@@ -990,7 +990,11 @@ func loadFromEnv(cfg *Config) {
 		})
 	}
 	if v := os.Getenv("AGENTCC_AUTH_ENABLED"); v != "" {
-		cfg.Auth.Enabled = v == "true" || v == "1"
+		// AGENTCC_INTERNAL_API_KEY takes precedence: once a key is registered,
+		// auth cannot be disabled via this var — that would silently re-open the proxy.
+		if os.Getenv("AGENTCC_INTERNAL_API_KEY") == "" {
+			cfg.Auth.Enabled = v == "true" || v == "1"
+		}
 	}
 
 	// Redis state env overrides.
