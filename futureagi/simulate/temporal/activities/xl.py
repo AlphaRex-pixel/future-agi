@@ -641,6 +641,10 @@ def build_simulation_context_map(call_execution, agent_version):
             ctx[dot_key] = ctx[underscore_key]
 
     # Walker dispatch roots; order is load-bearing (`call` first for bare heads).
+    # `scenario_columns` lets eval mapping values that reference the FE dropdown's
+    # friendly dot-path (`scenario_columns.<name>.value`) resolve without going
+    # through the raw dataset-column-UUID lookup. Prompt simulations save this
+    # form, so without it evals error out with "Column ... not available".
     subjects = {
         "call": call_execution,
         "agent": agent_def,
@@ -648,9 +652,54 @@ def build_simulation_context_map(call_execution, agent_version):
         "persona": simulator_agent,
         "prompt": prompt_template,
         "scenario": scenario,
+        "scenario_columns": _build_scenario_columns_subject(call_execution),
         "simulation": run_test,
     }
     return ctx, subjects
+
+
+def _build_scenario_columns_subject(call_execution):
+    """Build ``{canonical_name: {value, column_name, dataset_column_id}}`` for
+    the call's scenario row so the walker can resolve
+    ``scenario_columns.<name>.value`` mapping paths. Returns ``{}`` when the
+    call has no row or dataset attached.
+
+    Shape mirrors ``CallExecutionDetailSerializer.get_scenario_columns`` so
+    the FE dropdown and the eval-time resolver stay in lockstep.
+    """
+    from model_hub.models.develop_dataset import Cell, Column, Row
+    from simulate.utils.test_execution_utils import canonical_scenario_column_name
+
+    call_metadata = call_execution.call_metadata or {}
+    row_id = call_metadata.get("row_id")
+    if not row_id:
+        return {}
+    try:
+        row = Row.all_objects.get(id=row_id)
+    except Row.DoesNotExist:
+        return {}
+    if not row.dataset:
+        return {}
+    dataset_columns = list(
+        Column.all_objects.filter(id__in=row.dataset.column_order, deleted=False)
+    )
+    if not dataset_columns:
+        return {}
+    cells_by_column = {
+        str(cell.column_id): cell.value
+        for cell in Cell.all_objects.filter(
+            row_id=row.id, column__in=dataset_columns, deleted=False
+        )
+    }
+    result = {}
+    for dc in dataset_columns:
+        canonical = canonical_scenario_column_name(dc.name)
+        result[canonical] = {
+            "value": cells_by_column.get(str(dc.id), ""),
+            "column_name": canonical,
+            "dataset_column_id": str(dc.id),
+        }
+    return result
 
 
 def _run_single_evaluation(eval_config, call_execution, transcript_data):
