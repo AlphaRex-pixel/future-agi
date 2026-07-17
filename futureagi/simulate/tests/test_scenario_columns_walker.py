@@ -141,3 +141,49 @@ def test_build_scenario_graph_subject_returns_empty_when_no_scenario_id():
         scenario_id = None
 
     assert _build_scenario_graph_subject(_Call()) == {}
+
+
+class _CallStub:
+    """Stand-in for a CallExecution row exposing the top-level attrs the
+    walker's bare-head fall-through has to resolve."""
+
+    call_type = "Inbound"
+    duration = 42
+    overall_score = 0.87
+    audio_url = None
+    avg_agent_latency_ms = 850
+
+
+def _subjects_with_call(call):
+    return {
+        "call": call,
+        "agent": None,
+        "agent_version": None,
+        "persona": None,
+        "prompt": None,
+        "scenario": None,
+        "simulation": None,
+    }
+
+
+def test_walker_resolves_bare_head_via_call_subject():
+    subjects = _subjects_with_call(_CallStub())
+    assert walk_subject_path(subjects, "call_type") == "Inbound"
+    assert walk_subject_path(subjects, "duration") == 42
+    assert walk_subject_path(subjects, "overall_score") == 0.87
+    assert walk_subject_path(subjects, "avg_agent_latency_ms") == 850
+
+
+def test_walker_returns_none_for_bare_head_attr_with_none_value():
+    subjects = _subjects_with_call(_CallStub())
+    assert walk_subject_path(subjects, "audio_url") is None
+
+
+def test_walker_returns_path_missing_for_bare_head_not_on_any_subject():
+    subjects = _subjects_with_call(_CallStub())
+    assert walk_subject_path(subjects, "totally_made_up_field") is PATH_MISSING
+
+
+def test_walker_returns_path_missing_for_empty_string():
+    subjects = _subjects_with_call(_CallStub())
+    assert walk_subject_path(subjects, "") is PATH_MISSING

@@ -452,8 +452,14 @@ _MAX_PATH_SEGMENTS = 32  # cap traversal depth to bound FK descriptor chains
 
 
 def walk_subject_path(subjects, path):
-    """Resolve a dotted path against any registered subject root at any depth."""
-    if not isinstance(path, str) or "." not in path:
+    """Resolve a path against any registered subject root at any depth.
+
+    Handles both dotted paths (``call.transcript``, ``scenario_columns.<name>.value``)
+    and bare heads (``call_type``, ``duration``) — the bare-head case falls through
+    the subject-attribute lookup below and returns the top-level value on the first
+    matching subject.
+    """
+    if not isinstance(path, str) or not path:
         return PATH_MISSING
     if path.count(".") + 1 > _MAX_PATH_SEGMENTS:
         return PATH_MISSING
