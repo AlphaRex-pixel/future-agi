@@ -75,7 +75,6 @@ const PRIORITY_PREFIXES = [
   "call.stereo_recording_url",
   "call.agent_prompt",
   "call.", // remaining call-level leaves
-  "eval_", // resolved eval results (still flat)
   "scenario.columns.",
   "scenario.info.",
   "scenario.",
@@ -697,18 +696,6 @@ const SimulationTestMode = React.forwardRef(
             callData.recordings?.stereo_recording_url;
           if (stereoUrl) flat.call.stereo_recording_url = stereoUrl;
           if (callType) flat.simulation.call_type = callType;
-
-          // -- Eval results: resolve UUID keys → {eval_name: score + reason} --
-          const em = callData.eval_metrics || {};
-          const eo = callData.eval_outputs || {};
-          const evalEntries = Object.keys(em).length ? em : eo;
-          for (const [, ev] of Object.entries(evalEntries)) {
-            const name = ev.name || ev.eval_name || "eval";
-            flat[`eval_${name}`] = {
-              score: ev.value || ev.score,
-              reason: ev.reason || ev.explanation,
-            };
-          }
 
           // -- Raw callData pass-through (after SKIP). These are top-
           // level fields that don't belong in a nested group (like
