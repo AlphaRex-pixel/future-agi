@@ -142,9 +142,17 @@ class TestExecutionItemResponseSerializer(serializers.Serializer):
     source_type = serializers.CharField(read_only=True)
 
 
-# Kept for backward compatibility — the swagger decorator references this name.
-# The actual per-item shape is TestExecutionItemResponseSerializer above.
-RunTestExecutionsResponseSerializer = TestExecutionItemResponseSerializer
+class RunTestExecutionsResponseSerializer(serializers.Serializer):
+    """Paginated envelope returned by GET /run-tests/{run_test_id}/executions/.
+
+    Runtime shape comes from ``paginator.get_paginated_response(...)``:
+    ``{count, next, previous, results: [TestExecutionItem, ...]}``.
+    """
+
+    count = serializers.IntegerField(read_only=True)
+    next = serializers.CharField(read_only=True, allow_null=True)
+    previous = serializers.CharField(read_only=True, allow_null=True)
+    results = TestExecutionItemResponseSerializer(many=True, read_only=True)
 
 
 class RunTestScenarioItemResponseSerializer(serializers.Serializer):

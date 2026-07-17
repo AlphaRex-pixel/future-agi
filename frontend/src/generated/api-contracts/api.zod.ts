@@ -24159,6 +24159,7 @@ export const modelHubPromptHistoryExecutionsListResponseResultsItemTemplateVersi
 
 
 
+
 export const ModelHubPromptHistoryExecutionsListResponse = zod.object({
   "count": zod.number(),
   "next": zod.string().url().optional(),
@@ -24169,13 +24170,17 @@ export const ModelHubPromptHistoryExecutionsListResponse = zod.object({
   "output": zod.object({
 
 }).passthrough().optional(),
-  "prompt_config_snapshot": zod.string().optional(),
-  "template_name": zod.string().optional(),
+  "prompt_config_snapshot": zod.object({
+
+}).passthrough().optional().describe('\nGet prompt_config_snapshot with backward compatibility for modelDetail.\nIf modelDetail is missing from configuration, generate it from the model name.\n'),
+  "template_name": zod.string().min(1).optional(),
   "original_template": zod.string().uuid().optional(),
   "metadata": zod.object({
 
 }).passthrough().optional(),
-  "variable_names": zod.string().optional(),
+  "variable_names": zod.object({
+
+}).passthrough().optional(),
   "evaluation_results": zod.object({
 
 }).passthrough().optional(),
@@ -24187,7 +24192,9 @@ export const ModelHubPromptHistoryExecutionsListResponse = zod.object({
   "commit_message": zod.string().optional(),
   "updated_at": zod.string().datetime({"offset":true}).optional(),
   "is_draft": zod.boolean().optional(),
-  "labels": zod.string().optional(),
+  "labels": zod.object({
+
+}).passthrough().optional(),
   "placeholders": zod.object({
 
 }).passthrough().optional(),
@@ -24217,6 +24224,7 @@ export const modelHubPromptHistoryExecutionsGetExecutionDetailsResponseResultsIt
 
 
 
+
 export const ModelHubPromptHistoryExecutionsGetExecutionDetailsResponse = zod.object({
   "count": zod.number(),
   "next": zod.string().url().optional(),
@@ -24227,13 +24235,17 @@ export const ModelHubPromptHistoryExecutionsGetExecutionDetailsResponse = zod.ob
   "output": zod.object({
 
 }).passthrough().optional(),
-  "prompt_config_snapshot": zod.string().optional(),
-  "template_name": zod.string().optional(),
+  "prompt_config_snapshot": zod.object({
+
+}).passthrough().optional().describe('\nGet prompt_config_snapshot with backward compatibility for modelDetail.\nIf modelDetail is missing from configuration, generate it from the model name.\n'),
+  "template_name": zod.string().min(1).optional(),
   "original_template": zod.string().uuid().optional(),
   "metadata": zod.object({
 
 }).passthrough().optional(),
-  "variable_names": zod.string().optional(),
+  "variable_names": zod.object({
+
+}).passthrough().optional(),
   "evaluation_results": zod.object({
 
 }).passthrough().optional(),
@@ -24245,7 +24257,9 @@ export const ModelHubPromptHistoryExecutionsGetExecutionDetailsResponse = zod.ob
   "commit_message": zod.string().optional(),
   "updated_at": zod.string().datetime({"offset":true}).optional(),
   "is_draft": zod.boolean().optional(),
-  "labels": zod.string().optional(),
+  "labels": zod.object({
+
+}).passthrough().optional(),
   "placeholders": zod.object({
 
 }).passthrough().optional(),
@@ -24262,19 +24276,24 @@ export const modelHubPromptHistoryExecutionsReadResponseTemplateVersionMax = 50;
 
 
 
+
 export const ModelHubPromptHistoryExecutionsReadResponse = zod.object({
   "id": zod.string().uuid().optional(),
   "template_version": zod.string().min(1).max(modelHubPromptHistoryExecutionsReadResponseTemplateVersionMax),
   "output": zod.object({
 
 }).passthrough().optional(),
-  "prompt_config_snapshot": zod.string().optional(),
-  "template_name": zod.string().optional(),
+  "prompt_config_snapshot": zod.object({
+
+}).passthrough().optional().describe('\nGet prompt_config_snapshot with backward compatibility for modelDetail.\nIf modelDetail is missing from configuration, generate it from the model name.\n'),
+  "template_name": zod.string().min(1).optional(),
   "original_template": zod.string().uuid().optional(),
   "metadata": zod.object({
 
 }).passthrough().optional(),
-  "variable_names": zod.string().optional(),
+  "variable_names": zod.object({
+
+}).passthrough().optional(),
   "evaluation_results": zod.object({
 
 }).passthrough().optional(),
@@ -24286,7 +24305,9 @@ export const ModelHubPromptHistoryExecutionsReadResponse = zod.object({
   "commit_message": zod.string().optional(),
   "updated_at": zod.string().datetime({"offset":true}).optional(),
   "is_draft": zod.boolean().optional(),
-  "labels": zod.string().optional(),
+  "labels": zod.object({
+
+}).passthrough().optional(),
   "placeholders": zod.object({
 
 }).passthrough().optional(),
@@ -32429,7 +32450,13 @@ export const SimulateRunTestsExecutionsListParams = zod.object({
 
 
 
-export const SimulateRunTestsExecutionsListResponseItem = zod.object({
+
+
+export const SimulateRunTestsExecutionsListResponse = zod.object({
+  "count": zod.number().optional(),
+  "next": zod.string().min(1).optional(),
+  "previous": zod.string().min(1).optional(),
+  "results": zod.array(zod.object({
   "id": zod.string().min(1).optional(),
   "status": zod.string().min(1).optional(),
   "scenarios": zod.string().min(1).optional(),
@@ -32448,8 +32475,8 @@ export const SimulateRunTestsExecutionsListResponseItem = zod.object({
   "agent_type": zod.string().min(1).optional(),
   "total_number_of_fagi_agent_turns": zod.number().optional(),
   "source_type": zod.string().min(1).optional()
+})).optional()
 })
-export const SimulateRunTestsExecutionsListResponse = zod.array(SimulateRunTestsExecutionsListResponseItem)
 
 
 /**

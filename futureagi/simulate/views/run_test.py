@@ -4887,7 +4887,7 @@ class RunTestExecutionsView(APIView):
 
     @swagger_auto_schema(
         responses={
-            200: RunTestExecutionsResponseSerializer(many=True),
+            200: RunTestExecutionsResponseSerializer(),
             404: RunTestErrorResponseSerializer,
             500: RunTestErrorResponseSerializer,
         },

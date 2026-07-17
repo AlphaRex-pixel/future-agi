@@ -51996,10 +51996,7 @@
                     "200": {
                         "description": "",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/TestExecutionItemResponse"
-                            }
+                            "$ref": "#/definitions/RunTestExecutionsResponse"
                         }
                     },
                     "404": {
@@ -106046,13 +106043,15 @@
                 },
                 "prompt_config_snapshot": {
                     "title": "Prompt config snapshot",
-                    "type": "string",
+                    "description": "\nGet prompt_config_snapshot with backward compatibility for modelDetail.\nIf modelDetail is missing from configuration, generate it from the model name.\n",
+                    "type": "object",
                     "readOnly": true
                 },
                 "template_name": {
                     "title": "Template name",
                     "type": "string",
-                    "readOnly": true
+                    "readOnly": true,
+                    "minLength": 1
                 },
                 "original_template": {
                     "title": "Original template",
@@ -106063,11 +106062,12 @@
                 "metadata": {
                     "title": "Metadata",
                     "type": "object",
+                    "readOnly": true,
                     "x-nullable": true
                 },
                 "variable_names": {
                     "title": "Variable names",
-                    "type": "string",
+                    "type": "object",
                     "readOnly": true
                 },
                 "evaluation_results": {
@@ -106078,6 +106078,7 @@
                 "evaluation_configs": {
                     "title": "Evaluation configs",
                     "type": "object",
+                    "readOnly": true,
                     "x-nullable": true
                 },
                 "created_at": {
@@ -106107,7 +106108,7 @@
                 },
                 "labels": {
                     "title": "Labels",
-                    "type": "string",
+                    "type": "object",
                     "readOnly": true
                 },
                 "placeholders": {
@@ -116588,6 +116589,37 @@
                     "type": "string",
                     "readOnly": true,
                     "minLength": 1
+                }
+            }
+        },
+        "RunTestExecutionsResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "title": "Count",
+                    "type": "integer",
+                    "readOnly": true
+                },
+                "next": {
+                    "title": "Next",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "previous": {
+                    "title": "Previous",
+                    "type": "string",
+                    "readOnly": true,
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TestExecutionItemResponse"
+                    },
+                    "readOnly": true
                 }
             }
         },

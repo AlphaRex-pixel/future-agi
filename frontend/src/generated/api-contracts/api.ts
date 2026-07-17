@@ -910,6 +910,7 @@ import type {
   RunTestComponentsUpdateApi,
   RunTestErrorResponseApi,
   RunTestExecutionResponseApi,
+  RunTestExecutionsResponseApi,
   RunTestKPIsResponseApi,
   RunTestMessageResponseApi,
   RunTestNameResponseApi,
@@ -1069,7 +1070,6 @@ import type {
   TestExecutionColumnOrderApi,
   TestExecutionColumnOrderResponseApi,
   TestExecutionDetailResponseApi,
-  TestExecutionItemResponseApi,
   TestExecutionRerunApi,
   TestExecutionRerunResponseApi,
   TestExecutionStatusApi,
@@ -55694,7 +55694,7 @@ export const simulateRunTestsExecuteCreate = async (runTestId: string,
 
 
 export type simulateRunTestsExecutionsListResponse200 = {
-  data: TestExecutionItemResponseApi[]
+  data: RunTestExecutionsResponseApi
   status: 200
 }
 
