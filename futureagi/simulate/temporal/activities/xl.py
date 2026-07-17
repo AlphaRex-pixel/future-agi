@@ -540,8 +540,6 @@ def build_simulation_context_map(call_execution, agent_version):
     conv_metrics = call_execution.conversation_metrics_data or {}
     rtm = call_execution.response_time_ms
     response_time_seconds = rtm / 1000.0 if rtm is not None else None
-    # Reuse the drawer's provider resolution so the eval column and the
-    # UI chip agree in every payload shape.
     from simulate.serializers.test_execution import CallExecutionDetailSerializer
 
     _detail_serializer = CallExecutionDetailSerializer()
@@ -645,18 +643,39 @@ def build_simulation_context_map(call_execution, agent_version):
         ctx["scenario_info_type"] = _s(scenario.scenario_type)
         ctx["scenario_info_source"] = _s(scenario.source)
 
-    # Expose every entry under its dot-hierarchy alias too. This lets the
-    # new frontend dropdowns persist `agent.name` style mapping values
-    # while pre-migration configs with `agent_name` keep resolving.
+    # Mirror scalar fields the serializer exposes so what the FE dropdown offers
+    # matches what the resolver finds. Nested dicts/lists get walker attribute
+    # access; the ignored set are eval-produced or internal snapshot metadata.
+    _IGNORE = {
+        "eval_outputs", "eval_metrics",
+        "scenario_columns", "scenario_graph",
+        "recordings", "tool_outputs",
+        "customer_cost_breakdown", "customer_latency_metrics",
+        "rerun_snapshots", "is_snapshot", "snapshot_timestamp",
+        "rerun_type", "original_call_execution_id",
+    }
+    try:
+        _serialized = _detail_serializer.to_representation(call_execution)
+    except Exception as exc:
+        logger.warning(
+            "eval_ctx.serializer_representation_failed",
+            call_execution_id=str(call_execution.id),
+            error=str(exc),
+        )
+        _serialized = {}
+    for key, value in _serialized.items():
+        if key in ctx or key in _IGNORE or isinstance(value, (dict, list)):
+            continue
+        ctx[key] = _s(value)
+
     for underscore_key, dot_key in CONTEXT_MAP_DOT_ALIASES.items():
         if underscore_key in ctx:
             ctx[dot_key] = ctx[underscore_key]
 
     # Walker dispatch roots; order is load-bearing (`call` first for bare heads).
-    # `scenario_columns` lets eval mapping values that reference the FE dropdown's
-    # friendly dot-path (`scenario_columns.<name>.value`) resolve without going
-    # through the raw dataset-column-UUID lookup. Prompt simulations save this
-    # form, so without it evals error out with "Column ... not available".
+    # `scenario_columns` and `scenario_graph` delegate to the same serializer
+    # methods the FE dropdown reads, so mapping values pick from the same shape
+    # the walker resolves against.
     subjects = {
         "call": call_execution,
         "agent": agent_def,
@@ -664,71 +683,11 @@ def build_simulation_context_map(call_execution, agent_version):
         "persona": simulator_agent,
         "prompt": prompt_template,
         "scenario": scenario,
-        "scenario_columns": _build_scenario_columns_subject(call_execution),
-        "scenario_graph": _build_scenario_graph_subject(call_execution),
+        "scenario_columns": _detail_serializer.get_scenario_columns(call_execution) or {},
+        "scenario_graph": _detail_serializer.get_scenario_graph(call_execution) or {},
         "simulation": run_test,
     }
     return ctx, subjects
-
-
-def _build_scenario_columns_subject(call_execution):
-    """Build ``{canonical_name: {value, column_name, dataset_column_id}}`` for
-    the call's scenario row so the walker can resolve
-    ``scenario_columns.<name>.value`` mapping paths. Returns ``{}`` when the
-    call has no row or dataset attached.
-
-    Shape mirrors ``CallExecutionDetailSerializer.get_scenario_columns`` so
-    the FE dropdown and the eval-time resolver stay in lockstep.
-    """
-    from model_hub.models.develop_dataset import Cell, Column, Row
-    from simulate.utils.test_execution_utils import canonical_scenario_column_name
-
-    call_metadata = call_execution.call_metadata or {}
-    row_id = call_metadata.get("row_id")
-    if not row_id:
-        return {}
-    try:
-        row = Row.all_objects.get(id=row_id)
-    except Row.DoesNotExist:
-        return {}
-    if not row.dataset:
-        return {}
-    dataset_columns = list(
-        Column.all_objects.filter(id__in=row.dataset.column_order, deleted=False)
-    )
-    if not dataset_columns:
-        return {}
-    cells_by_column = {
-        str(cell.column_id): cell.value
-        for cell in Cell.all_objects.filter(
-            row_id=row.id, column__in=dataset_columns, deleted=False
-        )
-    }
-    result = {}
-    for dc in dataset_columns:
-        canonical = canonical_scenario_column_name(dc.name)
-        result[canonical] = {
-            "value": cells_by_column.get(str(dc.id), ""),
-            "column_name": canonical,
-            "dataset_column_id": str(dc.id),
-        }
-    return result
-
-
-def _build_scenario_graph_subject(call_execution):
-    from simulate.models.scenario_graph import ScenarioGraph
-
-    scenario_id = call_execution.scenario_id
-    if not scenario_id:
-        return {}
-    graph = (
-        ScenarioGraph.objects.filter(scenario_id=scenario_id, is_active=True)
-        .order_by("-created_at")
-        .first()
-    )
-    if not graph or not isinstance(graph.graph_config, dict):
-        return {}
-    return graph.graph_config.get("graph_data", {}) or {}
 
 
 def _run_single_evaluation(eval_config, call_execution, transcript_data):

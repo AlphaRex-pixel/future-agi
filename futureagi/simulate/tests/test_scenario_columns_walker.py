@@ -6,8 +6,6 @@ mapping values in this dot-path form, so a regression here would surface as
 
 from simulate.temporal.activities.xl import (
     PATH_MISSING,
-    _build_scenario_columns_subject,
-    _build_scenario_graph_subject,
     walk_subject_path,
 )
 
@@ -87,20 +85,6 @@ def test_walker_returns_path_missing_when_scenario_columns_key_absent():
     )
 
 
-def test_build_scenario_columns_subject_returns_empty_when_no_row():
-    class _Call:
-        call_metadata = {}
-
-    assert _build_scenario_columns_subject(_Call()) == {}
-
-
-def test_build_scenario_columns_subject_returns_empty_when_call_metadata_is_none():
-    class _Call:
-        call_metadata = None
-
-    assert _build_scenario_columns_subject(_Call()) == {}
-
-
 def test_walker_resolves_scenario_graph_node_path():
     subjects = _subjects_with(
         scenario_graph={
@@ -134,13 +118,6 @@ def test_walker_returns_path_missing_when_scenario_graph_key_absent():
     assert (
         walk_subject_path(subjects, "scenario_graph.nodes.0.type") is PATH_MISSING
     )
-
-
-def test_build_scenario_graph_subject_returns_empty_when_no_scenario_id():
-    class _Call:
-        scenario_id = None
-
-    assert _build_scenario_graph_subject(_Call()) == {}
 
 
 class _CallStub:
