@@ -1017,3 +1017,150 @@ class TestSubjectDispatchRobustness:
             _run_xl(ec, call_execution, transcript_data)
 
         assert mock_run.call_args.kwargs["mappings"]["cost"] == "0.039254"
+
+
+@pytest.mark.django_db
+@patch("simulate.services.test_executor.close_old_connections", lambda: None)
+class TestComputedSerializerFieldsInContext:
+    """Guards ctx-population from CallExecutionDetailSerializer's computed fields.
+    Regression fence for the FE-dropdown vs BE-resolver parity fix (TH-6904).
+    """
+
+    @patch("simulate.services.test_executor.run_eval_func")
+    def test_bare_head_call_type_resolves_to_serializer_computed_value(
+        self, mock_run, run_test, call_execution, transcript_data, eval_template
+    ):
+        """FE dropdown emits `call_type`; must resolve via get_call_type (computed, not a model attr)."""
+        mock_run.return_value = _SUCCESS_STUB
+        call_execution.call_metadata = {"call_direction": "outbound"}
+        call_execution.save(update_fields=["call_metadata"])
+        ec = _make_eval({"ct": "call_type"}, run_test, eval_template)
+
+        _run(ec, call_execution, transcript_data)
+
+        assert mock_run.call_args.kwargs["mappings"]["ct"] == "Outbound"
+
+    @patch("simulate.services.test_executor.run_eval_func")
+    def test_bare_head_call_type_defaults_to_inbound_without_metadata(
+        self, mock_run, run_test, call_execution, transcript_data, eval_template
+    ):
+        mock_run.return_value = _SUCCESS_STUB
+        ec = _make_eval({"ct": "call_type"}, run_test, eval_template)
+
+        _run(ec, call_execution, transcript_data)
+
+        assert mock_run.call_args.kwargs["mappings"]["ct"] == "Inbound"
+
+    @patch("simulate.services.test_executor.run_eval_func")
+    def test_bare_head_duration_resolves_from_duration_seconds_for_voice(
+        self, mock_run, run_test, call_execution, transcript_data, eval_template
+    ):
+        """Voice sim: get_duration returns duration_seconds."""
+        mock_run.return_value = _SUCCESS_STUB
+        ec = _make_eval({"d": "duration"}, run_test, eval_template)
+
+        _run(ec, call_execution, transcript_data)
+
+        assert mock_run.call_args.kwargs["mappings"]["d"] == "120"
+
+    @patch("simulate.services.test_executor.run_eval_func")
+    def test_bare_head_audio_url_resolves_from_recording_url(
+        self, mock_run, run_test, call_execution, transcript_data, eval_template
+    ):
+        """FE dropdown emits `audio_url`; ctx must alias to CallExecution.recording_url."""
+        mock_run.return_value = _SUCCESS_STUB
+        ec = _make_eval({"a": "audio_url"}, run_test, eval_template)
+
+        _run(ec, call_execution, transcript_data)
+
+        assert mock_run.call_args.kwargs["mappings"]["a"] == "s3://bucket/rec.mp3"
+
+    @patch("simulate.services.test_executor.run_eval_func")
+    def test_scalar_serializer_field_populates_via_representation_merge(
+        self, mock_run, run_test, call_execution, transcript_data, eval_template
+    ):
+        """to_representation merge fills every scalar serializer field into ctx.
+        `ended_reason` is a plain scalar exposed by the detail serializer, so a
+        rename or Meta.fields drop would silently regress the dropdown here.
+        """
+        mock_run.return_value = _SUCCESS_STUB
+        ec = _make_eval({"er": "ended_reason"}, run_test, eval_template)
+
+        _run(ec, call_execution, transcript_data)
+
+        assert mock_run.call_args.kwargs["mappings"]["er"] == "customer-ended-call"
+
+    @patch("simulate.temporal.activities.xl.close_old_connections", lambda: None)
+    def test_computed_fields_reach_xl_temporal_activity_path(
+        self, run_test, call_execution, transcript_data, eval_template
+    ):
+        """Regression guard: computed-field ctx entries reach the temporal path too."""
+        from model_hub.views.utils import evals as evals_mod
+
+        with patch.object(
+            evals_mod, "run_eval_func", return_value=_SUCCESS_STUB
+        ) as mock_run:
+            ec = _make_eval(
+                {"ct": "call_type", "d": "duration", "a": "audio_url"},
+                run_test,
+                eval_template,
+            )
+
+            _run_xl(ec, call_execution, transcript_data)
+
+        mappings = mock_run.call_args.kwargs["mappings"]
+        assert mappings["ct"] == "Inbound"
+        assert mappings["d"] == "120"
+        assert mappings["a"] == "s3://bucket/rec.mp3"
+
+    @patch("simulate.services.test_executor.run_eval_func")
+    def test_scenario_columns_value_resolves_via_computed_subject(
+        self,
+        mock_run,
+        run_test,
+        call_execution,
+        transcript_data,
+        eval_template,
+        dataset_for_scenario,
+    ):
+        """`scenario_columns.<name>.value` walker path exercises the inline
+        serializer call in xl.py, so a shape drift on get_scenario_columns fails here."""
+        mock_run.return_value = _SUCCESS_STUB
+        row = Row.objects.filter(dataset=dataset_for_scenario).first()
+        call_execution.call_metadata = {"row_id": str(row.id)}
+        call_execution.save(update_fields=["call_metadata"])
+        ec = _make_eval(
+            {"col": "scenario_columns.situation.value"}, run_test, eval_template
+        )
+
+        _run(ec, call_execution, transcript_data)
+
+        assert mock_run.call_args.kwargs["mappings"]["col"] == "row value"
+
+    @patch("simulate.services.test_executor.run_eval_func")
+    def test_scenario_graph_node_resolves_via_computed_subject(
+        self, mock_run, run_test, call_execution, transcript_data, eval_template, scenario, organization
+    ):
+        """`scenario_graph.nodes.<i>.<field>` exercises get_scenario_graph inline call."""
+        from simulate.models.scenario_graph import ScenarioGraph
+
+        mock_run.return_value = _SUCCESS_STUB
+        ScenarioGraph.objects.create(
+            scenario=scenario,
+            organization=organization,
+            name="Test Graph",
+            is_active=True,
+            graph_config={
+                "graph_data": {
+                    "nodes": [{"id": "n1", "type": "intent", "data": {"label": "Greet"}}],
+                    "edges": [],
+                }
+            },
+        )
+        ec = _make_eval(
+            {"nt": "scenario_graph.nodes.0.type"}, run_test, eval_template
+        )
+
+        _run(ec, call_execution, transcript_data)
+
+        assert mock_run.call_args.kwargs["mappings"]["nt"] == "intent"
