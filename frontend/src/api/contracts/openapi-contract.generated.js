@@ -66504,10 +66504,8 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         "description": {
           "title": "Description",
-          "description": "Description of the test run",
           "type": "string",
           "readOnly": true,
-          "minLength": 1,
           "x-nullable": true
         },
         "agent_definition": {
@@ -66521,20 +66519,12 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "agent_version": {
           "title": "Agent version",
           "type": "object",
-          "additionalProperties": {
-            "type": "string",
-            "x-nullable": true
-          },
           "readOnly": true,
           "x-nullable": true
         },
         "agent_definition_detail": {
           "title": "Agent definition detail",
           "type": "object",
-          "additionalProperties": {
-            "type": "string",
-            "x-nullable": true
-          },
           "readOnly": true,
           "x-nullable": true
         },
@@ -66566,10 +66556,6 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "prompt_template_detail": {
           "title": "Prompt template detail",
           "type": "object",
-          "additionalProperties": {
-            "type": "string",
-            "x-nullable": true
-          },
           "readOnly": true,
           "x-nullable": true
         },
@@ -66584,10 +66570,6 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "prompt_version_detail": {
           "title": "Prompt version detail",
           "type": "object",
-          "additionalProperties": {
-            "type": "string",
-            "x-nullable": true
-          },
           "readOnly": true,
           "x-nullable": true
         },
@@ -66605,11 +66587,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "scenarios_detail": {
           "type": "array",
           "items": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string",
-              "x-nullable": true
-            }
+            "type": "object"
           },
           "readOnly": true
         },
@@ -66635,10 +66613,6 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "simulator_agent_detail": {
           "title": "Simulator agent detail",
           "type": "object",
-          "additionalProperties": {
-            "type": "string",
-            "x-nullable": true
-          },
           "readOnly": true,
           "x-nullable": true
         },

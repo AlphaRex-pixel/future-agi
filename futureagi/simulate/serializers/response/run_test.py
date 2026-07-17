@@ -48,20 +48,23 @@ class RunTestResponseSerializer(serializers.ModelSerializer):
     agent_version snapshot handling, etc.) continues to use RunTestSerializer.
     """
 
-    agent_definition_detail = serializers.DictField(read_only=True, allow_null=True)
+    description = serializers.CharField(
+        read_only=True, allow_null=True, allow_blank=True
+    )
+    agent_definition_detail = serializers.JSONField(read_only=True, allow_null=True)
     source_type_display = serializers.CharField(read_only=True, allow_null=True)
     scenarios_detail = serializers.ListField(
-        child=serializers.DictField(), read_only=True
+        child=serializers.JSONField(), read_only=True
     )
-    simulator_agent_detail = serializers.DictField(read_only=True, allow_null=True)
+    simulator_agent_detail = serializers.JSONField(read_only=True, allow_null=True)
     simulate_eval_configs_detail = SimulateEvalConfigResponseSerializer(
         many=True, read_only=True
     )
     evals_detail = SimulateEvalConfigResponseSerializer(many=True, read_only=True)
     last_run_at = serializers.DateTimeField(read_only=True, allow_null=True)
-    prompt_template_detail = serializers.DictField(read_only=True, allow_null=True)
-    prompt_version_detail = serializers.DictField(read_only=True, allow_null=True)
-    agent_version = serializers.DictField(read_only=True, allow_null=True)
+    prompt_template_detail = serializers.JSONField(read_only=True, allow_null=True)
+    prompt_version_detail = serializers.JSONField(read_only=True, allow_null=True)
+    agent_version = serializers.JSONField(read_only=True, allow_null=True)
 
     class Meta:
         model = RunTest

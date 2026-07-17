@@ -16034,9 +16034,9 @@ export interface PersonaFieldOptionsApi {
   readonly regional_mix_choices?: string;
 }
 
-export type RunTestResponseApiAgentVersion = {[key: string]: string};
+export type RunTestResponseApiAgentVersion = { [key: string]: unknown };
 
-export type RunTestResponseApiAgentDefinitionDetail = {[key: string]: string};
+export type RunTestResponseApiAgentDefinitionDetail = { [key: string]: unknown };
 
 /**
  * Source type for the test run: agent_definition or prompt
@@ -16049,13 +16049,13 @@ export const RunTestResponseApiSourceType = {
   prompt: 'prompt',
 } as const;
 
-export type RunTestResponseApiPromptTemplateDetail = {[key: string]: string};
+export type RunTestResponseApiPromptTemplateDetail = { [key: string]: unknown };
 
-export type RunTestResponseApiPromptVersionDetail = {[key: string]: string};
+export type RunTestResponseApiPromptVersionDetail = { [key: string]: unknown };
 
-export type RunTestResponseApiScenariosDetailItem = {[key: string]: string};
+export type RunTestResponseApiScenariosDetailItem = { [key: string]: unknown };
 
-export type RunTestResponseApiSimulatorAgentDetail = {[key: string]: string};
+export type RunTestResponseApiSimulatorAgentDetail = { [key: string]: unknown };
 
 export type SimulateEvalConfigResponseApiConfig = { [key: string]: unknown };
 
@@ -16108,10 +16108,6 @@ export interface RunTestResponseApi {
      * @minLength 1
      */
   readonly name?: string;
-  /**
-     * Description of the test run
-     * @minLength 1
-     */
   readonly description?: string;
   /** Agent definition for this test run */
   readonly agent_definition?: string;
