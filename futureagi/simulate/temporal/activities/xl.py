@@ -544,7 +544,10 @@ def build_simulation_context_map(call_execution, agent_version):
     # UI chip agree in every payload shape.
     from simulate.serializers.test_execution import CallExecutionDetailSerializer
 
-    provider_name = CallExecutionDetailSerializer().get_provider(call_execution)
+    _detail_serializer = CallExecutionDetailSerializer()
+    provider_name = _detail_serializer.get_provider(call_execution)
+    duration_computed = _detail_serializer.get_duration(call_execution)
+    call_type_computed = _detail_serializer.get_call_type(call_execution)
 
     ctx = {
         "simulation_name": _s(run_test.name),
@@ -552,6 +555,9 @@ def build_simulation_context_map(call_execution, agent_version):
         "call_summary": _s(call_execution.call_summary),
         "ended_reason": _s(call_execution.ended_reason),
         "duration_seconds": _s(call_execution.duration_seconds),
+        "duration": _s(duration_computed),
+        "call_type": _s(call_type_computed),
+        "audio_url": _s(call_execution.recording_url),
         "status": _s(call_execution.status),
         "simulation_call_type": _s(call_execution.simulation_call_type),
         "phone_number": _s(call_execution.phone_number),
