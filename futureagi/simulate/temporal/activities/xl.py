@@ -653,6 +653,7 @@ def build_simulation_context_map(call_execution, agent_version):
         "prompt": prompt_template,
         "scenario": scenario,
         "scenario_columns": _build_scenario_columns_subject(call_execution),
+        "scenario_graph": _build_scenario_graph_subject(call_execution),
         "simulation": run_test,
     }
     return ctx, subjects
@@ -700,6 +701,22 @@ def _build_scenario_columns_subject(call_execution):
             "dataset_column_id": str(dc.id),
         }
     return result
+
+
+def _build_scenario_graph_subject(call_execution):
+    from simulate.models.scenario_graph import ScenarioGraph
+
+    scenario_id = call_execution.scenario_id
+    if not scenario_id:
+        return {}
+    graph = (
+        ScenarioGraph.objects.filter(scenario_id=scenario_id, is_active=True)
+        .order_by("-created_at")
+        .first()
+    )
+    if not graph or not isinstance(graph.graph_config, dict):
+        return {}
+    return graph.graph_config.get("graph_data", {}) or {}
 
 
 def _run_single_evaluation(eval_config, call_execution, transcript_data):
