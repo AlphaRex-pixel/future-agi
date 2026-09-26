@@ -646,7 +646,7 @@ class TestTraceSessionGraphAPI:
         assert filters[-1]["filter_config"]["filter_value"] == [session_id]
         pg_trace_manager.assert_not_called()
 
-    def test_session_latency_response_names_the_median(
+    def test_session_latency_response_names_the_mean(
         self, auth_client, observe_project
     ):
         rollup = {
@@ -682,7 +682,7 @@ class TestTraceSessionGraphAPI:
 
         assert response.status_code == status.HTTP_200_OK
         payload = get_result(response)
-        assert payload["metric_statistic"] == "median"
+        assert payload["metric_statistic"] == "mean"
         assert payload["data"][0]["value"] == 120.0
 
     def test_session_system_graph_dispatches_exact_snapshot(self):

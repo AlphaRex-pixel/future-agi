@@ -904,7 +904,7 @@ def _read_or_refresh_exact_graph(
         refresh=refresh,
         pending_payload=pending_payload,
         schedule_on_miss=schedule_on_miss,
-        # A latency snapshot a pre-median worker cached is a miss.
+        # A latency snapshot not marked as the mean is a miss.
         accept_snapshot=lambda payload: snapshot_names_its_statistic(
             namespace, metric_id, payload
         ),

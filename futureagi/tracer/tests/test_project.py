@@ -1133,9 +1133,9 @@ class TestProjectGraphDataAPI:
         data = get_result(response)
         assert data == {
             "system_metrics": exact_metrics,
-            # Declared per-series statistic: latency is always the median.
+            # Declared per-series statistic: latency is always the mean.
             "system_metric_statistics": {
-                "latency": "median",
+                "latency": "mean",
                 "tokens": "sum",
                 "cost": "mean",
                 "traffic": "count",

@@ -776,7 +776,7 @@ def fetch_session_graph_ch(
                 "query_sampled": False,
                 "query_refreshing": True,
             },
-            # A latency snapshot a pre-median worker cached is a miss.
+            # A latency snapshot not marked as the mean is a miss.
             accept_snapshot=lambda payload: snapshot_names_its_statistic(
                 "observe-session-system-graph", metric_id, payload
             ),

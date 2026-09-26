@@ -1,7 +1,7 @@
 """Every Observe system-metric graph response names its statistic.
 
-The latency series is the t-digest median on every path, so the response
-says ``metric_statistic: "median"`` and the UI labels it "Latency (median)".
+The latency series is the mean on every path, so the response says
+``metric_statistic: "mean"`` and the UI labels it "Latency (avg, ms)".
 These tests pin:
 
 * the statistic maps against the series each builder actually publishes;
@@ -27,6 +27,7 @@ from tracer.services.clickhouse.graph_metric_statistic import (
     TRACE_METRIC_STATISTICS,
     USER_METRIC_STATISTICS,
     chart_bundle_statistics,
+    publishes_latency,
     system_metric_statistic,
 )
 
@@ -72,9 +73,9 @@ class _NoReadPolicyAnalytics:
 
 
 class TestStatisticMaps:
-    def test_latency_is_the_median_on_every_surface(self):
+    def test_latency_is_the_mean_on_every_surface(self):
         for surface in ("trace", "session", "users"):
-            assert system_metric_statistic(surface, "latency") == "median"
+            assert system_metric_statistic(surface, "latency") == "mean"
 
     def test_choices_match_the_serializer_enum(self):
         from tracer.serializers.filters import OBSERVE_GRAPH_METRIC_STATISTIC_CHOICES
@@ -120,10 +121,10 @@ class TestStatisticMaps:
         ("surface", "metric_id", "expected"),
         [
             # The trace dispatcher publishes latency for unknown/blank ids.
-            ("trace", "time_to_first_token", "median"),
-            ("trace", "", "median"),
-            ("trace", None, "median"),
-            ("trace", " Latency ", "median"),
+            ("trace", "time_to_first_token", "mean"),
+            ("trace", "", "mean"),
+            ("trace", None, "mean"),
+            ("trace", " Latency ", "mean"),
             ("trace", "tokens", "sum"),
             ("trace", "traffic", "count"),
             ("trace", "cost", "mean"),
@@ -144,9 +145,33 @@ class TestStatisticMaps:
     ):
         assert system_metric_statistic(surface, metric_id) == expected
 
+    @pytest.mark.parametrize(
+        ("surface", "metric_id", "expected"),
+        [
+            ("trace", "latency", True),
+            ("trace", " Latency ", True),
+            ("trace", "", True),
+            ("trace", None, True),
+            ("trace", "time_to_first_token", True),
+            ("trace", "cost", False),
+            ("trace", "traffic", False),
+            ("session", "latency", True),
+            ("session", "avg_duration", False),
+            ("session", "unknown", False),
+            ("users", "latency", True),
+            # The users reader matches ids exactly; unknown ids are users.
+            ("users", "LATENCY", False),
+            ("users", "avg_cost_per_user", False),
+        ],
+    )
+    def test_publishes_latency_follows_the_published_series(
+        self, surface, metric_id, expected
+    ):
+        assert publishes_latency(surface, metric_id) is expected
+
     def test_chart_bundle_statistics(self):
         assert chart_bundle_statistics() == {
-            "latency": "median",
+            "latency": "mean",
             "tokens": "sum",
             "cost": "mean",
             "traffic": "count",
@@ -172,7 +197,7 @@ def _trace_graph(metric_id="latency", *, filters=(), analytics=None, **kwargs):
 class TestTraceGraphEnvelopes:
     @pytest.mark.parametrize(
         ("metric_id", "expected"),
-        [("latency", "median"), ("tokens", "sum"), ("bogus", "median")],
+        [("latency", "mean"), ("tokens", "sum"), ("bogus", "mean")],
     )
     def test_unfiltered_rollup(self, monkeypatch, metric_id, expected):
         monkeypatch.setattr(
@@ -185,7 +210,7 @@ class TestTraceGraphEnvelopes:
     def test_unfiltered_degraded_without_read_policy(self):
         response = _trace_graph(analytics=_NoReadPolicyAnalytics())
         assert response["query_status"] == "degraded"
-        assert response["metric_statistic"] == "median"
+        assert response["metric_statistic"] == "mean"
 
     def test_filtered_cached_complete(self, monkeypatch):
         monkeypatch.setattr(
@@ -193,7 +218,7 @@ class TestTraceGraphEnvelopes:
         )
         response = _trace_graph(filters=[_MODEL_FILTER], organization_id=ORG)
         assert response["query_status"] == "complete"
-        assert response["metric_statistic"] == "median"
+        assert response["metric_statistic"] == "mean"
 
     def test_filtered_pending_refresh(self, monkeypatch):
         monkeypatch.setattr(
@@ -201,7 +226,7 @@ class TestTraceGraphEnvelopes:
         )
         response = _trace_graph(filters=[_MODEL_FILTER], organization_id=ORG)
         assert response["query_status"] == "pending"
-        assert response["metric_statistic"] == "median"
+        assert response["metric_statistic"] == "mean"
 
     def test_filtered_refused_to_background(self, monkeypatch):
         monkeypatch.setattr(
@@ -219,7 +244,7 @@ class TestTraceGraphEnvelopes:
         )
         response = _trace_graph(filters=[_MODEL_FILTER], organization_id=ORG)
         assert response["query_status"] == "pending"
-        assert response["metric_statistic"] == "median"
+        assert response["metric_statistic"] == "mean"
 
     def test_filtered_direct_complete_and_degraded(self, monkeypatch):
         monkeypatch.setattr(
@@ -233,7 +258,7 @@ class TestTraceGraphEnvelopes:
             "_fetch_direct_raw_system_metric_graph",
             lambda **call: _complete(call["metric_id"]),
         )
-        assert _trace_graph(filters=[_MODEL_FILTER])["metric_statistic"] == "median"
+        assert _trace_graph(filters=[_MODEL_FILTER])["metric_statistic"] == "mean"
 
         def fail(**_):
             raise ExactGraphReadError("boom")
@@ -269,7 +294,7 @@ class TestSessionGraphEnvelopes:
             lambda **call: _complete(call["metric_id"]),
         )
         response = _session_graph({"type": "SYSTEM_METRIC", "id": "latency"})
-        assert response["metric_statistic"] == "median"
+        assert response["metric_statistic"] == "mean"
 
     def test_rollup_degraded_without_read_policy(self):
         response = _session_graph(
@@ -277,11 +302,11 @@ class TestSessionGraphEnvelopes:
             analytics=_NoReadPolicyAnalytics(),
         )
         assert response["query_status"] == "degraded"
-        assert response["metric_statistic"] == "median"
+        assert response["metric_statistic"] == "mean"
 
     @pytest.mark.parametrize(
         ("metric_id", "expected"),
-        [("latency", "median"), ("tokens", "sum"), ("session_count", "count")],
+        [("latency", "mean"), ("tokens", "sum"), ("session_count", "count")],
     )
     def test_exact_snapshot_pending(self, monkeypatch, metric_id, expected):
         monkeypatch.setattr(
@@ -335,7 +360,7 @@ class TestUsersGraphEnvelopes:
         monkeypatch.setattr(
             graph_dispatch, "_read_or_refresh_exact_graph", lambda **_: _complete()
         )
-        assert _users_graph(organization_id=ORG)["metric_statistic"] == "median"
+        assert _users_graph(organization_id=ORG)["metric_statistic"] == "mean"
 
     def test_refused_to_background(self, monkeypatch):
         monkeypatch.setattr(
@@ -353,11 +378,11 @@ class TestUsersGraphEnvelopes:
         )
         response = _users_graph(organization_id=ORG)
         assert response["query_status"] == "pending"
-        assert response["metric_statistic"] == "median"
+        assert response["metric_statistic"] == "mean"
 
     @pytest.mark.parametrize(
         ("metric_id", "expected"),
-        [("latency", "median"), ("total_cost", "sum"), ("bogus", "count")],
+        [("latency", "mean"), ("total_cost", "sum"), ("bogus", "count")],
     )
     def test_direct_complete(self, monkeypatch, metric_id, expected):
         monkeypatch.setattr(
@@ -381,7 +406,7 @@ class TestUsersGraphEnvelopes:
         monkeypatch.setattr(graph_dispatch, "read_exact_user_system_graph", fail)
         response = _users_graph()
         assert response["query_status"] == "degraded"
-        assert response["metric_statistic"] == "median"
+        assert response["metric_statistic"] == "mean"
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +417,7 @@ class TestUsersGraphEnvelopes:
 class TestChartsViewSeries:
     @pytest.mark.parametrize(
         ("metric_id", "expected"),
-        [("latency", "median"), ("tokens", "sum"), ("bogus", "median")],
+        [("latency", "mean"), ("tokens", "sum"), ("bogus", "mean")],
     )
     def test_single_series_is_stamped(self, monkeypatch, metric_id, expected):
         from tracer.utils import graphs_optimized
@@ -503,11 +528,11 @@ class TestResponseContract:
         ok = ObserveGraphDataResponseSerializer(
             data={
                 "status": True,
-                "result": {**_complete(), "metric_statistic": "median"},
+                "result": {**_complete(), "metric_statistic": "mean"},
             }
         )
         assert ok.is_valid(), ok.errors
-        assert ok.validated_data["result"]["metric_statistic"] == "median"
+        assert ok.validated_data["result"]["metric_statistic"] == "mean"
 
         wrong = ObserveGraphDataResponseSerializer(
             data={
@@ -533,7 +558,7 @@ class TestResponseContract:
         assert serializer.is_valid(), serializer.errors
         assert (
             serializer.validated_data["result"]["system_metric_statistics"]["latency"]
-            == "median"
+            == "mean"
         )
 
     def test_swagger_publishes_the_statistic_fields(self):

@@ -59,9 +59,7 @@ def _read(filters):
         project_id=PROJECT,
         filters=filters,
         interval="day",
-        # Latency renders every metric reduction (other metrics skip the
-        # per-trace latency values), so the pins below see the full statement.
-        metric_id="latency",
+        metric_id="active_users",
     )
     assert len(analytics.calls) == 1
     return analytics.calls[0]
@@ -123,11 +121,9 @@ def _assert_fused_positive_membership_and_metrics(
     for expression in (
         "min(rs.start_time) AS min_start",
         f"{bucket_fn}(min_start) AS time_bucket",
-        "groupArrayIf(toInt32(rs.latency_ms), isNotNull(rs.latency_ms))"
-        " AS trace_latencies",
-        "quantileTDigestStateArray(0.5)(trace_latencies) AS user_latency_state",
-        "coalesce(ifNotFinite(quantileTDigestMerge(0.5)(user_latency_state), NULL), 0)"
-        " AS avg_latency",
+        "avg(rs.latency_ms) AS span_avg_latency",
+        "avg(span_avg_latency) AS user_avg_latency",
+        "avg(user_avg_latency) AS avg_latency",
         "sum(rs.cost) AS span_total_cost",
         "sum(span_total_cost) AS user_total_cost",
         "avg(user_total_cost) AS avg_cost",

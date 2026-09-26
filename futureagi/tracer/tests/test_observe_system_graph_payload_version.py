@@ -1,13 +1,20 @@
-"""Exact system-graph snapshots cached before the median change are retired.
+"""A latency snapshot is served only when it is marked as the mean.
 
 ``observe-system-graph``, ``observe-session-system-graph`` and
-``observe-user-system-graph`` snapshots live for up to 30 days. Before the
-median change they held a mean latency. Their identity now carries
-``payload_version`` (as the agent graph's does), so every key derived from it
-- the snapshot key, the frozen-window alias, the refresh lock and state - is
-new, and an old mean can never be served under the "median" label. The
-global cache version is not bumped, so unrelated namespaces (dashboards,
-eval, annotation, agent graph) keep their snapshots.
+``observe-user-system-graph`` snapshots live for up to 30 days. Their
+identity carries ``payload_version`` (as the agent graph's does), so every
+key derived from it - the snapshot key, the frozen-window alias, the refresh
+lock and state - is new whenever the version moves. The global cache version
+is not bumped, so unrelated namespaces (dashboards, eval, annotation, agent
+graph) keep their snapshots.
+
+A worker that computes the latency mean writes ``metric_statistic: "mean"``
+into the payload it caches. During a rolling deploy an older worker can still
+take a job keyed by the current identity (it ignores ``payload_version``); it
+writes no marker (built before the statistic was named) or ``"median"`` (built
+for the retired median). Either is a cache miss on every read, never served
+under the "avg" label. Only latency is guarded; every other series (cost and
+durations are means too) is served marked or not.
 """
 
 from __future__ import annotations
@@ -152,7 +159,7 @@ def test_session_graph_identity_is_versioned(monkeypatch):
         "observe-user-system-graph",
     ],
 )
-def test_versioned_identity_never_reads_a_pre_median_snapshot(namespace):
+def test_versioned_identity_never_reads_an_unversioned_snapshot(namespace):
     legacy = {
         "project_id": PROJECT,
         "filters": [_MODEL_FILTER],
@@ -221,21 +228,21 @@ def test_worker_ignores_the_version_key(monkeypatch, namespace, reader, module):
         },
     )
     # The worker writes the statistic into the payload it caches: the marker
-    # that tells new readers this snapshot was computed by median-aware code.
+    # that tells readers this snapshot holds the latency mean.
     # (``_load_exact_payload`` is what refresh_exact_aggregation_snapshot
     # publishes.)
-    assert payload == {"ok": True, "metric_statistic": "median"}
+    assert payload == {"ok": True, "metric_statistic": "mean"}
     (call,) = received
     assert "payload_version" not in call
     assert call["metric_id"] == "latency"
 
 
 # ---------------------------------------------------------------------------
-# Rolling deploy: a pre-median worker can still pick up a refresh job keyed by
-# the new identity. It ignores payload_version, computes the old mean and
-# caches it under the new key for up to 30 days. Only median-aware workers
-# write ``metric_statistic`` into the payload, so a latency snapshot without
-# ``metric_statistic == "median"`` is a cache miss, never served.
+# Rolling deploy: an older worker can still pick up a refresh job keyed by the
+# current identity. It ignores payload_version, computes its own latency
+# statistic and caches it under the current key for up to 30 days, either
+# unmarked or marked "median". Only a latency snapshot marked
+# ``metric_statistic == "mean"`` is served; anything else is a cache miss.
 # ---------------------------------------------------------------------------
 
 _WINDOW_FILTER = {
@@ -247,7 +254,13 @@ _WINDOW_FILTER = {
         "filter_value": ["2026-06-01T00:00:00+00:00", "2026-06-08T00:00:00+00:00"],
     },
 }
-_OLD_WORKER_MEAN = 777.5
+_OLD_WORKER_VALUE = 777.5
+# Markers an older worker writes: none (before the statistic was named) or
+# the retired median.
+_STALE_MARKERS = [
+    pytest.param({}, id="unmarked"),
+    pytest.param({"metric_statistic": "median"}, id="median-marked"),
+]
 
 
 def _cached_payload(metric_id, **extra):
@@ -256,7 +269,7 @@ def _cached_payload(metric_id, **extra):
         "data": [
             {
                 "timestamp": "2026-06-01T00:00:00+00:00",
-                "value": _OLD_WORKER_MEAN,
+                "value": _OLD_WORKER_VALUE,
                 "primary_traffic": 3,
             }
         ],
@@ -369,56 +382,63 @@ def _served_values(payload):
 
 
 @pytest.mark.usefixtures("clean_cache")
+@pytest.mark.parametrize("marker", _STALE_MARKERS)
 @pytest.mark.parametrize(("module", "read_graph"), _SURFACES)
-def test_latency_snapshot_cached_by_a_pre_median_worker_is_a_miss(
-    monkeypatch, module, read_graph
+def test_latency_snapshot_not_marked_mean_is_a_miss(
+    monkeypatch, module, read_graph, marker
 ):
-    seeded = _seed_cache_on_first_read(monkeypatch, module, _cached_payload("latency"))
+    seeded = _seed_cache_on_first_read(
+        monkeypatch, module, _cached_payload("latency", **marker)
+    )
     payload = read_graph(monkeypatch, "latency")
 
     assert seeded, "the reader never consulted the snapshot cache"
-    assert _OLD_WORKER_MEAN not in _served_values(payload), payload
+    assert _OLD_WORKER_VALUE not in _served_values(payload), payload
     assert payload.get("query_status") != "complete", payload
     assert payload.get("query_cached") is not True, payload
     # The public boundary still names the statistic of what it will serve.
-    assert payload.get("metric_statistic") == "median"
+    assert payload.get("metric_statistic") == "mean"
 
 
 @pytest.mark.usefixtures("clean_cache")
 @pytest.mark.parametrize(("module", "read_graph"), _SURFACES)
-def test_latency_snapshot_marked_median_is_served(monkeypatch, module, read_graph):
+def test_latency_snapshot_marked_mean_is_served(monkeypatch, module, read_graph):
     _seed_cache_on_first_read(
         monkeypatch,
         module,
-        _cached_payload("latency", metric_statistic="median"),
+        _cached_payload("latency", metric_statistic="mean"),
     )
     payload = read_graph(monkeypatch, "latency")
 
     assert payload.get("query_status") == "complete", payload
     assert payload.get("query_cached") is True
-    assert _served_values(payload) == [_OLD_WORKER_MEAN]
-    assert payload.get("metric_statistic") == "median"
+    assert _served_values(payload) == [_OLD_WORKER_VALUE]
+    assert payload.get("metric_statistic") == "mean"
 
 
 @pytest.mark.usefixtures("clean_cache")
+@pytest.mark.parametrize("metric_id", ["tokens", "cost"])
 @pytest.mark.parametrize(("module", "read_graph"), _SURFACES)
 def test_non_latency_snapshot_without_a_marker_is_still_served(
-    monkeypatch, module, read_graph
+    monkeypatch, module, read_graph, metric_id
 ):
-    # Only latency changed meaning; an old worker's token sum is still right.
-    _seed_cache_on_first_read(monkeypatch, module, _cached_payload("tokens"))
-    payload = read_graph(monkeypatch, "tokens")
+    # Only latency is guarded. Cost is a mean too, and an unmarked cost
+    # snapshot is still served: keying the guard on the statistic's name
+    # instead of on the latency series would turn every cached cost chart
+    # into a miss.
+    _seed_cache_on_first_read(monkeypatch, module, _cached_payload(metric_id))
+    payload = read_graph(monkeypatch, metric_id)
 
     assert payload.get("query_status") == "complete", payload
-    assert _served_values(payload) == [_OLD_WORKER_MEAN]
+    assert _served_values(payload) == [_OLD_WORKER_VALUE]
 
 
 # ---------------------------------------------------------------------------
 # The same guard with the task queue ENABLED. The tests above pin the queue
 # to None, which returns before the scheduler reads the cache a second time
 # (after enqueueing a refresh). With a real queue that second read is where a
-# rejected snapshot came back: the old worker's mean is still in the cache
-# while the new job runs, and it was served as complete, cached "median".
+# rejected snapshot came back: the old worker's value is still in the cache
+# while the new job runs, and it was served as complete and cached.
 # ``fetch_session_graph_ch`` always takes that path; trace and users take it
 # when the read is scheduled as too big for the interactive wall, and on an
 # explicit refresh.
@@ -554,22 +574,25 @@ _QUEUED_SURFACES = [
 
 
 @pytest.mark.usefixtures("clean_cache")
+@pytest.mark.parametrize("marker", _STALE_MARKERS)
 @pytest.mark.parametrize(("module", "read_graph"), _QUEUED_SURFACES)
-def test_old_worker_latency_mean_is_not_served_while_a_refresh_is_queued(
-    monkeypatch, queue_accepts_without_running, module, read_graph
+def test_old_worker_latency_is_not_served_while_a_refresh_is_queued(
+    monkeypatch, queue_accepts_without_running, module, read_graph, marker
 ):
-    seeded = _seed_before_first_read(monkeypatch, module, _cached_payload("latency"))
+    seeded = _seed_before_first_read(
+        monkeypatch, module, _cached_payload("latency", **marker)
+    )
     payload = read_graph(monkeypatch, "latency")
 
     assert seeded, "the reader never consulted the snapshot cache"
     # The refresh really was handed to the queue, so the post-enqueue re-read
     # (not the first, already guarded, read) decided what was served.
     assert [job["namespace"] for job in queue_accepts_without_running] == seeded
-    assert _OLD_WORKER_MEAN not in _served_values(payload), payload
+    assert _OLD_WORKER_VALUE not in _served_values(payload), payload
     assert payload.get("query_status") != "complete", payload
     assert payload.get("query_cached") is not True, payload
     assert payload.get("query_refreshing") is True, payload
-    assert payload.get("metric_statistic") == "median"
+    assert payload.get("metric_statistic") == "mean"
 
 
 @pytest.mark.usefixtures("clean_cache")
@@ -581,13 +604,13 @@ def test_old_worker_latency_mean_is_not_served_while_a_refresh_is_queued(
         pytest.param(graph_dispatch, _refreshed_users_graph, id="users-refresh"),
     ],
 )
-def test_median_snapshot_is_still_served_while_its_refresh_is_queued(
+def test_mean_snapshot_is_still_served_while_its_refresh_is_queued(
     monkeypatch, queue_accepts_without_running, module, read_graph
 ):
     _seed_before_first_read(
         monkeypatch,
         module,
-        _cached_payload("latency", metric_statistic="median"),
+        _cached_payload("latency", metric_statistic="mean"),
     )
     payload = read_graph(monkeypatch, "latency")
 
@@ -595,7 +618,7 @@ def test_median_snapshot_is_still_served_while_its_refresh_is_queued(
     assert payload.get("query_status") == "complete", payload
     assert payload.get("query_cached") is True
     assert payload.get("query_refreshing") is True
-    assert _served_values(payload) == [_OLD_WORKER_MEAN]
+    assert _served_values(payload) == [_OLD_WORKER_VALUE]
 
 
 @pytest.mark.usefixtures("clean_cache")
@@ -607,16 +630,16 @@ def test_non_latency_snapshot_is_still_served_while_a_refresh_is_queued(
     payload = read_graph(monkeypatch, "tokens")
 
     assert payload.get("query_status") == "complete", payload
-    assert _served_values(payload) == [_OLD_WORKER_MEAN]
+    assert _served_values(payload) == [_OLD_WORKER_VALUE]
 
 
 @pytest.mark.usefixtures("clean_cache")
-def test_old_mean_carried_into_a_refreshed_window_is_not_served(
+def test_old_value_carried_into_a_refreshed_window_is_not_served(
     queue_accepts_without_running,
 ):
     """An explicit refresh of a rolling window moves it forward and carries the
     prior window's snapshot into the new key so the chart stays visible. A
-    carried old-worker mean must be rejected there too."""
+    carried old-worker latency must be rejected there too."""
 
     from django.core.cache import cache
 
@@ -662,6 +685,6 @@ def test_old_mean_carried_into_a_refreshed_window_is_not_served(
     (job,) = queue_accepts_without_running
     # The window moved: the refresh runs for a new frozen identity.
     assert job["identity"] != prior
-    assert _OLD_WORKER_MEAN not in _served_values(payload), payload
+    assert _OLD_WORKER_VALUE not in _served_values(payload), payload
     assert payload.get("query_status") != "complete", payload
     assert payload.get("query_cached") is not True, payload

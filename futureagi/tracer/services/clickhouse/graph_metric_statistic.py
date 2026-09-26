@@ -1,12 +1,13 @@
 """Which statistic each published Observe system-metric series is.
 
 Every graph response names the statistic of its series in
-``metric_statistic`` so the UI can label it ("Latency (median)") instead of
-guessing from the metric name. Latency is always the t-digest median
-(``latency_statistic.LATENCY_STATISTIC``). The maps mirror what each builder
-computes per bucket and resolve a metric id the same way the dispatcher
-resolves the series it publishes, including its fallbacks for unknown ids.
-Eval and annotation series carry no ``metric_statistic``.
+``metric_statistic`` so the UI can label it ("Latency (avg, ms)") instead of
+guessing from the metric name. Latency is always the arithmetic mean of span
+``latency_ms`` (``LATENCY_STATISTIC``), on every graph path, filtered or not.
+The maps mirror what each builder computes per bucket and resolve a metric id
+the same way the dispatcher resolves the series it publishes, including its
+fallbacks for unknown ids. Eval and annotation series carry no
+``metric_statistic``.
 """
 
 from __future__ import annotations
@@ -15,9 +16,9 @@ import functools
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from tracer.services.clickhouse.query_builders.latency_statistic import (
-    LATENCY_STATISTIC,
-)
+# The one statistic every Observe latency series publishes.
+LATENCY_STATISTIC = "mean"
+LATENCY_METRIC = "latency"
 
 METRIC_STATISTIC_CHOICES = ("count", "sum", "mean", "median", "percentage")
 
@@ -36,7 +37,7 @@ _TOKEN_SUMS = dict.fromkeys(
 # Trace and span graphs (``TimeSeriesQueryBuilder.format_result``), also the
 # series of the project ChartsView bundle.
 TRACE_METRIC_STATISTICS: Mapping[str, str] = {
-    "latency": LATENCY_STATISTIC,
+    LATENCY_METRIC: LATENCY_STATISTIC,
     **_TOKEN_SUMS,
     "traffic": "count",
     "cost": "mean",
@@ -71,18 +72,35 @@ _SURFACES: dict[str, tuple[Mapping[str, str], str | None]] = {
 CHART_BUNDLE_METRICS = ("latency", "tokens", "cost", "traffic")
 
 
-def system_metric_statistic(surface: str, metric_id: Any) -> str | None:
-    """The statistic of the series a system-metric request publishes."""
+def resolved_system_metric(surface: str, metric_id: Any) -> str | None:
+    """The series a system-metric request on ``surface`` publishes.
+
+    ``None`` when the surface rejects the id (the session graph).
+    """
 
     statistics, fallback = _SURFACES[surface]
     if surface == "trace":
         # The trace dispatcher normalizes the id; the others match it exactly.
-        key = str(metric_id or "latency").strip().lower()
+        key = str(metric_id or LATENCY_METRIC).strip().lower()
     else:
         key = str(metric_id or "")
     if key in statistics:
-        return statistics[key]
-    return statistics.get(fallback) if fallback else None
+        return key
+    return fallback
+
+
+def publishes_latency(surface: str, metric_id: Any) -> bool:
+    """Whether a system-metric request on ``surface`` publishes latency."""
+
+    return resolved_system_metric(surface, metric_id) == LATENCY_METRIC
+
+
+def system_metric_statistic(surface: str, metric_id: Any) -> str | None:
+    """The statistic of the series a system-metric request publishes."""
+
+    statistics, _fallback = _SURFACES[surface]
+    key = resolved_system_metric(surface, metric_id)
+    return statistics.get(key) if key else None
 
 
 def chart_bundle_statistics() -> dict[str, str]:
@@ -113,7 +131,7 @@ SNAPSHOT_NAMESPACE_SURFACES: Mapping[str, str] = {
 def stamp_snapshot_statistic(namespace: str, metric_id: Any, payload: Any) -> Any:
     """Write the statistic into a payload a refresh worker is about to cache.
 
-    Only median-aware workers write it, so it is the marker
+    Only workers that compute the latency mean write it, so it is the marker
     ``snapshot_names_its_statistic`` checks. Other namespaces pass through.
     """
 
@@ -126,22 +144,25 @@ def stamp_snapshot_statistic(namespace: str, metric_id: Any, payload: Any) -> An
 def snapshot_names_its_statistic(namespace: str, metric_id: Any, payload: Any) -> bool:
     """Whether a cached system-metric snapshot may be served.
 
-    During a rolling deploy a pre-median worker can take a refresh job keyed
-    by the new identity (it ignores ``payload_version``), compute the old mean
-    latency and cache it under the new key for up to 30 days. It never writes
-    ``metric_statistic``. So a latency snapshot is served only when its payload
-    says ``metric_statistic == "median"``; anything else is a cache miss that
-    a new worker recomputes. Non-latency series did not change meaning and
-    are always accepted.
+    During a rolling deploy an older worker can take a refresh job keyed by
+    the new identity (it ignores ``payload_version``) and cache its own
+    latency statistic under the new key for up to 30 days: one built before
+    the statistic was named writes no ``metric_statistic``, and one built for
+    the retired median writes ``"median"``. So a LATENCY snapshot is served
+    only when its payload says ``metric_statistic == "mean"``; anything else
+    is a cache miss that a current worker recomputes. The check keys on the
+    series being latency, not on the statistic's name: other series (cost,
+    durations) are means too, did not change meaning, and are always
+    accepted, marked or not.
     """
 
     surface = SNAPSHOT_NAMESPACE_SURFACES.get(namespace)
-    if surface is None:
+    if surface is None or not publishes_latency(surface, metric_id):
         return True
-    expected = system_metric_statistic(surface, metric_id)
-    if expected != LATENCY_STATISTIC:
-        return True
-    return isinstance(payload, dict) and payload.get("metric_statistic") == expected
+    return (
+        isinstance(payload, dict)
+        and payload.get("metric_statistic") == LATENCY_STATISTIC
+    )
 
 
 def stamps_metric_statistic(
@@ -172,12 +193,16 @@ def stamps_metric_statistic(
 
 __all__ = [
     "CHART_BUNDLE_METRICS",
+    "LATENCY_METRIC",
+    "LATENCY_STATISTIC",
     "METRIC_STATISTIC_CHOICES",
     "SESSION_METRIC_STATISTICS",
     "SNAPSHOT_NAMESPACE_SURFACES",
     "TRACE_METRIC_STATISTICS",
     "USER_METRIC_STATISTICS",
     "chart_bundle_statistics",
+    "publishes_latency",
+    "resolved_system_metric",
     "snapshot_names_its_statistic",
     "stamp_snapshot_statistic",
     "stamps_metric_statistic",

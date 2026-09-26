@@ -582,7 +582,7 @@ class TestTraceGraphMethodsAPI:
         assert dispatched_filters[0]["column_id"] == "created_at"
         assert sum(item["column_id"] == "latency" for item in dispatched_filters) == 1
 
-    def test_get_graph_methods_latency_response_names_the_median(
+    def test_get_graph_methods_latency_response_names_the_mean(
         self, auth_client, observe_project, monkeypatch
     ):
         from tracer.services.clickhouse import graph_dispatch
@@ -614,7 +614,7 @@ class TestTraceGraphMethodsAPI:
 
         assert response.status_code == status.HTTP_200_OK
         result = response.json()["result"]
-        assert result["metric_statistic"] == "median"
+        assert result["metric_statistic"] == "mean"
         assert result["data"][0]["value"] == 120.0
 
     def test_get_graph_methods_rejects_foreign_eval_config_before_ch_read(
