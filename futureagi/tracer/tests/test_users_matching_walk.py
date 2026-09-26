@@ -993,25 +993,97 @@ def test_a_cursor_followed_with_the_filters_reordered_publishes_each_user_once()
     assert names == expected
 
 
-def test_a_cursor_minted_on_another_witness_is_refused_not_misread():
-    # A pod whose precedence chose the provider leaf minted this cursor. This
-    # pod chooses the observation-type leaf for the same filters: the
-    # cursor's keys and coverage are the provider's, so it restarts instead
-    # of misreading them.
+def _minted_on(witness_key, world, filters, *, page_size=1):
+    """Page 1 minted by a pod that walked the ``witness_key`` leaf."""
+
+    original = UserListQueryBuilderV2.matching_activity_witnesses
+
+    def first(self):
+        return sorted(original(self), key=lambda w: w.key != witness_key)
+
+    with patch.object(UserListQueryBuilderV2, "matching_activity_witnesses", first):
+        return _page(world, page_size=page_size, filters=filters)
+
+
+def test_a_cursor_minted_on_another_eligible_witness_continues_on_it():
+    # A pod that walked the provider leaf minted page 1. Every eligible
+    # witness keeps the walk exact, so this pod continues on the leaf the
+    # cursor binds (its keys and coverage are the provider's): each user
+    # once, in the provider's order, never re-read as observation-type keys.
     world, _expected = _two_leaf_world()
     filters = [*_date_only(), _observation_leaf(), _provider_leaf()]
-    witnesses = UserListQueryBuilderV2(
-        organization_id=ORG, project_ids=[PROJECT], filters=filters
-    )._native_user_witnesses()
-    provider = next(w for w in witnesses if w.key == "provider")
-    with patch.object(
-        UserListQueryBuilderV2, "matching_activity_witnesses", return_value=[provider]
-    ):
-        read, _engine = _page(world, page_size=1, filters=filters)
-    assert _names(read) == ["user-4"]
+    read, _engine = _minted_on("provider", world, filters)
+    names = _names(read)
+    assert names == ["user-4"]
+    for _hop in range(8):
+        if not read.has_more:
+            break
+        read, engine = _page(
+            world, page_size=1, filters=filters, cursor=_signed_cursor(read)
+        )
+        names.extend(_names(read))
+        assert "estimate" not in _kinds(engine)
+    assert names == ["user-4", "user-2", "user-3", "user-1"]
+
+
+def test_a_cursor_naming_no_eligible_witness_is_refused_not_misread():
+    # The cursor's fingerprint names a leaf these filters do not make
+    # eligible: its keys and coverage are never read as another leaf's.
+    world, _expected = _two_leaf_world()
+    filters = [*_date_only(), _observation_leaf(), _provider_leaf()]
+    read, _engine = _page(world, page_size=1, filters=filters)
+    order = list(read.checkpoint_order)
+    order[4] = _fingerprint([*_date_only(), _model_leaf()])
+    cursor = ListCursor(
+        window_start=read.window_start,
+        window_end=read.window_end,
+        order=tuple(order),
+        seen_rows=read.seen_rows,
+    )
     with pytest.raises(ListCursorError) as raised:
-        _page(world, page_size=1, filters=filters, cursor=_signed_cursor(read))
+        _page(world, page_size=1, filters=filters, cursor=cursor)
     assert raised.value.code == "invalid_cursor"
+
+
+def test_a_typed_raw_witness_a_cursor_binds_is_certified_on_its_typed_predicate():
+    # Page 1 walked the number leaf (a typed raw witness) ahead of a native
+    # leaf; the continuation selects it by fingerprint and certifies on its
+    # typed predicate, as page 1 did.
+    world = World()
+    for ordinal in range(1, 5):
+        world.user(
+            ordinal,
+            key=minutes_before_end(ordinal),
+            raw=(minutes_before_end(ordinal),),
+            native=True,
+            typed_values=[("number", "5")],
+        )
+    number = _attribute_filter(
+        column_id="score",
+        filter_type="number",
+        filter_op="greater_than",
+        filter_value=3,
+    )
+    filters = [*_date_only(), number, _native_status_leaf()]
+    read, _engine = _minted_on("score", world, filters)
+    names = _names(read)
+    while read.has_more:
+        manager = _manager(filters)
+        engine = Engine(world)
+        with (
+            patch(SERVICE, return_value=engine),
+            patch.object(
+                manager, "_read_dimension_candidates", side_effect=_never_seed
+            ),
+        ):
+            read = manager.list_cursor_payload(page_size=1, cursor=_signed_cursor(read))
+        assert manager._walk_witness.key == "score"
+        assert manager._walked_typed_filter is not None
+        assert manager._walked_typed_filter.key == "score"
+        slices = [call for call in engine.calls if kind_of(call) == "slice"]
+        assert slices and all("attrs_number" in call for call in slices)
+        names.extend(_names(read))
+    assert names == ["user-1", "user-2", "user-3", "user-4"]
 
 
 def test_a_v1_matching_cursor_restarts():

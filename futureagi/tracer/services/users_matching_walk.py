@@ -5,8 +5,9 @@ aggregating the whole window; on the largest tenants it materialises two
 planning-time sets over the sorting key and dies before it starts, and a page
 filtered only on a native span dimension (status, model, provider, name,
 trace name, observation type) ran it with no witness at all. This walk
-replaces it when the page has a witness (``MatchingActivityWitness``, chosen
-once by ``UsersListManager.matching_activity_walk_applies``):
+replaces it when the page has a witness (``MatchingActivityWitness``; the
+eligible ones are ``UsersListManager.matching_activity_walk_applies``'s, and a
+cursor binds the one it walks):
 
 * raw: one scalar span-attribute filter - plain-text ``equals``/``in``,
   boolean ``equals``/``in``, or a number comparison - that is the only item
@@ -153,8 +154,9 @@ every user with a matching row at or after ``coverage`` is decided; the keyset
 re-discovered published user at the enrichment step, before any replay, and
 inside an instant it names the lowest decided position, published or not.
 Keys and coverage speak for one witness leaf, so ``witness`` names it
-(``witness_fingerprint``) and a request whose own witness differs refuses the
-cursor (``invalid_cursor``) instead of reading one leaf's keys as another's.
+(``witness_fingerprint``): a continuation walks the eligible witness it names,
+and a cursor that names none refuses (``invalid_cursor``) instead of reading
+one leaf's keys as another's.
 ``open_instant`` (present only when true; a five-element cursor is read as
 false) tells the next request to decide the instant just below ``coverage``
 first, from ``last_id`` when ``last_key`` is that instant; a request sets it
@@ -203,11 +205,12 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, the manager imports us.
 
 logger = structlog.get_logger(__name__)
 
-# The witness is a function of the filters as the signed cursor binds them
-# (without their order), and the cursor also carries its fingerprint
-# (``witness_fingerprint``): a request that would read the cursor's keys and
-# coverage as another leaf's refuses it. v1 cursors carried no fingerprint and
-# chose native witnesses by request position, so they restart.
+# The eligible witnesses are a function of the filters as the signed cursor
+# binds them (without their order), and the cursor carries the fingerprint of
+# the one it walks (``witness_fingerprint``): a continuation walks that one,
+# and a cursor naming no eligible witness refuses rather than read its keys
+# and coverage as another leaf's. v1 cursors carried no fingerprint and chose
+# native witnesses by request position, so they restart.
 USER_LIST_MATCHING_CURSOR_ORDER = "matching_activity_users_v2"
 # Newest activity matching the WITNESS leaf: the raw attribute leaf when the
 # walk accepts one, otherwise an eligible native leaf
@@ -1498,6 +1501,40 @@ def witness_fingerprint(witness: MatchingActivityWitness) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
 
 
+def _eligible_witnesses(
+    manager: Any,
+) -> list[tuple[MatchingActivityWitness, Any]]:
+    """The witnesses the walk may discover on, in static rank order.
+
+    ``UsersListManager.matching_activity_walk_applies`` computes them from the
+    filters the cursor binds; a manager that set only one witness walks it.
+    """
+
+    eligible = list(getattr(manager, "_walk_eligible", None) or ())
+    if not eligible and manager._walk_witness is not None:
+        eligible = [(manager._walk_witness, manager._walked_typed_filter)]
+    return eligible
+
+
+def _bound_witness(manager: Any, fingerprint: Any) -> MatchingActivityWitness:
+    """The eligible witness a cursor's ``fingerprint`` names, now in use.
+
+    Selected, never re-chosen: a cursor's keys and coverage speak for the
+    leaf it was minted on, so every page of one cursor walks that leaf. A
+    fingerprint no eligible witness has refuses the cursor. The typed
+    predicate of a typed raw witness is set with it, since the
+    certification reads it (``_enrichment_statement_count``, ``_certify``).
+    """
+
+    for witness, typed in _eligible_witnesses(manager):
+        if witness_fingerprint(witness) == fingerprint:
+            manager.use_walk_witness(witness, typed)
+            return witness
+    raise ListCursorError(
+        "invalid_cursor", "User ordering changed; restart pagination."
+    )
+
+
 def _slices_needed(width: timedelta) -> int:
     """Slices at the cap that ``width`` of window still needs."""
 
@@ -1529,15 +1566,11 @@ def walk_matching_activity_page(
         filters=manager.filters,
         empty_scope=manager.empty_scope,
     )
-    # The witness ``matching_activity_walk_applies`` chose, carried to every
-    # statement: slices, instants and probes never recompute it.
     witness = manager._walk_witness
     if witness is None:
         raise ListCursorError(
             "invalid_cursor", "User ordering changed; restart pagination."
         )
-    builder.walk_witness = witness
-    fingerprint = witness_fingerprint(witness)
     open_instant = False
     if cursor_order is None:
         last_key, last_id, coverage = None, None, window_end
@@ -1545,12 +1578,14 @@ def walk_matching_activity_page(
         if (
             len(cursor_order) not in (5, 6)
             or cursor_order[0] != USER_LIST_MATCHING_CURSOR_ORDER
-            # Keys and coverage of another leaf: never read as this one's.
-            or cursor_order[4] != fingerprint
         ):
             raise ListCursorError(
                 "invalid_cursor", "User ordering changed; restart pagination."
             )
+        # A continuation walks the witness its cursor binds, whichever
+        # eligible witness that is: keys and coverage of a leaf the filters
+        # no longer make eligible are never read as another's.
+        witness = _bound_witness(manager, cursor_order[4])
         last_key = _utc(cursor_order[1])
         last_id = str(cursor_order[2]) if cursor_order[2] is not None else None
         coverage = _utc(cursor_order[3])
@@ -1563,6 +1598,10 @@ def walk_matching_activity_page(
             raise ListCursorError(
                 "invalid_cursor", "User ordering changed; restart pagination."
             )
+    # The witness this request walks, carried to every statement: slices,
+    # instants and probes never recompute it.
+    builder.walk_witness = witness
+    fingerprint = witness_fingerprint(witness)
     state = _WalkState(
         manager=manager,
         builder=builder,

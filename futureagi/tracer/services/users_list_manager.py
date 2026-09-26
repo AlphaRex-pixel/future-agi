@@ -596,9 +596,15 @@ class UsersListManager:
         # The number/boolean predicate the current walk is decided on, set by
         # ``matching_activity_walk_applies`` for the page it applies to.
         self._walked_typed_filter: WalkedTypedFilter | None = None
-        # The witness the current walk discovers on, chosen once by
-        # ``matching_activity_walk_applies``; the walk's builder reads it.
+        # The witness the current walk discovers on: the first eligible one
+        # (``matching_activity_walk_applies``) until the walk selects the one
+        # a cursor binds (``use_walk_witness``); the walk's builder reads it.
         self._walk_witness: MatchingActivityWitness | None = None
+        # Every witness the walk may discover on, in static rank order, with
+        # the typed predicate a typed raw witness is decided on.
+        self._walk_eligible: list[
+            tuple[MatchingActivityWitness, WalkedTypedFilter | None]
+        ] = []
         # Newest live span per user and native leaf (filter index) that
         # satisfies the leaf's existence flag: a native walk's certified order
         # key. Its own cache: an attribute key may share a native column's
@@ -1332,17 +1338,12 @@ class UsersListManager:
     def matching_activity_walk_applies(self, builder: UserListQueryBuilderV2) -> bool:
         """Whether this page walks newest matching activity instead of seeding.
 
-        The witness is chosen here, once, and stored for the walk
-        (``_walk_witness``); precedence is a function of the filters as the
-        signed cursor binds them (``canonical_filter_leaf``), never of their
-        order in the request, and the walk binds the chosen witness into its
-        cursor, so a continuation can never read one leaf's keys as
-        another's. The candidates come most selective first
-        (``builder.matching_activity_witnesses``: a static rank, then a raw
-        witness before a native one, then identity), because a witness most
-        users match while the page's matches are rare finds the same users
-        again in every slice and publishes nothing for request after request.
-        The first candidate the walk accepts is the witness:
+        Computes the witnesses the walk may discover on (``_walk_eligible``),
+        a pure function of the filters as the signed cursor binds them
+        (``canonical_filter_leaf``), never of their order in the request. The
+        candidates come in ``builder.matching_activity_witnesses`` order (a
+        static rank, then a raw witness before a native one, then identity);
+        every one the walk accepts is eligible:
 
         * a raw attribute witness, when it is the ONLY filter item on its key
           as the cursor binds the filters (identical leaves, which
@@ -1361,26 +1362,47 @@ class UsersListManager:
           newest match, so two leaves on its column need no special rule.
 
         With none, the page does not walk: every other filter shape keeps
-        its path. The order key is always the witness leaf's newest matching
-        activity.
-
-        Sets the typed predicate the certification reads when a typed raw
-        witness is chosen.
+        its path. Every eligible witness keeps the walk exact; which one it
+        discovers on is the walk's choice, bound into its cursor
+        (``users_matching_walk``), so a continuation can never read one
+        leaf's keys as another's. Until the walk chooses, the first eligible
+        witness is in use (``use_walk_witness``). The order key is always the
+        walked leaf's newest matching activity.
         """
         self._walked_typed_filter = None
         self._walk_witness = None
+        self._walk_eligible = []
         if self.sort_params:
             return False
+        eligible: list[tuple[MatchingActivityWitness, WalkedTypedFilter | None]] = []
         for witness in builder.matching_activity_witnesses():
             if witness.family == "native":
-                self._walk_witness = witness
-                return True
-            if self._raw_walk_witness_applies(witness):
-                return True
-        return False
+                eligible.append((witness, None))
+                continue
+            accepted, typed = self._raw_walk_witness_accepts(witness)
+            if accepted:
+                eligible.append((witness, typed))
+        if not eligible:
+            return False
+        self._walk_eligible = eligible
+        self.use_walk_witness(*eligible[0])
+        return True
 
-    def _raw_walk_witness_applies(self, witness: MatchingActivityWitness) -> bool:
-        """Whether the walk accepts the raw witness; stores it when it does."""
+    def use_walk_witness(
+        self, witness: MatchingActivityWitness, typed: WalkedTypedFilter | None
+    ) -> None:
+        """Walk ``witness``: the certification reads its typed predicate, if any."""
+
+        self._walk_witness = witness
+        self._walked_typed_filter = typed
+
+    def _raw_walk_witness_accepts(
+        self, witness: MatchingActivityWitness
+    ) -> tuple[bool, WalkedTypedFilter | None]:
+        """Whether the walk accepts the raw witness, and its typed predicate.
+
+        Side-effect free: a function of the filters the cursor binds.
+        """
 
         key, kind = witness.key, witness.kind
         # One item per leaf as the signed cursor binds it: ``[A, A]`` is
@@ -1398,18 +1420,11 @@ class UsersListManager:
             }.values()
         )
         if len(items) != 1:
-            return False
+            return False, None
         if kind == "text":
-            if key not in self.attribute_exact_text_filters:
-                return False
-            self._walk_witness = witness
-            return True
+            return key in self.attribute_exact_text_filters, None
         typed = typed_walk_filter(witness, items[0])
-        if typed is None:
-            return False
-        self._walked_typed_filter = typed
-        self._walk_witness = witness
-        return True
+        return typed is not None, typed
 
     def _prune_attribute_candidate_batch(
         self,
@@ -2160,6 +2175,7 @@ class UsersListManager:
         self._native_matching_activity_by_user.clear()
         self._walked_typed_filter = None
         self._walk_witness = None
+        self._walk_eligible = []
         self._native_filter_values_by_user.clear()
         self._relation_matching_user_ids.clear()
         base_builder = UserListQueryBuilderV2(
