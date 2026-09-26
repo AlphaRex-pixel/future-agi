@@ -750,8 +750,8 @@ class SQLQueryHandler:
             row_ids_condition = "AND c.row_id = ANY(%s)"
             params.append(row_ids)
 
-        # Convert choices list to SQL array format
-        choices_array = "ARRAY[" + ",".join([f"'{choice}'" for choice in choices]) + "]"
+        # Choices are template-authored text: bind them for the unnest() below.
+        params.append(list(choices))
 
         # Check if the function exists first
         check_function_sql = """
@@ -882,7 +882,7 @@ class SQLQueryHandler:
                     ELSE 0
                 END as choice_present
             FROM valid_json_cells
-            CROSS JOIN unnest({choices_array}::text[]) as choice
+            CROSS JOIN unnest(%s::text[]) as choice
             WHERE json_array IS NOT NULL
         ),
         column_choice_stats AS (
