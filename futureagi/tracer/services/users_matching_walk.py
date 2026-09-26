@@ -23,6 +23,24 @@ cursor binds the one it walks):
   flag (``idx_status`` alone does, and not by design), so an empty native
   slice costs in proportion to its width (``index_pruned``).
 
+Witness choice. Every witness ``matching_activity_walk_applies`` accepts keeps
+the walk exact; they differ only in cost. A witness most users match while the
+page's matches are rare finds the same users again in every slice and
+publishes nothing, request after request (production: ``status = ERROR`` and a
+raw value on every span read 10-12 GB a page for 0 users when the raw leaf,
+first in the static rank, was walked). So a first page with two or more
+eligible witnesses costs the first ``USER_LIST_WALK_WITNESS_CANDIDATES`` of them
+with one ``EXPLAIN ESTIMATE`` each over the whole window (index analysis, no
+column data, inside ``USER_LIST_WALK_PROBE_WALL_MS``, each under a server cap)
+and walks the one whose weighted rows are fewest (``_choose_witness``); an
+estimate that cannot answer leaves the static rank's first. The choice is
+bound into the cursor, and a continuation walks it without measuring
+(``_bound_witness``). Known misses: the estimate measures scan cost, not
+candidates, so a rare raw value spread over many granules can lose to a leaf
+with more users; two fresh first pages can walk different leaves, and so order
+differently, when the data flips the estimates between them; on a lane whose
+ClickHouse profile is read-only the estimates are admitted only, uncapped.
+
 The order key follows the witness: the newest live span whose latest state
 satisfies the witness leaf, over the whole window. Then:
 
@@ -253,6 +271,11 @@ USER_LIST_WALK_PROBE_TARGET_READ_ROWS = settings.USER_LIST_WALK_PROBE_TARGET_REA
 # wall: the estimate's own time must fit what is left of it before the
 # existence statement, which repeats that index analysis, is issued.
 USER_LIST_WALK_PROBE_WALL_MS = settings.USER_LIST_WALK_PROBE_WALL_MS
+# How many eligible witnesses a first page costs before it walks the cheapest
+# (``_choose_witness``); 1 walks the static rank's first.
+USER_LIST_WALK_WITNESS_CANDIDATES = settings.USER_LIST_WALK_WITNESS_CANDIDATES
+# One estimated raw span-attribute row against one native row.
+USER_LIST_WALK_RAW_WITNESS_ROW_WEIGHT = settings.USER_LIST_WALK_RAW_WITNESS_ROW_WEIGHT
 _TICK = timedelta(microseconds=1)
 
 
@@ -345,6 +368,20 @@ class _WalkBudget:
 
     def remaining_statements(self) -> int:
         return max(self.max_statements - self.statements, 0)
+
+    def resize(self, budget: int, *, ceiling: int, extra: int) -> None:
+        """Set the count, its step and its ceiling before the first slice.
+
+        The witness choice runs on this budget's wall and count before the
+        walk knows which witness, and so which count, it walks
+        (``_choose_witness``); nothing has grown yet. Its ``extra``
+        statements come on top of the walk's own count and ceiling, never
+        out of them: after the choice the walk has the budget the static
+        walk had.
+        """
+        self.step = int(budget)
+        self.max_statements = self.step + int(extra)
+        self.ceiling = max(self.max_statements, int(ceiling) + int(extra))
 
     def remaining_ms(self) -> float:
         return max(self.deadline.total_ms - self.deadline.elapsed_ms(), 0.0)
@@ -498,7 +535,8 @@ def _statement_budget(manager: Any) -> int:
     statements at the view's 100 keys. Both numbers are known before the
     first statement; only time splits and the head-of-line user's native
     statement sent again without the cap fall outside them (module
-    docstring).
+    docstring). A first page's witness estimates come on top of it
+    (``_choose_witness``, ``_WalkBudget.resize``).
     """
     return max(
         USER_LIST_WALK_MAX_STATEMENTS,
@@ -955,6 +993,123 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
         )
         return None
     return not list(result.data or ())
+
+
+def _witness_candidates(
+    manager: Any,
+) -> list[tuple[MatchingActivityWitness, Any]]:
+    """The eligible witnesses a first page costs: none when fewer than two."""
+
+    candidates = _eligible_witnesses(manager)[:USER_LIST_WALK_WITNESS_CANDIDATES]
+    return candidates if len(candidates) >= 2 else []
+
+
+def _choose_witness(
+    state: _WalkState, candidates: list[tuple[MatchingActivityWitness, Any]]
+) -> int:
+    """Walk the candidate whose whole-window scan the index says is cheapest.
+
+    One ``EXPLAIN ESTIMATE`` per candidate, in static rank order, of that
+    candidate's existence statement over ``[window_start, decided_from)``
+    (``build_matching_activity_existence_estimate_query``): index analysis
+    only, no column data. Its rows are the granules that witness's slices
+    would read - a raw witness's those the key and value blooms keep,
+    ``status``'s those ``idx_status`` keeps, any other native one's the
+    primary-key range - weighted by what a row of that family costs
+    (``USER_LIST_WALK_RAW_WITNESS_ROW_WEIGHT`` for raw, 1 for native). The
+    least weighted count wins, ties to the static order. A scan cost over
+    the whole window, not a count over its newest slice: a raw value absent
+    from the newest week, or errors absent from the newest day, would pick
+    the wrong leaf there.
+
+    The estimates share one wall, ``USER_LIST_WALK_PROBE_WALL_MS`` or what
+    is left of the page wall, whichever is smaller; each is charged one
+    statement and carries what is left of that wall as its server cap. An
+    estimate that is unreadable, fails on a read budget, is stopped at its
+    cap, or finds no wall or count to start in, leaves the static choice,
+    the first candidate, for the whole request: never worse than without
+    the choice. Every eligible witness keeps the walk exact; the choice
+    decides nothing but which one this cursor walks (``_bound_witness``
+    continues it). Returns the estimates sent.
+    """
+    from tracer.services import users_list_manager as ulm
+
+    builder = state.builder
+    wall_ms = min(USER_LIST_WALK_PROBE_WALL_MS, int(state.budget.remaining_ms()))
+    spent_ms = 0.0
+    sent = 0
+    measured: list[dict[str, Any]] = []
+    fallback: str | None = None
+    settings = ulm._page_replay_read_settings(max_result_rows=1)
+    for witness, _typed in candidates:
+        left_ms = int(wall_ms - spent_ms)
+        if left_ms < 25:
+            fallback = "no_wall"
+            break
+        if not state.budget.take(1):
+            fallback = "no_budget"
+            break
+        sent += 1
+        query, params = builder.build_matching_activity_existence_estimate_query(
+            range_start=state.window_start,
+            range_end=state.decided_from,
+            witness=witness,
+        )
+        started = time.monotonic()
+        try:
+            estimate = ulm.V2AnalyticsQueryService().execute_ch_query(
+                query,
+                params,
+                timeout_ms=left_ms,
+                settings=settings,
+                server_execution_cap_ms=left_ms,
+            )
+        except ReadDeadlineExceeded:
+            _probe_wall_spent(state)
+            fallback = "stopped"
+            break
+        except Exception as exc:
+            if not is_read_budget_error(exc):
+                raise
+            fallback = type(exc).__name__
+            break
+        estimate_ms = _statement_ms(estimate, started)
+        spent_ms += estimate_ms
+        rows = builder.matching_activity_existence_estimate(
+            list(estimate.data or ()), getattr(estimate, "columns", None)
+        )
+        if rows is None:
+            fallback = "unreadable"
+            break
+        weight = USER_LIST_WALK_RAW_WITNESS_ROW_WEIGHT if witness.family == "raw" else 1
+        measured.append(
+            {
+                "family": witness.family,
+                "column": witness.key,
+                "rows": rows,
+                "cost": rows * weight,
+                "ms": round(estimate_ms, 1),
+            }
+        )
+    if fallback is None:
+        position = min(
+            range(len(measured)), key=lambda index: (measured[index]["cost"], index)
+        )
+    else:
+        position = 0
+    witness, typed = candidates[position]
+    state.manager.use_walk_witness(witness, typed)
+    state.witness = witness
+    builder.walk_witness = witness
+    logger.info(
+        "users_matching_walk_witness_chosen",
+        family=witness.family,
+        column=witness.key,
+        static_position=position,
+        fallback=fallback,
+        candidates=measured,
+    )
+    return sent
 
 
 def _certify(state: _WalkState, batch: list[_Candidate]) -> int:
@@ -1601,7 +1756,14 @@ def walk_matching_activity_page(
     # The witness this request walks, carried to every statement: slices,
     # instants and probes never recompute it.
     builder.walk_witness = witness
-    fingerprint = witness_fingerprint(witness)
+    decided_from = min(coverage, window_end)
+    exhausted = manager.empty_scope or decided_from <= window_start
+    # A first page with two or more eligible witnesses costs them first
+    # (``_choose_witness``); those estimates come on top of its count.
+    candidates = (
+        _witness_candidates(manager) if cursor_order is None and not exhausted else []
+    )
+    budget = _statement_budget(manager)
     state = _WalkState(
         manager=manager,
         builder=builder,
@@ -1612,20 +1774,28 @@ def walk_matching_activity_page(
         frozen_filters=frozen_filters,
         budget=_WalkBudget(
             wall_ms=USER_LIST_PAGE_WALL_MS,
-            max_statements=_statement_budget(manager),
-            ceiling=_statement_budget(manager) * USER_LIST_WALK_EMPTY_PAGE_BUDGETS,
+            max_statements=budget + len(candidates),
+            ceiling=budget * USER_LIST_WALK_EMPTY_PAGE_BUDGETS + len(candidates),
         ),
         last_key=last_key,
         last_id=last_id,
-        decided_from=min(coverage, window_end),
+        decided_from=decided_from,
     )
+    if candidates:
+        sent = _choose_witness(state, candidates)
+        # The chosen witness's own count (a typed raw witness certifies on
+        # one statement of its own), with the estimates on top.
+        budget = _statement_budget(manager)
+        state.budget.resize(
+            budget, ceiling=budget * USER_LIST_WALK_EMPTY_PAGE_BUDGETS, extra=sent
+        )
+    fingerprint = witness_fingerprint(state.witness)
     slice_end = state.decided_from
     width = USER_LIST_WALK_INITIAL_SLICE
     before: tuple[datetime, str] | None = None
     # Every undecided user's newest matching row lies at or below this line
     # (a time), or strictly below this position inside a tied instant.
     boundary: datetime | tuple[datetime, str] | None = slice_end
-    exhausted = manager.empty_scope or slice_end <= window_start
     probed = False
     # An instant to decide before the next slice: the one the cursor left
     # open, or the floor of a slice that returned nothing else.

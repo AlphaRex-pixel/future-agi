@@ -82,8 +82,8 @@ class MatchingActivityWitness:
 # (``witness_selectivity_rank``). A witness the page's matches are rare
 # under, but that matches most users, finds the same users again in every
 # slice: each request certifies them, rejects them and publishes nothing, for
-# as many requests as the window has slices. So the walk discovers on the
-# rarest leaf it can name without reading anything, by what the leaf asks for:
+# as many requests as the window has slices. The static rank guesses the
+# rarest leaf from what it asks for, without reading anything:
 #
 # 0  a raw text equality/``in``: a value of a key the user chose, served by
 #    the key and value blooms;
@@ -97,18 +97,14 @@ class MatchingActivityWitness:
 # 7  a native negation or null test: every span without the named value,
 #    or with any value at all.
 #
-# Known limitation: the rank is static, a guess from what the leaf asks for,
-# never from the data. When the guess is wrong the walk still publishes every
-# member exactly once, in order; it only takes more requests, most of them
-# empty degraded pages. A raw text leaf always ranks first, so a common raw
-# value (``env = production``, ``plan = pro``) is walked ahead of a rare
-# native leaf such as ``status = ERROR``; ``trace_name`` ranks above
-# ``model`` even when it is the denser of the two; and ``observation_type``
-# ties with ``provider``, the tie going to the leaf's identity, so
-# ``observation_type`` wins. Measuring density per request (an ``EXPLAIN
-# ESTIMATE`` of each candidate witness, or catalog value counts) is not done:
-# a cost probe reads the bloom index cold on the largest projects, and the
-# rank must stay a function of the filters the cursor binds.
+# The rank is a guess: a common raw value (``env = production``) outranks a
+# rare ``status = ERROR``. So it is no longer the choice, only its order: a
+# first page with two or more eligible witnesses costs the first
+# ``USER_LIST_WALK_WITNESS_CANDIDATES`` of them, in this order, with one
+# ``EXPLAIN ESTIMATE`` each over the whole window and walks the cheapest
+# (``users_matching_walk._choose_witness``); ties, and any estimate it
+# cannot read, fall back to this order. The choice is bound into the
+# cursor, so every later page walks the same leaf without measuring.
 _WITNESS_RANK_NATIVE_EQUALITY = {
     "name": 2,
     "trace_name": 2,
@@ -610,16 +606,17 @@ class UserListQueryBuilder(BaseQueryBuilder):
 
         Raw span-attribute witnesses (``_scalar_user_witnesses``) and native
         leaves with an existence term (``_native_user_witnesses``), ranked by
-        ``witness_selectivity_rank`` (a documented static order: no statement
-        is spent measuring it), then a raw witness before a native one (the
+        ``witness_selectivity_rank`` (a static order: the walk's measured
+        choice costs its candidates in it and falls back to it), then a raw
+        witness before a native one (the
         blooms serve it, so an empty slice costs only its overhead), then one
         the seeded page could seed on before one that qualifies the walk
         alone, then the least ``identity``. Never by position in the request:
         the cursor binds the filters without their order, so every request a
         cursor admits ranks them the same. Whether the walk accepts a raw
         witness is the manager's decision
-        (``UsersListManager.matching_activity_walk_applies``); it takes the
-        first one it accepts.
+        (``UsersListManager.matching_activity_walk_applies``); which accepted
+        one it walks is the walk's (``users_matching_walk._choose_witness``).
         """
         ranked: list[tuple[int, int, bool, str, MatchingActivityWitness]] = []
         for item, kind, witness, params, seedable in self._scalar_user_witnesses():
@@ -941,7 +938,11 @@ class UserListQueryBuilder(BaseQueryBuilder):
         return query, params
 
     def build_matching_activity_existence_query(
-        self, *, range_start: Any, range_end: Any
+        self,
+        *,
+        range_start: Any,
+        range_end: Any,
+        witness: MatchingActivityWitness | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """Whether any witnessed row lies in ``[range_start, range_end)``.
 
@@ -953,8 +954,11 @@ class UserListQueryBuilder(BaseQueryBuilder):
         only after ``build_matching_activity_existence_estimate_query`` has
         costed it: nothing else bounds a statement wider than the slice cap
         (application reads carry no server row, byte or time cap).
+        ``witness`` names a witness other than the walk's (``walk_witness``).
         """
-        params = self._matching_activity_range_params(range_start, range_end)
+        params = self._matching_activity_range_params(
+            range_start, range_end, witness=witness
+        )
         query = f"""
         SELECT 1 AS witnessed
         FROM spans
@@ -966,7 +970,11 @@ class UserListQueryBuilder(BaseQueryBuilder):
         return query, params
 
     def build_matching_activity_existence_estimate_query(
-        self, *, range_start: Any, range_end: Any
+        self,
+        *,
+        range_start: Any,
+        range_end: Any,
+        witness: MatchingActivityWitness | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """``EXPLAIN ESTIMATE`` of the existence statement, text for text.
 
@@ -982,10 +990,12 @@ class UserListQueryBuilder(BaseQueryBuilder):
         analysis costs - the index granules of every selected part, read at
         the caller's thread count and cache state - which is why the walk
         runs it under the existence statement's own read settings and
-        inside the probe's wall.
+        inside the probe's wall. ``witness`` costs a witness other than the
+        walk's: the walk's choice among its eligible witnesses estimates each
+        one over the whole window before it walks any.
         """
         query, params = self.build_matching_activity_existence_query(
-            range_start=range_start, range_end=range_end
+            range_start=range_start, range_end=range_end, witness=witness
         )
         return "EXPLAIN ESTIMATE\n" + query.lstrip(), params
 
@@ -1021,11 +1031,15 @@ class UserListQueryBuilder(BaseQueryBuilder):
         return estimate if counted_any else None
 
     def _matching_activity_range_params(
-        self, range_start: Any, range_end: Any
+        self,
+        range_start: Any,
+        range_end: Any,
+        *,
+        witness: MatchingActivityWitness | None = None,
     ) -> dict[str, Any]:
         if range_start is None or range_end is None or range_start >= range_end:
             raise ValueError("matching activity slice is invalid")
-        witness = self.walk_witness
+        witness = witness if witness is not None else self.walk_witness
         if witness is None:
             raise UnsupportedBoundedUserListQuery(
                 "the matching-activity walk chose no witness for this page"

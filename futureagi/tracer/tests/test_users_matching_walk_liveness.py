@@ -118,11 +118,21 @@ def _is_member(user: dict) -> bool:
     )
 
 
-def _expected(world: World) -> list[str]:
-    """Members in page order: newest matching activity, then id, descending."""
+def _expected(world: World, leaf: str | None = None) -> list[str]:
+    """Members in page order: newest matching activity, then id, descending.
 
+    The activity of the walked leaf: the world's ``key``, or with ``leaf`` the
+    newest match of that leaf of its own (``World.native_leaf``), when the
+    walk chose it (``_choose_witness``).
+    """
+
+    keys = (
+        {uid: user["key"] for uid, user in world.users.items()}
+        if leaf is None
+        else world.leaves[leaf]["keys"]
+    )
     members = [
-        (user["key"], uid) for uid, user in world.users.items() if _is_member(user)
+        (keys[uid], uid) for uid, user in world.users.items() if _is_member(user)
     ]
     return [uid for _key, uid in sorted(members, reverse=True)]
 
@@ -435,6 +445,7 @@ def _follow(
     width: timedelta | None = None,
     family: str = "raw",
     heavy_native: frozenset[str] = frozenset(),
+    estimates: Callable[[int], dict] | None = None,
 ) -> tuple[list[str], int]:
     """Follow the cursor to the end; returns the published names and the hops.
 
@@ -465,7 +476,10 @@ def _follow(
     split in time, uncounted, inside the documented bound.
     ``mutate(world, published, cursor)`` runs between hops. ``family`` says
     which filters the page carries (``_family_filters``): the walk's witness
-    is the raw attribute leaf, or a native leaf.
+    is the raw attribute leaf, or a native leaf. ``estimates(hop)`` scripts
+    what each witness's estimate reports on that hop (``Engine.estimate_by``):
+    only a first page sends them, before its first slice, at most
+    ``USER_LIST_WALK_WITNESS_CANDIDATES`` of them, on top of its count.
     """
     with _scripted_clock(_Clock()) as clock:
         return _follow_on(
@@ -485,6 +499,7 @@ def _follow(
             width=width,
             family=family,
             heavy_native=heavy_native,
+            estimates=estimates,
         )
 
 
@@ -506,6 +521,7 @@ def _follow_on(
     width: timedelta | None,
     family: str = "raw",
     heavy_native: frozenset[str] = frozenset(),
+    estimates: Callable[[int], dict] | None = None,
 ) -> tuple[list[str], int]:
     budget = max(
         max_statements or walk.USER_LIST_WALK_MAX_STATEMENTS,
@@ -536,6 +552,8 @@ def _follow_on(
             heavy_native=heavy_native,
         )
         engine.outage = outage_every is not None and hop % outage_every == 0
+        if estimates is not None:
+            engine.estimate_by = estimates(hop)
         with capture_logs() as logs:
             read = _keyed_page(
                 page_size=page_size,
@@ -552,7 +570,19 @@ def _follow_on(
         assert len(engine.split) <= 1, (hop, engine.split)
         assert narrowed <= enrichment * (least - 1), (hop, narrowed)
         spent = len(engine.calls) - narrowed
-        assert spent <= ceiling, (hop, spent, ceiling)
+        # A first page with two or more eligible witnesses costs them before
+        # its first slice (``_choose_witness``), on top of its count.
+        choice_estimates = next(
+            (n for n, kind in enumerate(engine.kinds) if kind != "estimate"),
+            len(engine.kinds),
+        )
+        assert choice_estimates == 0 or cursor is None, (hop, choice_estimates)
+        assert choice_estimates <= walk.USER_LIST_WALK_WITNESS_CANDIDATES, (
+            hop,
+            choice_estimates,
+        )
+        hop_ceiling = ceiling + choice_estimates
+        assert spent <= hop_ceiling, (hop, spent, hop_ceiling)
         if (
             not engine.outage
             and read.has_more
@@ -570,10 +600,10 @@ def _follow_on(
                 if entry["event"] == "users_matching_walk_budget_exhausted"
             ]
             wall_spent = engine._elapsed_ms() >= walk.USER_LIST_PAGE_WALL_MS - 25
-            assert wall_spent or counted + enrichment + finish > ceiling, (
+            assert wall_spent or counted + enrichment + finish > hop_ceiling, (
                 hop,
                 counted,
-                ceiling,
+                hop_ceiling,
                 engine._elapsed_ms(),
             )
         if not engine.outage:
@@ -2656,6 +2686,42 @@ def _with_second_leaf(world: World, rng: random.Random) -> None:
     world.native_leaf(REORDERED_SECOND, members, rows)
 
 
+# The two eligible witnesses of a family whose first page costs them
+# (``_choose_witness``), by what their estimates bind (``Engine.estimate_by``):
+# ``mixed`` (the raw tag or the native status leaf, both keyed by the world's
+# ``key``) and ``reordered`` (observation_type, keyed by ``key``, or the
+# provider leaf, keyed by its own newest matches).
+CHOICES = {"mixed": ("tag", "error"), "reordered": ("llm", REORDERED_SECOND)}
+
+
+def _choice(
+    seed: int, family: str, *, walked: str | None = None
+) -> tuple[Callable[[int], dict] | None, str | None]:
+    """What the estimates report each hop, and the leaf the page is keyed by.
+
+    The first page's estimates make ``walked`` (drawn from ``seed`` when not
+    given) the cheapest eligible witness, so across the seeds every witness
+    is walked; every later hop reports fresh random rows, which a
+    continuation never reads: it walks the witness its cursor binds.
+    Returns ``(estimates, leaf)`` for ``_follow`` and ``_expected``.
+    """
+    leaves = CHOICES.get(family)
+    if leaves is None:
+        return None, None
+    rng = random.Random(9_973 * seed + 11)
+    walked = walked or rng.choice(leaves)
+
+    def estimates(hop: int) -> dict:
+        if hop == 1:
+            return {
+                leaf: 0 if leaf == walked else rng.randrange(1, 10**6)
+                for leaf in leaves
+            }
+        return {leaf: rng.randrange(0, 10**6) for leaf in leaves}
+
+    return estimates, walked if walked == REORDERED_SECOND else None
+
+
 def _gap_world(rng: random.Random, n_users: int) -> World:
     """Users 20 minutes to 6 hours apart, one row each, as many as fit."""
 
@@ -2740,6 +2806,7 @@ def test_every_hop_sequence_ends_exact_and_never_raises_the_coverage(seed, famil
     bound = _hop_bound(n_users, page_size, len(heavy)) + _slice_hops(
         world, seed, family
     )
+    estimates, leaf = _choice(seed, family)
     with _limits(seed) as (max_statements, finish), _shipped_walls():
         names, _hops = _follow(
             world,
@@ -2755,10 +2822,11 @@ def test_every_hop_sequence_ends_exact_and_never_raises_the_coverage(seed, famil
             fail_ms=faults.fail_ms,
             width=faults.width,
             family=family,
+            estimates=estimates,
         )
 
     assert len(names) == len(set(names)), "a user was published twice"
-    assert names == _expected(world)
+    assert names == _expected(world, leaf)
 
 
 def _stop_matching(rng: random.Random, changed: set[str]):
@@ -2802,6 +2870,10 @@ def test_users_that_stop_matching_between_hops_never_stall_or_repeat(seed, famil
     faults, keys = _fault(
         10_000 + seed, _key_count(seed), [kind for kind in FAULTS if kind != "width"]
     )
+    # The mutations change the leaf keyed by ``key``: the first page walks it.
+    estimates, _leaf = _choice(
+        10_000 + seed, family, walked="llm" if family == "reordered" else None
+    )
     with _limits(seed) as (max_statements, finish), _shipped_walls():
         names, _hops = _follow(
             world,
@@ -2818,6 +2890,7 @@ def test_users_that_stop_matching_between_hops_never_stall_or_repeat(seed, famil
             fail_ms=faults.fail_ms,
             width=faults.width,
             family=family,
+            estimates=estimates,
         )
 
     assert len(names) == len(set(names)), "a user was published twice"
@@ -2892,6 +2965,9 @@ def test_users_that_change_between_hops_follow_the_coverage_fence(kind, seed, fa
     world = _with_native(_world(rng, n_users), 20_000 + 97 * seed, family)
     page_size = rng.choice([1, 3, 7, 25])
     changed: dict[str, bool] = {}
+    estimates, _leaf = _choice(
+        20_000 + seed, family, walked="llm" if family == "reordered" else None
+    )
     with _limits(seed) as (max_statements, finish), _shipped_walls():
         names, _hops = _follow(
             world,
@@ -2903,6 +2979,7 @@ def test_users_that_change_between_hops_follow_the_coverage_fence(kind, seed, fa
             slice_ms=_slice_model(seed, family),
             finish=finish,
             family=family,
+            estimates=estimates,
         )
 
     assert len(names) == len(set(names)), "a user was published twice"

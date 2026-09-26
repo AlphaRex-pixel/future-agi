@@ -427,6 +427,22 @@ INTERACTIVE_READ_SETTING_SPECS = {
             # (95 parts, 16k marks; 3.2 s at one thread on a cold index), the
             # boolean-key estimate 114-117 ms (395 parts, 33k marks).
             ("USER_LIST_WALK_PROBE_WALL_MS", 1_000, 25, 60_000),
+            # A first Users page with two or more eligible walk witnesses
+            # costs up to this many of them, in static rank order, with one
+            # EXPLAIN ESTIMATE each over the whole window (index analysis, no
+            # column data, inside USER_LIST_WALK_PROBE_WALL_MS) and walks the
+            # cheapest; continuations walk the witness their cursor binds. 1
+            # turns the measurement off: the static rank's first witness.
+            ("USER_LIST_WALK_WITNESS_CANDIDATES", 3, 1, 8),
+            # What one estimated row of a raw span-attribute witness costs
+            # against one row of a native one. Basis, measured on the largest
+            # tenant: a raw text slice reads the attribute map, about 3.2 KB a
+            # row (7.69 GB / 2.38M rows); a native status slice about 32 B a
+            # row (0.1 MB / 3,154 rows). Without it a dense raw value whose
+            # rows sit in recent months outweighs status=ERROR at 30 days but
+            # not at 12 months, where the raw walk read 10-12 GB a page for 0
+            # users.
+            ("USER_LIST_WALK_RAW_WITNESS_ROW_WEIGHT", 16, 1, 1_024),
             ("FILTER_VALUE_READ_MAX_THREADS", 2, 1, 16),
             ("FILTER_SELECTOR_QUERY_TIMEOUT_MS", 2_500, 25, 10_000),
             ("FILTER_SELECTOR_MAX_OPT_IN_QUERY_TIMEOUT_MS", 3_000, 25, 30_000),
