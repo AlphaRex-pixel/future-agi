@@ -13,6 +13,7 @@ drive the real views and ``manage.py create_user`` against the test database.
 
 from __future__ import annotations
 
+import importlib.util
 import threading
 import time
 from types import SimpleNamespace
@@ -436,10 +437,16 @@ class TestMarketplaceRoutes:
 
     def test_a_self_hosted_api_schema_still_documents_them(self):
         """The checked-in OpenAPI contract is one surface for every edition."""
-        import tfc.openapi_urls
-
-        with patch("tfc.ee_gating.is_oss", return_value=True):
-            documented = _fresh(tfc.openapi_urls).urlpatterns[-1]
+        # Located, not imported: with ee/cloud checked out (CI), a plain import
+        # would include its URLconfs, whose apps these test settings do not
+        # install. The fresh copy runs with ee/cloud gated off.
+        spec = importlib.util.find_spec("tfc.openapi_urls")
+        openapi_urls = SimpleNamespace(__name__=spec.name, __file__=spec.origin)
+        with (
+            patch("tfc.ee_gating.is_oss", return_value=True),
+            patch("tfc.ee_loader.has_ee", return_value=False),
+        ):
+            documented = _fresh(openapi_urls).urlpatterns[-1]
 
         assert str(documented.pattern) == "accounts/"
         assert _routes(documented.url_patterns) == MARKETPLACE_ROUTES
