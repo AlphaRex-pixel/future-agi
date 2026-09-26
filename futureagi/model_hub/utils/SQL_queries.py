@@ -81,6 +81,19 @@ MODEL_COST_CALCULATION_SQL = """
 """
 
 
+# Sort column ids the Evaluations > Usage grid sends, mapped to the fixed
+# expression ``get_all_templates`` orders by. No other value reaches its SQL.
+EVAL_TEMPLATE_SORT_COLUMNS = {
+    "last_30_run": "last30run",
+    "updated_at": "updated_at",
+    "eval_template_name": "template_name",
+    # Legacy camelCase support
+    "last30Run": "last30run",
+    "updatedAt": "updated_at",
+    "evalTemplateName": "template_name",
+}
+
+
 def build_sql_filters(filters=[], column_map={}):
     filter_clauses = []
     params = []
@@ -326,22 +339,13 @@ class SQLQueryHandler:
         offset,
         workspace_id=None,
     ):
-        sort_dict = {
-            "last_30_run": "last30run",
-            "updated_at": "updated_at",
-            "eval_template_name": "template_name",
-            # Legacy camelCase support
-            "last30Run": "last30run",
-            "updatedAt": "updated_at",
-            "evalTemplateName": "template_name",
-        }
-
         sort_order = sort_order if sort_order else "DESC"
-        sort_by = (
-            sort_dict.get(sort_by, sort_by)
-            if sort_dict.get(sort_by, sort_by)
-            else "last30run"
-        )
+        if sort_order not in ("ASC", "DESC"):
+            raise ValueError("Unsupported eval template sort order")
+        sort_by = sort_by if sort_by else "last_30_run"
+        if sort_by not in EVAL_TEMPLATE_SORT_COLUMNS:
+            raise ValueError("Unsupported eval template sort column")
+        sort_by = EVAL_TEMPLATE_SORT_COLUMNS[sort_by]
         limit = limit if limit else 10
         offset = offset if offset else 0
         query = f"""
