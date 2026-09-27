@@ -3044,8 +3044,13 @@ def test_the_estimate_runs_under_the_existence_statements_settings_in_the_probe_
     assert expected["max_threads"] == 8
     assert engine.settings[1] == expected and engine.settings[2] == expected
     assert engine.settings[1] != ulm._page_read_settings(max_result_rows=1)
-    assert 0 < engine.timeouts[1] <= walk.USER_LIST_WALK_PROBE_WALL_MS
-    assert 0 < engine.timeouts[2] <= engine.timeouts[1]
+    # The estimate is stopped at half the probe wall: the existence
+    # statement is licensed only when the estimate took at most half.
+    assert (
+        engine.timeouts[1] == engine.caps[1] == walk.USER_LIST_WALK_PROBE_WALL_MS // 2
+    )
+    assert 0 < engine.timeouts[2] <= walk.USER_LIST_WALK_PROBE_WALL_MS
+    assert engine.timeouts[2] == engine.caps[2]
 
 
 @_plain_count
@@ -3080,11 +3085,12 @@ def test_an_estimate_over_its_time_budget_licenses_no_wide_statement():
 
 @_plain_count
 def test_a_probe_deadline_raised_in_the_transport_ends_the_probe_not_the_page():
-    """An executor that honours ``timeout_ms`` raises for the probe's deadline.
+    """An estimate stopped at its cap (or its transport deadline) ends the estimate.
 
-    That ends the probe (no existence statement, nothing licensed) and the
-    walk slices on at the cap; only a page wall that is really spent stops
-    the page.
+    No existence statement, nothing licensed; the presence statement still
+    asks, with the half of the probe wall the estimate's cap keeps for it,
+    finds a user-carrying span and licenses nothing, and the walk slices on
+    at the cap. Only a page wall that is really spent stops the page.
     """
     thirty_days = _filters(window_start=WINDOW_END - timedelta(days=30))
     world = World()
@@ -3098,9 +3104,11 @@ def test_a_probe_deadline_raised_in_the_transport_ends_the_probe_not_the_page():
         return original(query, params, timeout_ms, settings, **caps)
 
     engine.execute_ch_query = probe_deadline
+    engine.unwitnessed = [WINDOW_END - timedelta(days=20)]
     with patch.object(walk, "_statement_budget", return_value=4):
         read, engine = _page(world, page_size=25, filters=thirty_days, engine=engine)
-    assert _kinds(engine) == ["slice", "estimate", "slice", "slice"]
+    assert _kinds(engine) == ["slice", "estimate", "presence", "slice", "slice"]
+    assert engine.caps[2] >= walk.USER_LIST_WALK_PROBE_WALL_MS // 2
     assert read.has_more is True and read.payload["table"] == []
 
 
@@ -3114,6 +3122,57 @@ def test_the_tail_existence_statement_carries_a_server_cap():
     cap = engine.caps[2]
     assert cap is not None and 25 <= cap <= walk.USER_LIST_WALK_PROBE_WALL_MS
     assert cap == engine.timeouts[2]
+
+
+def test_the_tail_estimate_carries_a_server_cap_of_half_the_probe_wall():
+    # ``timeout_ms`` never reaches ClickHouse: the tail estimate ran with no
+    # server bound at all, the one walk probe statement still uncapped. It is
+    # stopped at half the probe wall, past which it could license nothing.
+    thirty_days = _filters(window_start=WINDOW_END - timedelta(days=30))
+    read, engine = _page(World(), page_size=25, filters=thirty_days)
+    assert _kinds(engine) == ["slice", "estimate", "probe"]
+    assert engine.caps[1] == walk.USER_LIST_WALK_PROBE_WALL_MS // 2
+    assert engine.timeouts[1] == engine.caps[1]
+
+
+@pytest.mark.parametrize(
+    "estimate_ms", [510.0, 700.0, 960.0, 980.0, 1000.0, 1500.0, None]
+)
+@pytest.mark.parametrize(
+    "leaves", [[_native_status_leaf()], None], ids=["status", "raw"]
+)
+def test_a_slow_tail_estimate_never_starves_the_presence_statement(estimate_ms, leaves):
+    # A user-less twelve-month scope whose tail estimate is slow (a cold or
+    # large index), or stopped at its cap (None): the estimate licenses
+    # nothing, and the presence statement still gets the half of the probe
+    # wall the estimate's cap keeps for it. Three statements, complete; it
+    # was the slice-at-the-cap sequence, degraded, whenever the estimate
+    # left less than 25 ms.
+    filters = (
+        _twelve_months(leaves)
+        if leaves
+        else _filters(window_start=WINDOW_END - timedelta(days=365))
+    )
+    engine = Engine(World())
+    engine.estimate_override = walk.USER_LIST_WALK_PROBE_TARGET_READ_ROWS + 1
+    if estimate_ms is None:
+        original = engine.execute_ch_query
+
+        def stopped(query, params=None, timeout_ms=None, settings=None, **caps):
+            if kind_of(query) == "estimate":
+                engine.calls.append(query)
+                engine.caps.append(caps.get("server_execution_cap_ms"))
+                raise ReadDeadlineExceeded("stopped at its cap")
+            return original(query, params, timeout_ms, settings, **caps)
+
+        engine.execute_ch_query = stopped
+    else:
+        engine.estimate_ms = estimate_ms
+    read, engine = _page(World(), page_size=25, filters=filters, engine=engine)
+    assert _kinds(engine) == ["slice", "estimate", "presence"]
+    assert read.payload["query_status"] == "complete" and read.has_more is False
+    presence_cap = engine.caps[-1]
+    assert presence_cap >= walk.USER_LIST_WALK_PROBE_WALL_MS // 2
 
 
 @_plain_count

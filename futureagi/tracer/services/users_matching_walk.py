@@ -94,16 +94,19 @@ read settings as the statement it costs - threads included - and the pair
 shares one budget, ``USER_LIST_WALK_PROBE_WALL_MS`` within the page wall:
 the existence statement, which repeats that analysis before it reads a row,
 is issued only when the estimate's observed time fits what the probe budget
-has left. An estimate over the target, over its time, or one the walk cannot
-read, licenses nothing: the walk slices at the cap. The estimate never
+has left - at most half of it, so the estimate runs under a server cap of
+half the probe wall, and the existence statement under what it left. An
+estimate over the target, over its time, stopped at its cap, or one the walk
+cannot read, licenses nothing: the walk slices at the cap. The estimate never
 decides coverage - only the existence statement's own answer does: none
 proves the tail exhausted by the same rule an empty slice uses; a row proves
 existence, never a position, and leaves the walk slicing at the cap exactly
 where it was. The pair is asked at most once per page and once more after
 each populated slice, never twice in a row. When the estimate does not
 license the existence statement, one witness-free statement asks, once per
-request and under a server cap, whether the tail holds any span with a user
-at all (``build_matching_activity_presence_query``): none proves the tail
+request, on top of the count and under a server cap no slow estimate can
+starve, whether the tail holds any span with a user at all
+(``build_matching_activity_presence_query``): none proves the tail
 exhausted (a scope with no end users over twelve months completes in three
 statements, not one per day until the count runs out); a row licenses
 nothing.
@@ -940,20 +943,25 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
     settings (threads included): the estimate is that statement's own index
     analysis, and its observed time is what the existence statement pays
     again before it reads its first row, so the existence statement is
-    issued only when that time fits what the probe budget has left. ``None``
-    when the walk's budget stops either, when the estimate refuses on rows
-    or on time, or when either statement fails on a read budget: a probe
-    that cannot answer inside its budget licenses nothing, and the walk goes
-    on slicing at the cap exactly as it would have without it.
+    issued only when that time fits what the probe budget has left - at most
+    half of it. Each carries a server cap: the estimate half the probe wall
+    (a longer one could license nothing), the existence statement what the
+    estimate left. ``None`` when the walk's budget stops either, when the
+    estimate refuses on rows or on time, or when either statement is
+    stopped at its cap or fails on a read budget: a probe that cannot answer
+    inside its budget licenses nothing, and the walk goes on slicing at the
+    cap exactly as it would have without it.
 
     Except for one question the estimate cannot refuse: when it does not
     license the existence statement (over the target, over its time,
-    unreadable, or failed on a read budget), the tail may still hold no span
-    with a user at all - a scope with no end users, over twelve months - and
-    then slicing it at the cap costs every statement the request has, for
-    nothing. So the walk asks that once per request (``_tail_has_no_user``):
-    no row proves the tail exhausted; a row, or a statement that cannot
-    answer, licenses nothing.
+    unreadable, stopped at its cap, or failed on a read budget), the tail
+    may still hold no span with a user at all - a scope with no end users,
+    over twelve months - and then slicing it at the cap costs every
+    statement the request has, for nothing. So the walk asks that once per
+    request (``_tail_has_no_user``), with what the estimate left of the probe
+    wall and never less than the half the estimate's cap keeps for it (a
+    slow estimate cannot starve it): no row proves the tail exhausted; a
+    row, or a statement that cannot answer, licenses nothing.
     """
     from tracer.services import users_list_manager as ulm
 
@@ -965,6 +973,13 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
     probe_wall_ms = max(
         25, min(USER_LIST_WALK_PROBE_WALL_MS, int(state.budget.remaining_ms()))
     )
+    # The existence statement is licensed only when the estimate's time fits
+    # what it left, ``estimate_ms <= probe_wall_ms - estimate_ms``: at most
+    # half the wall. So the server stops the estimate there - a longer one
+    # could license nothing - and the other half is kept for the presence
+    # statement, which a slow estimate then cannot starve.
+    estimate_cap_ms = max(25, probe_wall_ms // 2)
+    presence_floor_ms = probe_wall_ms - estimate_cap_ms
     settings = ulm._page_replay_read_settings(max_result_rows=1)
     query, params = state.builder.build_matching_activity_existence_estimate_query(
         range_start=state.window_start, range_end=below
@@ -972,21 +987,29 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
     started = time.monotonic()
     try:
         estimate = ulm.V2AnalyticsQueryService().execute_ch_query(
-            query, params, timeout_ms=probe_wall_ms, settings=settings
+            query,
+            params,
+            timeout_ms=estimate_cap_ms,
+            settings=settings,
+            server_execution_cap_ms=estimate_cap_ms,
         )
-    except ReadDeadlineExceeded:
-        _probe_wall_spent(state)
-        return None
     except Exception as exc:
         if not is_read_budget_error(exc):
             raise
+        # Stopped at its cap or failed on a read budget: it licenses
+        # nothing and ends the estimate, not the page, unless the page's own
+        # wall is what ran out.
+        _probe_wall_spent(state)
+        if state.budget.exhausted_by is not None:
+            return None
         logger.warning(
             "users_matching_walk_tail_estimate_failed", error_type=type(exc).__name__
         )
+        spent_ms = (time.monotonic() - started) * 1000.0
         return _tail_has_no_user(
             state,
             below=below,
-            left_ms=probe_wall_ms - (time.monotonic() - started) * 1000.0,
+            left_ms=max(presence_floor_ms, probe_wall_ms - spent_ms),
         )
     estimate_ms = _statement_ms(estimate, started)
     rows = state.builder.matching_activity_existence_estimate(
@@ -996,6 +1019,7 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
     # repeats the estimate's index analysis before it reads a row, so it is
     # issued only when a statement of the estimate's own time fits there.
     probe_left_ms = probe_wall_ms - estimate_ms
+    presence_ms = max(presence_floor_ms, probe_left_ms)
     if rows is None or rows > USER_LIST_WALK_PROBE_TARGET_READ_ROWS:
         logger.info(
             "users_matching_walk_tail_probe_refused",
@@ -1003,14 +1027,14 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
             target_rows=USER_LIST_WALK_PROBE_TARGET_READ_ROWS,
             estimate_ms=round(estimate_ms, 1),
         )
-        return _tail_has_no_user(state, below=below, left_ms=probe_left_ms)
+        return _tail_has_no_user(state, below=below, left_ms=presence_ms)
     if estimate_ms > probe_left_ms:
         logger.info(
             "users_matching_walk_tail_probe_over_budget",
             estimate_ms=round(estimate_ms, 1),
             probe_wall_ms=probe_wall_ms,
         )
-        return _tail_has_no_user(state, below=below, left_ms=probe_left_ms)
+        return _tail_has_no_user(state, below=below, left_ms=presence_ms)
     if not state.budget.take(1):
         return None
     query, params = state.builder.build_matching_activity_existence_query(
@@ -1052,8 +1076,9 @@ def _tail_has_no_user(
     range predicate - project, time terms, ``isNotNull(end_user_id)``, the
     empty-scope guard - with no witness at all, ``LIMIT 1``
     (``build_matching_activity_presence_query``), under a server cap of
-    ``left_ms``, what the tail probe's wall has left; with less than 25 ms
-    left it is not sent. It never publishes ``complete`` while a member
+    ``left_ms`` (what the tail probe's wall has left, at least the half the
+    tail estimate's cap keeps for it) within the page wall; with less than
+    25 ms left it is not sent. It never publishes ``complete`` while a member
     exists below ``below``: the slice and existence predicate is that range
     predicate AND the witness, over the same range with the same parameters,
     so no row for the range predicate means no row for the witness either,
@@ -1067,6 +1092,7 @@ def _tail_has_no_user(
     """
     from tracer.services import users_list_manager as ulm
 
+    left_ms = min(left_ms, state.budget.remaining_ms())
     if state.presence_checked or left_ms < 25:
         return None
     state.presence_checked = True

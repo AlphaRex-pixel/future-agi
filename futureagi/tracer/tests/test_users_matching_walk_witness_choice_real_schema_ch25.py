@@ -16,8 +16,9 @@ own, so ``system.query_log`` proves what the PRODUCT sent, not a harness clamp.
 * U: a scope with no end user over twelve months, the tail estimate refused
   (forced below it, as production refused MUD's 408 marks). Three statements
   - the first slice, the estimate, the witness-free presence statement - and
-  an empty, complete page; the presence statement is capped and reads next to
-  nothing.
+  an empty, complete page; the tail estimate is capped at half the probe
+  wall, and the presence statement, capped at no less than the other half,
+  reads next to nothing.
 """
 
 from __future__ import annotations
@@ -366,9 +367,14 @@ def test_a_user_less_twelve_month_scope_is_empty_and_complete_in_three_statement
     assert read.payload["table"] == [] and read.has_more is False
     assert read.payload["query_status"] == "complete"
     logged = executor.logged(ch_client)
+    # The tail estimate is stopped on the server at half the probe wall (past
+    # it, it could license nothing); the presence statement keeps the rest.
+    _query, estimate_id, estimate_cap = executor.statements[1]
+    assert estimate_cap == walk.USER_LIST_WALK_PROBE_WALL_MS // 2
+    assert float(logged[estimate_id][2]) == estimate_cap / 1000
     _query, query_id, cap = executor.statements[2]
     read_rows, read_bytes, sent_cap = logged[query_id]
-    assert cap is not None and 25 <= cap <= 1_000
+    assert cap is not None and walk.USER_LIST_WALK_PROBE_WALL_MS // 2 <= cap <= 1_000
     assert sent_cap is not None and float(sent_cap) > 0
     # Boundary granules through the end-user projection, never the tail.
     assert read_bytes < 64 * 1024 * 1024, read_bytes
