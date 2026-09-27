@@ -3031,6 +3031,152 @@ def test_users_that_change_between_hops_follow_the_coverage_fence(kind, seed, fa
     ]
 
 
+# The two properties above mutate the leaf keyed by ``key``, so their first
+# page walks it. When the first page walks the OTHER eligible witness (the
+# reordered family's provider leaf, keys and rows of its own), the cursor
+# must go on reading that leaf's keys: mutations on the walked leaf.
+
+
+def _stop_matching_the_walked_leaf(rng: random.Random, changed: set[str]):
+    """An unpublished member stops matching the walked (provider) leaf, or
+    the other leaf, or is rejected."""
+
+    others = _stop_matching(rng, changed)
+
+    def mutate(world: World, published: set[str], cursor: tuple) -> None:
+        leaf = world.leaves[REORDERED_SECOND]
+        members = [
+            uid
+            for uid, user in world.users.items()
+            if uid not in published and _is_member(user)
+        ]
+        if members and rng.random() < 0.5:
+            uid = rng.choice(members)
+            changed.add(uid)
+            leaf["keys"][uid] = None
+            leaf["decisions"][uid] = False
+            world.users[uid]["second"] = False
+            return
+        others(world, published, cursor)
+
+    return mutate
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_users_that_stop_matching_the_walked_other_leaf_never_stall_or_repeat(seed):
+    rng = random.Random(70_000 + seed)
+    n_users = rng.choice([8, 20, 45, 80])
+    world = _with_native(_world(rng, n_users), 70_000 + seed, "reordered")
+    before = _expected(world, REORDERED_SECOND)
+    page_size = rng.choice([1, 3, 7, 25])
+    heavy = frozenset(rng.sample(sorted(world.users), rng.choice([0, 0, 1, 2])))
+    changed: set[str] = set()
+    faults, keys = _fault(
+        70_000 + seed, _key_count(seed), [kind for kind in FAULTS if kind != "width"]
+    )
+    estimates, leaf = _choice(70_000 + seed, "reordered", walked=REORDERED_SECOND)
+    assert leaf == REORDERED_SECOND
+    with _limits(seed) as (max_statements, finish), _shipped_walls():
+        names, _hops = _follow(
+            world,
+            page_size=page_size,
+            max_hops=_hop_bound(n_users, page_size, len(heavy))
+            + _slice_hops(world, seed, "reordered", leaf),
+            max_statements=max_statements,
+            heavy=heavy,
+            mutate=_stop_matching_the_walked_leaf(rng, changed),
+            slice_ms=_slice_model(seed, "reordered"),
+            keys=keys,
+            finish=finish,
+            fault=faults.fault,
+            fail_ms=faults.fail_ms,
+            family="reordered",
+            estimates=estimates,
+            leaf=leaf,
+        )
+
+    assert len(names) == len(set(names)), "a user was published twice"
+    assert [uid for uid in names if uid not in changed] == [
+        uid for uid in before if uid not in changed
+    ]
+    assert set(names) <= set(before)
+
+
+def _change_the_walked_leaf(rng: random.Random, kind: str, changed: dict[str, bool]):
+    """Between hops, an unpublished user starts matching, or its newest
+    provider (walked leaf) match moves up or down, the old row left behind."""
+
+    def mutate(world: World, published: set[str], cursor: tuple) -> None:
+        if rng.random() < 0.5:
+            return
+        uid = rng.choice(sorted(world.users))
+        user = world.users[uid]
+        if uid in published or uid in changed:
+            return
+        leaf = world.leaves[REORDERED_SECOND]
+        member = _is_member(user)
+        if kind == "start":
+            if member:
+                return
+            user["curated"] = True
+            user["native"] = True
+            if user["key"] is None:
+                user["key"] = WINDOW_START + TICK * rng.randrange(WINDOW // TICK)
+                world.raw.append((user["key"], uid))
+            new = WINDOW_START + TICK * rng.randrange(WINDOW // TICK)
+            leaf["decisions"][uid] = True
+            user["second"] = True
+        elif not member:
+            return
+        elif kind == "up":
+            old = leaf["keys"][uid]
+            new = old + (WINDOW_END - TICK - old) * rng.random()
+        else:
+            old = leaf["keys"][uid]
+            new = WINDOW_START + (old - WINDOW_START) * rng.random()
+        leaf["keys"][uid] = new
+        leaf["raw"].append((new, uid))
+        changed[uid] = _passed(new, uid, cursor)
+
+    return mutate
+
+
+@pytest.mark.parametrize("kind", ["start", "up", "down"])
+@pytest.mark.parametrize("seed", range(16))
+def test_changes_on_the_walked_other_leaf_follow_the_coverage_fence(kind, seed):
+    rng = random.Random(80_000 + 97 * seed + len(kind))
+    n_users = rng.choice([8, 20, 45])
+    world = _with_native(_world(rng, n_users), 80_000 + 97 * seed, "reordered")
+    page_size = rng.choice([1, 3, 7, 25])
+    changed: dict[str, bool] = {}
+    estimates, leaf = _choice(80_000 + seed, "reordered", walked=REORDERED_SECOND)
+    with _limits(seed) as (max_statements, finish), _shipped_walls():
+        names, _hops = _follow(
+            world,
+            page_size=page_size,
+            max_hops=_hop_bound(n_users, page_size, 0)
+            + _slice_hops(world, seed, "reordered", leaf),
+            max_statements=max_statements,
+            mutate=_change_the_walked_leaf(rng, kind, changed),
+            slice_ms=_slice_model(seed, "reordered"),
+            finish=finish,
+            family="reordered",
+            estimates=estimates,
+            leaf=leaf,
+        )
+
+    assert len(names) == len(set(names)), "a user was published twice"
+    members = set(_expected(world, REORDERED_SECOND))
+    for uid, passed in changed.items():
+        assert (uid in names) == (not passed and uid in members), (uid, passed)
+    keys = world.leaves[REORDERED_SECOND]["keys"]
+    positions = {uid: (keys[uid], uid) for uid in names}
+    assert names == sorted(names, key=positions.__getitem__, reverse=True)
+    assert [uid for uid in names if uid not in changed] == [
+        uid for uid in _expected(world, REORDERED_SECOND) if uid not in changed
+    ]
+
+
 def _windowed(family: str, days: int) -> list[dict]:
     """``family``'s filters over the ``days`` ending at the window's end."""
 

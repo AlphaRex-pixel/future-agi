@@ -400,6 +400,23 @@ class Engine:
         self.enrichment_scan_ids.append(tuple(params["eu_scan_ids"]))
         data = []
         for uid in ids:
+            attributes = self.world.users[uid].get("attributes")
+            if attributes is not None:
+                # One row per requested key the user carries, each with its
+                # own newest match: a raw witness on any key is modelled.
+                for attribute_key in params["requested_attribute_keys"]:
+                    if attribute_key not in attributes:
+                        continue
+                    typed_values, newest = attributes[attribute_key]
+                    data.append(
+                        {
+                            "end_user_id": uid,
+                            "attribute_key": attribute_key,
+                            "attribute_typed_values": typed_values,
+                            "latest_matching_start_time": newest or EPOCH,
+                        }
+                    )
+                continue
             key = self.world.users[uid]["key"]
             if key is None:
                 continue
@@ -1606,6 +1623,68 @@ def test_three_raw_leaves_never_crowd_the_native_leaf_out_of_the_costed_ones():
         with patch.object(walk, "USER_LIST_WALK_WITNESS_CANDIDATES", limit):
             got = [witness.key for witness, _typed in walk._witness_candidates(manager)]
         assert got == expected, limit
+
+
+def _two_raw_key_world() -> tuple[World, dict[str, list[str]]]:
+    """Users carrying ``tag = gold`` and ``plan = pro``, each with its own newest match.
+
+    Every user has two raw rows; its tag's newest match is one of them and its
+    plan's the other, in orders that differ, so a page keyed by the wrong key
+    is told apart by its order. Every fifth user has no plan: a non-member.
+    """
+
+    world = World()
+    keyed: dict[str, list[tuple[datetime, str]]] = {"tag": [], "plan": []}
+    for n in range(1, 31):
+        first = minutes_before_end(3 * n)
+        second = minutes_before_end(200 - 5 * n)
+        uid = world.user(n, key=first, raw=(first, second))
+        attributes = {"tag": ([("string", '"Gold"')], first)}
+        keyed["tag"].append((first, f"user-{n}"))
+        if n % 5:
+            attributes["plan"] = ([("string", '"Pro"')], second)
+            keyed["plan"].append((second, f"user-{n}"))
+        world.users[uid]["attributes"] = attributes
+    members = {name for _at, name in keyed["plan"]}
+    return world, {
+        key: [name for _at, name in sorted(rows, reverse=True) if name in members]
+        for key, rows in keyed.items()
+    }
+
+
+@pytest.mark.parametrize("cheap", ["tag", "plan"])
+def test_a_page_choosing_between_two_raw_keys_publishes_by_the_key_it_walks(cheap):
+    # Two raw text leaves, estimates scripted either way: the walk discovers
+    # and keys the page on the cheaper key - the second requested key too -
+    # and publishes every member (both leaves decided at certification) once,
+    # newest match on the walked key first, across its cursor.
+    world, expected = _two_raw_key_world()
+    filters = [
+        *_date_only(),
+        _raw_leaf("tag", "equals", "gold"),
+        _raw_leaf("plan", "equals", "pro"),
+    ]
+    names, cursor, hops = [], None, 0
+    while True:
+        engine = Engine(world)
+        engine.estimate_by = {"tag": 1, "plan": 1_000}
+        if cheap == "plan":
+            engine.estimate_by = {"tag": 1_000, "plan": 1}
+        read, engine = _page(
+            world, page_size=7, filters=filters, cursor=cursor, engine=engine
+        )
+        hops += 1
+        if cursor is None:
+            assert sorted(engine.estimated) == ["plan", "tag"]
+        else:
+            assert engine.estimated == []
+        names.extend(_names(read))
+        if not read.has_more:
+            break
+        cursor = _signed_cursor(read)
+        assert hops < 20
+    assert names == expected[cheap]
+    assert expected["tag"] != expected["plan"]
 
 
 def test_one_candidate_or_one_eligible_witness_sends_no_estimate():
