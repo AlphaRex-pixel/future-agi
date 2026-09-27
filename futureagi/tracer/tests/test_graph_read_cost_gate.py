@@ -66,7 +66,7 @@ def _attribute_filter(key: str = "deployment.environment", value: str = "product
     }
 
 
-def _estimate(rows: int) -> SimpleNamespace:
+def _estimate(rows: int, marks=None) -> SimpleNamespace:
     return SimpleNamespace(
         data=[
             {
@@ -74,7 +74,7 @@ def _estimate(rows: int) -> SimpleNamespace:
                 "table": "spans",
                 "parts": 207,
                 "rows": rows,
-                "marks": max(1, rows // 8192),
+                "marks": max(1, rows // 8192) if marks is None else marks,
             }
         ],
         columns=list(ESTIMATE_COLUMNS),
@@ -87,9 +87,17 @@ class Analytics:
 
     supports_per_query_read_settings = True
 
-    def __init__(self, *, estimated_rows, seed_estimate=None, seed_raises=False):
+    def __init__(
+        self,
+        *,
+        estimated_rows,
+        estimated_marks=None,
+        seed_estimate=None,
+        seed_raises=False,
+    ):
         self.calls = []
         self._estimated_rows = estimated_rows
+        self._estimated_marks = estimated_marks
         self._seed_estimate = seed_estimate
         self._seed_raises = seed_raises
 
@@ -102,7 +110,7 @@ class Analytics:
         if "graph_cost_project_id" in query:
             if self._estimated_rows is None:
                 return SimpleNamespace(data=[], columns=[], query_time_ms=1)
-            return _estimate(self._estimated_rows)
+            return _estimate(self._estimated_rows, self._estimated_marks)
         if self._seed_raises:
             raise TimeoutError("seed probe exceeded its budget")
         if self._seed_estimate is None:
@@ -652,6 +660,182 @@ def test_a_poll_behind_a_failed_refresh_does_not_re_enqueue_the_scan(scheduled):
     assert response["query_provenance"] == "read_cost_gate"
 
 
+# --- the Voice chart's simulator toggle parses raw_log ----------------------
+#
+# ``remove_simulation_calls`` on the Voice chart adds a predicate that reads
+# every span's raw_log (``attributes_extra`` and the ``attrs_string`` map) to
+# find simulator phone numbers. Its cost is the bytes of those columns, not
+# the span count the raw-scan rate prices. On dev project 5272afb0 (read-only,
+# the statement this surface renders, four workers) the toggle turned 90 days
+# from 4.44 MiB / 708 ms into 5.72 GiB / 4,579 ms, and 180 days from 7.52 MiB /
+# 524 ms into 15.92 GiB / 14,117 ms, over 47,824 and 69,587 estimated spans -
+# which the raw-scan rate prices at 27 ms and 39 ms. A tenant with a hundred
+# times those calls was admitted to the 30 s wall on a sub-second prediction.
+
+
+def _voice_filters(days: int = 90, *, remove_simulation_calls: bool = True):
+    from tracer.services.clickhouse.query_builders.voice_call_list import (
+        VOICE_CALL_ROOT_FILTER,
+        VOICE_CALL_SIMULATOR_EXCLUSION_FILTER,
+    )
+
+    # The leaves ``get_graph_methods`` appends for observe_type="voice".
+    filters = [_window(days), VOICE_CALL_ROOT_FILTER]
+    if remove_simulation_calls:
+        filters.append(VOICE_CALL_SIMULATOR_EXCLUSION_FILTER)
+    return filters
+
+
+# A large voice tenant's window: 500,000 spans in 2,000 granules, about 88 GiB
+# of raw_log at dev's measured 45 MiB per granule. The raw-scan rate prices
+# those spans at 278 ms; the raw_log it parses cannot be read in 30 s.
+FAT_VOICE_ROWS = 500_000
+FAT_VOICE_MARKS = 2_000
+
+
+@pytest.mark.unit
+def test_toggle_on_voice_chart_is_priced_by_the_raw_log_it_parses(scheduled):
+    analytics = Analytics(
+        estimated_rows=FAT_VOICE_ROWS, estimated_marks=FAT_VOICE_MARKS
+    )
+
+    response = _fetch(analytics, filters=_voice_filters())
+
+    assert analytics.statements == [], "the 30 s wall cannot parse this raw_log"
+    assert len(analytics.cost_probes) == 1, "the same one metadata probe"
+    assert len(scheduled.enqueued) == 1, "the background wall can"
+    assert response["query_status"] == "pending"
+
+
+@pytest.mark.unit
+def test_toggle_off_voice_chart_of_the_same_window_still_runs_inline(scheduled):
+    """Without the toggle nothing reads raw_log, so the span count prices it."""
+
+    analytics = Analytics(
+        estimated_rows=FAT_VOICE_ROWS, estimated_marks=FAT_VOICE_MARKS
+    )
+
+    response = _fetch(analytics, filters=_voice_filters(remove_simulation_calls=False))
+
+    assert len(analytics.statements) == 1
+    assert response["query_complete"] is True
+    assert scheduled.enqueued == []
+
+
+@pytest.mark.unit
+def test_toggle_on_voice_chart_no_wall_can_parse_is_refused(scheduled):
+    """3,300 granules is over three minutes of raw_log: not even the worker."""
+
+    analytics = Analytics(estimated_rows=FAT_VOICE_ROWS, estimated_marks=3_300)
+
+    response = _fetch(analytics, filters=_voice_filters())
+
+    assert analytics.statements == []
+    assert scheduled.enqueued == []
+    assert response["query_status"] == "degraded"
+    assert response["query_error_code"] == "read_budget_exceeded"
+    assert response["query_provenance"] == "read_cost_gate"
+
+
+@pytest.mark.unit
+def test_background_worker_prices_the_raw_log_it_parses():
+    analytics = Analytics(estimated_rows=FAT_VOICE_ROWS, estimated_marks=3_300)
+
+    with pytest.raises(graph_dispatch.BoundedGraphReadError) as raised:
+        _background(analytics, filters=_voice_filters())
+
+    assert analytics.statements == []
+    assert raised.value.error_code == "read_budget_exceeded"
+
+
+@pytest.mark.unit
+def test_background_worker_parses_raw_log_its_wall_can_absorb():
+    analytics = Analytics(
+        estimated_rows=FAT_VOICE_ROWS, estimated_marks=FAT_VOICE_MARKS
+    )
+
+    response = _background(analytics, filters=_voice_filters())
+
+    assert len(analytics.statements) == 1
+    assert response["query_complete"] is True
+
+
+@pytest.mark.unit
+def test_a_seed_never_readmits_a_raw_log_parse(scheduled):
+    """A trace witness bounds spans, not the raw_log granules they sit in.
+
+    The seed lever admits up to 4,096 granules - 256 GiB at the 64 MiB
+    granule cap - and the simulator predicate still parses raw_log in each.
+    """
+
+    analytics = Analytics(
+        estimated_rows=87_400_000,
+        estimated_marks=20_000,
+        seed_estimate=1_600_000,
+    )
+
+    response = _fetch(analytics, filters=[*_voice_filters(), _attribute_filter()])
+
+    assert analytics.statements == []
+    assert analytics.seed_probes == []
+    assert response["query_status"] in {"pending", "degraded"}
+
+
+@pytest.mark.unit
+def test_toggle_on_voice_chart_with_uncountable_granules_is_not_small(scheduled):
+    """No granule count means the raw_log arm is uncosted: schedule, not scan."""
+
+    analytics = Analytics(estimated_rows=47_824, estimated_marks="many")
+
+    response = _fetch(analytics, filters=_voice_filters())
+
+    assert analytics.statements == []
+    assert len(scheduled.enqueued) == 1
+    assert response["query_status"] == "pending"
+
+
+@pytest.mark.unit
+def test_toggle_off_voice_chart_never_reads_the_granule_count(scheduled):
+    analytics = Analytics(estimated_rows=47_824, estimated_marks="many")
+
+    response = _fetch(analytics, filters=_voice_filters(remove_simulation_calls=False))
+
+    assert len(analytics.statements) == 1
+    assert response["query_complete"] is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("rows", "marks", "measured_ms"),
+    [
+        # Dev 5272afb0, toggle on, the gate's own EXPLAIN ESTIMATE and the
+        # statement's first (cold) run: 7, 30, 90 and 180 days.
+        (758, 10, 288),
+        (2_766, 69, 1_535),
+        (47_824, 207, 4_579),
+        (69_587, 363, 14_117),
+    ],
+)
+def test_measured_dev_voice_windows_still_run_inline(
+    scheduled, rows, marks, measured_ms
+):
+    """The price is an upper bound of each measured read, inside the wall."""
+    from django.conf import settings
+
+    analytics = Analytics(estimated_rows=rows, estimated_marks=marks)
+
+    response = _fetch(analytics, filters=_voice_filters())
+
+    assert len(analytics.statements) == 1
+    assert response["query_complete"] is True
+    predicted_ms = (
+        marks * graph_read_cost._RAW_LOG_GRANULE_SCAN_MS
+        + rows / graph_read_cost._RAW_SCAN_ROWS_PER_MS
+    )
+    assert measured_ms <= predicted_ms
+    assert predicted_ms <= settings.INTERACTIVE_ANALYTICS_DEFAULT_WALL_MS
+
+
 # --- the estimate reducer --------------------------------------------------
 
 
@@ -686,6 +870,33 @@ def test_affordable_rows_scale_with_the_wall_not_with_a_window():
     )
     assert (
         graph_read_cost.raw_graph_scan_fits_wall(rows + 1, remaining_ms=20_000) is True
+    )
+
+
+@pytest.mark.unit
+def test_raw_log_granules_spend_the_wall_before_the_spans_do():
+    fits = graph_read_cost.raw_graph_scan_fits_wall
+    granules_ms = 10 * graph_read_cost._RAW_LOG_GRANULE_SCAN_MS
+    rows = graph_read_cost._RAW_SCAN_ROWS_PER_MS * 1_000
+
+    assert fits(rows, remaining_ms=granules_ms + 1_000, raw_log_marks=10) is True
+    assert fits(rows + 1, remaining_ms=granules_ms + 1_000, raw_log_marks=10) is False
+    assert fits(0, remaining_ms=granules_ms - 1, raw_log_marks=10) is False
+    assert fits(0, remaining_ms=granules_ms, raw_log_marks=10) is True
+
+
+@pytest.mark.unit
+def test_estimate_reducer_counts_granules_as_it_counts_spans():
+    reduce = graph_read_cost._reduce_estimate
+    rows = [
+        {"table": "spans", "rows": 5, "marks": 2},
+        {"table": "spans", "rows": 7, "marks": 3},
+    ]
+
+    assert reduce(rows, ESTIMATE_COLUMNS, field="marks") == 5
+    assert reduce([], ESTIMATE_COLUMNS, field="marks") == 0
+    assert (
+        reduce([{"table": "spans", "rows": 5}], ESTIMATE_COLUMNS, field="marks") is None
     )
 
 

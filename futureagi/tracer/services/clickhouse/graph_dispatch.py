@@ -41,6 +41,7 @@ from tracer.services.clickhouse.exact_graph_reads import (
 )
 from tracer.services.clickhouse.graph_read_cost import (
     estimate_raw_graph_scan_rows,
+    estimate_raw_log_graph_scan,
     estimate_user_graph_scan_rows,
     raw_graph_scan_fits_wall,
     raw_graph_scan_window,
@@ -279,6 +280,22 @@ def _raw_trace_seed_candidates(
             )
         )
     return sorted(candidates, key=lambda item: (item.rank, item.filter_index))
+
+
+def _graph_parses_raw_log(filters: list[dict[str, Any]]) -> bool:
+    """Whether the statement parses every span's raw_log to decide membership.
+
+    Only the Voice chart's "exclude simulation calls" leaf does: it looks for
+    simulator phone numbers in each span's raw_log, so the read costs those
+    bytes rather than its span count.
+    """
+
+    # Lazy import for the same v1/v2 filter cycle as the seed compiler.
+    from tracer.services.clickhouse.query_builders.latest_filter_predicates import (
+        is_internal_simulator_call_filter,
+    )
+
+    return any(is_internal_simulator_call_filter(item) for item in filters or [])
 
 
 def _graph_seed_probe_budget_ms(timeout_ms: int) -> int:
@@ -1579,9 +1596,13 @@ class _GraphReadUnaffordable:
     schedule, never a reason to issue the statement inline and never on its own
     a reason to refuse: an uncosted read goes to the bounded worker, which can
     survive being wrong about it.
+
+    ``raw_log_marks`` is the granule count of a statement that parses raw_log,
+    carried for the same reason: the background wall is costed with it too.
     """
 
     estimated_rows: int | None
+    raw_log_marks: int | None = None
 
 
 def _affordable_raw_graph_seed(
@@ -1627,24 +1648,40 @@ def _affordable_raw_graph_seed(
         start_date=start_date,
         end_date=end_date,
     )
+    parses_raw_log = _graph_parses_raw_log(filters)
     estimated_rows: int | None = None
+    raw_log_marks: int | None = None
     try:
-        estimated_rows = estimate_raw_graph_scan_rows(
-            analytics=analytics,
-            project_id=project_id,
-            scan_start=scan_window[0],
-            scan_end=scan_window[1],
-            timeout_ms=analytics.remaining_read_ms(interactive_deadline_ms),
-        )
+        if parses_raw_log:
+            estimate = estimate_raw_log_graph_scan(
+                analytics=analytics,
+                project_id=project_id,
+                scan_start=scan_window[0],
+                scan_end=scan_window[1],
+                timeout_ms=analytics.remaining_read_ms(interactive_deadline_ms),
+            )
+            if estimate is not None:
+                estimated_rows, raw_log_marks = estimate
+        else:
+            estimated_rows = estimate_raw_graph_scan_rows(
+                analytics=analytics,
+                project_id=project_id,
+                scan_start=scan_window[0],
+                scan_end=scan_window[1],
+                timeout_ms=analytics.remaining_read_ms(interactive_deadline_ms),
+            )
         if raw_graph_scan_fits_wall(
             estimated_rows,
             remaining_ms=analytics.remaining_read_ms(interactive_deadline_ms),
+            raw_log_marks=raw_log_marks,
         ):
             return None
-        if observe_type != "trace":
+        if observe_type != "trace" or parses_raw_log:
             # A span graph compiles no trace-ID witness, so there is no second
-            # lever to try: the window is the read.
-            return _GraphReadUnaffordable(estimated_rows)
+            # lever to try: the window is the read. A raw_log parse has none
+            # either: a witness narrows spans, not the granules they share, and
+            # a seed admits up to _GRAPH_SEED_MAX_ESTIMATED_MARKS of them.
+            return _GraphReadUnaffordable(estimated_rows, raw_log_marks)
         seed_candidate, seed_probe_count = _select_raw_trace_seed_candidate(
             analytics=analytics,
             project_id=project_id,
@@ -1656,7 +1693,7 @@ def _affordable_raw_graph_seed(
     except ReadDeadlineExceeded:
         # The request wall is already gone. That is the plainest possible
         # proof that this statement cannot run on it.
-        return _GraphReadUnaffordable(estimated_rows)
+        return _GraphReadUnaffordable(estimated_rows, raw_log_marks)
     if seed_candidate is None:
         return _GraphReadUnaffordable(estimated_rows)
     return seed_candidate, seed_probe_count
@@ -1697,10 +1734,17 @@ def _schedule_unaffordable_graph_read(
 
     unaffordable = BoundedGraphReadError("read_budget_exceeded", retryable=True)
     # Unknown is not "too big": it is "not costed here". Route it to the wider
-    # wall rather than refusing a read that may well fit.
+    # wall rather than refusing a read that may well fit. A raw_log parse is
+    # priced by its granules on this wall as on the interactive one.
+    raw_log_cost = (
+        {}
+        if verdict.raw_log_marks is None
+        else {"raw_log_marks": verdict.raw_log_marks}
+    )
     schedulable = verdict.estimated_rows is None or fits_wall(
         verdict.estimated_rows,
         remaining_ms=GRAPH_WALL_DEADLINE_MS,
+        **raw_log_cost,
     )
     if organization_id and schedulable:
         try:
@@ -1817,6 +1861,7 @@ def fetch_background_raw_system_metric_graph(
             logger.info(
                 "graph_background_read_refused_by_cost_gate",
                 estimated_rows=int(seed.estimated_rows),
+                raw_log_marks=seed.raw_log_marks,
             )
             raise BoundedGraphReadError("read_budget_exceeded", retryable=True)
         # Uncosted, and no admitted witness. Run it unseeded on this bounded

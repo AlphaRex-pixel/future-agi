@@ -206,6 +206,42 @@ def test_voice_chart_latency_is_the_call_latency(
     ]
 
 
+@pytest.mark.parametrize("remove_simulation_calls", [False, True])
+def test_voice_chart_cost_gate_prices_the_simulator_raw_log(
+    auth_client, voice_fixture, monkeypatch, remove_simulation_calls
+):
+    # The toggle's predicate reads every span's raw_log, so the view's leaf must
+    # reach the cost gate as raw_log granules; without it nothing reads raw_log.
+    from tracer.services.clickhouse import graph_dispatch
+
+    priced = []
+    real_fits_wall = graph_dispatch.raw_graph_scan_fits_wall
+
+    def _recording_fits_wall(estimated_rows, **kwargs):
+        priced.append(kwargs.get("raw_log_marks"))
+        return real_fits_wall(estimated_rows, **kwargs)
+
+    monkeypatch.setattr(
+        graph_dispatch, "raw_graph_scan_fits_wall", _recording_fits_wall
+    )
+
+    traffic = _graph(
+        auth_client,
+        voice_fixture,
+        "traffic",
+        **_voice_scope(remove_simulation_calls),
+    )
+
+    assert sum(point["value"] for point in traffic) == len(
+        CALLS[remove_simulation_calls]
+    )
+    assert len(priced) == 1, "the chart is costed once, before it is read"
+    if remove_simulation_calls:
+        assert isinstance(priced[0], int) and priced[0] >= 1
+    else:
+        assert priced == [None]
+
+
 def test_trace_chart_still_counts_every_span(auth_client, voice_fixture):
     traffic = _graph(auth_client, voice_fixture, "traffic")
 
