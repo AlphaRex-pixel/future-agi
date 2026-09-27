@@ -446,6 +446,7 @@ def _follow(
     family: str = "raw",
     heavy_native: frozenset[str] = frozenset(),
     estimates: Callable[[int], dict] | None = None,
+    leaf: str | None = None,
 ) -> tuple[list[str], int]:
     """Follow the cursor to the end; returns the published names and the hops.
 
@@ -480,7 +481,9 @@ def _follow(
     what each witness's estimate reports on that hop (``Engine.estimate_by``):
     only a first page sends them, before its first slice, at most
     ``USER_LIST_WALK_WITNESS_CANDIDATES`` of them, on top of its count, as
-    the tail's presence statement is (at most one a request).
+    the tail's presence statement is (at most one a request). ``leaf`` is
+    the world leaf the page walks (``_choice``; None: the world's own rows),
+    whose rows the refused-user check reads.
     """
     with _scripted_clock(_Clock()) as clock:
         return _follow_on(
@@ -501,7 +504,14 @@ def _follow(
             family=family,
             heavy_native=heavy_native,
             estimates=estimates,
+            leaf=leaf,
         )
+
+
+def _walked_rows(world: World, leaf: str | None) -> list[tuple[datetime, str]]:
+    """The rows of the leaf a page walks: its own, or the world's."""
+
+    return world.leaves[leaf]["raw"] if leaf is not None else world.raw
 
 
 def _follow_on(
@@ -523,6 +533,7 @@ def _follow_on(
     family: str = "raw",
     heavy_native: frozenset[str] = frozenset(),
     estimates: Callable[[int], dict] | None = None,
+    leaf: str | None = None,
 ) -> tuple[list[str], int]:
     budget = max(
         max_statements or walk.USER_LIST_WALK_MAX_STATEMENTS,
@@ -655,9 +666,10 @@ def _follow_on(
             stalled = not progressed
             refused_at = None
             if _exhausted(logs) == ["read_budget"]:
+                # The refused user's newest witness on the WALKED leaf.
                 refused_at = max(
                     moment
-                    for moment, raw_id in world.raw
+                    for moment, raw_id in _walked_rows(world, leaf)
                     if world.canonical.get(raw_id) == engine.refused
                     and moment < coverage
                 )
@@ -2740,13 +2752,15 @@ def _gap_world(rng: random.Random, n_users: int) -> World:
     return world
 
 
-def _slice_hops(world: World, seed: int, family: str = "raw") -> int:
+def _slice_hops(
+    world: World, seed: int, family: str = "raw", leaf: str | None = None
+) -> int:
     """Extra hops a world may take when slices are slow.
 
     When no capped slice can return rows, only the head-of-line slice read
     without a cap, one least width wide, returns rows, and a request reads
-    one: every least-width window that holds a witnessed row may cost a
-    request of its own. When every slice costs by its width, empty or not
+    one: every least-width window that holds a witnessed row (of the walked
+    ``leaf``) may cost a request of its own. When every slice costs by its width, empty or not
     (``UNPRUNED_SLICE``, two seconds an hour), the page wall admits a few
     hours of window a request: at most one request an hour of the window.
     """
@@ -2755,7 +2769,12 @@ def _slice_hops(world: World, seed: int, family: str = "raw") -> int:
         return int(WINDOW / timedelta(hours=1))
     if model is not SLICE_MODELS[3]:
         return 0
-    return len({moment.replace(second=0, microsecond=0) for moment, _id in world.raw})
+    return len(
+        {
+            moment.replace(second=0, microsecond=0)
+            for moment, _id in _walked_rows(world, leaf)
+        }
+    )
 
 
 @contextmanager
@@ -2808,10 +2827,10 @@ def test_every_hop_sequence_ends_exact_and_never_raises_the_coverage(seed, famil
     )
     # A quarter of the worlds lose the server on every fifth request.
     outage = random.Random(31 * seed + 7).random() < 0.25
-    bound = _hop_bound(n_users, page_size, len(heavy)) + _slice_hops(
-        world, seed, family
-    )
     estimates, leaf = _choice(seed, family)
+    bound = _hop_bound(n_users, page_size, len(heavy)) + _slice_hops(
+        world, seed, family, leaf
+    )
     with _limits(seed) as (max_statements, finish), _shipped_walls():
         names, _hops = _follow(
             world,
@@ -2828,10 +2847,21 @@ def test_every_hop_sequence_ends_exact_and_never_raises_the_coverage(seed, famil
             width=faults.width,
             family=family,
             estimates=estimates,
+            leaf=leaf,
         )
 
     assert len(names) == len(set(names)), "a user was published twice"
     assert names == _expected(world, leaf)
+
+
+def test_a_read_budget_stop_on_the_walked_provider_leaf_is_checked_on_its_rows():
+    # Seed 444 of the reordered family walks the provider leaf (``_choice``)
+    # and a request stops on a read budget. The refused-user check reads the
+    # WALKED leaf's rows; reading the world's own rows it found none for the
+    # refused user and raised on an empty max(), or checked the wrong leaf.
+    _estimates, leaf = _choice(444, "reordered")
+    assert leaf == REORDERED_SECOND
+    test_every_hop_sequence_ends_exact_and_never_raises_the_coverage(444, "reordered")
 
 
 def _stop_matching(rng: random.Random, changed: set[str]):
@@ -2876,7 +2906,7 @@ def test_users_that_stop_matching_between_hops_never_stall_or_repeat(seed, famil
         10_000 + seed, _key_count(seed), [kind for kind in FAULTS if kind != "width"]
     )
     # The mutations change the leaf keyed by ``key``: the first page walks it.
-    estimates, _leaf = _choice(
+    estimates, leaf = _choice(
         10_000 + seed, family, walked="llm" if family == "reordered" else None
     )
     with _limits(seed) as (max_statements, finish), _shipped_walls():
@@ -2884,7 +2914,7 @@ def test_users_that_stop_matching_between_hops_never_stall_or_repeat(seed, famil
             world,
             page_size=page_size,
             max_hops=_hop_bound(n_users, page_size, len(heavy))
-            + _slice_hops(world, seed, family),
+            + _slice_hops(world, seed, family, leaf),
             max_statements=max_statements,
             heavy=heavy,
             mutate=_stop_matching(rng, changed),
@@ -2896,6 +2926,7 @@ def test_users_that_stop_matching_between_hops_never_stall_or_repeat(seed, famil
             width=faults.width,
             family=family,
             estimates=estimates,
+            leaf=leaf,
         )
 
     assert len(names) == len(set(names)), "a user was published twice"
@@ -2970,7 +3001,7 @@ def test_users_that_change_between_hops_follow_the_coverage_fence(kind, seed, fa
     world = _with_native(_world(rng, n_users), 20_000 + 97 * seed, family)
     page_size = rng.choice([1, 3, 7, 25])
     changed: dict[str, bool] = {}
-    estimates, _leaf = _choice(
+    estimates, leaf = _choice(
         20_000 + seed, family, walked="llm" if family == "reordered" else None
     )
     with _limits(seed) as (max_statements, finish), _shipped_walls():
@@ -2978,13 +3009,14 @@ def test_users_that_change_between_hops_follow_the_coverage_fence(kind, seed, fa
             world,
             page_size=page_size,
             max_hops=_hop_bound(n_users, page_size, 0)
-            + _slice_hops(world, seed, family),
+            + _slice_hops(world, seed, family, leaf),
             max_statements=max_statements,
             mutate=_change(rng, kind, changed),
             slice_ms=_slice_model(seed, family),
             finish=finish,
             family=family,
             estimates=estimates,
+            leaf=leaf,
         )
 
     assert len(names) == len(set(names)), "a user was published twice"
