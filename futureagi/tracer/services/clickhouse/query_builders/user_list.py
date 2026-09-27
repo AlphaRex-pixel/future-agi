@@ -1028,6 +1028,24 @@ class UserListQueryBuilder(BaseQueryBuilder):
         )
         return "EXPLAIN ESTIMATE\n" + query.lstrip(), params
 
+    def build_matching_activity_range_estimate_query(
+        self, *, range_start: Any, range_end: Any
+    ) -> tuple[str, dict[str, Any]]:
+        """``EXPLAIN ESTIMATE`` of the witness-free presence statement.
+
+        The rows of every span in ``[range_start, range_end)`` the primary key
+        keeps: the range every witness's estimate is a part of
+        (``build_matching_activity_presence_query``, text for text; no skip
+        index applies, so the server answers from the primary index alone).
+        The walk's witness choice compares a native leaf's estimate with it:
+        a leaf estimated at about the whole range is one the index cannot
+        prune, and its estimate says nothing about how rare it is.
+        """
+        query, params = self.build_matching_activity_presence_query(
+            range_start=range_start, range_end=range_end
+        )
+        return "EXPLAIN ESTIMATE\n" + query.lstrip(), params
+
     @staticmethod
     def matching_activity_existence_estimate(
         rows: Iterable[Mapping[str, Any]], columns: Iterable[str] | None

@@ -148,6 +148,11 @@ class World:
         return (self.users[uid]["cost"] if carries_cost else 0.0), len(rows)
 
 
+# The witness-free range estimate (``_choose_witness``), as ``Engine`` records
+# and scripts it.
+RANGE = ""
+
+
 def kind_of(query: str) -> str:
     if "native_span_flags" in query:
         return "native"
@@ -200,8 +205,9 @@ class Engine:
         self.estimate_override: int | list | None = None
         # Per witness, the rows its estimate reports, keyed by what the
         # witness binds: a raw witness's attribute key, a native leaf's value
-        # (lower-cased). An exception instance is raised instead. The
-        # witness each estimate costed is recorded, in order.
+        # (lower-cased), ``RANGE`` for the witness-free range estimate. An
+        # exception instance is raised instead. The witness each estimate
+        # costed is recorded, in order.
         self.estimate_by: dict[str, int | Exception] = {}
         self.estimated: list[str] = []
         # The client-observed time the scripted server reports for the
@@ -330,6 +336,8 @@ class Engine:
 
     @staticmethod
     def _estimated_witness(params) -> str:
+        """What the estimate's witness binds; ``RANGE`` when it binds none."""
+
         if "latest_filter_key_0" in params:
             return str(params["latest_filter_key_0"])
         for name, value in params.items():
@@ -337,10 +345,29 @@ class Engine:
                 return value.lower()
         return ""
 
+    def _everyone(self, params) -> dict:
+        """Every span with a user in range, whatever it matches, by the id it carries."""
+
+        low, high = _from_us(params["slice_start_us"]), _from_us(params["slice_end_us"])
+        self.estimate_ranges.append((low, high))
+        rows = [
+            *self.world.raw,
+            *(row for leaf in self.world.leaves.values() for row in leaf["raw"]),
+            *(
+                (moment, f"unwitnessed-{n}")
+                for n, moment in enumerate(self.unwitnessed)
+            ),
+        ]
+        return {raw_id: moment for moment, raw_id in rows if low <= moment < high}
+
     def _estimate(self, params):
-        in_range = self._witnessed(params, self.estimate_ranges)
-        columns = ["database", "table", "parts", "rows", "marks"]
         witness = self._estimated_witness(params)
+        in_range = (
+            self._witnessed(params, self.estimate_ranges)
+            if witness != RANGE
+            else self._everyone(params)
+        )
+        columns = ["database", "table", "parts", "rows", "marks"]
         self.estimated.append(witness)
         if witness in self.estimate_by:
             answer = self.estimate_by[witness]
@@ -1405,9 +1432,10 @@ def test_a_dense_raw_leaf_and_a_rare_error_leaf_walk_the_error_leaf():
     filters = [*_filters(), _native_status_leaf()]
     read, engine = _page(world, page_size=25, filters=filters)
     kinds = _kinds(engine)
-    assert kinds[:2] == ["estimate", "estimate"]
-    # The native leaf is estimated first (``_choose_witness``).
-    assert engine.estimated == ["error", "tag"]
+    assert kinds[:3] == ["estimate"] * 3
+    # The native leaf is estimated first, then the witness-free range, then
+    # the raw leaf (``_choose_witness``).
+    assert engine.estimated == ["error", RANGE, "tag"]
     error_only = [*_date_only(), _native_status_leaf()]
     assert read.checkpoint_order[4] == _fingerprint(error_only)
     names = _names(read)
@@ -1439,7 +1467,7 @@ def test_a_choice_whose_estimates_flip_before_the_next_page_keeps_its_witness():
     world, expected = _dense_raw_world(60, 30)
     filters = [*_filters(), _native_status_leaf()]
     read, engine = _page(world, page_size=10, filters=filters)
-    assert engine.estimated == ["error", "tag"]
+    assert engine.estimated == ["error", RANGE, "tag"]
     names = _names(read)
     while read.has_more:
         engine = Engine(world)
@@ -1510,7 +1538,9 @@ def test_a_raw_estimate_that_cannot_answer_never_outbids_an_answered_native_leaf
     error_only = [*_date_only(), _native_status_leaf()]
     assert read.checkpoint_order[4] == _fingerprint(error_only)
     assert _names(read) == expected[:25]
-    assert engine.estimated == ["error", "tag"]
+    # The range estimate, sent between the families, shows the error leaf
+    # sparser than the window: it is informative, and walked.
+    assert engine.estimated == ["error", RANGE, "tag"]
 
 
 @_UNANSWERED
@@ -1587,6 +1617,188 @@ def test_when_no_estimate_answers_the_static_choice_stands():
     ]
 
 
+def _chosen(logs) -> dict:
+    (chosen,) = [
+        entry
+        for entry in logs
+        if entry["event"] == "users_matching_walk_witness_chosen"
+    ]
+    return chosen
+
+
+@_UNANSWERED
+def test_a_raw_estimate_that_cannot_answer_keeps_a_rare_raw_leaf_over_a_dense_model(
+    answer,
+):
+    # The mirror of the production failure: a rare raw value (three members
+    # carry tag = gold) AND a model every span has. The raw estimate cannot
+    # answer (its time is the blooms over every granule, rare value or
+    # dense); the model estimate answers at the whole range, which the
+    # witness-free range estimate shows: the model leaf says nothing about
+    # rarity and does not outbid the raw leaf. The page walks the raw leaf
+    # and publishes the three members at once; walked on the model leaf it
+    # certified and rejected 600 users a slice for page after page.
+    world, expected = _dense_world(600, 3)
+    filters = [*_filters(), _model_leaf()]
+    engine = Engine(world)
+    _unanswered(engine, "tag", answer)
+    with (
+        patch.object(walk, "is_read_budget_error", lambda exc: True),
+        capture_logs() as logs,
+    ):
+        read, engine = _page(world, page_size=25, filters=filters, engine=engine)
+    slices = [call for call in engine.calls if kind_of(call) == "slice"]
+    assert slices and all("attrs_string" in call for call in slices)
+    assert _names(read) == expected
+    assert read.has_more is False
+    # The native estimate, the witness-free range one, then the raw one.
+    assert engine.estimated == ["gpt-4o", RANGE, "tag"]
+    assert _kinds(engine)[:3] == ["estimate"] * 3
+    chosen = _chosen(logs)
+    assert (chosen["family"], chosen["column"]) == ("raw", "tag")
+    assert chosen["fallback"] == "uninformative"
+    assert chosen["range_rows"] == 600
+    assert [
+        (c["column"], c["rows"], c["informative"]) for c in chosen["candidates"]
+    ] == [("model", 600, False)]
+    # The range estimate goes between the families, before the raw one (a
+    # raw estimate can outlast its cap and leave no wall), and is capped.
+    wall = walk.USER_LIST_WALK_PROBE_WALL_MS
+    range_cap = engine.caps[1]
+    assert range_cap is not None and 25 <= range_cap <= wall
+    assert engine.timeouts[1] == range_cap
+    assert engine.calls[1].lstrip().startswith("EXPLAIN ESTIMATE")
+    assert "AS present" in engine.calls[1] and "attrs_string" not in engine.calls[1]
+
+
+def test_a_raw_estimate_that_outlasts_its_cap_still_leaves_the_range_answered():
+    # A throttled read is stopped only between blocks: production-like, the
+    # raw estimate ran 2.8 s past an 879 ms cap and left the choice no wall.
+    # The range estimate goes before any raw one, so it has already
+    # answered; the dense model leaf does not outbid the rare raw one.
+    world, expected = _dense_world(600, 3)
+    filters = [*_filters(), _model_leaf()]
+    engine = Engine(world)
+    original = engine._estimate
+
+    def estimate(params):
+        if engine._estimated_witness(params) == "tag":
+            engine.estimated.append("tag")
+            time.sleep(0.08)
+            raise ReadDeadlineExceeded("stopped long after its cap")
+        return original(params)
+
+    engine._estimate = estimate
+    with patch.object(walk, "USER_LIST_WALK_PROBE_WALL_MS", 60):
+        read, engine = _page(world, page_size=25, filters=filters, engine=engine)
+    slices = [call for call in engine.calls if kind_of(call) == "slice"]
+    assert slices and all("attrs_string" in call for call in slices)
+    assert _names(read) == expected
+    assert engine.estimated == ["gpt-4o", RANGE, "tag"]
+
+
+@pytest.mark.parametrize(
+    ("native_rows", "walked"),
+    [(899, "native"), (900, "raw"), (1_000, "raw"), (0, "native")],
+)
+def test_an_answered_native_leaf_outbids_an_unanswered_raw_one_only_when_sparse(
+    native_rows, walked
+):
+    # The range holds 1,000 rows. A native estimate under nine tenths of it
+    # says its leaf is sparser than the window: it outbids the raw leaf whose
+    # estimate did not answer. At nine tenths or more it says nothing, and
+    # the static rank's raw-first walk stands. A native estimate of 0 rows
+    # needs no range estimate at all.
+    world, _expected = _dense_world(40, 3)
+    filters = [*_filters(), _model_leaf()]
+    engine = Engine(world)
+    engine.estimate_by = {
+        "gpt-4o": native_rows,
+        "tag": ReadDeadlineExceeded("stopped at its cap"),
+        RANGE: 1_000,
+    }
+    read, engine = _page(world, page_size=25, filters=filters, engine=engine)
+    slices = [call for call in engine.calls if kind_of(call) == "slice"]
+    raw = "attrs_string"
+    assert slices and all((raw in call) == (walked == "raw") for call in slices)
+    ranged = [] if native_rows == 0 else [RANGE]
+    assert engine.estimated == ["gpt-4o", *ranged, "tag"]
+
+
+@_UNANSWERED
+def test_a_range_estimate_that_cannot_answer_keeps_the_answered_native_leaf(answer):
+    # Neither the raw estimate nor the range one answers: nothing says the
+    # model leaf is dense, and an answered native leaf is walked rather than
+    # the static raw-first choice (the production failure's rule).
+    world, _expected = _dense_world(40, 3)
+    filters = [*_filters(), _model_leaf()]
+    engine = Engine(world)
+    engine.estimate_by["tag"] = ReadDeadlineExceeded("stopped at its cap")
+    _unanswered(engine, RANGE, answer)
+    with (
+        patch.object(walk, "is_read_budget_error", lambda exc: True),
+        capture_logs() as logs,
+    ):
+        read, engine = _page(world, page_size=25, filters=filters, engine=engine)
+    assert engine.estimated == ["gpt-4o", RANGE, "tag"]
+    slices = [call for call in engine.calls if kind_of(call) == "slice"]
+    assert slices and not any("attrs_string" in call for call in slices)
+    assert read.checkpoint_order is None or read.checkpoint_order[4] == _fingerprint(
+        [*_date_only(), _model_leaf()]
+    )
+    chosen = _chosen(logs)
+    assert chosen["column"] == "model" and chosen["fallback"] is None
+    assert chosen["range_rows"] is None and chosen["range_unanswered"] in {
+        "stopped",
+        "unreadable",
+        "RuntimeError",
+    }
+
+
+def test_a_range_estimate_with_no_wall_left_keeps_the_answered_native_leaf():
+    # The native estimate spends the choice's wall: the raw estimate is never
+    # sent, nor is the range one; the answered native leaf is walked.
+    world, _expected = _dense_world(40, 3)
+    filters = [*_filters(), _model_leaf()]
+    engine = Engine(world)
+    engine.estimate_ms = walk.USER_LIST_WALK_PROBE_WALL_MS
+    with capture_logs() as logs:
+        read, engine = _page(world, page_size=25, filters=filters, engine=engine)
+    assert engine.estimated == ["gpt-4o"]
+    slices = [call for call in engine.calls if kind_of(call) == "slice"]
+    assert slices and not any("attrs_string" in call for call in slices)
+    chosen = _chosen(logs)
+    assert chosen["stop"] == "no_wall" and chosen["range_unanswered"] == "no_wall"
+
+
+def test_the_range_estimate_comes_on_top_of_a_minimal_count():
+    # The count's floor is one decision; the three choice estimates - the
+    # range one included - come on top of it and never take the
+    # head-of-line batch's room.
+    world, expected = _dense_world(40, 3)
+    filters = [*_filters(), _model_leaf()]
+    manager = _manager(filters)
+    builder = UserListQueryBuilderV2(
+        organization_id=ORG, project_ids=[PROJECT], filters=manager.filters
+    )
+    assert manager.matching_activity_walk_applies(builder)
+    engine = Engine(world)
+    engine.estimate_by["tag"] = ReadDeadlineExceeded("stopped at its cap")
+    with patch.object(walk, "USER_LIST_WALK_MAX_STATEMENTS", 1):
+        floor = 2 + walk._narrowings() + walk._head_statements(manager)
+        with _plain_count, capture_logs() as logs:
+            read, engine = _page(world, page_size=25, filters=filters, engine=engine)
+    kinds = _kinds(engine)
+    assert kinds[:3] == ["estimate"] * 3
+    assert _names(read) == expected
+    stopped = [
+        entry["statements"]
+        for entry in logs
+        if entry["event"] == "users_matching_walk_budget_exhausted"
+    ]
+    assert len(kinds) <= floor + 3 and all(n <= floor + 3 for n in stopped)
+
+
 def _three_raw_and_status():
     return [
         *_filters(),
@@ -1616,9 +1828,9 @@ def test_three_raw_leaves_never_crowd_the_native_leaf_out_of_the_costed_ones():
     # The static rank: the three raw leaves (by identity), then status.
     assert eligible == ["region", "tag", "tier", "status"]
     # K = 3: the first two by rank and the best native leaf, in static order;
-    # the native leaf is estimated first.
+    # the native leaf is estimated first, then the range.
     assert candidates == ["region", "tag", "status"]
-    assert engine.estimated == ["error", "region", "tag"]
+    assert engine.estimated == ["error", RANGE, "region", "tag"]
     for limit, expected in ((1, []), (2, ["region", "status"]), (4, eligible)):
         with patch.object(walk, "USER_LIST_WALK_WITNESS_CANDIDATES", limit):
             got = [witness.key for witness, _typed in walk._witness_candidates(manager)]
@@ -1716,15 +1928,16 @@ def test_a_minimal_budget_still_decides_the_head_of_line_batch_after_the_estimat
         with _plain_count, capture_logs() as logs:
             read, engine = _page(world, page_size=25, filters=filters)
     kinds = _kinds(engine)
-    assert kinds[:2] == ["estimate", "estimate"]
+    # The error leaf answers with rows: the range estimate goes too.
+    assert kinds[:3] == ["estimate"] * 3
     assert _names(read) == expected
-    # One decision's count after the two estimates, never out of it.
+    # One decision's count after the three estimates, never out of it.
     stopped = [
         entry["statements"]
         for entry in logs
         if entry["event"] == "users_matching_walk_budget_exhausted"
     ]
-    assert len(kinds) <= floor + 2 and all(n <= floor + 2 for n in stopped)
+    assert len(kinds) <= floor + 3 and all(n <= floor + 3 for n in stopped)
 
 
 @pytest.mark.parametrize(
@@ -1761,8 +1974,9 @@ def test_every_witness_estimate_carries_a_server_cap_inside_the_probe_wall():
     filters = [*_filters(), _native_status_leaf(), _model_leaf()]
     read, engine = _page(world, page_size=25, filters=filters)
     kinds = _kinds(engine)
-    estimates = [index for index, kind in enumerate(kinds[:3]) if kind == "estimate"]
-    assert estimates == [0, 1, 2]
+    # Two native estimates, the range one, the raw one.
+    estimates = [index for index, kind in enumerate(kinds[:4]) if kind == "estimate"]
+    assert estimates == [0, 1, 2, 3]
     for index in estimates:
         cap = engine.caps[index]
         assert cap is not None and 25 <= cap <= walk.USER_LIST_WALK_PROBE_WALL_MS
