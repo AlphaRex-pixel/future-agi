@@ -8,11 +8,19 @@ executor that applies the application's read settings, sends
 ``AnalyticsQueryService`` does, and tags each statement with a query id of its
 own, so ``system.query_log`` proves what the PRODUCT sent, not a harness clamp.
 
-* R: a raw value on every span (``env = production``) and a rare
-  ``status = ERROR``. The first page costs both witnesses with one
-  ``EXPLAIN ESTIMATE`` each (no column rows read, each capped on the server)
-  and walks the error leaf; the pages publish exactly the users graph's
-  members, once, newest error first.
+* R: raw values on every span (``env = production``, and ``region``,
+  ``tier``) and a rare ``status = ERROR``. The first page costs the native
+  witness first, then the raw ones, with one ``EXPLAIN ESTIMATE`` each (no
+  column rows read, each capped on the server) and walks the error leaf -
+  also when the raw estimate is stopped at its cap, and when three raw leaves
+  outrank it; the pages publish exactly the users graph's members, once,
+  newest error first.
+* P: every eligible witness keeps the walk exact. Page 1 is forced onto each
+  eligible witness of four filter combinations; every later page, with the
+  filters reversed, continues on the cursor's witness without costing any.
+  The pages equal the users graph's membership, once, in the walked leaf's
+  (newest latest-live match, id) order, with stale versions and deletions in
+  the data.
 * U: a scope with no end user over twelve months, the tail estimate refused
   (forced below it, as production refused MUD's 408 marks). Three statements
   - the first slice, the estimate, the witness-free presence statement - and
@@ -41,6 +49,9 @@ from tracer.services.clickhouse.application_read_policy import (
 )
 from tracer.services.clickhouse.list_cursor import ListCursor
 from tracer.services.clickhouse.read_budget import ReadDeadlineExceeded
+from tracer.services.clickhouse.v2.query_builders.user_list import (
+    UserListQueryBuilderV2,
+)
 from tracer.services.users_list_manager import UsersListManager
 
 pytestmark = pytest.mark.integration
@@ -113,7 +124,8 @@ def worlds(ch_client):
               toString(generateUUIDv4(number)), concat('r', toString(number)), 'op',
               NULL, {_user("number % " + str(USERS))},
               if(cityHash64(number, 'err') % 4000 = 0, 'ERROR', 'OK'),
-              'gpt-4o', 'openai', map('env', 'production'), 0, 1
+              'gpt-4o', 'openai',
+              map('env', 'production', 'region', 'us', 'tier', 'std'), 0, 1
             FROM numbers(400000)
             """
         )
@@ -158,6 +170,7 @@ class _TaggedExecutor:
         self.client = client
         self.prefix = f"{TAG}-{case}-{uuid.uuid4().hex[:6]}"
         self.statements: list[tuple[str, str, int | None]] = []
+        self.stop_raw_estimates = False
 
     def execute_ch_query(
         self,
@@ -170,6 +183,14 @@ class _TaggedExecutor:
     ):
         query_id = f"{self.prefix}-{len(self.statements)}"
         self.statements.append((query, query_id, server_execution_cap_ms))
+        if (
+            self.stop_raw_estimates
+            and query.lstrip().startswith("EXPLAIN ESTIMATE")
+            and "attrs_string" in query
+        ):
+            # A raw witness estimate on a cold bloom index, stopped at its
+            # cap: what the service raises on TIMEOUT_EXCEEDED.
+            raise ReadDeadlineExceeded("stopped at its cap")
         with application_read_context(execution_cap_ms=server_execution_cap_ms):
             sent = application_read_settings(settings)
         started = time.monotonic()
@@ -250,7 +271,7 @@ STATUS_ERROR = _leaf("status", "ERROR", "SYSTEM_METRIC")
 ENV_PRODUCTION = _leaf("env", "production", "SPAN_ATTRIBUTE")
 
 
-def _page(client, project, filters, *, case, cursor=None):
+def _page(client, project, filters, *, case, cursor=None, page_size=25, stop_raw=False):
     manager = UsersListManager(
         organization_id=ORGANIZATION,
         allowed_project_ids=[project],
@@ -260,14 +281,33 @@ def _page(client, project, filters, *, case, cursor=None):
         attribute_keys=[],
     )
     executor = _TaggedExecutor(client, case)
+    executor.stop_raw_estimates = stop_raw
     with patch(SERVICE, return_value=executor):
-        read = manager.list_cursor_payload(page_size=25, cursor=cursor)
+        read = manager.list_cursor_payload(page_size=page_size, cursor=cursor)
     return read, executor, manager
 
 
-def test_a_dense_raw_value_and_a_rare_error_walk_the_error_leaf(ch_client, worlds):
+REGION_US = _leaf("region", "us", "SPAN_ATTRIBUTE")
+TIER_STD = _leaf("tier", "std", "SPAN_ATTRIBUTE")
+
+
+@pytest.mark.parametrize(
+    ("raw_leaves", "stop_raw"),
+    [
+        ([ENV_PRODUCTION], False),
+        # The raw estimate cannot answer (stopped at its cap): the answered
+        # native leaf is walked, never the static raw-first choice.
+        ([ENV_PRODUCTION], True),
+        # Three raw values on every span: the native leaf is still costed.
+        ([ENV_PRODUCTION, REGION_US, TIER_STD], False),
+    ],
+    ids=["one-raw", "raw-estimate-stopped", "three-raw"],
+)
+def test_a_dense_raw_value_and_a_rare_error_walk_the_error_leaf(
+    ch_client, worlds, raw_leaves, stop_raw
+):
     window_start = R_END - timedelta(days=30)
-    filters = [_date(window_start, R_END), STATUS_ERROR, ENV_PRODUCTION]
+    filters = [_date(window_start, R_END), STATUS_ERROR, *raw_leaves]
     names: list[str] = []
     cursor = None
     pages = 0
@@ -279,21 +319,24 @@ def test_a_dense_raw_value_and_a_rare_error_walk_the_error_leaf(ch_client, world
     ):
         while True:
             read, executor, manager = _page(
-                ch_client, R, filters, case="r", cursor=cursor
+                ch_client, R, filters, case="r", cursor=cursor, stop_raw=stop_raw
             )
             pages += 1
             kinds = executor.kinds()
             assert read.payload["query_status"] == "complete"
             if pages == 1:
-                # Both witnesses costed, raw first in the static rank; the
-                # error leaf walked.
-                assert kinds[:2] == ["estimate", "estimate"]
+                # The native witness costed first, then the raw one(s) (at
+                # most three candidates); the error leaf walked.
+                costed = min(3, 1 + len(raw_leaves))
+                assert kinds[:costed] == ["estimate"] * costed
+                assert executor.statements[0][0].count("attrs_string") == 0
                 assert (manager._walk_witness.family, manager._walk_witness.key) == (
                     "native",
                     "status",
                 )
                 logged = executor.logged(ch_client)
-                for _query, query_id, cap in executor.statements[:2]:
+                answered = executor.statements[: 1 if stop_raw else costed]
+                for _query, query_id, cap in answered:
                     read_rows, _bytes, sent_cap = logged[query_id]
                     # Index analysis only: no column rows.
                     assert read_rows <= 1, (query_id, read_rows)
@@ -379,3 +422,223 @@ def test_a_user_less_twelve_month_scope_is_empty_and_complete_in_three_statement
     # Boundary granules through the end-user projection, never the tail.
     assert read_bytes < 64 * 1024 * 1024, read_bytes
     assert read_rows < 300_000, read_rows
+
+
+# P: every eligible witness walks exactly (review round 5, forced parity).
+P = str(uuid.uuid4())
+P_USERS = 300
+P_START = datetime(2026, 8, 10, tzinfo=UTC)
+P_END = P_START + timedelta(days=2)
+P_LEAVES = {
+    "tag": _leaf("tag", "gold", "SPAN_ATTRIBUTE"),
+    "plan": _leaf("plan", "pro", "SPAN_ATTRIBUTE"),
+    "score": {
+        "column_id": "score",
+        "filter_config": {
+            "col_type": "SPAN_ATTRIBUTE",
+            "filter_type": "number",
+            "filter_op": "greater_than",
+            "filter_value": 8,
+        },
+    },
+    "status": STATUS_ERROR,
+    "model": _leaf("model", "gpt-4o", "SYSTEM_METRIC"),
+}
+# Each leaf's own predicate over the latest live row, for the expected order.
+P_PREDICATES = {
+    "tag": "attrs_string['tag'] = 'gold'",
+    "plan": "attrs_string['plan'] = 'pro'",
+    "score": "mapContains(attrs_number, 'score') AND attrs_number['score'] > 8",
+    "status": "status = 'ERROR'",
+    "model": "model = 'gpt-4o'",
+}
+P_COMBOS = {
+    "four-leaves": ("tag", "plan", "score", "status"),
+    "raw-and-model": ("tag", "model"),
+    "text-and-typed": ("plan", "score"),
+    "two-native": ("status", "model"),
+}
+P_CASES = [(combo, walked) for combo, leaves in P_COMBOS.items() for walked in leaves]
+
+
+def _p_spans(salt: str, version: int, deleted: int, where: str) -> str:
+    return f"""
+    SELECT toUUID('{P}'), 'llm', 'svc',
+      toDateTime64('2026-08-10 00:00:00', 6, 'UTC')
+        + toIntervalMicrosecond(number * 5760000),
+      toString(reinterpretAsUUID(concat(unhex(lpad(hex(number), 16, '0')),
+        unhex('00000000000000b7')))),
+      concat('s', toString(number)), 'op',
+      NULL, {_user("number % " + str(P_USERS))},
+      if(cityHash64(number, 'err{salt}') % 200 = 0, 'ERROR', 'OK'),
+      if(cityHash64(number, 'model{salt}') % 3 = 0, 'gpt-4o', 'claude'), 'openai',
+      map('tag', if(cityHash64(number, 'tag{salt}') % 4 = 0, 'gold', 'silver'),
+          'plan', if(cityHash64(number, 'plan{salt}') % 20 = 0, 'pro', 'free')),
+      map('score', toFloat64(cityHash64(number, 'score{salt}') % 10)),
+      map('flag', toUInt8(cityHash64(number, 'flag{salt}') % 5 = 0)),
+      {deleted}, {version}
+    FROM numbers(30000)
+    WHERE {where}
+    """
+
+
+@pytest.fixture(scope="module")
+def p_world(ch_client):
+    insert = """
+    INSERT INTO spans (project_id, observation_type, service_name, start_time,
+      trace_id, id, name, end_time, end_user_id, status, model, provider,
+      attrs_string, attrs_number, attrs_bool, is_deleted, _version)
+    """
+    try:
+        ch_client.execute(insert + _p_spans("", 1, 0, "1"))
+        # Stale versions: a later version with other values for 1 span in 7.
+        ch_client.execute(insert + _p_spans("v2", 2, 0, "number % 7 = 0"))
+        # Deleted spans: 1 in 13.
+        ch_client.execute(insert + _p_spans("v3", 3, 1, "number % 13 = 0"))
+        ch_client.execute(
+            f"""
+            INSERT INTO end_users (project_id, end_user_id, organization_id,
+              user_id, user_id_type, first_seen)
+            SELECT toUUID('{P}'), {_user("number")}, toUUID('{ORGANIZATION}'),
+              concat('user-', toString(number)), 'string',
+              toDateTime64('2026-07-01 00:00:00', 6, 'UTC')
+            FROM numbers({P_USERS})
+            """
+        )
+        yield {
+            row[0]: f"user-{n}"
+            for n, row in enumerate(
+                ch_client.execute(
+                    f"SELECT toString({_user('number')}) FROM numbers({P_USERS})"
+                )
+            )
+        }
+    finally:
+        for table in ("spans", "end_users"):
+            ch_client.execute(
+                f"ALTER TABLE {table} DELETE WHERE project_id = toUUID(%(p)s) "
+                "SETTINGS mutations_sync = 2",
+                {"p": P},
+            )
+
+
+def _p_filters(leaves) -> list[dict]:
+    return [_date(P_START, P_END), *(P_LEAVES[name] for name in leaves)]
+
+
+def _p_expected(client, label, leaves, walked):
+    query, params, _needs_eval = exact_graph_reads._user_id_membership_sql(
+        project_id=P,
+        filters=_p_filters(leaves),
+        start_date=P_START,
+        end_date=P_END,
+        all_snapshot_users=True,
+    )
+    graph = {label[str(row[0])] for row in client.execute(query, params)}
+    keys = client.execute(
+        "SELECT toString(end_user_id), max(start_time) FROM spans FINAL "
+        f"WHERE project_id = toUUID(%(p)s) AND is_deleted = 0 "
+        f"AND {P_PREDICATES[walked]} GROUP BY end_user_id",
+        {"p": P},
+    )
+    ordered = [
+        label[user]
+        for user, _key in sorted(keys, key=lambda row: (row[1], row[0]), reverse=True)
+    ]
+    return [name for name in ordered if name in graph], graph
+
+
+def _walked_first(walked):
+    original = UserListQueryBuilderV2.matching_activity_witnesses
+
+    def first(self):
+        return sorted(original(self), key=lambda witness: witness.key != walked)
+
+    return first
+
+
+def _no_choice(*args, **kwargs):
+    raise AssertionError("a continuation never costs witnesses")
+
+
+@pytest.mark.parametrize(
+    ("combo", "walked"), P_CASES, ids=[f"{c}-{w}" for c, w in P_CASES]
+)
+def test_every_eligible_witness_walks_exactly_once_in_its_order(
+    ch_client, p_world, combo, walked
+):
+    leaves = P_COMBOS[combo]
+    expected, graph = _p_expected(ch_client, p_world, leaves, walked)
+    assert len(expected) > 7, (combo, walked, len(expected))
+    reversed_filters = [_date(P_START, P_END), *(P_LEAVES[n] for n in leaves[::-1])]
+    names: list[str] = []
+    with (
+        patch.object(walk, "USER_LIST_PAGE_WALL_MS", 60_000),
+        patch.object(walk, "USER_LIST_WALK_FINISH_WALL_MS", 120_000),
+    ):
+        # Page 1 forced onto ``walked``: the static rank's first, uncosted.
+        with (
+            patch.object(
+                UserListQueryBuilderV2,
+                "matching_activity_witnesses",
+                _walked_first(walked),
+            ),
+            patch.object(walk, "USER_LIST_WALK_WITNESS_CANDIDATES", 1),
+        ):
+            read, _executor, manager = _page(
+                ch_client, P, _p_filters(leaves), case="p", page_size=7
+            )
+        assert manager._walk_witness.key == walked
+        fingerprint = walk.witness_fingerprint(manager._walk_witness)
+        names.extend(row["user_id"] for row in read.payload["table"])
+        pages = 1
+        while read.has_more:
+            assert read.checkpoint_order[4] == fingerprint
+            cursor = ListCursor(
+                window_start=read.window_start,
+                window_end=read.window_end,
+                order=tuple(read.checkpoint_order),
+                seen_rows=read.seen_rows,
+            )
+            with patch.object(walk, "_choose_witness", _no_choice):
+                read, _executor, manager = _page(
+                    ch_client, P, reversed_filters, case="p", cursor=cursor, page_size=7
+                )
+            assert manager._walk_witness.key == walked
+            names.extend(row["user_id"] for row in read.payload["table"])
+            pages += 1
+            assert pages < 400
+    assert len(names) == len(set(names)), "a user was published twice"
+    assert set(names) == graph
+    assert names == expected
+
+
+@pytest.mark.parametrize("combo", list(P_COMBOS))
+def test_the_costed_choice_is_exact_whichever_leaf_it_walks(ch_client, p_world, combo):
+    leaves = P_COMBOS[combo]
+    names: list[str] = []
+    with (
+        patch.object(walk, "USER_LIST_PAGE_WALL_MS", 60_000),
+        patch.object(walk, "USER_LIST_WALK_FINISH_WALL_MS", 120_000),
+    ):
+        read, _executor, manager = _page(
+            ch_client, P, _p_filters(leaves), case="q", page_size=7
+        )
+        walked = manager._walk_witness.key
+        names.extend(row["user_id"] for row in read.payload["table"])
+        while read.has_more:
+            cursor = ListCursor(
+                window_start=read.window_start,
+                window_end=read.window_end,
+                order=tuple(read.checkpoint_order),
+                seen_rows=read.seen_rows,
+            )
+            read, _executor, manager = _page(
+                ch_client, P, _p_filters(leaves), case="q", cursor=cursor, page_size=7
+            )
+            assert manager._walk_witness.key == walked
+            names.extend(row["user_id"] for row in read.payload["table"])
+    expected, graph = _p_expected(ch_client, p_world, leaves, walked)
+    assert len(names) == len(set(names)), "a user was published twice"
+    assert set(names) == graph
+    assert names == expected
