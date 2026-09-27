@@ -12,9 +12,12 @@ own, so ``system.query_log`` proves what the PRODUCT sent, not a harness clamp.
   ``tier``) and a rare ``status = ERROR``. The first page costs the native
   witness first, then the raw ones, with one ``EXPLAIN ESTIMATE`` each (no
   column rows read, each capped on the server) and walks the error leaf -
-  also when the raw estimate is stopped at its cap, and when three raw leaves
-  outrank it; the pages publish exactly the users graph's members, once,
-  newest error first.
+  also when the raw estimate is stopped at its cap (the witness-free range
+  estimate then shows the error leaf sparser than the window), and when three
+  raw leaves outrank it; the pages publish exactly the users graph's members,
+  once, newest error first. A rare raw value (three request ids) AND a model
+  on every span walks the raw leaf, also when its estimate is stopped: the
+  model's estimate is the whole range and says nothing about rarity.
 * P: every eligible witness keeps the walk exact. Page 1 is forced onto each
   eligible witness of four filter combinations; every later page, with the
   filters reversed, continues on the cursor's witness without costing any.
@@ -39,6 +42,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from structlog.testing import capture_logs
 
 from conftest import _ch_test_native_client
 from tracer.services import users_matching_walk as walk
@@ -125,7 +129,8 @@ def worlds(ch_client):
               NULL, {_user("number % " + str(USERS))},
               if(cityHash64(number, 'err') % 4000 = 0, 'ERROR', 'OK'),
               'gpt-4o', 'openai',
-              map('env', 'production', 'region', 'us', 'tier', 'std'), 0, 1
+              map('env', 'production', 'region', 'us', 'tier', 'std',
+                  'request_id', hex(cityHash64(number, 'rq'))), 0, 1
             FROM numbers(400000)
             """
         )
@@ -318,16 +323,36 @@ def test_a_dense_raw_value_and_a_rare_error_walk_the_error_leaf(
         patch.object(walk, "USER_LIST_WALK_FINISH_WALL_MS", 120_000),
     ):
         while True:
-            read, executor, manager = _page(
-                ch_client, R, filters, case="r", cursor=cursor, stop_raw=stop_raw
-            )
+            with capture_logs() as logs:
+                read, executor, manager = _page(
+                    ch_client, R, filters, case="r", cursor=cursor, stop_raw=stop_raw
+                )
             pages += 1
             kinds = executor.kinds()
             assert read.payload["query_status"] == "complete"
             if pages == 1:
-                # The native witness costed first, then the raw one(s) (at
-                # most three candidates); the error leaf walked.
-                costed = min(3, 1 + len(raw_leaves))
+                # The witness-free range estimate goes between the native
+                # estimate and the raw one(s).
+                range_query = executor.statements[1][0]
+                assert range_query.lstrip().startswith("EXPLAIN ESTIMATE")
+                assert "AS present" in range_query
+                assert "attrs_string" not in range_query
+                assert "toString(status)" not in range_query
+            if pages == 1 and stop_raw:
+                # The raw estimate did not answer: the range estimate shows
+                # the error leaf sparser than the window.
+                (chosen,) = [
+                    entry
+                    for entry in logs
+                    if entry["event"] == "users_matching_walk_witness_chosen"
+                ]
+                (status,) = chosen["candidates"]
+                assert status["informative"] is True, (status, chosen["range_rows"])
+                assert status["rows"] < 0.9 * chosen["range_rows"]
+            if pages == 1:
+                # The native witness costed first, then the range, then the
+                # raw one(s) (at most three candidates); the error leaf walked.
+                costed = min(3, 1 + len(raw_leaves)) + 1
                 assert kinds[:costed] == ["estimate"] * costed
                 assert executor.statements[0][0].count("attrs_string") == 0
                 assert (manager._walk_witness.family, manager._walk_witness.key) == (
@@ -335,7 +360,8 @@ def test_a_dense_raw_value_and_a_rare_error_walk_the_error_leaf(
                     "status",
                 )
                 logged = executor.logged(ch_client)
-                answered = executor.statements[: 1 if stop_raw else costed]
+                # The native and range estimates answer; a stopped raw one does not.
+                answered = executor.statements[: 2 if stop_raw else costed]
                 for _query, query_id, cap in answered:
                     read_rows, _bytes, sent_cap = logged[query_id]
                     # Index analysis only: no column rows.
@@ -389,6 +415,101 @@ def test_a_dense_raw_value_and_a_rare_error_walk_the_error_leaf(
     )
     graph = {label[str(row[0])] for row in ch_client.execute(query, params)}
     assert set(names) == graph
+
+
+# Three spans of three users (users are number % 2,000).
+RARE_NUMBERS = (11, 150_012, 399_013)
+
+
+def test_a_rare_raw_value_and_a_model_on_every_span_walk_the_raw_leaf(
+    ch_client, worlds
+):
+    # The raw estimate is stopped at its cap. Before the range estimate, the
+    # answered model estimate outbid it and the page walked a leaf every span
+    # carries: every user found again in every slice, certified and rejected.
+    window_start = R_START
+    request_ids = [
+        row[0]
+        for row in ch_client.execute(
+            "SELECT hex(cityHash64(toUInt64(number), 'rq')) FROM numbers(400000) "
+            f"WHERE number IN {RARE_NUMBERS} ORDER BY number"
+        )
+    ]
+    rare = {
+        "column_id": "request_id",
+        "filter_config": {
+            "col_type": "SPAN_ATTRIBUTE",
+            "filter_type": "text",
+            "filter_op": "in",
+            "filter_value": request_ids,
+        },
+    }
+    filters = [
+        _date(window_start, R_END),
+        rare,
+        _leaf("model", "gpt-4o", "SYSTEM_METRIC"),
+    ]
+    with (
+        patch.object(walk, "USER_LIST_PAGE_WALL_MS", 60_000),
+        patch.object(walk, "USER_LIST_WALK_FINISH_WALL_MS", 120_000),
+        capture_logs() as logs,
+    ):
+        read, executor, manager = _page(
+            ch_client, R, filters, case="rare", stop_raw=True
+        )
+    kinds = executor.kinds()
+    (chosen,) = [
+        entry
+        for entry in logs
+        if entry["event"] == "users_matching_walk_witness_chosen"
+    ]
+    assert (manager._walk_witness.family, manager._walk_witness.key) == (
+        "raw",
+        "request_id",
+    ), chosen
+    # The model estimate first, then the witness-free range estimate, which
+    # the model's equals, then the raw one, which does not answer.
+    assert kinds[:3] == ["estimate"] * 3
+    assert "estimate" not in kinds[3:4]
+    (model,) = chosen["candidates"]
+    assert model["column"] == "model" and model["informative"] is False
+    assert model["rows"] >= 0.9 * chosen["range_rows"]
+    assert chosen["fallback"] == "uninformative"
+    slices = [q for q, _id, _cap in executor.statements if "AS raw_end_user_id" in q]
+    assert slices and all("attrs_string" in q for q in slices)
+    assert read.payload["query_status"] == "complete" and read.has_more is False
+
+    newest = ch_client.execute(
+        "SELECT toString(end_user_id), max(start_time) FROM spans "
+        "WHERE project_id = toUUID(%(p)s) "
+        "AND attrs_string['request_id'] IN %(ids)s GROUP BY end_user_id",
+        {"p": R, "ids": tuple(request_ids)},
+    )
+    label = {
+        row[0]: f"user-{n}"
+        for n, row in enumerate(
+            ch_client.execute(
+                f"SELECT toString({_user('number')}) FROM numbers({USERS})"
+            )
+        )
+    }
+    expected = [
+        label[user]
+        for user, _key in sorted(newest, key=lambda row: (row[1], row[0]), reverse=True)
+    ]
+    assert len(expected) == 3
+    names = [row["user_id"] for row in read.payload["table"]]
+    assert names == expected
+    query, params, _needs_eval = exact_graph_reads._user_id_membership_sql(
+        project_id=R,
+        filters=filters,
+        start_date=window_start,
+        end_date=R_END,
+        all_snapshot_users=True,
+    )
+    assert {label[str(row[0])] for row in ch_client.execute(query, params)} == set(
+        names
+    )
 
 
 @pytest.mark.parametrize(
