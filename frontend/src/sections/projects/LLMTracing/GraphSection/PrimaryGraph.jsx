@@ -968,11 +968,13 @@ const PrimaryGraph = ({
       : "rgba(147, 160, 230, 0.25)");
 
   // The server names the statistic of every system-metric series; latency is
-  // always the median. Only a stamped payload is labelled: one without the
-  // field (an older server or a stale tab) may still hold a mean, so it keeps
-  // the plain metric name rather than a guess.
+  // always the mean. Only the latency series is captioned, and only when the
+  // payload says "mean": one without the field (an older server) or with a
+  // retired or unknown statistic keeps the plain metric name rather than a
+  // guess. Cost is a mean too but has always been read as one.
   const metricStatistic = (displayGraphData || graphData)?.metric_statistic;
-  const statisticLabel = metricStatistic === "median" ? "median" : null;
+  const statisticLabel =
+    metricDef.id === "latency" && metricStatistic === "mean" ? "avg" : null;
   const metricSeriesQualifiers = [statisticLabel, metricDef.unit].filter(
     Boolean,
   );

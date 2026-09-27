@@ -39,9 +39,7 @@ export const formatYAxisValue = (value, selectedGraphProperty) => {
   return formatter(value);
 };
 
-const AVG_SYSTEM_METRICS = ["cost"];
-// Every Observe latency series is the t-digest median (p50), never a mean.
-const MEDIAN_SYSTEM_METRICS = ["latency"];
+const AVG_SYSTEM_METRICS = ["cost", "latency"];
 
 export const getLineSeriesName = (selectedGraphProperty) => {
   if (!selectedGraphProperty) return "";
@@ -52,12 +50,10 @@ export const getLineSeriesName = (selectedGraphProperty) => {
   const isAvgMetric = AVG_SYSTEM_METRICS.includes(
     _.toLower(selectedGraphProperty),
   );
-  const isMedianMetric = MEDIAN_SYSTEM_METRICS.includes(
-    _.toLower(selectedGraphProperty),
-  );
-  const prefix = isMedianMetric ? "Median " : isAvgMetric ? "Avg. " : "";
 
-  const label = `${prefix}${_.capitalize(selectedGraphProperty)}`;
+  const label = `${isAvgMetric ? "Avg. " : ""}${_.capitalize(
+    selectedGraphProperty,
+  )}`;
 
   return `${baseUnit} (${label})`;
 };

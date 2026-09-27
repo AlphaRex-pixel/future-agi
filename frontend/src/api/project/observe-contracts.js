@@ -20,7 +20,7 @@ const nullableGraphPoint = z.object({
 // The generated schema closes `metric_statistic` to today's enum. A newer
 // server may name a statistic this tab predates (for example p95); rejecting
 // it would fail the whole graph until a reload. Accept any string: the label
-// logic keys on "median" and falls back to the plain name otherwise.
+// logic keys on "mean" for latency and falls back to the plain name otherwise.
 const traceGraphResponse = TracerTraceGetGraphMethodsResponse.extend({
   result: TracerTraceGetGraphMethodsResponse.shape.result.extend({
     data: z.array(nullableGraphPoint),

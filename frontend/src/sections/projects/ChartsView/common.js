@@ -35,16 +35,16 @@ export const generateAllColors = (paletteFn, newBaseKey = baseKeys) => {
 
 /**
  * Labels of the project latency chart. The server declares each series'
- * statistic in `system_metric_statistics`; latency is the median. Without
- * that declaration (an older server) the chart keeps the plain label rather
- * than guessing a statistic.
+ * statistic in `system_metric_statistics`; latency is the mean. Without that
+ * declaration (an older server), or with a retired or unknown statistic, the
+ * chart keeps the plain label rather than guessing a statistic.
  */
 export const latencyChartLabels = (systemMetricStatistics) =>
-  systemMetricStatistics?.latency === "median"
+  systemMetricStatistics?.latency === "mean"
     ? {
-        label: "Latency (median)",
-        seriesName: "Latency (median)",
-        yAxisLabel: "Median latency (ms)",
+        label: "Latency (avg, ms)",
+        seriesName: "Latency (avg, ms)",
+        yAxisLabel: "Avg latency (ms)",
       }
     : {
         label: "Latency",

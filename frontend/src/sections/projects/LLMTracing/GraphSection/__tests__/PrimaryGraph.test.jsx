@@ -1528,10 +1528,10 @@ describe("PrimaryGraph", () => {
       ["sessions", "/tracer/trace-session/get_session_graph_data/"],
       ["users", "/tracer/project/get_users_aggregate_graph_data/"],
     ])(
-      "labels the %s latency series as the median the server declares",
+      "labels the %s latency series as the mean the server declares",
       async (trafficLabel, graphEndpoint) => {
         axios.post.mockResolvedValue(
-          graphResponse({ metric_statistic: "median" }),
+          graphResponse({ metric_statistic: "mean" }),
         );
         renderWithQueryClient(
           <PrimaryGraph
@@ -1544,16 +1544,35 @@ describe("PrimaryGraph", () => {
         await waitFor(() =>
           expect(screen.getByTestId("apex-chart")).toHaveAttribute(
             "data-primary-series-name",
-            "Latency (median, ms)",
+            "Latency (avg, ms)",
           ),
         );
         expect(screen.getByTestId("graph-metric-statistic")).toHaveTextContent(
-          "(median)",
+          "(avg)",
         );
         // The picker trigger keeps the catalog name of the metric.
         expect(screen.getByText("Latency")).toBeInTheDocument();
       },
     );
+
+    it("draws a retired median statistic under the plain latency label", async () => {
+      // No server publishes "median" any more; a payload that still says so
+      // (a stale tab) is never labelled as an average.
+      axios.post.mockResolvedValue(
+        graphResponse({ metric_statistic: "median" }),
+      );
+      renderWithQueryClient(
+        <PrimaryGraph observeIdOverride="project-override" />,
+      );
+
+      await waitFor(() =>
+        expect(screen.getByTestId("apex-chart")).toHaveAttribute(
+          "data-primary-series-name",
+          "Latency (ms)",
+        ),
+      );
+      expect(screen.queryByTestId("graph-metric-statistic")).toBeNull();
+    });
 
     it("does not guess a statistic the response does not declare", async () => {
       axios.post.mockResolvedValue(graphResponse({}));
@@ -1587,34 +1606,41 @@ describe("PrimaryGraph", () => {
       expect(screen.queryByTestId("graph-metric-statistic")).toBeNull();
     });
 
-    it("adds no median caption to a summed series", async () => {
-      axios.post.mockResolvedValue(
-        graphResponse({ metric_name: "tokens", metric_statistic: "sum" }),
-      );
-      renderWithQueryClient(
-        <PrimaryGraph
-          observeIdOverride="project-override"
-          defaultMetric="tokens"
-          staticMetrics={{
-            system: [
-              {
-                id: "tokens",
-                label: "Tokens",
-                unit: "",
-                apiType: "SYSTEM_METRIC",
-              },
-            ],
-          }}
-        />,
-      );
+    it.each([
+      ["tokens", "Tokens", "sum"],
+      // Cost is a mean too; only latency is captioned.
+      ["cost", "Cost", "mean"],
+    ])(
+      "adds no caption to the %s series",
+      async (metricId, label, statistic) => {
+        axios.post.mockResolvedValue(
+          graphResponse({ metric_name: metricId, metric_statistic: statistic }),
+        );
+        renderWithQueryClient(
+          <PrimaryGraph
+            observeIdOverride="project-override"
+            defaultMetric={metricId}
+            staticMetrics={{
+              system: [
+                {
+                  id: metricId,
+                  label,
+                  unit: "",
+                  apiType: "SYSTEM_METRIC",
+                },
+              ],
+            }}
+          />,
+        );
 
-      await waitFor(() =>
-        expect(screen.getByTestId("apex-chart")).toHaveAttribute(
-          "data-primary-series-name",
-          "Tokens",
-        ),
-      );
-      expect(screen.queryByTestId("graph-metric-statistic")).toBeNull();
-    });
+        await waitFor(() =>
+          expect(screen.getByTestId("apex-chart")).toHaveAttribute(
+            "data-primary-series-name",
+            label,
+          ),
+        );
+        expect(screen.queryByTestId("graph-metric-statistic")).toBeNull();
+      },
+    );
   });
 });

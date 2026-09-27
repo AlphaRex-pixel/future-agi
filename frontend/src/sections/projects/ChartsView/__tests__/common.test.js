@@ -2,23 +2,30 @@ import { describe, expect, it } from "vitest";
 import { latencyChartLabels } from "../common";
 
 describe("latencyChartLabels", () => {
-  it("labels latency as the median the server declares", () => {
+  it("labels latency as the mean the server declares", () => {
     expect(
       latencyChartLabels({
-        latency: "median",
+        latency: "mean",
         tokens: "sum",
         cost: "mean",
         traffic: "count",
       }),
     ).toEqual({
-      label: "Latency (median)",
-      seriesName: "Latency (median)",
-      yAxisLabel: "Median latency (ms)",
+      label: "Latency (avg, ms)",
+      seriesName: "Latency (avg, ms)",
+      yAxisLabel: "Avg latency (ms)",
     });
   });
 
-  it.each([undefined, null, {}, { latency: "mean" }])(
-    "keeps the plain label when the statistic is not a declared median (%j)",
+  it.each([
+    undefined,
+    null,
+    {},
+    // Retired: no server publishes it; never labelled as an average.
+    { latency: "median" },
+    { latency: "p95" },
+  ])(
+    "keeps the plain label when latency is not a declared mean (%j)",
     (statistics) => {
       expect(latencyChartLabels(statistics)).toEqual({
         label: "Latency",

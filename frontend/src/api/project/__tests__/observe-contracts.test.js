@@ -54,7 +54,7 @@ describe("Observe API response contracts", () => {
       status: true,
       result: {
         metric_name: "latency",
-        metric_statistic: "median",
+        metric_statistic: "mean",
         data: [],
         query_complete: true,
         query_status: "complete",
@@ -62,7 +62,7 @@ describe("Observe API response contracts", () => {
       },
     };
 
-    expect(parseTraceGraphResponse(body).metric_statistic).toBe("median");
+    expect(parseTraceGraphResponse(body).metric_statistic).toBe("mean");
   });
 
   it("accepts a series statistic this client does not know", () => {
