@@ -34,28 +34,16 @@ the best native one always among them (``_witness_candidates``), with one
 ``EXPLAIN ESTIMATE`` each over the whole window (index analysis, no column
 data, inside ``USER_LIST_WALK_PROBE_WALL_MS``, each under a server cap),
 native candidates first, and walks the one whose weighted rows are fewest
-among the estimates that answered (``_choose_witness``). A raw estimate that
-did not answer says nothing about its value (its time is the blooms over
-every granule, rare value or dense), so an answered native leaf outbids it
-only when one witness-free estimate of the range shows the native leaf
-sparser than the window (``_informative``); that range estimate is sent on
-every first page that costs both families and whose native estimate answered
-with rows, before any raw estimate. When nothing is left, the static rank's
-first stands. The choice is bound into the
+among the estimates that answered (``_choose_witness``); only when none
+answered does the static rank's first stand. The choice is bound into the
 cursor, and a continuation walks it without measuring (``_bound_witness``).
 Known misses: the estimate measures scan cost, not candidates, so a rare raw
 value spread over many granules can lose to a leaf with more users; two fresh
 first pages can walk different leaves, and so order differently, when the
 data flips the estimates between them; a native estimate stopped at its cap
 spends the shared wall, so no estimate after it answers, and when none before
-it did the static (raw-first) walk stands; a native value that is rare by
-spans but present in nine granules in ten or more (an error in every 1,000
-spans, eight per granule) looks dense to the index, so next to a raw
-estimate that did not answer the static (raw-first) walk stands; when the
-range estimate
-does not answer either, an answered native leaf is walked however dense; on
-a lane whose ClickHouse profile is read-only the estimates are admitted only,
-uncapped.
+it did the static (raw-first) walk stands; on a lane whose ClickHouse profile
+is read-only the estimates are admitted only, uncapped.
 
 The order key follows the witness: the newest live span whose latest state
 satisfies the witness leaf, over the whole window. Then:
@@ -301,13 +289,6 @@ USER_LIST_WALK_PROBE_WALL_MS = settings.USER_LIST_WALK_PROBE_WALL_MS
 USER_LIST_WALK_WITNESS_CANDIDATES = settings.USER_LIST_WALK_WITNESS_CANDIDATES
 # One estimated raw span-attribute row against one native row.
 USER_LIST_WALK_RAW_WITNESS_ROW_WEIGHT = settings.USER_LIST_WALK_RAW_WITNESS_ROW_WEIGHT
-# A native estimate at this share of the range's rows or more says nothing
-# about how rare its leaf is (``_informative``): it cannot outbid a raw leaf
-# whose estimate did not answer. A dense value's granules are nearly all of
-# the range's (a model on every span: all of them); a rare value that a skip
-# index prunes keeps fewer (local worlds: errors in 1 of 40,000 spans keep
-# 11%, in 1 of 4,000 spans 64-68%).
-_UNINFORMATIVE_NATIVE_SHARE = 0.9
 _TICK = timedelta(microseconds=1)
 
 
@@ -1186,56 +1167,6 @@ def _witness_candidates(
     return candidates if len(candidates) >= 2 else []
 
 
-def _estimate_rows(
-    state: _WalkState, query: str, params: dict[str, Any], left_ms: int
-) -> tuple[int | None, str | None, float]:
-    """One choice estimate under ``left_ms`` of the choice's wall, capped on the server.
-
-    Returns ``(rows, reason, spent_ms)``: the rows the estimate reports, or
-    None with why it did not answer - stopped at its cap, failed on a read
-    budget (the exception's name), or a plan the reducer cannot read - and
-    what it took off the shared wall. Any other failure raises.
-    """
-    from tracer.services import users_list_manager as ulm
-
-    started = time.monotonic()
-    try:
-        estimate = ulm.V2AnalyticsQueryService().execute_ch_query(
-            query,
-            params,
-            timeout_ms=left_ms,
-            settings=ulm._page_replay_read_settings(max_result_rows=1),
-            server_execution_cap_ms=left_ms,
-        )
-    except Exception as exc:
-        if not is_read_budget_error(exc):
-            raise
-        # A stop at the cap and a read-budget failure answer nothing; what
-        # they took comes off the shared wall.
-        _probe_wall_spent(state)
-        reason = (
-            "stopped" if isinstance(exc, ReadDeadlineExceeded) else type(exc).__name__
-        )
-        return None, reason, (time.monotonic() - started) * 1000.0
-    spent_ms = _statement_ms(estimate, started)
-    rows = state.builder.matching_activity_existence_estimate(
-        list(estimate.data or ()), getattr(estimate, "columns", None)
-    )
-    return rows, None if rows is not None else "unreadable", spent_ms
-
-
-def _informative(rows: int, range_rows: int) -> bool:
-    """Whether a native estimate says its leaf is sparser than the range.
-
-    A native leaf no skip index prunes (``model``, ``provider``, a name) is
-    estimated at the primary-key range, the rows of every span in the window,
-    whatever its value; a dense value's granules are nearly all of them. Its
-    answer then says nothing about how rare the leaf is.
-    """
-
-    return rows == 0 or rows < _UNINFORMATIVE_NATIVE_SHARE * range_rows
-
-
 def _choose_witness(
     state: _WalkState, candidates: list[tuple[MatchingActivityWitness, Any]]
 ) -> int:
@@ -1254,37 +1185,26 @@ def _choose_witness(
     day, would pick the wrong leaf there.
 
     The native candidates are estimated first, in static rank order, then
-    the range (when raw candidates follow and a native estimate answered
-    with rows), then the raw ones: a native estimate reads the set index or
-    the primary key, a raw one the key and value blooms (hundreds of times
-    the index bytes, and a throttled read can outlast its cap), so a slow
-    raw estimate cannot spend the wall before the others answer. The estimates share one wall, ``USER_LIST_WALK_PROBE_WALL_MS``
+    the raw ones: a native estimate reads the set index or the primary key,
+    a raw one the key and value blooms (hundreds of times the index bytes),
+    so a slow raw estimate cannot spend the wall before a native one
+    answers. The estimates share one wall, ``USER_LIST_WALK_PROBE_WALL_MS``
     or what is left of the page wall, whichever is smaller; each is charged
     one statement and carries what is left of that wall as its server cap.
 
     The rule: the least weighted count among the estimates that ANSWERED
     wins, ties to the static order. An estimate that did not answer - stopped
     at its cap, failed on a read budget, unreadable, or never sent because
-    no wall or count was left - is never chosen while another answered. Its
-    silence says nothing about the value, though: a raw estimate's time is
-    the blooms read over every granule of the window, the same for a rare
-    value as for one on every span. So when a RAW estimate did not answer,
-    an answered native leaf outbids it only when its estimate says the leaf
-    is sparse: one witness-free ``EXPLAIN ESTIMATE`` of the range
-    (``build_matching_activity_range_estimate_query``, primary key only) gives
-    the window's rows, and a native
-    estimate at ``_UNINFORMATIVE_NATIVE_SHARE`` of them or more (a leaf the
-    index cannot prune, ``model = gpt-4o`` on every span) is set aside
-    (``_informative``). A rare error leaf that ``idx_status`` prunes still
-    outbids an unanswered dense raw leaf (the static rank's raw-first walk
-    is the failure the choice exists for: 10-12 GB a page for 0 users); a
-    dense model leaf no longer outbids an unanswered rare raw one. When the
-    range estimate itself does not answer, every answered native leaf stays
-    in. Only when nothing is left does the static choice, the first
-    candidate, stand. Every eligible witness keeps the walk exact; the
-    choice decides nothing but which one this cursor walks
-    (``_bound_witness`` continues it). Returns the estimates sent.
+    no wall or count was left - is never chosen while another answered: a
+    raw leaf whose estimate did not answer is not cheaper than any answered
+    native leaf (the static rank's raw-first walk is the failure the choice
+    exists for: 10-12 GB a page for 0 users). Only when no estimate answered
+    does the static choice, the first candidate, stand. Every eligible
+    witness keeps the walk exact; the choice decides nothing but which one
+    this cursor walks (``_bound_witness`` continues it). Returns the
+    estimates sent.
     """
+    from tracer.services import users_list_manager as ulm
 
     builder = state.builder
     wall_ms = min(USER_LIST_WALK_PROBE_WALL_MS, int(state.budget.remaining_ms()))
@@ -1293,21 +1213,13 @@ def _choose_witness(
     measured: list[dict[str, Any]] = []
     unanswered: list[dict[str, Any]] = []
     stop: str | None = None
-    range_rows: int | None = None
-    range_reason: str | None = None
-    ranged = False
-    natives = [
-        index for index, (w, _typed) in enumerate(candidates) if w.family != "raw"
-    ]
-    raws = [index for index, (w, _typed) in enumerate(candidates) if w.family == "raw"]
-    # The range estimate goes between the two families, before any raw one:
-    # a raw estimate can outlast its cap (a throttled read is stopped only
-    # between blocks) and leave no wall after it.
-    order: list[int | None] = [*natives, *([None] if natives and raws else []), *raws]
+    settings = ulm._page_replay_read_settings(max_result_rows=1)
+    order = sorted(
+        range(len(candidates)),
+        key=lambda index: (candidates[index][0].family == "raw", index),
+    )
     for position in order:
-        if position is None and not any(entry["rows"] for entry in measured):
-            # No native answered with rows: nothing for the range to judge.
-            continue
+        witness = candidates[position][0]
         left_ms = int(wall_ms - spent_ms)
         if left_ms < 25:
             stop = "no_wall"
@@ -1316,33 +1228,45 @@ def _choose_witness(
             stop = "no_budget"
             break
         sent += 1
-        if position is None:
-            ranged = True
-            query, params = builder.build_matching_activity_range_estimate_query(
-                range_start=state.window_start, range_end=state.decided_from
-            )
-            range_rows, range_reason, estimate_ms = _estimate_rows(
-                state, query, params, left_ms
-            )
-            spent_ms += estimate_ms
-            if range_rows is None and state.budget.exhausted_by is not None:
-                stop = "page_wall"
-                break
-            continue
-        witness = candidates[position][0]
         query, params = builder.build_matching_activity_existence_estimate_query(
             range_start=state.window_start,
             range_end=state.decided_from,
             witness=witness,
         )
         described = {"family": witness.family, "column": witness.key}
-        rows, reason, estimate_ms = _estimate_rows(state, query, params, left_ms)
-        spent_ms += estimate_ms
-        if rows is None:
+        started = time.monotonic()
+        try:
+            estimate = ulm.V2AnalyticsQueryService().execute_ch_query(
+                query,
+                params,
+                timeout_ms=left_ms,
+                settings=settings,
+                server_execution_cap_ms=left_ms,
+            )
+        except Exception as exc:
+            if not is_read_budget_error(exc):
+                raise
+            # A stop at the cap and a read-budget failure answer nothing;
+            # what they took comes off the shared wall.
+            spent_ms += (time.monotonic() - started) * 1000.0
+            reason = (
+                "stopped"
+                if isinstance(exc, ReadDeadlineExceeded)
+                else type(exc).__name__
+            )
             unanswered.append({**described, "reason": reason})
+            _probe_wall_spent(state)
             if state.budget.exhausted_by is not None:
                 stop = "page_wall"
                 break
+            continue
+        estimate_ms = _statement_ms(estimate, started)
+        spent_ms += estimate_ms
+        rows = builder.matching_activity_existence_estimate(
+            list(estimate.data or ()), getattr(estimate, "columns", None)
+        )
+        if rows is None:
+            unanswered.append({**described, "reason": "unreadable"})
             continue
         weight = USER_LIST_WALK_RAW_WITNESS_ROW_WEIGHT if witness.family == "raw" else 1
         measured.append(
@@ -1354,30 +1278,15 @@ def _choose_witness(
                 "ms": round(estimate_ms, 1),
             }
         )
-    if not ranged and natives and raws and any(entry["rows"] for entry in measured):
-        range_reason = stop
-    answered = {entry["position"] for entry in measured}
-    raw_unanswered = any(index not in answered for index in raws)
-    if range_rows is not None:
-        for entry in measured:
-            if entry["family"] == "native":
-                entry["informative"] = _informative(entry["rows"], range_rows)
-    eligible = measured
-    if raw_unanswered and range_rows is not None:
-        eligible = [entry for entry in measured if entry.get("informative", True)]
-    if eligible:
-        position = min(eligible, key=lambda entry: (entry["cost"], entry["position"]))[
+    if measured:
+        position = min(measured, key=lambda entry: (entry["cost"], entry["position"]))[
             "position"
         ]
         fallback = None
     else:
-        # Nothing answered, or nothing that says more than the static rank.
+        # Nothing answered: the static choice.
         position = 0
-        fallback = (
-            "uninformative"
-            if measured
-            else stop or (unanswered[0]["reason"] if unanswered else "no_estimate")
-        )
+        fallback = stop or (unanswered[0]["reason"] if unanswered else "no_estimate")
     witness, typed = candidates[position]
     state.manager.use_walk_witness(witness, typed)
     state.witness = witness
@@ -1391,8 +1300,6 @@ def _choose_witness(
         stop=stop,
         candidates=measured,
         unanswered=unanswered,
-        range_rows=range_rows,
-        range_unanswered=range_reason if range_rows is None else None,
     )
     return sent
 
@@ -2048,11 +1955,6 @@ def walk_matching_activity_page(
     candidates = (
         _witness_candidates(manager) if cursor_order is None and not exhausted else []
     )
-    # One estimate per candidate, and the range estimate when the candidates
-    # mix both families.
-    choice = len(candidates) + int(
-        len({witness.family == "raw" for witness, _typed in candidates}) == 2
-    )
     budget = _statement_budget(manager)
     state = _WalkState(
         manager=manager,
@@ -2064,8 +1966,8 @@ def walk_matching_activity_page(
         frozen_filters=frozen_filters,
         budget=_WalkBudget(
             wall_ms=USER_LIST_PAGE_WALL_MS,
-            max_statements=budget + choice,
-            ceiling=budget * USER_LIST_WALK_EMPTY_PAGE_BUDGETS + choice,
+            max_statements=budget + len(candidates),
+            ceiling=budget * USER_LIST_WALK_EMPTY_PAGE_BUDGETS + len(candidates),
         ),
         last_key=last_key,
         last_id=last_id,
