@@ -421,6 +421,69 @@ def test_refreshed_voice_graph_worker_counts_the_listed_calls(
     assert sum(point["value"] for point in payload["data"]) == len(CALLS[True])
 
 
+@override_settings(EXACT_AGGREGATION_TASK_QUEUE="exact_aggregation")
+@pytest.mark.parametrize("metric_type", ["EVAL", "ANNOTATION"])
+def test_unaffordable_voice_membership_chart_renders_through_the_worker(
+    auth_client, voice_fixture, voice_membership_metrics, monkeypatch, metric_type
+):
+    # A toggle-on eval/annotation chart the 30 s wall cannot parse is handed to
+    # the worker namespace _observe_payload already runs, and polls as pending.
+    from django.conf import settings
+
+    from tracer.services.clickhouse import graph_dispatch
+    from tracer.tasks import exact_aggregation
+
+    real_fits_wall = getattr(graph_dispatch, "raw_log_membership_fits_wall", None)
+
+    def _only_the_background_wall_fits(estimated_rows, *, remaining_ms, **kwargs):
+        if remaining_ms <= settings.INTERACTIVE_ANALYTICS_DEFAULT_WALL_MS:
+            return False
+        return real_fits_wall(estimated_rows, remaining_ms=remaining_ms, **kwargs)
+
+    monkeypatch.setattr(
+        graph_dispatch,
+        "raw_log_membership_fits_wall",
+        _only_the_background_wall_fits,
+        raising=False,
+    )
+
+    with patch(
+        "tracer.tasks.exact_aggregation.refresh_exact_aggregation_snapshot.apply_async"
+    ) as enqueue:
+        response = auth_client.post(
+            "/tracer/trace/get_graph_methods/",
+            {
+                "project_id": voice_fixture["project_id"],
+                "interval": "day",
+                "req_data_config": {
+                    "id": voice_membership_metrics[metric_type],
+                    "type": metric_type,
+                },
+                "filters": _window_filter(voice_fixture["window"]),
+                **_voice_scope(True),
+            },
+            format="json",
+        )
+
+    assert response.status_code == status.HTTP_200_OK, response.content
+    body = response.json()
+    result = body.get("result", body)
+    assert result["query_status"] == "pending"
+    assert result["query_refreshing"] is True
+    assert enqueue.call_count == 1
+    task = enqueue.call_args.kwargs["kwargs"]
+    namespaces = {
+        "EVAL": "observe-eval-graph",
+        "ANNOTATION": "observe-annotation-graph",
+    }
+    assert task["namespace"] == namespaces[metric_type]
+    assert VOICE_CALL_SIMULATOR_EXCLUSION_FILTER in task["identity"]["filters"]
+
+    payload = exact_aggregation._observe_payload(task["namespace"], task["identity"])
+
+    assert payload["query_status"] == "complete"
+
+
 @pytest.mark.parametrize("remove_simulation_calls", [False, True])
 def test_eval_and_annotation_membership_selects_the_listed_calls(
     voice_fixture, remove_simulation_calls
