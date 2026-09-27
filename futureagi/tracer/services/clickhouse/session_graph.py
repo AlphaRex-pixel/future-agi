@@ -26,6 +26,7 @@ from tracer.services.clickhouse.graph_dispatch import (
     format_system_metric_graph,
 )
 from tracer.services.clickhouse.graph_metric_statistic import (
+    publishes_latency,
     snapshot_names_its_statistic,
     stamps_metric_statistic,
 )
@@ -705,8 +706,14 @@ def fetch_session_graph_ch(
     if metric_type == "SYSTEM_METRIC":
         if metric_id not in SESSION_SYSTEM_METRICS:
             raise ValueError("Unsupported session system metric")
-        if metric_id in _SESSION_ROLLUP_METRICS and _has_only_positive_window_filters(
-            filters
+        # Latency never reads the rollup: ``spans_per_session`` holds only
+        # per-session t-digest states (no latency sum), so an unfiltered
+        # latency graph takes the exact snapshot below with its empty filter
+        # set and publishes the same mean as any filtered one.
+        if (
+            metric_id in _SESSION_ROLLUP_METRICS
+            and not publishes_latency("session", metric_id)
+            and _has_only_positive_window_filters(filters)
         ):
             if not bool(getattr(analytics, "supports_per_query_read_settings", True)):
                 return degraded_graph_response(

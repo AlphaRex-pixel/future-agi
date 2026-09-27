@@ -40,6 +40,7 @@ from tracer.services.clickhouse.exact_graph_reads import (
     read_exact_user_system_graph,
 )
 from tracer.services.clickhouse.graph_metric_statistic import (
+    publishes_latency,
     snapshot_names_its_statistic,
     stamps_metric_statistic,
 )
@@ -1850,7 +1851,8 @@ def fetch_background_raw_system_metric_graph(
     )
 
 
-@stamps_metric_statistic("trace", lambda call: call.get("metric_id"))
+# Every call here is a system metric; a blank id publishes latency.
+@stamps_metric_statistic("trace", lambda call: call.get("metric_id") or "")
 def fetch_system_metric_graph_ch(
     *,
     analytics: Any,
@@ -1864,14 +1866,25 @@ def fetch_system_metric_graph_ch(
     organization_id: str | None = None,
     workspace_id: str | None = None,
 ) -> dict[str, Any]:
-    """Read an unfiltered rollup or an exact synchronous filtered graph."""
+    """Read an unfiltered rollup or an exact synchronous filtered graph.
+
+    An unfiltered LATENCY request is the exception to the rollup: it takes
+    the filtered path below with its empty filter set. The rollup reads
+    ``spans``'s hourly aggregate states, which hold latency only as t-digest
+    states over every physically inserted row; they carry no latency sum, so
+    they cannot publish the mean the filtered path publishes. On the exact
+    path a chart with no filter equals the same chart with a filter that
+    matches every span, and its Traffic bars come from the same statement.
+    Every other metric keeps the rollup (its Traffic series still counts
+    every physical version, a known over-count of re-versioned rows).
+    """
 
     project_id = _validated_project_id(project_id)
     filters = list(filters or [])
     normalized_observe_type = str(observe_type or "trace").strip().lower()
     if normalized_observe_type not in {"trace", "span"}:
         raise ValueError("observe_type must be trace or span")
-    if not _active_filters(filters):
+    if not _active_filters(filters) and not publishes_latency("trace", metric_id):
         if not bool(getattr(analytics, "supports_per_query_read_settings", True)):
             return degraded_graph_response(
                 str(metric_id or ""),
@@ -2183,7 +2196,7 @@ def _affordable_user_graph_read(
     return _GraphReadUnaffordable(estimated_rows)
 
 
-@stamps_metric_statistic("users", lambda call: call.get("metric_id"))
+@stamps_metric_statistic("users", lambda call: call.get("metric_id") or "")
 def fetch_user_system_metric_graph_ch(
     *,
     analytics: Any,

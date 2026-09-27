@@ -587,10 +587,14 @@ class TestTraceGraphMethodsAPI:
     ):
         from tracer.services.clickhouse import graph_dispatch
 
-        # Below the stamped public entry point, so the real stamp runs.
+        # Below the stamped public entry point, so the real stamp runs. An
+        # unfiltered latency graph takes the exact path, not the rollup.
+        monkeypatch.setattr(
+            graph_dispatch, "_affordable_raw_graph_seed", lambda **_: None
+        )
         monkeypatch.setattr(
             graph_dispatch,
-            "_fetch_rollup_system_metric_graph",
+            "_fetch_direct_raw_system_metric_graph",
             lambda **kwargs: {
                 "metric_name": kwargs["metric_id"],
                 "data": [{"timestamp": "2026-06-18T00:00:00", "value": 120.0}],

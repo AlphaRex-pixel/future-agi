@@ -649,8 +649,9 @@ class TestTraceSessionGraphAPI:
     def test_session_latency_response_names_the_mean(
         self, auth_client, observe_project
     ):
-        rollup = {
+        snapshot = {
             "metric_name": "latency",
+            "metric_statistic": "mean",
             "data": [{"timestamp": "2026-06-18T00:00:00", "value": 120.0}],
             "query_complete": True,
             "query_status": "complete",
@@ -662,10 +663,12 @@ class TestTraceSessionGraphAPI:
                 return_value=mock.Mock(supports_per_query_read_settings=True),
             ),
             # Below the stamped public entry point, so the real stamp runs.
+            # An unfiltered latency graph is an exact snapshot (here, a
+            # cached one), never the rollup.
             mock.patch(
                 "tracer.services.clickhouse.session_graph."
-                "_fetch_rollup_system_metric_graph",
-                return_value=rollup,
+                "read_or_schedule_exact_snapshot",
+                return_value=snapshot,
             ),
         ):
             response = auth_client.post(
@@ -745,7 +748,8 @@ class TestTraceSessionGraphAPI:
     @pytest.mark.parametrize(
         "metric_id",
         [
-            "latency",
+            # Not latency: an unfiltered latency graph is an exact snapshot
+            # (test_session_date_only_latency_is_an_exact_snapshot).
             "cost",
             "tokens",
             "error_rate",
@@ -790,6 +794,39 @@ class TestTraceSessionGraphAPI:
         )
         assert query_call.kwargs["settings"]["max_threads"] == 4
         assert "max_rows_to_read" not in query_call.kwargs["settings"]
+
+    def test_session_date_only_latency_is_an_exact_snapshot(self):
+        """The rollup holds per-session t-digest states and no latency sum, so
+        an unfiltered session latency graph takes the exact snapshot with its
+        empty filter set and publishes the same mean as a filtered one."""
+
+        analytics = mock.Mock()
+        pending = {
+            "metric_name": "latency",
+            "data": [],
+            "query_complete": False,
+            "query_status": "pending",
+            "query_sampled": False,
+            "query_refreshing": True,
+        }
+        with mock.patch(
+            "tracer.services.clickhouse.session_graph.read_or_schedule_exact_snapshot",
+            return_value=pending,
+        ) as exact_read:
+            graph = fetch_session_graph_ch(
+                analytics=analytics,
+                project_id=str(uuid.uuid4()),
+                filters=[],
+                interval="day",
+                req_data_config={"id": "latency", "type": "SYSTEM_METRIC"},
+            )
+
+        analytics.execute_ch_query.assert_not_called()
+        namespace, identity = exact_read.call_args.args
+        assert namespace == "observe-session-system-graph"
+        assert identity["filters"] == []
+        assert identity["metric_id"] == "latency"
+        assert graph == {**pending, "metric_statistic": "mean"}
 
     def test_session_avg_traces_uses_bounded_candidates_without_pending(self):
         project_id = str(uuid.uuid4())

@@ -197,7 +197,7 @@ def _trace_graph(metric_id="latency", *, filters=(), analytics=None, **kwargs):
 class TestTraceGraphEnvelopes:
     @pytest.mark.parametrize(
         ("metric_id", "expected"),
-        [("latency", "mean"), ("tokens", "sum"), ("bogus", "mean")],
+        [("tokens", "sum"), ("cost", "mean"), ("traffic", "count")],
     )
     def test_unfiltered_rollup(self, monkeypatch, metric_id, expected):
         monkeypatch.setattr(
@@ -207,10 +207,26 @@ class TestTraceGraphEnvelopes:
         )
         assert _trace_graph(metric_id)["metric_statistic"] == expected
 
+    @pytest.mark.parametrize("metric_id", ["latency", "bogus", "", None])
+    def test_unfiltered_latency_on_the_exact_path(self, monkeypatch, metric_id):
+        # An unfiltered latency request never reads the rollup.
+        monkeypatch.setattr(
+            graph_dispatch, "_read_or_refresh_exact_graph", lambda **_: None
+        )
+        monkeypatch.setattr(
+            graph_dispatch, "_affordable_raw_graph_seed", lambda **_: None
+        )
+        monkeypatch.setattr(
+            graph_dispatch,
+            "_fetch_direct_raw_system_metric_graph",
+            lambda **call: _complete(call["metric_id"]),
+        )
+        assert _trace_graph(metric_id)["metric_statistic"] == "mean"
+
     def test_unfiltered_degraded_without_read_policy(self):
-        response = _trace_graph(analytics=_NoReadPolicyAnalytics())
+        response = _trace_graph("tokens", analytics=_NoReadPolicyAnalytics())
         assert response["query_status"] == "degraded"
-        assert response["metric_statistic"] == "mean"
+        assert response["metric_statistic"] == "sum"
 
     def test_filtered_cached_complete(self, monkeypatch):
         monkeypatch.setattr(
@@ -287,22 +303,32 @@ def _session_graph(config, *, filters=(), analytics=None):
 
 
 class TestSessionGraphEnvelopes:
-    def test_rollup_latency(self, monkeypatch):
+    def test_rollup_tokens(self, monkeypatch):
         monkeypatch.setattr(
             session_graph,
             "_fetch_rollup_system_metric_graph",
             lambda **call: _complete(call["metric_id"]),
         )
+        response = _session_graph({"type": "SYSTEM_METRIC", "id": "tokens"})
+        assert response["metric_statistic"] == "sum"
+
+    def test_unfiltered_latency_is_an_exact_snapshot(self, monkeypatch):
+        monkeypatch.setattr(
+            session_graph,
+            "read_or_schedule_exact_snapshot",
+            lambda namespace, identity, **call: call["pending_payload"],
+        )
         response = _session_graph({"type": "SYSTEM_METRIC", "id": "latency"})
+        assert response["query_status"] == "pending"
         assert response["metric_statistic"] == "mean"
 
     def test_rollup_degraded_without_read_policy(self):
         response = _session_graph(
-            {"type": "SYSTEM_METRIC", "id": "latency"},
+            {"type": "SYSTEM_METRIC", "id": "tokens"},
             analytics=_NoReadPolicyAnalytics(),
         )
         assert response["query_status"] == "degraded"
-        assert response["metric_statistic"] == "mean"
+        assert response["metric_statistic"] == "sum"
 
     @pytest.mark.parametrize(
         ("metric_id", "expected"),

@@ -179,7 +179,7 @@ def test_trace_primary_date_only_uses_one_interactive_rollup_query(
         project_id=PROJECT_ID,
         filters=filters,
         interval=interval,
-        metric_id="latency",
+        metric_id="tokens",
         observe_type="trace",
     )
 
@@ -231,7 +231,7 @@ def test_date_only_rollup_fails_closed_when_query_settings_are_locked(observe_ty
         project_id=PROJECT_ID,
         filters=[],
         interval="day",
-        metric_id="latency",
+        metric_id="tokens",
         observe_type=observe_type,
     )
 
@@ -253,7 +253,7 @@ def test_session_date_only_rollup_fails_closed_when_query_settings_are_locked():
         project_id=PROJECT_ID,
         filters=[],
         interval="day",
-        req_data_config={"type": "SYSTEM_METRIC", "id": "latency"},
+        req_data_config={"type": "SYSTEM_METRIC", "id": "tokens"},
     )
 
     analytics.execute_ch_query.assert_not_called()
@@ -1430,7 +1430,7 @@ def test_trace_rollup_failure_propagates_without_exact_or_raw_fallback(monkeypat
                 )
             ],
             interval="day",
-            metric_id="latency",
+            metric_id="tokens",
         )
 
     assert raised.value is failure
@@ -1500,7 +1500,7 @@ def test_rollup_schema_drift_fails_closed_instead_of_publishing_zero(
                     )
                 ],
                 interval="day",
-                metric_id="latency",
+                metric_id="tokens",
             )
     else:
         monkeypatch.setattr(
