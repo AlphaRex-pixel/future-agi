@@ -589,7 +589,9 @@ def _follow_on(
             len(engine.kinds),
         )
         assert choice_estimates == 0 or cursor is None, (hop, choice_estimates)
-        assert choice_estimates <= walk.USER_LIST_WALK_WITNESS_CANDIDATES, (
+        # One per candidate, plus the witness-free range estimate when the
+        # candidates mix both families.
+        assert choice_estimates <= walk.USER_LIST_WALK_WITNESS_CANDIDATES + 1, (
             hop,
             choice_estimates,
         )
