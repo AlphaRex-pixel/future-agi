@@ -489,8 +489,14 @@ def test_the_walk_and_the_seeded_page_publish_the_same_set_and_totals(
         for column in ("total_cost", "num_traces", "total_tokens"):
             assert row[column] == seeded[name][column], (name, column)
     if items[0] is TAG_GOLD:
-        # The raw leaf is walkable, so it is the witness and the order key.
-        assert manager._walk_witness.family == "raw"
+        # Both leaves are eligible witnesses; the first page walks the one
+        # its estimates cost least (``_choose_witness``), and either keys
+        # these four members alike: tag = gold and status = error sit on the
+        # same span for each.
+        assert (manager._walk_witness.family, manager._walk_witness.key) in {
+            ("raw", "tag"),
+            ("native", "status"),
+        }
         assert [row["user_id"] for row in walked] == _ordered(
             survivor_of_e, {"A": 60, "E": 40, "H": 30, "K1": 25}
         )
