@@ -84,6 +84,7 @@ def recorded_steps(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr(
         command, "call", lambda name, log, **options: steps.append(name)
     )
+    monkeypatch.setattr(command, "first_admin", lambda log: steps.append("first admin"))
     return steps
 
 
@@ -99,6 +100,7 @@ def test_runs_every_step_in_order(local_operator, recorded_steps) -> None:
         "search attributes",
         "cdc",
         "register_temporal_schedules",
+        "first admin",
     ]
 
 
@@ -110,6 +112,9 @@ def test_the_standalone_bootstrap_runs_the_same_steps_in_the_same_order(
 ) -> None:
     call_command("bootstrap_install")
     job = list(recorded_steps)
+    # The first admin is the Helm chart's (bootstrap.admin); a Standalone
+    # install creates its own with ./bin/install's create_user.
+    assert job.pop() == "first admin"
     recorded_steps.clear()
     spec = importlib.util.spec_from_file_location(
         "standalone_bootstrap", STANDALONE_BOOTSTRAP
@@ -140,7 +145,7 @@ def test_property_catalog_can_be_skipped(local_operator, recorded_steps) -> None
     call_command("bootstrap_install", "--skip-property-catalog")
 
     assert "catalog" not in recorded_steps
-    assert recorded_steps[-1] == "register_temporal_schedules"
+    assert recorded_steps[-2:] == ["register_temporal_schedules", "first admin"]
 
 
 @pytest.mark.parametrize(
@@ -178,7 +183,7 @@ def test_hosted_env_type_runs_as_an_operator_job(
 
     call_command("bootstrap_install")
 
-    assert recorded_steps[-1] == "register_temporal_schedules"
+    assert recorded_steps[-2:] == ["register_temporal_schedules", "first admin"]
 
 
 @pytest.mark.xfail(
@@ -1030,3 +1035,76 @@ def test_change_data_capture_retries_transient_failures_and_logs_the_result(
         'change data capture: {"mode": "outbox", "ready": true, '
         '"run": "00000000-0000-0000-0000-000000000007"}',
     ]
+
+
+class _Users:
+    """Stands in for the user model's manager: remembers existing emails."""
+
+    def __init__(self, existing=()):
+        self.existing = {email.lower() for email in existing}
+        self.objects = self
+
+    def filter(self, email__iexact):
+        return SimpleNamespace(exists=lambda: email__iexact.lower() in self.existing)
+
+
+@pytest.fixture
+def signups(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    created: list[dict] = []
+    monkeypatch.setattr("accounts.utils.first_signup", created.append)
+    return created
+
+
+ADMIN_ENV = {
+    "FAGI_ADMIN_EMAIL": " Owner@Example.com ",
+    "FAGI_ADMIN_NAME": "Owner",
+    "FAGI_ADMIN_PASSWORD": "long-enough-1",
+}
+
+
+def test_first_admin_is_created_once_from_the_environment(monkeypatch, signups) -> None:
+    monkeypatch.setattr("django.contrib.auth.get_user_model", lambda: _Users())
+    logs: list[str] = []
+
+    command.first_admin(logs.append, env=ADMIN_ENV)
+
+    assert signups == [
+        {
+            "email": "Owner@Example.com",
+            "full_name": "Owner",
+            "password": "long-enough-1",
+            "allow_email": True,
+        }
+    ]
+    assert logs == ["first admin Owner@Example.com created"]
+
+
+def test_an_existing_first_admin_is_left_unchanged(monkeypatch, signups) -> None:
+    monkeypatch.setattr(
+        "django.contrib.auth.get_user_model", lambda: _Users(["owner@example.com"])
+    )
+    logs: list[str] = []
+
+    command.first_admin(logs.append, env=ADMIN_ENV)
+
+    assert signups == []
+    assert logs == ["first admin Owner@Example.com already exists: left unchanged"]
+
+
+def test_no_first_admin_without_an_email(signups) -> None:
+    command.first_admin(lambda line: None, env={"FAGI_ADMIN_PASSWORD": "long-enough-1"})
+
+    assert signups == []
+
+
+@pytest.mark.parametrize(
+    "overrides", [{"FAGI_ADMIN_NAME": ""}, {"FAGI_ADMIN_PASSWORD": "short"}]
+)
+def test_first_admin_needs_a_name_and_a_real_password(
+    monkeypatch, signups, overrides
+) -> None:
+    monkeypatch.setattr("django.contrib.auth.get_user_model", lambda: _Users())
+
+    with pytest.raises(command.BootstrapError, match="8 or more characters"):
+        command.first_admin(lambda line: None, env={**ADMIN_ENV, **overrides})
+    assert signups == []

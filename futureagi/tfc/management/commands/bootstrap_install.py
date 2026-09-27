@@ -17,6 +17,9 @@ same order, so every install path prepares the datastores the same way:
      (``oss_outbox_cdc.ensure_installed``: capture triggers plus the drain
      schedules for ``outbox``, both removed for ``peerdb``/``off``)
   8. register_temporal_schedules
+  9. the first admin from FAGI_ADMIN_EMAIL, FAGI_ADMIN_NAME and
+     FAGI_ADMIN_PASSWORD, when set (the chart's bootstrap.admin). The
+     Standalone bootstrap leaves this one to ./bin/install's create_user.
 
 Every step is idempotent, so the Job runs on every install and upgrade. A
 failure exits non-zero with the reason, and Kubernetes retries the Job.
@@ -392,6 +395,35 @@ def change_data_capture(
     with_retries("change data capture", ensure, log, attempts=attempts, delay=delay)
 
 
+def first_admin(log: Callable[[str], None], env=None) -> None:
+    """The first admin from FAGI_ADMIN_EMAIL, FAGI_ADMIN_NAME and
+    FAGI_ADMIN_PASSWORD (the Helm chart's bootstrap.admin Secret; the same
+    names ./bin/install reads). Created once; an existing account with that
+    email is never changed, password included. Nothing to do without them."""
+    env = os.environ if env is None else env
+    email = (env.get("FAGI_ADMIN_EMAIL") or "").strip()
+    if not email:
+        return
+    from django.contrib.auth import get_user_model
+
+    if get_user_model().objects.filter(email__iexact=email).exists():
+        log(f"first admin {email} already exists: left unchanged")
+        return
+    name = (env.get("FAGI_ADMIN_NAME") or "").strip()
+    password = env.get("FAGI_ADMIN_PASSWORD") or ""
+    if not name or len(password) < 8:
+        raise BootstrapError(
+            "the first admin needs a name and a password of 8 or more characters "
+            "(FAGI_ADMIN_NAME, FAGI_ADMIN_PASSWORD; Helm: bootstrap.admin.existingSecret)"
+        )
+    from accounts.utils import first_signup
+
+    first_signup(
+        {"email": email, "full_name": name, "password": password, "allow_email": True}
+    )
+    log(f"first admin {email} created")
+
+
 def summary(env=None) -> list[str]:
     """What this run is about to prepare. Never a secret's value."""
     env = os.environ if env is None else env
@@ -487,4 +519,5 @@ class Command(BaseCommand):
             self.log,
             attempts=attempts,
         )
+        first_admin(self.log)
         self.log(f"ready in {time.monotonic() - started:.0f}s")

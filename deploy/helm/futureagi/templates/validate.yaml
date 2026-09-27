@@ -17,6 +17,12 @@ Renders nothing when the values are consistent.
 {{- if and (eq $v.postgres.mode "external") (not $v.postgres.password) (not $v.postgres.existingSecret) -}}
 {{- $errors = append $errors "postgres.password or postgres.existingSecret is required for an external PostgreSQL" -}}
 {{- end -}}
+{{- if and (dig "pooler" "enabled" false $v.postgres) (not (dig "pooler" "host" "" $v.postgres)) -}}
+{{- $errors = append $errors "postgres.pooler.host is required with postgres.pooler.enabled: your PgBouncer (transaction mode) in front of PostgreSQL" -}}
+{{- end -}}
+{{- if and (dig "readReplica" "enabled" false $v.postgres) (not (dig "readReplica" "host" "" $v.postgres)) -}}
+{{- $errors = append $errors "postgres.readReplica.host is required with postgres.readReplica.enabled" -}}
+{{- end -}}
 {{- if and (eq $v.clickhouse.mode "external") (not $v.clickhouse.external.host) -}}
 {{- $errors = append $errors "clickhouse.external.host is required: your ClickHouse 25.3+ server (or set clickhouse.mode=bundled)" -}}
 {{- end -}}
@@ -64,6 +70,24 @@ Renders nothing when the values are consistent.
 {{- if and $v.ingress.enabled $v.ingress.objects.host (ne $v.objectStorage.mode "bundled") -}}
 {{- $errors = append $errors "ingress.objects.host exposes the bundled object storage: it needs objectStorage.mode=bundled (external storage has its own URL: urls.objects)" -}}
 {{- end -}}
+{{- if $v.gatewayApi.enabled -}}
+{{- if not $v.gatewayApi.parentRefs -}}
+{{- $errors = append $errors "gatewayApi.parentRefs is required with gatewayApi.enabled: the Gateway (and listener) the routes attach to" -}}
+{{- end -}}
+{{- $gwApp := include "futureagi.gatewayApi.host" (dict "root" . "route" "app") -}}
+{{- $gwApi := include "futureagi.gatewayApi.host" (dict "root" . "route" "api") -}}
+{{- if or (not $gwApp) (not $gwApi) -}}
+{{- $errors = append $errors "gatewayApi.app.host and gatewayApi.api.host (or the ingress hosts) are required with gatewayApi.enabled" -}}
+{{- else if eq $gwApp $gwApi -}}
+{{- $errors = append $errors "gatewayApi.api.host must differ from gatewayApi.app.host: the API serves many top-level paths" -}}
+{{- end -}}
+{{- if and $v.gatewayApi.otlpGrpc.enabled (or (not $v.gatewayApi.otlpGrpc.host) (has $v.gatewayApi.otlpGrpc.host (list $gwApp $gwApi (include "futureagi.gatewayApi.host" (dict "root" . "route" "otlp"))))) -}}
+{{- $errors = append $errors "gatewayApi.otlpGrpc.host is required and must differ from the HTTP route hosts: a GRPCRoute cannot share a hostname with an HTTPRoute on one listener" -}}
+{{- end -}}
+{{- if and $v.gatewayApi.llmGateway.enabled (not $v.gatewayApi.llmGateway.host) -}}
+{{- $errors = append $errors "gatewayApi.llmGateway.host is required with gatewayApi.llmGateway.enabled" -}}
+{{- end -}}
+{{- end -}}
 {{- if not (or $v.worker.allQueues.enabled $v.worker.queues) -}}
 {{- $errors = append $errors "worker.allQueues.enabled is false and worker.queues is empty: nothing would run evaluations, schedules or the CDC drain" -}}
 {{- end -}}
@@ -77,6 +101,21 @@ Renders nothing when the values are consistent.
 {{- range $queue := $v.worker.queues -}}
 {{- if not (regexMatch "^[a-z0-9_]+$" (toString $queue.name)) -}}
 {{- $errors = append $errors (printf "worker.queues: every entry needs a name of lowercase letters, digits and _ (got %q)" (toString $queue.name)) -}}
+{{- end -}}
+{{- end -}}
+{{- $gw := $v.agentccGateway -}}
+{{- $gwRedis := dig "redis" "enabled" "auto" $gw | toString -}}
+{{- if not (has $gwRedis (list "auto" "true" "false")) -}}
+{{- $errors = append $errors (printf "agentccGateway.redis.enabled must be auto, true or false (got %q)" $gwRedis) -}}
+{{- end -}}
+{{- if and (eq $gwRedis "true") (eq $v.redis.mode "external") $v.redis.external.tls -}}
+{{- $errors = append $errors "agentccGateway.redis.enabled=true needs Redis without TLS: the gateway has no Redis TLS (point it at another Redis with AGENTCC_REDIS_ADDRESS in agentccGateway.extraEnv)" -}}
+{{- end -}}
+{{- if and (eq (include "futureagi.gateway.multiReplica" .) "true") (ne (include "futureagi.gateway.redis" .) "true") (not (hasKey ($gw.extraEnv | default dict) "AGENTCC_REDIS_ADDRESS")) (not (dig "redis" "address" "" ($gw.config | default dict))) (not $gw.existingConfigMap) -}}
+{{- if and (eq $v.redis.mode "external") $v.redis.external.tls -}}
+{{- $errors = append $errors "agentccGateway runs more than one replica without Redis, so each replica would count rate limits and budgets on its own, and it cannot use redis.external over TLS (the gateway has no Redis TLS): set AGENTCC_REDIS_ADDRESS in agentccGateway.extraEnv to a Redis without TLS, or run one replica with agentccGateway.redis.enabled=false" -}}
+{{- else -}}
+{{- $errors = append $errors "agentccGateway runs more than one replica without Redis, so each replica would count rate limits and budgets on its own: set agentccGateway.redis.enabled=true (or auto), set AGENTCC_REDIS_ADDRESS in agentccGateway.extraEnv, or run one replica" -}}
 {{- end -}}
 {{- end -}}
 {{- if and $v.config.recaptcha (not (hasKey $v.secrets.extra "RECAPTCHA_SECRET_KEY")) (not (hasKey $v.config.extraEnv "RECAPTCHA_SECRET_KEY")) (not $v.config.extraEnvFrom) -}}
@@ -104,6 +143,71 @@ checkable against a live release: `lookup` finds nothing in `helm template`. */ 
 {{- $errors = append $errors (printf "%s.bundled.persistence.size is %s, but StatefulSet %s was created with %s and cannot change: keep %s, or grow the volume as \"Install-time settings\" in the chart README shows" $key (toString $p.size) $name $hadSize $hadSize) -}}
 {{- else if and $had (ne $hadClass $class) -}}
 {{- $errors = append $errors (printf "%s.bundled.persistence.storageClass (or global.storageClass) is %q, but StatefulSet %s was created with %q and cannot change" $key $class $name $hadClass) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /* Edition, license, SSO, proxy, CA bundle, air-gap, ExternalSecrets */ -}}
+{{- $edition := $v.edition | default "oss" | toString -}}
+{{- if not (has $edition (list "oss" "ee")) -}}
+{{- $errors = append $errors (printf "edition must be oss or ee (got %q)" $edition) -}}
+{{- else if and (eq $edition "ee") (not (include "futureagi.license.source" .)) -}}
+{{- $errors = append $errors "edition=ee needs a license: set license.existingSecret (a Secret with the key EE_LICENSE_KEY) or license.key" -}}
+{{- end -}}
+{{- $l := $v.license | default dict -}}
+{{- if and $l.existingSecret $l.key -}}
+{{- $errors = append $errors "set license.existingSecret or license.key, not both" -}}
+{{- end -}}
+{{- with $l.heartbeat -}}
+{{- if not (has (toString . | lower) (list "true" "false")) -}}
+{{- $errors = append $errors (printf "license.heartbeat must be true, false or empty (got %q)" (toString .)) -}}
+{{- end -}}
+{{- end -}}
+{{- $adapt := dig "compatibility" "openshift" "adaptSecurityContext" "auto" $v.global | toString -}}
+{{- if not (has $adapt (list "auto" "force" "disabled")) -}}
+{{- $errors = append $errors (printf "global.compatibility.openshift.adaptSecurityContext must be auto, force or disabled (got %q)" $adapt) -}}
+{{- end -}}
+{{- $proxy := $v.global.proxy | default dict -}}
+{{- if and $proxy.noProxy (not (or $proxy.httpProxy $proxy.httpsProxy)) -}}
+{{- $errors = append $errors "global.proxy.noProxy is set without global.proxy.httpProxy or httpsProxy" -}}
+{{- end -}}
+{{- range $name := list "httpProxy" "httpsProxy" -}}
+{{- with get $proxy $name -}}
+{{- if not (regexMatch "^(http|https|socks5h?)://[^/]+/?$" (toString .)) -}}
+{{- $errors = append $errors (printf "global.proxy.%s must be a URL such as http://proxy.example.com:3128 (got %q)" $name (toString .)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $ca := $v.global.caBundle | default dict -}}
+{{- if and $ca.configMap $ca.secret -}}
+{{- $errors = append $errors "set global.caBundle.configMap or global.caBundle.secret, not both" -}}
+{{- end -}}
+{{- if and (eq (toString $v.global.airgap) "true") $v.serving.enabled (not $v.serving.persistence.enabled) -}}
+{{- $errors = append $errors "global.airgap with serving.enabled needs serving.persistence.enabled=true and the models pre-seeded on that volume (serving cannot download them offline; see examples/airgap.yaml), or serving.enabled=false" -}}
+{{- end -}}
+{{- range $provider := list "google" "github" "microsoft" -}}
+{{- $p := dig $provider dict ($v.auth | default dict) -}}
+{{- if and (not $p.existingSecret) (ne (empty $p.clientId) (empty $p.clientSecret)) -}}
+{{- $errors = append $errors (printf "auth.%s needs both clientId and clientSecret (or existingSecret)" $provider) -}}
+{{- end -}}
+{{- end -}}
+{{- $es := $v.externalSecrets | default dict -}}
+{{- if $es.enabled -}}
+{{- $targets := dict "app" $v.secrets.existingSecret "llm" $v.secrets.llm.existingSecret "license" $l.existingSecret "email" (dig "email" "existingSecret" "" $v.config) "google" (dig "google" "existingSecret" "" ($v.auth | default dict)) "github" (dig "github" "existingSecret" "" ($v.auth | default dict)) "microsoft" (dig "microsoft" "existingSecret" "" ($v.auth | default dict)) "admin" (dig "admin" "existingSecret" "" $v.bootstrap) "postgres" $v.postgres.existingSecret "clickhouse" $v.clickhouse.existingSecret "redis" $v.redis.existingSecret "objectStorage" $v.objectStorage.existingSecret -}}
+{{- $paths := dict "app" "secrets.existingSecret" "llm" "secrets.llm.existingSecret" "license" "license.existingSecret" "email" "config.email.existingSecret" "google" "auth.google.existingSecret" "github" "auth.github.existingSecret" "microsoft" "auth.microsoft.existingSecret" "admin" "bootstrap.admin.existingSecret" "postgres" "postgres.existingSecret" "clickhouse" "clickhouse.existingSecret" "redis" "redis.existingSecret" "objectStorage" "objectStorage.existingSecret" -}}
+{{- if not $es.secrets -}}
+{{- $errors = append $errors "externalSecrets.enabled needs at least one entry in externalSecrets.secrets" -}}
+{{- end -}}
+{{- range $group, $spec := $es.secrets | default dict -}}
+{{- if not (hasKey $targets $group) -}}
+{{- $errors = append $errors (printf "externalSecrets.secrets.%s: unknown group; use one of %s" $group (keys $targets | sortAlpha | join ", ")) -}}
+{{- else if not (get $targets $group) -}}
+{{- $errors = append $errors (printf "externalSecrets.secrets.%s needs %s: the name of the Secret it creates, which the chart then reads" $group (get $paths $group)) -}}
+{{- end -}}
+{{- if not (or (dig "secretStoreRef" "name" "" ($spec | default dict)) (dig "secretStoreRef" "name" "" $es)) -}}
+{{- $errors = append $errors (printf "externalSecrets.secrets.%s needs a store: externalSecrets.secretStoreRef.name or its own secretStoreRef.name" $group) -}}
+{{- end -}}
+{{- if not (or (dig "data" nil ($spec | default dict)) (dig "dataFrom" nil ($spec | default dict))) -}}
+{{- $errors = append $errors (printf "externalSecrets.secrets.%s needs data (key map) or dataFrom" $group) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

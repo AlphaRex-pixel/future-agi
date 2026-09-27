@@ -6,6 +6,7 @@
 #   * kubeconform -strict on every rendered manifest, per Kubernetes version
 #   * invariants of the rendered manifests (hack/rendered_checks.py), and
 #     the backend's behaviour settings against docker-compose.distributed.yml
+#   * the install notes and hack/support-bundle.sh keep credentials out
 #   * values.yaml, values.schema.json and the README values table agree
 #   * the pre-commit Prettier run skips the templates and those generated files
 #   * the ClickHouse config files match the ones the Standalone install uses
@@ -25,7 +26,9 @@ helm=${HELM:-helm}
 kubeconform=${KUBECONFORM:-kubeconform}
 # Python 3 with PyYAML.
 python=${PYTHON:-python3}
-kube_versions=${KUBE_VERSIONS:-"1.27.0 1.33.0"}
+kube_versions=${KUBE_VERSIONS:-"1.27.0 1.37.0"}
+# JSON schemas of CRD kinds (Gateway API routes, ...), by group and version.
+crd_schemas=${CRD_SCHEMAS:-"https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json"}
 out=${OUT_DIR:-$(mktemp -d)}
 mkdir -p "$out"
 
@@ -43,6 +46,25 @@ value_sets=(
   "all-components|examples/external.yaml examples/ingress.yaml ci/all-components.yaml"
   "overrides|examples/bundled.yaml ci/overrides.yaml"
   "gitops|examples/external.yaml ci/gitops.yaml"
+  "digests|examples/bundled.yaml ci/digests.yaml"
+  "digests-unpinned|examples/bundled.yaml ci/digests.yaml ci/digests-unpinned.yaml"
+  "worker-queues|examples/bundled.yaml ci/worker-queues.yaml"
+  "pooler|examples/external.yaml ci/pooler.yaml"
+  "gateway-api|examples/bundled.yaml examples/gateway-api.yaml ci/gateway-api.yaml"
+  "ingress-traefik|examples/external.yaml examples/ingress-traefik.yaml"
+  "local|examples/local.yaml"
+  "size-small|examples/external.yaml examples/sizes/small.yaml"
+  "size-medium|examples/external.yaml examples/sizes/medium.yaml"
+  "size-large|examples/external.yaml examples/sizes/large.yaml"
+  "cloud-gke|examples/cloud/gke.yaml"
+  "cloud-eks|examples/cloud/eks.yaml"
+  "cloud-aks|examples/cloud/aks.yaml"
+  "enterprise|examples/external.yaml examples/enterprise.yaml ci/enterprise.yaml"
+  "license-legacy|examples/bundled.yaml ci/license-legacy.yaml"
+  "proxy-ca|examples/external.yaml ci/proxy-ca.yaml"
+  "airgap|examples/external.yaml examples/airgap.yaml"
+  "external-secrets|examples/external.yaml examples/external-secrets.yaml"
+  "openshift|examples/bundled.yaml ci/openshift.yaml"
 )
 
 echo "== chart defaults: refuse to render, with guidance"
@@ -61,8 +83,25 @@ echo "ok   defaults fail with guidance"
 
 echo "== inconsistent values: refuse to render"
 # name|expected message|helm arguments (over examples/bundled.yaml)
+# An expected message starting with re: is an extended regular expression:
+# values.schema.json rejects some values before validate.yaml runs, and Helm
+# 3.18+ and Helm 4 word schema errors differently from older Helm 3.
 refused=(
   "recaptcha without its key|config.recaptcha needs secrets.extra.RECAPTCHA_SECRET_KEY|--set config.recaptcha=true"
+  "gateway replicas without Redis|agentccGateway runs more than one replica without Redis|--set agentccGateway.replicas=2 --set agentccGateway.redis.enabled=false"
+  "gateway Redis over TLS|the gateway has no Redis TLS|--set redis.mode=external --set redis.external.host=r --set redis.external.tls=true --set agentccGateway.redis.enabled=true"
+  "an autoscaled gateway with Redis over TLS|to a Redis without TLS, or run one replica with agentccGateway.redis.enabled=false|--set redis.mode=external --set redis.external.host=r --set redis.external.tls=true --set agentccGateway.autoscaling.enabled=true"
+  "Enterprise without a license|edition=ee needs a license|--set edition=ee"
+  "an unknown edition|re:edition.*must be one of|--set edition=enterprise"
+  "two license sources|set license.existingSecret or license.key, not both|--set license.key=k --set license.existingSecret=s"
+  "noProxy without a proxy|global.proxy.noProxy is set without|--set global.proxy.noProxy=.corp"
+  "a proxy that is not a URL|re:httpsProxy.*oes not match pattern|--set global.proxy.httpsProxy=proxy:3128"
+  "two CA bundle sources|global.caBundle.configMap or global.caBundle.secret, not both|--set global.caBundle.configMap=a --set global.caBundle.secret=b"
+  "air-gapped serving without its volume|global.airgap with serving.enabled needs serving.persistence.enabled|--set global.airgap=true --set serving.enabled=true"
+  "half an OAuth client|auth.google needs both clientId and clientSecret|--set auth.google.clientId=x"
+  "an ExternalSecret the chart would not read|externalSecrets.secrets.app needs secrets.existingSecret|--set externalSecrets.enabled=true --set externalSecrets.secretStoreRef.name=vault --set externalSecrets.secrets.app.dataFrom[0].extract.key=a"
+  "an unknown OpenShift mode|re:adaptSecurityContext.*must be one of|--set global.compatibility.openshift.adaptSecurityContext=on"
+  "an unknown ExternalSecret group|re:[Pp]roperty ?[Nn]ame.*vault|--set externalSecrets.secrets.vault.dataFrom[0].extract.key=a"
 )
 for case in "${refused[@]}"; do
   IFS='|' read -r name expected args <<<"$case"
@@ -70,7 +109,13 @@ for case in "${refused[@]}"; do
   if "$helm" template futureagi "$chart" -f "$chart/examples/bundled.yaml" $args >"$out/refused.txt" 2>&1; then
     fail "rendered despite: $name"
   fi
-  grep -qF -- "$expected" "$out/refused.txt" || {
+  if [[ $expected == re:* ]]; then
+    expected=${expected#re:}
+    grep_mode=-qE
+  else
+    grep_mode=-qF
+  fi
+  grep "$grep_mode" -- "$expected" "$out/refused.txt" || {
     cat "$out/refused.txt" >&2
     fail "the error for \"$name\" does not mention: $expected"
   }
@@ -90,8 +135,13 @@ for set in "${value_sets[@]}"; do
     fail "helm lint ($name)"
   }
   "$helm" template futureagi "$chart" --namespace futureagi "${args[@]}" >"$out/$name.yaml"
+  # Rendered for each Kubernetes version: some fields depend on it (the
+  # kubelet's preStop sleep action needs 1.30).
+  mkdir -p "$out/kube"
   for version in $kube_versions; do
-    "$kubeconform" -strict -summary -kubernetes-version "$version" "$out/$name.yaml" ||
+    "$helm" template futureagi "$chart" --namespace futureagi --kube-version "$version" "${args[@]}" >"$out/kube/$name-$version.yaml"
+    "$kubeconform" -strict -summary -kubernetes-version "$version" \
+      -schema-location default -schema-location "$crd_schemas" "$out/kube/$name-$version.yaml" ||
       fail "kubeconform ($name, Kubernetes $version)"
   done
 done
@@ -104,6 +154,75 @@ echo "== GitOps: rendering again changes nothing"
 diff -u "$out/gitops.yaml" "$out/gitops.again.txt" || fail "a second render of gitops differs"
 rm -f "$out/gitops.again.txt"
 echo "ok   identical"
+
+echo "== openshift-auto (the security.openshift.io/v1 API present)"
+"$helm" template futureagi "$chart" --namespace futureagi -f "$chart/examples/bundled.yaml" \
+  --api-versions security.openshift.io/v1 >"$out/openshift-auto.yaml"
+echo "ok   rendered"
+
+echo "== the install notes print the proxy's host, never its login"
+# helm template leaves NOTES.txt out; a client-side dry run renders it. It
+# never talks to the caller's cluster (no kubeconfig): Helm 3 wants one for a
+# dry run, so it is skipped there.
+if KUBECONFIG="$out/no-kubeconfig" "$helm" install futureagi "$chart" --dry-run=client --namespace futureagi \
+  -f "$chart/examples/bundled.yaml" --set global.proxy.httpsProxy=http://corp:notes-123@proxy.corp.example:3128 \
+  >"$out/notes.txt" 2>&1; then
+  sed -n '/^NOTES:/,$p' "$out/notes.txt" >"$out/notes-only.txt"
+  if grep -q 'notes-123' "$out/notes-only.txt" || ! grep -qF 'through the proxy proxy.corp.example:3128;' "$out/notes-only.txt"; then
+    cat "$out/notes-only.txt" >&2
+    fail "the install notes print the proxy URL with its login"
+  fi
+  # A login urlParse cannot parse ('#', a stray '%') still renders.
+  KUBECONFIG="$out/no-kubeconfig" "$helm" install futureagi "$chart" --dry-run=client --namespace futureagi \
+    -f "$chart/examples/bundled.yaml" --set-string 'global.proxy.httpsProxy=http://corp:n#o%zz@proxy.corp.example:3128' \
+    >"$out/notes-odd.txt" 2>&1 || { cat "$out/notes-odd.txt" >&2; fail "install notes with an odd proxy login"; }
+  grep -qF 'through the proxy proxy.corp.example:3128;' "$out/notes-odd.txt" || {
+    sed -n '/^NOTES:/,$p' "$out/notes-odd.txt" >&2
+    fail "the install notes misprint a proxy with an odd login"
+  }
+  echo "ok   host:port only"
+elif grep -q 'cluster unreachable' "$out/notes.txt"; then
+  echo "skip (this Helm needs a cluster for a client-side dry run)"
+else
+  cat "$out/notes.txt" >&2
+  fail "helm install --dry-run=client"
+fi
+
+echo "== GitOps examples (not Helm values): YAML and CRD schemas"
+for file in "$chart"/examples/gitops/*.yaml; do
+  "$python" -c 'import sys, yaml; docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]; assert docs and all("kind" in d for d in docs), sys.argv[1]' "$file" ||
+    fail "invalid YAML: $file"
+  "$kubeconform" -strict -summary -schema-location default -schema-location "$crd_schemas" "$file" ||
+    fail "kubeconform ($file)"
+done
+
+echo "== hack/support-bundle.sh parses and redacts"
+bash -n "$chart/hack/support-bundle.sh" || fail "support-bundle.sh does not parse"
+if command -v shellcheck >/dev/null; then
+  shellcheck "$chart/hack/support-bundle.sh" || fail "shellcheck support-bundle.sh"
+fi
+# Its redaction functions, on values, log lines, describe output and the
+# install notes with secrets in them: by name, and credentials in URLs (a
+# proxy login, a DATABASE_URL in extraEnv) under any name.
+redactors=$(sed -n '/^sensitive=/,/^run() {/p' "$chart/hack/support-bundle.sh" | sed '$d')
+redacted=$(bash -c "$redactors"'
+printf "license:\n  key: lic-123\n  url: https://licenses\npostgres:\n  password: pg-123\nsecrets:\n  extra:\n    SENTRY_DSN: dsn-123\n" | redact_yaml
+printf "global:\n  proxy:\n    httpsProxy: http://corp:proxy-123@proxy.corp:3128\n    noProxy: .corp\nconfig:\n  extraEnv:\n    DATABASE_URL: postgres://app:url-123@db.corp:5432/app\n" | redact_yaml
+printf "PG_PASSWORD:  env-123\napi_key=\"log-123\" user=bob\n" | redact_text
+printf "      HTTPS_PROXY:   http://corp:describe-123@proxy.corp:3128\n      NO_PROXY:      .corp\n      DATABASE_URL:  postgres://app:dburl-123@db.corp:5432/app\n" | redact_text
+printf "NOTE     Outbound traffic goes through http://corp:status-123@proxy.corp:3128; NO_PROXY covers\n" | redact_text
+printf "config:\n  extraEnv:\n    DB_URL: postgres://app:p@ss-123@db.corp:5432/app\n" | redact_yaml')
+if grep -qE 'lic-123|pg-123|dsn-123|env-123|log-123|proxy-123|url-123|describe-123|status-123|ss-123' <<<"$redacted"; then
+  echo "$redacted" >&2
+  fail "support-bundle.sh redaction leaves a secret"
+fi
+for kept in 'https://licenses' 'noProxy: .corp' 'NO_PROXY:      .corp' 'postgres://<redacted>@db.corp:5432/app' 'http://<redacted>@proxy.corp:3128;'; do
+  grep -qF -- "$kept" <<<"$redacted" || {
+    echo "$redacted" >&2
+    fail "support-bundle.sh redaction removes: $kept"
+  }
+done
+echo "ok   redacts"
 
 echo "== rendered invariants"
 # No manifest may carry an unexpanded template or an empty image.
