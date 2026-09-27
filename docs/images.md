@@ -169,11 +169,41 @@ docker image inspect futureagi/standalone:latest --format '{{json .Config.Labels
    is the commit: `https://github.com/future-agi/future-agi/commit/<revision>`.
    Before it moves any tag, the release checks that each multi-architecture
    image carries all the labels and the version and commit it was built from.
-3. **Signatures: not yet.** The images are not signed today (no cosign or
-   Docker Content Trust signatures are published), so steps 1 and 2 are the
-   check. Signing is planned in the release workflow (keyless cosign from
-   GitHub Actions); once it ships, this section will give the
-   `cosign verify` command and the expected certificate identity.
+3. **Signatures: not yet for the images.** The images are not signed today
+   (no cosign or Docker Content Trust signatures are published), so steps 1
+   and 2 are the check. Signing is planned in the release workflow (keyless
+   cosign from GitHub Actions); once it ships, this section will give the
+   `cosign verify` command and the expected certificate identity. On
+   Kubernetes, the signed Helm chart already pins each image by digest (see
+   below).
+
+### Verifying the Helm chart
+
+Every release publishes the Helm chart to
+`oci://ghcr.io/future-agi/charts/futureagi` (version `X.Y.Z`, the release
+without the `v`), signed keylessly with cosign by
+`.github/workflows/helm-release.yml` at the release tag, with a build
+provenance attestation:
+
+```sh
+VERSION=X.Y.Z
+cosign verify ghcr.io/future-agi/charts/futureagi:$VERSION \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity https://github.com/future-agi/future-agi/.github/workflows/helm-release.yml@refs/tags/v$VERSION
+gh attestation verify oci://ghcr.io/future-agi/charts/futureagi:$VERSION --repo future-agi/future-agi \
+  --signer-workflow future-agi/future-agi/.github/workflows/helm-release.yml
+```
+
+The GitHub Release `vX.Y.Z` carries the same package,
+`futureagi-X.Y.Z.tgz`, with its signature bundle (check it with
+`cosign verify-blob futureagi-X.Y.Z.tgz --bundle futureagi-X.Y.Z.tgz.sigstore.json`
+and the same issuer and identity) and checksums
+(`futureagi-X.Y.Z.sha256`). The packaged chart pins every Future AGI image
+to the digest the release built (`image.digests`), and
+`futureagi-images-X.Y.Z.txt` lists every image it can pull as
+`repository:tag@sha256:...`, with a Hauler manifest
+(`futureagi-hauler-X.Y.Z.yaml`) for mirroring into a private registry. The
+[chart README](../deploy/helm/futureagi/README.md#verify) has the details.
 
 ## Health checks
 

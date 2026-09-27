@@ -305,7 +305,7 @@ Six prompt-optimization algorithms (GEPA, PromptWizard, ProTeGi, Bayesian, Meta-
 |  Docker Compose: Standalone | ✅ | `./bin/install`: one app container next to Postgres and ClickHouse, for a laptop or a single VM |
 |  Docker Compose: Distributed | ✅ | `./bin/install --distributed`: one container per service, for scale on one host |
 |  Production Compose overlay | ✅ | `./deploy/setup.sh` on the Distributed setup: generates secrets, pins image tags, pulls images and starts the stack ([deploy/README.md](deploy/README.md)) |
-|  Kubernetes / Helm | ✅ | Distributed on Kubernetes: [`deploy/helm/futureagi`](deploy/helm/futureagi/README.md) |
+|  Kubernetes / Helm | ✅ | Distributed on Kubernetes: `helm install futureagi oci://ghcr.io/future-agi/charts/futureagi --version X.Y.Z`, one signed chart for the open-source and Enterprise editions ([chart README](deploy/helm/futureagi/README.md)) |
 |  AWS / GCP / Azure | ✅ | Docker Compose on a VM, or the Helm chart on a Kubernetes 1.27+ cluster |
 |  AWS Marketplace | ⏳ | Coming soon |
 |  Air-gapped / on-prem | ✅ | Mirror the images, set `FUTURE_AGI_TELEMETRY_DISABLED=true` and block outbound traffic ([Telemetry](#telemetry)); [contact sales](mailto:sales@futureagi.com) for support |

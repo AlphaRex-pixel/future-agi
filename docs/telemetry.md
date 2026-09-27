@@ -196,11 +196,14 @@ With telemetry off:
 - **one** opt-out registration is still sent, so Future AGI can count installs
   that have opted out. It contains only `schema_version`, `instance_id`,
   `version`, `deployment_type`, `timestamp` and `telemetry_disabled: true`, and
-  is sent again only if you turn telemetry back on and off.
+  is sent again only if you turn telemetry back on and off. Until one gets
+  through, it is attempted again at every telemetry run.
 
 To make no connection to Future AGI at all, also block outbound traffic to
 `FUTURE_AGI_TELEMETRY_URL` at your network. The failed attempts are logged as
-warnings and change nothing else.
+warnings and change nothing else. The Helm chart's `global.airgap` sets
+`FUTURE_AGI_TELEMETRY_DISABLED=true` too: offline, that one registration
+attempt fails the same harmless way and is retried.
 
 ### Settings
 
