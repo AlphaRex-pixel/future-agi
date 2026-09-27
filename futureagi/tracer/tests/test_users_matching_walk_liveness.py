@@ -2992,3 +2992,75 @@ def test_users_that_change_between_hops_follow_the_coverage_fence(kind, seed, fa
     assert [uid for uid in names if uid not in changed] == [
         uid for uid in _expected(world) if uid not in changed
     ]
+
+
+def _windowed(family: str, days: int) -> list[dict]:
+    """``family``'s filters over the ``days`` ending at the window's end."""
+
+    date = _filters(window_start=WINDOW_END - timedelta(days=days))[0]
+    return [date, *_family_filters(family)[1:]]
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_a_user_less_scope_is_always_an_empty_complete_page(seed):
+    # No span in scope carries a user. Whatever the window, the family and
+    # what the tail estimate says (fits, over the target, unreadable), the
+    # first page is empty and complete; when the tail needs more slices than
+    # a request has, it takes three statements after the witness estimates.
+    rng = random.Random(50_000 + seed)
+    days = rng.choice([1, 3, 7, 30, 90, 365])
+    family = rng.choice(FAMILIES)
+    target = walk.USER_LIST_WALK_PROBE_TARGET_READ_ROWS
+    engine = Engine(World())
+    engine.estimate_override = rng.choice(
+        [None, target + 1, rng.randrange(target * 4), []]
+    )
+    read, engine = _page(
+        World(), page_size=25, filters=_windowed(family, days), engine=engine
+    )
+    kinds = [kind_of(call) for call in engine.calls]
+    assert read.payload["table"] == [] and read.has_more is False, kinds
+    assert read.payload["query_status"] == "complete"
+    first = next((n for n, kind in enumerate(kinds) if kind != "estimate"), 0)
+    if days >= 30:
+        assert len(kinds) - first <= 3, kinds
+    assert kinds.count("presence") <= 1
+
+
+@pytest.mark.parametrize("family", ["raw", "native", "mixed"])
+@pytest.mark.parametrize("seed", range(12))
+def test_a_member_below_a_long_empty_tail_is_never_proven_away(seed, family):
+    # The only member lies deep in a twelve-month tail below empty slices,
+    # and every tail estimate is refused. The presence statement finds its
+    # span and licenses nothing: no request is complete and empty while it
+    # is undecided, and the member is published within a bounded number of
+    # requests.
+    rng = random.Random(60_000 + 31 * seed)
+    world = World()
+    moment = WINDOW_END - timedelta(
+        days=rng.randrange(2, 360), minutes=rng.randrange(1440)
+    )
+    world.user(1, key=moment, raw=(moment,), native=True)
+    filters = _windowed(family, 365)
+    target = walk.USER_LIST_WALK_PROBE_TARGET_READ_ROWS
+    names, cursor = [], None
+    for _hop in range(12):
+        engine = Engine(world)
+        engine.estimate_override = target + 1 + rng.randrange(10**6)
+        engine.unwitnessed = [
+            WINDOW_END - timedelta(days=rng.randrange(1, 365))
+            for _ in range(rng.choice([0, 0, 3]))
+        ]
+        read, engine = _page(
+            world, page_size=25, filters=filters, cursor=cursor, engine=engine
+        )
+        names.extend(_names(read))
+        kinds = [kind_of(call) for call in engine.calls]
+        assert kinds.count("presence") <= 1
+        if not names:
+            assert read.has_more is True, (kinds, read.payload["query_status"])
+        if not read.has_more:
+            break
+        cursor = _signed_cursor(read)
+    assert names == ["user-1"]
+    assert read.has_more is False

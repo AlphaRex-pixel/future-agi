@@ -96,7 +96,13 @@ decides coverage - only the existence statement's own answer does: none
 proves the tail exhausted by the same rule an empty slice uses; a row proves
 existence, never a position, and leaves the walk slicing at the cap exactly
 where it was. The pair is asked at most once per page and once more after
-each populated slice, never twice in a row.
+each populated slice, never twice in a row. When the estimate does not
+license the existence statement, one witness-free statement asks, once per
+request and under a server cap, whether the tail holds any span with a user
+at all (``build_matching_activity_presence_query``): none proves the tail
+exhausted (a scope with no end users over twelve months completes in three
+statements, not one per day until the count runs out); a row licenses
+nothing.
 
 Budget. The walk owns a wall (``USER_LIST_PAGE_WALL_MS``) and a statement
 budget (``USER_LIST_WALK_MAX_STATEMENTS``, never less than one batch's
@@ -429,6 +435,9 @@ class _WalkState:
     # sent again without the cap: once per request
     # (``_read_native_certification``).
     uncapped_native: bool = False
+    # The tail's witness-free presence statement was sent: once per request
+    # (``_tail_is_empty``), whatever populated slices re-arm.
+    presence_checked: bool = False
     # The tied instant being decided, the id below which it was entered, and
     # the resolved ids it returned (certified), in descending order.
     instant: datetime | None = None
@@ -920,6 +929,15 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
     or on time, or when either statement fails on a read budget: a probe
     that cannot answer inside its budget licenses nothing, and the walk goes
     on slicing at the cap exactly as it would have without it.
+
+    Except for one question the estimate cannot refuse: when it does not
+    license the existence statement (over the target, over its time,
+    unreadable, or failed on a read budget), the tail may still hold no span
+    with a user at all - a scope with no end users, over twelve months - and
+    then slicing it at the cap costs every statement the request has, for
+    nothing. So the walk asks that once per request (``_tail_has_no_user``):
+    no row proves the tail exhausted; a row, or a statement that cannot
+    answer, licenses nothing.
     """
     from tracer.services import users_list_manager as ulm
 
@@ -949,11 +967,19 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
         logger.warning(
             "users_matching_walk_tail_estimate_failed", error_type=type(exc).__name__
         )
-        return None
+        return _tail_has_no_user(
+            state,
+            below=below,
+            left_ms=probe_wall_ms - (time.monotonic() - started) * 1000.0,
+        )
     estimate_ms = _statement_ms(estimate, started)
     rows = state.builder.matching_activity_existence_estimate(
         list(estimate.data or ()), getattr(estimate, "columns", None)
     )
+    # What the estimate left of the probe's budget; the existence statement
+    # repeats the estimate's index analysis before it reads a row, so it is
+    # issued only when a statement of the estimate's own time fits there.
+    probe_left_ms = probe_wall_ms - estimate_ms
     if rows is None or rows > USER_LIST_WALK_PROBE_TARGET_READ_ROWS:
         logger.info(
             "users_matching_walk_tail_probe_refused",
@@ -961,18 +987,14 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
             target_rows=USER_LIST_WALK_PROBE_TARGET_READ_ROWS,
             estimate_ms=round(estimate_ms, 1),
         )
-        return None
-    # What the estimate left of the probe's budget; the existence statement
-    # repeats the estimate's index analysis before it reads a row, so it is
-    # issued only when a statement of the estimate's own time fits there.
-    probe_left_ms = probe_wall_ms - estimate_ms
+        return _tail_has_no_user(state, below=below, left_ms=probe_left_ms)
     if estimate_ms > probe_left_ms:
         logger.info(
             "users_matching_walk_tail_probe_over_budget",
             estimate_ms=round(estimate_ms, 1),
             probe_wall_ms=probe_wall_ms,
         )
-        return None
+        return _tail_has_no_user(state, below=below, left_ms=probe_left_ms)
     if not state.budget.take(1):
         return None
     query, params = state.builder.build_matching_activity_existence_query(
@@ -993,6 +1015,68 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
         )
         return None
     return not list(result.data or ())
+
+
+def _tail_has_no_user(
+    state: _WalkState, *, below: datetime, left_ms: float
+) -> bool | None:
+    """``True`` when no span with a user lies in ``[window_start, below)``.
+
+    One statement, once per request (``presence_checked``): the slices' own
+    range predicate - project, time terms, ``isNotNull(end_user_id)``, the
+    empty-scope guard - with no witness at all, ``LIMIT 1``
+    (``build_matching_activity_presence_query``), under a server cap of
+    ``left_ms``, what the tail probe's wall has left; with less than 25 ms
+    left it is not sent. It never publishes ``complete`` while a member
+    exists below ``below``: the slice and existence predicate is that range
+    predicate AND the witness, over the same range with the same parameters,
+    so no row for the range predicate means no row for the witness either,
+    and every undecided member's newest match is such a row below ``below``
+    (module docstring). It removes work only where the existence statement
+    would also have answered "none".
+
+    ``None`` licenses nothing - a row, a statement stopped at its cap or
+    failed on a read budget, no wall or count left, or a request that asked
+    already - and the walk slices on at the cap.
+    """
+    from tracer.services import users_list_manager as ulm
+
+    if state.presence_checked or left_ms < 25:
+        return None
+    state.presence_checked = True
+    if not state.budget.take(1):
+        return None
+    cap_ms = int(left_ms)
+    query, params = state.builder.build_matching_activity_presence_query(
+        range_start=state.window_start, range_end=below
+    )
+    started = time.monotonic()
+    try:
+        result = ulm.V2AnalyticsQueryService().execute_ch_query(
+            query,
+            params,
+            timeout_ms=cap_ms,
+            settings=ulm._page_replay_read_settings(max_result_rows=1),
+            server_execution_cap_ms=cap_ms,
+        )
+    except ReadDeadlineExceeded:
+        _probe_wall_spent(state)
+        return None
+    except Exception as exc:
+        if not is_read_budget_error(exc):
+            raise
+        logger.warning(
+            "users_matching_walk_tail_presence_failed", error_type=type(exc).__name__
+        )
+        return None
+    present = bool(list(result.data or ()))
+    logger.info(
+        "users_matching_walk_tail_presence",
+        present=present,
+        cap_ms=cap_ms,
+        presence_ms=round(_statement_ms(result, started), 1),
+    )
+    return None if present else True
 
 
 def _witness_candidates(

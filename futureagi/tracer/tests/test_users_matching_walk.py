@@ -157,6 +157,8 @@ def kind_of(query: str) -> str:
         return "estimate"
     if "AS witnessed" in query:
         return "probe"
+    if "AS present" in query:
+        return "presence"
     if "dimension_candidate_ids" in query:
         return "remap"
     if "latest_candidate_attribute_values" in query:
@@ -182,6 +184,10 @@ class Engine:
         self.slice_ranges: list[tuple[datetime, datetime]] = []
         self.instant_ranges: list[tuple[datetime, datetime]] = []
         self.probe_ranges: list[tuple[datetime, datetime]] = []
+        self.presence_ranges: list[tuple[datetime, datetime]] = []
+        # Spans with a user that no witness matches: only the witness-free
+        # presence statement sees them.
+        self.unwitnessed: list[datetime] = []
         self.estimate_ranges: list[tuple[datetime, datetime]] = []
         self.replay_ranges: list[tuple[datetime, datetime]] = []
         # The estimate table the scripted server returns for a tail: by
@@ -228,6 +234,8 @@ class Engine:
             return self._estimate(params)
         if kind == "probe":
             return self._probe(params)
+        if kind == "presence":
+            return self._presence(params)
         if kind == "remap":
             return self._remap(params)
         if kind == "enrich":
@@ -297,6 +305,25 @@ class Engine:
         found = bool(self._witnessed(params, self.probe_ranges))
         return SimpleNamespace(
             data=[{"witnessed": 1}] if found else [], query_time_ms=1.0
+        )
+
+    def _presence(self, params):
+        """Any span with a user in range, whatever it matches."""
+
+        low, high = _from_us(params["slice_start_us"]), _from_us(params["slice_end_us"])
+        self.presence_ranges.append((low, high))
+        moments = [
+            *(moment for moment, _raw_id in self.world.raw),
+            *(
+                moment
+                for leaf in self.world.leaves.values()
+                for moment, _id in leaf["raw"]
+            ),
+            *self.unwitnessed,
+        ]
+        found = any(low <= moment < high for moment in moments)
+        return SimpleNamespace(
+            data=[{"present": 1}] if found else [], query_time_ms=1.0
         )
 
     @staticmethod
@@ -2747,8 +2774,10 @@ def test_an_estimate_over_the_target_or_unreadable_licenses_no_wide_statement():
 
     Over the target (bloom false positives across a long tail), or a result
     the reducer cannot read (an empty estimate table, another table, no
-    integer): the existence statement is not issued and the walk slices at
-    the cap, partial + cursor when the budget runs out.
+    integer): the existence statement is not issued. The tail holds spans
+    with a user (none witnessed), so the witness-free presence statement
+    finds one and licenses nothing either: the walk slices at the cap,
+    partial + cursor when the budget runs out.
     """
     thirty_days = _filters(window_start=WINDOW_END - timedelta(days=30))
     for override in (
@@ -2767,11 +2796,12 @@ def test_an_estimate_over_the_target_or_unreadable_licenses_no_wide_statement():
     ):
         engine = Engine(World())
         engine.estimate_override = override
+        engine.unwitnessed = [WINDOW_END - timedelta(days=20)]
         with patch.object(walk, "_statement_budget", return_value=4):
             read, engine = _page(
                 World(), page_size=25, filters=thirty_days, engine=engine
             )
-        assert _kinds(engine) == ["slice", "estimate", "slice", "slice"], override
+        assert _kinds(engine) == ["slice", "estimate", "presence", "slice"], override
         assert "probe" not in _kinds(engine)
         assert read.has_more is True and read.payload["table"] == []
         cap = walk.USER_LIST_WALK_MAX_SLICE
@@ -2860,9 +2890,10 @@ def test_a_probe_the_budget_refuses_or_that_fails_licenses_nothing():
         return original(query, params, timeout_ms, settings, **caps)
 
     engine.execute_ch_query = failing_estimate
+    engine.unwitnessed = [WINDOW_END - timedelta(days=20)]
     with patch.object(walk, "_statement_budget", return_value=4):
         read, engine = _page(world, page_size=25, filters=thirty_days, engine=engine)
-    assert _kinds(engine) == ["slice", "estimate", "slice", "slice"]
+    assert _kinds(engine) == ["slice", "estimate", "presence", "slice"]
     assert read.has_more is True and read.payload["table"] == []
 
     # With the budget spent on the estimate itself, the page ends there.
@@ -2910,9 +2941,10 @@ def test_an_estimate_over_its_time_budget_licenses_no_wide_statement():
     thirty_days = _filters(window_start=WINDOW_END - timedelta(days=30))
     engine = Engine(World())
     engine.estimate_ms = walk.USER_LIST_WALK_PROBE_WALL_MS / 2 + 1
+    engine.unwitnessed = [WINDOW_END - timedelta(days=20)]
     with patch.object(walk, "_statement_budget", return_value=4):
         read, engine = _page(World(), page_size=25, filters=thirty_days, engine=engine)
-    assert _kinds(engine) == ["slice", "estimate", "slice", "slice"]
+    assert _kinds(engine) == ["slice", "estimate", "presence", "slice"]
     assert read.has_more is True and read.payload["table"] == []
     cap = walk.USER_LIST_WALK_MAX_SLICE
     assert max(high - low for low, high in engine.slice_ranges) <= cap
@@ -2949,6 +2981,126 @@ def test_a_probe_deadline_raised_in_the_transport_ends_the_probe_not_the_page():
         read, engine = _page(world, page_size=25, filters=thirty_days, engine=engine)
     assert _kinds(engine) == ["slice", "estimate", "slice", "slice"]
     assert read.has_more is True and read.payload["table"] == []
+
+
+def _twelve_months(filters=None):
+    start = WINDOW_END - timedelta(days=365)
+    date = _filters(window_start=start)[0]
+    return [date, *(filters or [_native_status_leaf()])]
+
+
+@pytest.mark.parametrize(
+    "leaves",
+    [
+        [_native_status_leaf()],
+        [_model_leaf()],
+        [_native_leaf("provider", "equals", "openai", col_type="SYSTEM_METRIC")],
+        [_native_leaf("observation_type", "equals", "llm", col_type="SYSTEM_METRIC")],
+        None,
+    ],
+    ids=["status", "model", "provider", "observation_type", "raw"],
+)
+def test_a_user_less_twelve_month_scope_is_an_empty_complete_page_in_three_statements(
+    leaves,
+):
+    # The production MUD shape: no end user in scope, twelve months, the
+    # tail estimate over the target. The walk sliced at the one-day cap
+    # until four budgets ran out (96 statements) and returned an empty page
+    # marked "more available". The witness-free presence statement proves
+    # the tail has no span with a user at all: empty, complete, three
+    # statements.
+    filters = (
+        _twelve_months(leaves)
+        if leaves
+        else _filters(window_start=WINDOW_END - timedelta(days=365))
+    )
+    engine = Engine(World())
+    engine.estimate_override = walk.USER_LIST_WALK_PROBE_TARGET_READ_ROWS + 1
+    read, engine = _page(World(), page_size=25, filters=filters, engine=engine)
+    assert _kinds(engine) == ["slice", "estimate", "presence"]
+    assert read.payload["table"] == [] and read.has_more is False
+    assert read.checkpoint_order is None
+    assert read.payload["query_status"] == "complete"
+    presence = engine.calls[2]
+    assert "LIMIT 1" in presence and "isNotNull(end_user_id)" in presence
+    # No witness: the leaf's predicate is not in it.
+    assert "attrs_" not in presence and "native_leaf" not in presence
+    tail = (WINDOW_END - timedelta(days=365), engine.slice_ranges[0][0])
+    assert engine.presence_ranges == [tail]
+    cap = engine.caps[2]
+    assert cap is not None and 25 <= cap <= walk.USER_LIST_WALK_PROBE_WALL_MS
+    assert engine.timeouts[2] == cap
+    assert engine.settings[2] == ulm._page_replay_read_settings(max_result_rows=1)
+
+
+@_plain_count
+def test_a_tail_with_users_but_no_witness_licenses_nothing_and_slices_on():
+    # Users exist below the first empty slice, none matching: the presence
+    # statement finds a row and licenses nothing. The walk slices at the cap
+    # exactly as before, and a later empty slice asks neither statement
+    # again (no populated slice re-armed the probe).
+    engine = Engine(World())
+    engine.estimate_override = walk.USER_LIST_WALK_PROBE_TARGET_READ_ROWS + 1
+    engine.unwitnessed = [WINDOW_END - timedelta(days=200)]
+    read, engine = _page(World(), page_size=25, filters=_twelve_months(), engine=engine)
+    kinds = _kinds(engine)
+    assert kinds[:3] == ["slice", "estimate", "presence"]
+    assert set(kinds[3:]) == {"slice"}
+    assert read.has_more is True and read.payload["table"] == []
+    assert read.payload["query_status"] == "degraded"
+    cap = walk.USER_LIST_WALK_MAX_SLICE
+    assert max(high - low for low, high in engine.slice_ranges) <= cap
+
+
+@_plain_count
+def test_a_presence_statement_stopped_at_its_cap_licenses_nothing():
+    engine = Engine(World())
+    engine.estimate_override = walk.USER_LIST_WALK_PROBE_TARGET_READ_ROWS + 1
+    original = engine.execute_ch_query
+
+    def stopped(query, params=None, timeout_ms=None, settings=None, **caps):
+        if kind_of(query) == "presence":
+            engine.calls.append(query)
+            raise ReadDeadlineExceeded("stopped at its cap")
+        return original(query, params, timeout_ms, settings, **caps)
+
+    engine.execute_ch_query = stopped
+    read, engine = _page(World(), page_size=25, filters=_twelve_months(), engine=engine)
+    kinds = _kinds(engine)
+    assert kinds[:3] == ["slice", "estimate", "presence"]
+    assert set(kinds[3:]) == {"slice"}
+    # Never "complete" on an answer it did not get.
+    assert read.has_more is True and read.payload["query_status"] == "degraded"
+
+
+def test_the_presence_statement_is_sent_at_most_once_a_request():
+    # A member two days down re-arms the tail probe after its populated
+    # slice; the next refused estimate sends no second presence statement.
+    world = World()
+    for ordinal, days in ((1, 2), (2, 300)):
+        moment = WINDOW_END - timedelta(days=days)
+        world.user(ordinal, key=moment, raw=(moment,), native=True)
+    engine = Engine(world)
+    engine.estimate_override = walk.USER_LIST_WALK_PROBE_TARGET_READ_ROWS + 1
+    read, engine = _page(world, page_size=25, filters=_twelve_months(), engine=engine)
+    kinds = _kinds(engine)
+    assert kinds.count("presence") == 1
+    assert kinds.count("estimate") >= 2
+    assert "user-1" in _names(read)
+    names = _names(read)
+    while read.has_more:
+        engine = Engine(world)
+        engine.estimate_override = walk.USER_LIST_WALK_PROBE_TARGET_READ_ROWS + 1
+        read, engine = _page(
+            world,
+            page_size=25,
+            filters=_twelve_months(),
+            cursor=_signed_cursor(read),
+            engine=engine,
+        )
+        assert _kinds(engine).count("presence") <= 1
+        names.extend(_names(read))
+    assert names == ["user-1", "user-2"]
 
 
 def test_seeded_and_unfiltered_candidate_statements_are_byte_identical_to_the_pins():

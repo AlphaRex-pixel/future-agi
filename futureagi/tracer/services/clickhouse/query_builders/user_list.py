@@ -969,6 +969,35 @@ class UserListQueryBuilder(BaseQueryBuilder):
         """
         return query, params
 
+    def build_matching_activity_presence_query(
+        self, *, range_start: Any, range_end: Any
+    ) -> tuple[str, dict[str, Any]]:
+        """Whether any span with a user lies in ``[range_start, range_end)``.
+
+        The slice and existence statements' own range predicate - project,
+        time terms, ``isNotNull(end_user_id)``, the empty-scope guard - with
+        the same parameters and NO witness, ``LIMIT 1``. Every witnessed row
+        a slice or existence statement could return satisfies it, so no row
+        here proves those statements would return none over the same range;
+        a row proves nothing about any witness. ``isNotNull(end_user_id)`` is
+        answered through the projection keyed by end user, so a scope with no
+        end users reads only boundary granules. The walk sends it once per
+        request, when the existence statement's estimate does not license
+        that statement, under a server cap.
+        """
+        params = self._matching_activity_range_params(range_start, range_end)
+        params.pop("_witness_sql")
+        for name in self.walk_witness.params if self.walk_witness else {}:
+            params.pop(name, None)
+        query = f"""
+        SELECT 1 AS present
+        FROM spans
+        PREWHERE {self._matching_activity_range_predicate()}
+        LIMIT 1
+        {_SEEDED_PAGE_READ_SETTINGS}
+        """
+        return query, params
+
     def build_matching_activity_existence_estimate_query(
         self,
         *,
