@@ -42,8 +42,11 @@ value spread over many granules can lose to a leaf with more users; two fresh
 first pages can walk different leaves, and so order differently, when the
 data flips the estimates between them; a native estimate stopped at its cap
 spends the shared wall, so no estimate after it answers, and when none before
-it did the static (raw-first) walk stands; on a lane whose ClickHouse profile
-is read-only the estimates are admitted only, uncapped.
+it did the static (raw-first) walk stands; a rare raw value whose estimate
+does not answer loses to any native leaf whose estimate did, however dense
+that leaf is (the page then walks, say, a model every span carries); on a lane
+whose ClickHouse profile is read-only the estimates are admitted only,
+uncapped.
 
 The order key follows the witness: the newest live span whose latest state
 satisfies the witness leaf, over the whole window. Then:
@@ -697,12 +700,13 @@ def _read_slice(
     whose retry the page wall refuses, ends it.
 
     What stays unbounded. Survivor, instant and attribute enrichment
-    statements and the tail estimate never carry a server cap (the
-    application's no-abort policy): a wall only decides whether they start.
-    The exceptions: the server stops the native span-dimension statement at
-    its cap (``_native_certification_deadline``), and the witness estimates
-    and the tail's existence and presence statements at what the probe wall
-    has left (``_choose_witness``, ``_tail_is_empty``). The escape lifts the walls,
+    statements never carry a server cap (the application's no-abort policy):
+    a wall only decides whether they start. The exceptions: the server stops
+    the native span-dimension statement at its cap
+    (``_native_certification_deadline``), the witness estimates at what the
+    choice wall has left (``_choose_witness``), and the tail estimate and the
+    tail's existence and presence statements at their share of what the probe
+    wall has left (``_tail_is_empty``, ``_tail_has_no_user``). The escape lifts the walls,
     once per request, for the head-of-line decision: the uncapped slice, its
     survivor statement, the instant read and its survivor statement when the
     slice comes back tied at one instant, and one batch's certification (and
