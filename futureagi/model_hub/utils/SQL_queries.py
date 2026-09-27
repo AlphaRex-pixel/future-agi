@@ -750,8 +750,9 @@ class SQLQueryHandler:
             row_ids_condition = "AND c.row_id = ANY(%s)"
             params.append(row_ids)
 
-        # Choices are template-authored text: bind them for the unnest() below.
-        params.append(list(choices))
+        # Choices are template-authored text: bind them for the unnest() below,
+        # each as its text, as the query compared them before it bound them.
+        params.append([str(choice) for choice in choices])
 
         # Check if the function exists first
         check_function_sql = """

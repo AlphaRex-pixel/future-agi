@@ -70,3 +70,53 @@ def test_choice_stats_count_choices_containing_an_apostrophe(user, workspace, sc
 
     counts = {row[4]: (row[6], float(row[7])) for row in rows}
     assert counts == {"Yes": (2, 66.67), "Don't know": (1, 33.33)}
+
+
+@pytest.mark.django_db
+def test_choice_stats_keep_non_text_choices_as_their_text(user, workspace):
+    # The query text used to hold each choice as '{choice}', so a numeric or
+    # boolean choice was compared as its str(). Binding must keep that.
+    template = EvalTemplate.no_workspace_objects.create(
+        name="choice-stats-mixed",
+        organization=user.organization,
+        workspace=workspace,
+        owner=OwnerChoices.USER.value,
+        config={"output": "choices"},
+        choices=["Yes", 1, True],
+    )
+    dataset = Dataset.objects.create(
+        name="choice-stats-mixed",
+        organization=user.organization,
+        user=user,
+        source=DatasetSourceChoices.BUILD.value,
+        model_type=ModelTypes.GENERATIVE_LLM.value,
+        workspace=workspace,
+    )
+    metric = UserEvalMetric.objects.create(
+        name="choice-stats-mixed-metric",
+        organization=user.organization,
+        workspace=workspace,
+        dataset=dataset,
+        template=template,
+        config={"mapping": {}},
+        user=user,
+    )
+    column = Column.objects.create(
+        name="choice-stats-mixed-metric",
+        data_type=DataTypeChoices.ARRAY.value,
+        source=SourceChoices.EVALUATION.value,
+        source_id=str(metric.id),
+        dataset=dataset,
+    )
+    for order, value in enumerate(['["Yes"]', '["1"]', '["True"]', '["Yes"]']):
+        row = Row.objects.create(dataset=dataset, order=order)
+        Cell.objects.create(dataset=dataset, row=row, column=column, value=value)
+
+    rows = SQLQueryHandler.get_cells_choices_analysis(
+        dataset_id=str(dataset.id),
+        eval_template_id=str(template.id),
+        choices=template.choices,
+    )
+
+    counts = {row[4]: row[6] for row in rows}
+    assert counts == {"Yes": 2, "1": 1, "True": 1}
