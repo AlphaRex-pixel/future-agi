@@ -52,8 +52,9 @@ def _pending(**_):
     return graph_dispatch._pending_graph_payload("latency")
 
 
-def test_version_is_one():
-    assert OBSERVE_SYSTEM_GRAPH_PAYLOAD_VERSION == 1
+def test_version_is_two():
+    # 1 was the never-released median; 2 is the mean on every path.
+    assert OBSERVE_SYSTEM_GRAPH_PAYLOAD_VERSION == 2
 
 
 def test_trace_graph_identity_is_versioned(monkeypatch):
@@ -159,15 +160,17 @@ def test_session_graph_identity_is_versioned(monkeypatch):
         "observe-user-system-graph",
     ],
 )
-def test_versioned_identity_never_reads_an_unversioned_snapshot(namespace):
-    legacy = {
+@pytest.mark.parametrize("earlier", [None, 1], ids=["unversioned", "median-v1"])
+def test_versioned_identity_never_reads_an_earlier_snapshot(namespace, earlier):
+    base = {
         "project_id": PROJECT,
         "filters": [_MODEL_FILTER],
         "interval": "day",
         "metric_id": "latency",
         "organization_id": ORG,
     }
-    versioned = {**legacy, "payload_version": OBSERVE_SYSTEM_GRAPH_PAYLOAD_VERSION}
+    legacy = base if earlier is None else {**base, "payload_version": earlier}
+    versioned = {**base, "payload_version": OBSERVE_SYSTEM_GRAPH_PAYLOAD_VERSION}
 
     assert exact_aggregation_cache.snapshot_cache_key(
         namespace, versioned

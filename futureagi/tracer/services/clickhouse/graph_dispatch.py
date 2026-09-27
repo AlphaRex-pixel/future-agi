@@ -79,11 +79,16 @@ GRAPH_RESULT_BYTES = settings.DASHBOARD_ROLLUP_MAX_RESULT_BYTES
 # the retired hierarchy-as-path projection.
 AGENT_GRAPH_PAYLOAD_VERSION = 5
 # The same, for the exact system-metric snapshots (observe-system-graph,
-# observe-session-system-graph, observe-user-system-graph). Version 1: latency
-# is the t-digest median. Snapshots cached before it hold a mean and must never
-# be served under the "median" label, so the identity (and with it the cache,
-# alias, refresh-lock and refresh-state keys) rotates.
-OBSERVE_SYSTEM_GRAPH_PAYLOAD_VERSION = 1
+# observe-session-system-graph, observe-user-system-graph). Each version
+# rotates the identity, and with it the cache, alias, refresh-lock and
+# refresh-state keys:
+# - 1: latency was the t-digest median (never released);
+# - 2: latency is the mean on every path and the users graph is the pooled
+#   span mean, not dev's mean of per-user means. No snapshot of an earlier
+#   version is ever read. Within a version, a latency snapshot is served only
+#   when marked "mean" (graph_metric_statistic.snapshot_names_its_statistic),
+#   which covers an older worker taking a current-version job mid-deploy.
+OBSERVE_SYSTEM_GRAPH_PAYLOAD_VERSION = 2
 # A short-window selector may prove as many as 4,096 trace matches. Decoration
 # fans each trace set into child-span reads, so keep the same finite 40-trace
 # envelope used by the long-window sampler before any decoration query runs.
