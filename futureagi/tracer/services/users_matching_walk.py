@@ -31,15 +31,18 @@ raw value on every span read 10-12 GB a page for 0 users when the raw leaf,
 first in the static rank, was walked). So a first page with two or more
 eligible witnesses costs the first ``USER_LIST_WALK_WITNESS_CANDIDATES`` of them
 with one ``EXPLAIN ESTIMATE`` each over the whole window (index analysis, no
-column data, inside ``USER_LIST_WALK_PROBE_WALL_MS``, each under a server cap)
-and walks the one whose weighted rows are fewest (``_choose_witness``); an
-estimate that cannot answer leaves the static rank's first. The choice is
-bound into the cursor, and a continuation walks it without measuring
-(``_bound_witness``). Known misses: the estimate measures scan cost, not
-candidates, so a rare raw value spread over many granules can lose to a leaf
-with more users; two fresh first pages can walk different leaves, and so order
-differently, when the data flips the estimates between them; on a lane whose
-ClickHouse profile is read-only the estimates are admitted only, uncapped.
+column data, inside ``USER_LIST_WALK_PROBE_WALL_MS``, each under a server cap),
+native candidates first, and walks the one whose weighted rows are fewest
+among the estimates that answered (``_choose_witness``); only when none
+answered does the static rank's first stand. The choice is bound into the
+cursor, and a continuation walks it without measuring (``_bound_witness``).
+Known misses: the estimate measures scan cost, not candidates, so a rare raw
+value spread over many granules can lose to a leaf with more users; two fresh
+first pages can walk different leaves, and so order differently, when the
+data flips the estimates between them; a native estimate stopped at its cap
+spends the shared wall, so no estimate after it answers, and when none before
+it did the static (raw-first) walk stands; on a lane whose ClickHouse profile
+is read-only the estimates are admitted only, uncapped.
 
 The order key follows the witness: the newest live span whose latest state
 satisfies the witness leaf, over the whole window. Then:
@@ -1104,28 +1107,37 @@ def _choose_witness(
 ) -> int:
     """Walk the candidate whose whole-window scan the index says is cheapest.
 
-    One ``EXPLAIN ESTIMATE`` per candidate, in static rank order, of that
-    candidate's existence statement over ``[window_start, decided_from)``
+    One ``EXPLAIN ESTIMATE`` per candidate of that candidate's existence
+    statement over ``[window_start, decided_from)``
     (``build_matching_activity_existence_estimate_query``): index analysis
     only, no column data. Its rows are the granules that witness's slices
     would read - a raw witness's those the key and value blooms keep,
     ``status``'s those ``idx_status`` keeps, any other native one's the
     primary-key range - weighted by what a row of that family costs
-    (``USER_LIST_WALK_RAW_WITNESS_ROW_WEIGHT`` for raw, 1 for native). The
-    least weighted count wins, ties to the static order. A scan cost over
-    the whole window, not a count over its newest slice: a raw value absent
-    from the newest week, or errors absent from the newest day, would pick
-    the wrong leaf there.
+    (``USER_LIST_WALK_RAW_WITNESS_ROW_WEIGHT`` for raw, 1 for native). A
+    scan cost over the whole window, not a count over its newest slice: a
+    raw value absent from the newest week, or errors absent from the newest
+    day, would pick the wrong leaf there.
 
-    The estimates share one wall, ``USER_LIST_WALK_PROBE_WALL_MS`` or what
-    is left of the page wall, whichever is smaller; each is charged one
-    statement and carries what is left of that wall as its server cap. An
-    estimate that is unreadable, fails on a read budget, is stopped at its
-    cap, or finds no wall or count to start in, leaves the static choice,
-    the first candidate, for the whole request: never worse than without
-    the choice. Every eligible witness keeps the walk exact; the choice
-    decides nothing but which one this cursor walks (``_bound_witness``
-    continues it). Returns the estimates sent.
+    The native candidates are estimated first, in static rank order, then
+    the raw ones: a native estimate reads the set index or the primary key,
+    a raw one the key and value blooms (hundreds of times the index bytes),
+    so a slow raw estimate cannot spend the wall before a native one
+    answers. The estimates share one wall, ``USER_LIST_WALK_PROBE_WALL_MS``
+    or what is left of the page wall, whichever is smaller; each is charged
+    one statement and carries what is left of that wall as its server cap.
+
+    The rule: the least weighted count among the estimates that ANSWERED
+    wins, ties to the static order. An estimate that did not answer - stopped
+    at its cap, failed on a read budget, unreadable, or never sent because
+    no wall or count was left - is never chosen while another answered: a
+    raw leaf whose estimate did not answer is not cheaper than any answered
+    native leaf (the static rank's raw-first walk is the failure the choice
+    exists for: 10-12 GB a page for 0 users). Only when no estimate answered
+    does the static choice, the first candidate, stand. Every eligible
+    witness keeps the walk exact; the choice decides nothing but which one
+    this cursor walks (``_bound_witness`` continues it). Returns the
+    estimates sent.
     """
     from tracer.services import users_list_manager as ulm
 
@@ -1134,15 +1146,21 @@ def _choose_witness(
     spent_ms = 0.0
     sent = 0
     measured: list[dict[str, Any]] = []
-    fallback: str | None = None
+    unanswered: list[dict[str, Any]] = []
+    stop: str | None = None
     settings = ulm._page_replay_read_settings(max_result_rows=1)
-    for witness, _typed in candidates:
+    order = sorted(
+        range(len(candidates)),
+        key=lambda index: (candidates[index][0].family == "raw", index),
+    )
+    for position in order:
+        witness = candidates[position][0]
         left_ms = int(wall_ms - spent_ms)
         if left_ms < 25:
-            fallback = "no_wall"
+            stop = "no_wall"
             break
         if not state.budget.take(1):
-            fallback = "no_budget"
+            stop = "no_budget"
             break
         sent += 1
         query, params = builder.build_matching_activity_existence_estimate_query(
@@ -1150,6 +1168,7 @@ def _choose_witness(
             range_end=state.decided_from,
             witness=witness,
         )
+        described = {"family": witness.family, "column": witness.key}
         started = time.monotonic()
         try:
             estimate = ulm.V2AnalyticsQueryService().execute_ch_query(
@@ -1159,39 +1178,50 @@ def _choose_witness(
                 settings=settings,
                 server_execution_cap_ms=left_ms,
             )
-        except ReadDeadlineExceeded:
-            _probe_wall_spent(state)
-            fallback = "stopped"
-            break
         except Exception as exc:
             if not is_read_budget_error(exc):
                 raise
-            fallback = type(exc).__name__
-            break
+            # A stop at the cap and a read-budget failure answer nothing;
+            # what they took comes off the shared wall.
+            spent_ms += (time.monotonic() - started) * 1000.0
+            reason = (
+                "stopped"
+                if isinstance(exc, ReadDeadlineExceeded)
+                else type(exc).__name__
+            )
+            unanswered.append({**described, "reason": reason})
+            _probe_wall_spent(state)
+            if state.budget.exhausted_by is not None:
+                stop = "page_wall"
+                break
+            continue
         estimate_ms = _statement_ms(estimate, started)
         spent_ms += estimate_ms
         rows = builder.matching_activity_existence_estimate(
             list(estimate.data or ()), getattr(estimate, "columns", None)
         )
         if rows is None:
-            fallback = "unreadable"
-            break
+            unanswered.append({**described, "reason": "unreadable"})
+            continue
         weight = USER_LIST_WALK_RAW_WITNESS_ROW_WEIGHT if witness.family == "raw" else 1
         measured.append(
             {
-                "family": witness.family,
-                "column": witness.key,
+                **described,
+                "position": position,
                 "rows": rows,
                 "cost": rows * weight,
                 "ms": round(estimate_ms, 1),
             }
         )
-    if fallback is None:
-        position = min(
-            range(len(measured)), key=lambda index: (measured[index]["cost"], index)
-        )
+    if measured:
+        position = min(measured, key=lambda entry: (entry["cost"], entry["position"]))[
+            "position"
+        ]
+        fallback = None
     else:
+        # Nothing answered: the static choice.
         position = 0
+        fallback = stop or (unanswered[0]["reason"] if unanswered else "no_estimate")
     witness, typed = candidates[position]
     state.manager.use_walk_witness(witness, typed)
     state.witness = witness
@@ -1202,7 +1232,9 @@ def _choose_witness(
         column=witness.key,
         static_position=position,
         fallback=fallback,
+        stop=stop,
         candidates=measured,
+        unanswered=unanswered,
     )
     return sent
 

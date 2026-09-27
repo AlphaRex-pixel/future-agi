@@ -12,6 +12,7 @@ import copy
 import hashlib
 import itertools
 import re
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -1387,7 +1388,8 @@ def test_a_dense_raw_leaf_and_a_rare_error_leaf_walk_the_error_leaf():
     read, engine = _page(world, page_size=25, filters=filters)
     kinds = _kinds(engine)
     assert kinds[:2] == ["estimate", "estimate"]
-    assert engine.estimated == ["tag", "error"]
+    # The native leaf is estimated first (``_choose_witness``).
+    assert engine.estimated == ["error", "tag"]
     error_only = [*_date_only(), _native_status_leaf()]
     assert read.checkpoint_order[4] == _fingerprint(error_only)
     names = _names(read)
@@ -1419,7 +1421,7 @@ def test_a_choice_whose_estimates_flip_before_the_next_page_keeps_its_witness():
     world, expected = _dense_raw_world(60, 30)
     filters = [*_filters(), _native_status_leaf()]
     read, engine = _page(world, page_size=10, filters=filters)
-    assert engine.estimated == ["tag", "error"]
+    assert engine.estimated == ["error", "tag"]
     names = _names(read)
     while read.has_more:
         engine = Engine(world)
@@ -1436,7 +1438,7 @@ def test_a_choice_whose_estimates_flip_before_the_next_page_keeps_its_witness():
     assert names == expected
 
 
-@pytest.mark.parametrize(
+_UNANSWERED = pytest.mark.parametrize(
     "answer",
     [
         [],
@@ -1446,31 +1448,64 @@ def test_a_choice_whose_estimates_flip_before_the_next_page_keeps_its_witness():
     ],
     ids=["unreadable", "another-table", "capped", "read-budget"],
 )
-def test_an_estimate_that_cannot_answer_leaves_the_static_choice(answer):
+
+
+def _unanswered(engine: Engine, leaf: str, answer) -> None:
+    """Make ``leaf``'s estimate answer nothing: an unreadable plan, or ``answer`` raised."""
+
+    if not isinstance(answer, list):
+        engine.estimate_by[leaf] = answer
+        return
+    original = engine._estimate
+
+    def estimate(params):
+        if engine._estimated_witness(params) == leaf:
+            engine.estimated.append(leaf)
+            return SimpleNamespace(
+                data=answer,
+                columns=["database", "table", "parts", "rows", "marks"],
+                query_time_ms=1.0,
+            )
+        return original(params)
+
+    engine._estimate = estimate
+
+
+@_UNANSWERED
+def test_a_raw_estimate_that_cannot_answer_never_outbids_an_answered_native_leaf(
+    answer,
+):
+    # The measured production failure's shape, with the raw estimate the one
+    # that cannot answer (stopped at its cap on a cold index, unreadable, or
+    # failed on a read budget). The native leaf is estimated first and
+    # answered; the raw leaf, unanswered, is not cheaper than it: the page
+    # walks the error leaf, never the static raw-first walk.
+    world, expected = _dense_raw_world(600, 30)
+    filters = [*_filters(), _native_status_leaf()]
+    engine = Engine(world)
+    engine.estimate_by = {"error": 30}
+    _unanswered(engine, "tag", answer)
+    with patch.object(walk, "is_read_budget_error", lambda exc: True):
+        read, engine = _page(world, page_size=25, filters=filters, engine=engine)
+    slices = [call for call in engine.calls if kind_of(call) == "slice"]
+    assert slices and not any("attrs_string" in call for call in slices)
+    error_only = [*_date_only(), _native_status_leaf()]
+    assert read.checkpoint_order[4] == _fingerprint(error_only)
+    assert _names(read) == expected[:25]
+    assert engine.estimated == ["error", "tag"]
+
+
+@_UNANSWERED
+def test_a_native_estimate_that_cannot_answer_leaves_the_answered_raw_leaf(answer):
     world, _expected = _dense_raw_world(40, 5)
     filters = [*_filters(), _native_status_leaf()]
     engine = Engine(world)
-    if isinstance(answer, list):
-        original = engine._estimate
-
-        def estimate(params):
-            if engine._estimated_witness(params) == "error":
-                engine.estimated.append("error")
-                return SimpleNamespace(
-                    data=answer,
-                    columns=["database", "table", "parts", "rows", "marks"],
-                    query_time_ms=1.0,
-                )
-            return original(params)
-
-        engine._estimate = estimate
-    else:
-        engine.estimate_by = {"error": answer}
+    _unanswered(engine, "error", answer)
     with patch.object(walk, "is_read_budget_error", lambda exc: True):
         read, engine = _page(world, page_size=25, filters=filters, engine=engine)
-    # The first estimate was read, the second could not answer: the static
-    # choice (the raw leaf, ranked first) for the whole request.
-    assert engine.estimated == ["tag", "error"]
+    # The native estimate is sent first and cannot answer; the raw one is
+    # still sent inside the wall and answers: the only answer is walked.
+    assert engine.estimated == ["error", "tag"]
     assert read.checkpoint_order is None or read.checkpoint_order[4] == _fingerprint(
         _filters()
     )
@@ -1483,17 +1518,55 @@ def test_an_estimate_that_cannot_answer_leaves_the_static_choice(answer):
     assert _names(read) == _names(static)
 
 
-def test_estimates_that_find_no_wall_left_leave_the_static_choice():
-    # The choice's wall is spent by the first estimate: the second is never
-    # sent, and the static choice stands.
+def test_estimates_that_find_no_wall_left_walk_the_answered_native_leaf():
+    # The native estimate answers and spends the choice's wall: the raw one
+    # is never sent, and the answered native leaf is walked, not the static
+    # raw-first choice.
     world, _expected = _dense_raw_world(40, 5)
     filters = [*_filters(), _native_status_leaf()]
     engine = Engine(world)
     engine.estimate_ms = walk.USER_LIST_WALK_PROBE_WALL_MS
     read, engine = _page(world, page_size=25, filters=filters, engine=engine)
-    assert engine.estimated == ["tag"]
+    slices = [call for call in engine.calls if kind_of(call) == "slice"]
+    assert slices and not any("attrs_string" in call for call in slices)
+    assert engine.estimated == ["error"]
+
+
+def test_when_no_estimate_answers_the_static_choice_stands():
+    # The native estimate is stopped at its cap after spending the choice's
+    # whole wall: no estimate answered, so the static rank's first, the raw
+    # leaf, is walked (a documented miss: the decided rule keeps the static
+    # choice only when nothing answered).
+    world, _expected = _dense_raw_world(40, 5)
+    filters = [*_filters(), _native_status_leaf()]
+    engine = Engine(world)
+    original = engine._estimate
+
+    def estimate(params):
+        if engine._estimated_witness(params) == "error":
+            engine.estimated.append("error")
+            time.sleep(0.04)
+            raise ReadDeadlineExceeded("stopped at its cap")
+        return original(params)
+
+    engine._estimate = estimate
+    with (
+        patch.object(walk, "USER_LIST_WALK_PROBE_WALL_MS", 40),
+        capture_logs() as logs,
+    ):
+        read, engine = _page(world, page_size=25, filters=filters, engine=engine)
+    assert engine.estimated == ["error"]
     slices = [call for call in engine.calls if kind_of(call) == "slice"]
     assert slices and all("attrs_string" in call for call in slices)
+    (chosen,) = [
+        entry
+        for entry in logs
+        if entry["event"] == "users_matching_walk_witness_chosen"
+    ]
+    assert chosen["fallback"] == "no_wall" and chosen["candidates"] == []
+    assert chosen["unanswered"] == [
+        {"family": "native", "column": "status", "reason": "stopped"}
+    ]
 
 
 def test_one_candidate_or_one_eligible_witness_sends_no_estimate():
