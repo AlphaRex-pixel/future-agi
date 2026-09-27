@@ -8,6 +8,7 @@ so each guard can see which statement decided what.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import itertools
@@ -2912,7 +2913,14 @@ def test_an_estimate_over_the_target_or_unreadable_licenses_no_wide_statement():
             read, engine = _page(
                 World(), page_size=25, filters=thirty_days, engine=engine
             )
-        assert _kinds(engine) == ["slice", "estimate", "presence", "slice"], override
+        # Four statements of the count, and the presence statement on top.
+        assert _kinds(engine) == [
+            "slice",
+            "estimate",
+            "presence",
+            "slice",
+            "slice",
+        ], override
         assert "probe" not in _kinds(engine)
         assert read.has_more is True and read.payload["table"] == []
         cap = walk.USER_LIST_WALK_MAX_SLICE
@@ -3004,7 +3012,8 @@ def test_a_probe_the_budget_refuses_or_that_fails_licenses_nothing():
     engine.unwitnessed = [WINDOW_END - timedelta(days=20)]
     with patch.object(walk, "_statement_budget", return_value=4):
         read, engine = _page(world, page_size=25, filters=thirty_days, engine=engine)
-    assert _kinds(engine) == ["slice", "estimate", "presence", "slice"]
+    # The presence statement comes on top of the count.
+    assert _kinds(engine) == ["slice", "estimate", "presence", "slice", "slice"]
     assert read.has_more is True and read.payload["table"] == []
 
     # With the budget spent on the estimate itself, the page ends there.
@@ -3055,7 +3064,8 @@ def test_an_estimate_over_its_time_budget_licenses_no_wide_statement():
     engine.unwitnessed = [WINDOW_END - timedelta(days=20)]
     with patch.object(walk, "_statement_budget", return_value=4):
         read, engine = _page(World(), page_size=25, filters=thirty_days, engine=engine)
-    assert _kinds(engine) == ["slice", "estimate", "presence", "slice"]
+    # The presence statement comes on top of the count.
+    assert _kinds(engine) == ["slice", "estimate", "presence", "slice", "slice"]
     assert read.has_more is True and read.payload["table"] == []
     cap = walk.USER_LIST_WALK_MAX_SLICE
     assert max(high - low for low, high in engine.slice_ranges) <= cap
@@ -3246,6 +3256,55 @@ def test_the_presence_statement_is_sent_at_most_once_a_request():
         assert _kinds(engine).count("presence") <= 1
         names.extend(_names(read))
     assert names == ["user-1", "user-2"]
+
+
+def _presence_world() -> World:
+    """Forty members a few hours apart below an empty first hour, twelve months."""
+
+    world = World()
+    for n in range(1, 41):
+        moment = WINDOW_END - timedelta(hours=2 + 7 * n, minutes=n)
+        world.user(n, key=moment, raw=(moment,), native=True)
+    return world
+
+
+@pytest.mark.parametrize("max_statements", range(1, 31))
+def test_a_presence_statement_that_finds_a_row_takes_nothing_from_the_walk(
+    max_statements,
+):
+    # A populated twelve-month scope whose tail estimate is refused: the
+    # presence statement finds a row and licenses nothing. It is charged on
+    # top of the walk's count, as the witness estimates are, so the page
+    # publishes the same users with the same status as a walk that never
+    # sent it (the production C-12M status pages went from complete to
+    # degraded when it came out of the count).
+    world = _presence_world()
+
+    def run(presence: bool):
+        engine = Engine(world)
+        engine.estimate_override = walk.USER_LIST_WALK_PROBE_TARGET_READ_ROWS + 1
+        skip = (
+            contextlib.nullcontext()
+            if presence
+            else patch.object(walk, "_tail_has_no_user", lambda state, **kw: None)
+        )
+        with (
+            patch.object(walk, "USER_LIST_WALK_EMPTY_PAGE_BUDGETS", 1),
+            patch.object(walk, "USER_LIST_WALK_MAX_STATEMENTS", max_statements),
+            skip,
+        ):
+            return _page(world, page_size=25, filters=_twelve_months(), engine=engine)
+
+    read, engine = run(True)
+    bare, bare_engine = run(False)
+    assert _kinds(engine).count("presence") == 1, _kinds(engine)
+    assert (
+        _names(read),
+        read.payload["query_status"],
+        read.has_more,
+    ) == (_names(bare), bare.payload["query_status"], bare.has_more)
+    kinds = [kind for kind in _kinds(engine) if kind != "presence"]
+    assert kinds == _kinds(bare_engine)
 
 
 def test_seeded_and_unfiltered_candidate_statements_are_byte_identical_to_the_pins():

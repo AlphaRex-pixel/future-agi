@@ -479,7 +479,8 @@ def _follow(
     is the raw attribute leaf, or a native leaf. ``estimates(hop)`` scripts
     what each witness's estimate reports on that hop (``Engine.estimate_by``):
     only a first page sends them, before its first slice, at most
-    ``USER_LIST_WALK_WITNESS_CANDIDATES`` of them, on top of its count.
+    ``USER_LIST_WALK_WITNESS_CANDIDATES`` of them, on top of its count, as
+    the tail's presence statement is (at most one a request).
     """
     with _scripted_clock(_Clock()) as clock:
         return _follow_on(
@@ -581,7 +582,11 @@ def _follow_on(
             hop,
             choice_estimates,
         )
-        hop_ceiling = ceiling + choice_estimates
+        # The tail's presence statement, at most once a request, is charged
+        # on top of the count too (``_tail_has_no_user``).
+        presence = engine.kinds.count("presence")
+        assert presence <= 1, (hop, presence)
+        hop_ceiling = ceiling + choice_estimates + presence
         assert spent <= hop_ceiling, (hop, spent, hop_ceiling)
         if (
             not engine.outage

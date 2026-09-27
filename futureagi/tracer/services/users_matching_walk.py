@@ -393,6 +393,16 @@ class _WalkBudget:
         self.max_statements = self.step + int(extra)
         self.ceiling = max(self.max_statements, int(ceiling) + int(extra))
 
+    def add_on_top(self, statements: int) -> None:
+        """Raise the count and its ceiling by ``statements`` sent on top of them.
+
+        A probe that removes work where it answers, and changes nothing where
+        it does not (``_tail_has_no_user``), is charged like the witness
+        estimates: never out of the room a certification or a slice needs.
+        """
+        self.max_statements += int(statements)
+        self.ceiling += int(statements)
+
     def remaining_ms(self) -> float:
         return max(self.deadline.total_ms - self.deadline.elapsed_ms(), 0.0)
 
@@ -1037,7 +1047,8 @@ def _tail_has_no_user(
 ) -> bool | None:
     """``True`` when no span with a user lies in ``[window_start, below)``.
 
-    One statement, once per request (``presence_checked``): the slices' own
+    One statement, once per request (``presence_checked``) and on top of
+    the walk's count (``_WalkBudget.add_on_top``): the slices' own
     range predicate - project, time terms, ``isNotNull(end_user_id)``, the
     empty-scope guard - with no witness at all, ``LIMIT 1``
     (``build_matching_activity_presence_query``), under a server cap of
@@ -1059,6 +1070,10 @@ def _tail_has_no_user(
     if state.presence_checked or left_ms < 25:
         return None
     state.presence_checked = True
+    # On top of the walk's count and ceiling, as the witness estimates are:
+    # on a populated scope it finds a row and licenses nothing, and then it
+    # must not have taken the statement the last certification needed.
+    state.budget.add_on_top(1)
     if not state.budget.take(1):
         return None
     cap_ms = int(left_ms)
