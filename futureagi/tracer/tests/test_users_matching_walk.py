@@ -1569,6 +1569,44 @@ def test_when_no_estimate_answers_the_static_choice_stands():
     ]
 
 
+def _three_raw_and_status():
+    return [
+        *_filters(),
+        _raw_leaf("region", "equals", "us"),
+        _raw_leaf("tier", "equals", "std"),
+        _native_status_leaf(),
+    ]
+
+
+def test_three_raw_leaves_never_crowd_the_native_leaf_out_of_the_costed_ones():
+    # env, region and tier on every span, and status = ERROR: every raw text
+    # leaf ranks above the native one, so the first three by rank were the
+    # three raw leaves and status was never costed; the page walked a dense
+    # raw leaf. The best native leaf is always among the candidates.
+    world, _expected = _dense_raw_world(600, 30)
+    filters = _three_raw_and_status()
+    read, engine = _page(world, page_size=25, filters=filters)
+    slices = [call for call in engine.calls if kind_of(call) == "slice"]
+    assert slices and not any("attrs_string" in call for call in slices)
+    manager = _manager(filters)
+    builder = UserListQueryBuilderV2(
+        organization_id=ORG, project_ids=[PROJECT], filters=manager.filters
+    )
+    assert manager.matching_activity_walk_applies(builder)
+    candidates = [witness.key for witness, _typed in walk._witness_candidates(manager)]
+    eligible = [witness.key for witness, _typed in walk._eligible_witnesses(manager)]
+    # The static rank: the three raw leaves (by identity), then status.
+    assert eligible == ["region", "tag", "tier", "status"]
+    # K = 3: the first two by rank and the best native leaf, in static order;
+    # the native leaf is estimated first.
+    assert candidates == ["region", "tag", "status"]
+    assert engine.estimated == ["error", "region", "tag"]
+    for limit, expected in ((1, []), (2, ["region", "status"]), (4, eligible)):
+        with patch.object(walk, "USER_LIST_WALK_WITNESS_CANDIDATES", limit):
+            got = [witness.key for witness, _typed in walk._witness_candidates(manager)]
+        assert got == expected, limit
+
+
 def test_one_candidate_or_one_eligible_witness_sends_no_estimate():
     world, _expected = _dense_raw_world(40, 5)
     for filters, candidates in (

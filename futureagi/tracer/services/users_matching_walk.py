@@ -29,9 +29,10 @@ page's matches are rare finds the same users again in every slice and
 publishes nothing, request after request (production: ``status = ERROR`` and a
 raw value on every span read 10-12 GB a page for 0 users when the raw leaf,
 first in the static rank, was walked). So a first page with two or more
-eligible witnesses costs the first ``USER_LIST_WALK_WITNESS_CANDIDATES`` of them
-with one ``EXPLAIN ESTIMATE`` each over the whole window (index analysis, no
-column data, inside ``USER_LIST_WALK_PROBE_WALL_MS``, each under a server cap),
+eligible witnesses costs up to ``USER_LIST_WALK_WITNESS_CANDIDATES`` of them,
+the best native one always among them (``_witness_candidates``), with one
+``EXPLAIN ESTIMATE`` each over the whole window (index analysis, no column
+data, inside ``USER_LIST_WALK_PROBE_WALL_MS``, each under a server cap),
 native candidates first, and walks the one whose weighted rows are fewest
 among the estimates that answered (``_choose_witness``); only when none
 answered does the static rank's first stand. The choice is bound into the
@@ -1096,9 +1097,32 @@ def _tail_has_no_user(
 def _witness_candidates(
     manager: Any,
 ) -> list[tuple[MatchingActivityWitness, Any]]:
-    """The eligible witnesses a first page costs: none when fewer than two."""
+    """The eligible witnesses a first page costs: none when fewer than two.
 
-    candidates = _eligible_witnesses(manager)[:USER_LIST_WALK_WITNESS_CANDIDATES]
+    At most ``USER_LIST_WALK_WITNESS_CANDIDATES`` of them, always including
+    the best native one by static rank when one is eligible, the rest filled
+    in static order, and returned in static order. Every raw text leaf ranks
+    above every native one (``witness_selectivity_rank``), so a plain prefix
+    of the rank would cost three raw leaves and never the sparse native leaf
+    that makes the page cheap (``env``, ``region`` and ``tier`` on every
+    span, with ``status = ERROR``). With one candidate nothing is costed: the
+    static rank's first is walked.
+    """
+
+    eligible = _eligible_witnesses(manager)
+    limit = USER_LIST_WALK_WITNESS_CANDIDATES
+    chosen = list(range(min(limit, len(eligible))))
+    native = next(
+        (
+            index
+            for index, (witness, _typed) in enumerate(eligible)
+            if witness.family != "raw"
+        ),
+        None,
+    )
+    if limit >= 2 and native is not None and native not in chosen:
+        chosen = [*chosen[: limit - 1], native]
+    candidates = [eligible[index] for index in sorted(chosen)]
     return candidates if len(candidates) >= 2 else []
 
 

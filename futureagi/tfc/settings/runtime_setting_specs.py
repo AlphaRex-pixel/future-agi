@@ -428,11 +428,13 @@ INTERACTIVE_READ_SETTING_SPECS = {
             # boolean-key estimate 114-117 ms (395 parts, 33k marks).
             ("USER_LIST_WALK_PROBE_WALL_MS", 1_000, 25, 60_000),
             # A first Users page with two or more eligible walk witnesses
-            # costs up to this many of them, in static rank order, with one
-            # EXPLAIN ESTIMATE each over the whole window (index analysis, no
-            # column data, inside USER_LIST_WALK_PROBE_WALL_MS) and walks the
-            # cheapest; continuations walk the witness their cursor binds. 1
-            # turns the measurement off: the static rank's first witness.
+            # costs up to this many of them - the best native one always
+            # among them, the rest in static rank order - with one EXPLAIN
+            # ESTIMATE each over the whole window (index analysis, no column
+            # data, inside USER_LIST_WALK_PROBE_WALL_MS, native ones first)
+            # and walks the cheapest that answered; continuations walk the
+            # witness their cursor binds. 1 turns the measurement off: the
+            # static rank's first witness.
             ("USER_LIST_WALK_WITNESS_CANDIDATES", 3, 1, 8),
             # What one estimated row of a raw span-attribute witness costs
             # against one row of a native one. Basis, measured on the largest
