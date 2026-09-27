@@ -679,11 +679,13 @@ def _read_slice(
     request has decided something, a stopped slice it cannot narrow, or
     whose retry the page wall refuses, ends it.
 
-    What stays unbounded. Survivor, instant, attribute enrichment and
-    tail-probe statements never carry a server cap (the application's
-    no-abort policy): a wall only decides whether they start. The native
-    span-dimension statement is the exception: the server stops it at its
-    cap (``_native_certification_deadline``). The escape lifts the walls,
+    What stays unbounded. Survivor, instant and attribute enrichment
+    statements and the tail estimate never carry a server cap (the
+    application's no-abort policy): a wall only decides whether they start.
+    The exceptions: the server stops the native span-dimension statement at
+    its cap (``_native_certification_deadline``), and the witness estimates
+    and the tail's existence and presence statements at what the probe wall
+    has left (``_choose_witness``, ``_tail_is_empty``). The escape lifts the walls,
     once per request, for the head-of-line decision: the uncapped slice, its
     survivor statement, the instant read and its survivor statement when the
     slice comes back tied at one instant, and one batch's certification (and
@@ -1000,9 +1002,18 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
     query, params = state.builder.build_matching_activity_existence_query(
         range_start=state.window_start, range_end=below
     )
+    # The server stops it at what the estimate left of the probe wall: the
+    # application read path sends no other time, row or byte cap, and
+    # ``timeout_ms`` never reaches ClickHouse. A stop licenses nothing: it
+    # ends the probe, not the page.
+    cap_ms = max(25, int(probe_left_ms))
     try:
         result = ulm.V2AnalyticsQueryService().execute_ch_query(
-            query, params, timeout_ms=max(25, int(probe_left_ms)), settings=settings
+            query,
+            params,
+            timeout_ms=cap_ms,
+            settings=settings,
+            server_execution_cap_ms=cap_ms,
         )
     except ReadDeadlineExceeded:
         _probe_wall_spent(state)

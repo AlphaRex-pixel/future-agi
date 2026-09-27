@@ -2983,6 +2983,40 @@ def test_a_probe_deadline_raised_in_the_transport_ends_the_probe_not_the_page():
     assert read.has_more is True and read.payload["table"] == []
 
 
+def test_the_tail_existence_statement_carries_a_server_cap():
+    # ``timeout_ms`` never reaches ClickHouse: the existence statement ran
+    # with no server bound at all. It now carries what the estimate left of
+    # the probe wall as its server cap.
+    thirty_days = _filters(window_start=WINDOW_END - timedelta(days=30))
+    read, engine = _page(World(), page_size=25, filters=thirty_days)
+    assert _kinds(engine) == ["slice", "estimate", "probe"]
+    cap = engine.caps[2]
+    assert cap is not None and 25 <= cap <= walk.USER_LIST_WALK_PROBE_WALL_MS
+    assert cap == engine.timeouts[2]
+
+
+@_plain_count
+def test_an_existence_statement_stopped_at_its_cap_licenses_nothing():
+    thirty_days = _filters(window_start=WINDOW_END - timedelta(days=30))
+    engine = Engine(World())
+    original = engine.execute_ch_query
+
+    def stopped(query, params=None, timeout_ms=None, settings=None, **caps):
+        if kind_of(query) == "probe":
+            engine.calls.append(query)
+            engine.caps.append(caps.get("server_execution_cap_ms"))
+            raise ReadDeadlineExceeded("stopped at its cap")
+        return original(query, params, timeout_ms, settings, **caps)
+
+    engine.execute_ch_query = stopped
+    with patch.object(walk, "_statement_budget", return_value=4):
+        read, engine = _page(World(), page_size=25, filters=thirty_days, engine=engine)
+    # The probe ended, not the page: the walk sliced on at the cap.
+    assert _kinds(engine) == ["slice", "estimate", "probe", "slice"]
+    assert engine.caps[-2] is not None
+    assert read.has_more is True and read.payload["query_status"] == "degraded"
+
+
 def _twelve_months(filters=None):
     start = WINDOW_END - timedelta(days=365)
     date = _filters(window_start=start)[0]
