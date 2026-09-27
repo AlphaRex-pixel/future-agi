@@ -1,23 +1,28 @@
 # Helm chart CI (deploy/helm/futureagi: the Distributed setup on Kubernetes).
 #
-#   static  deploy/helm/futureagi/hack/check.sh: the chart's defaults and
-#           inconsistent values refuse to render with guidance; helm lint
-#           --strict and helm template for the bundled, external, ingress,
-#           all-components, overrides and gitops value sets (gitops rendered
-#           twice, identically); kubeconform -strict against
-#           the oldest and newest supported Kubernetes; the rendered manifests'
+#   static  on the latest Helm 4 and the latest Helm 3, twice: against the
+#           chart directory and against the chart as helm-release.yml packages
+#           it (hack/package.sh --no-digests, so a file .helmignore drops by
+#           mistake fails here). Each run is deploy/helm/futureagi/hack/check.sh:
+#           the chart's defaults and inconsistent values refuse to render with
+#           guidance; helm lint --strict and helm template for every value set
+#           (examples/ and ci/; gitops rendered twice, identically); kubeconform -strict against the oldest
+#           supported and the newest GA Kubernetes; the rendered manifests'
 #           invariants (hack/rendered_checks.py); values.yaml,
 #           values.schema.json and the README table agree; the ClickHouse
 #           config matches the Standalone install's and the UI's security
-#           headers the frontend image's. Then the chart's version
-#           must follow the platform release (release-please moves it).
+#           headers the frontend image's. Then: no subchart (Chart.yaml
+#           dependencies or charts/) and no Bitnami image in any rendered
+#           manifest, and the chart's version must follow the platform
+#           release (release-please moves it).
 #   kind    builds the backend, frontend, fi-collector and agentcc-gateway
-#           images from this checkout, installs the chart on kind with every
-#           datastore bundled, and runs deploy/helm/futureagi/hack/kind-smoke.sh:
-#           rollout, /health/, helm test, the bootstrap job's schema, CDC and
-#           schedules, a first account, a refused volume resize, an in-place
-#           upgrade that must keep the generated keys, and a rollback that
-#           must put the previous Secret back.
+#           images from this checkout, installs the chart with Helm 4 on kind
+#           with every datastore bundled, and runs
+#           deploy/helm/futureagi/hack/kind-smoke.sh: rollout, /health/, helm
+#           test, the bootstrap job's schema, CDC and schedules, a first
+#           account, a refused volume resize, an in-place upgrade that must
+#           keep the generated keys, and a rollback that must put the previous
+#           Secret back.
 name: Helm chart CI
 
 on:
@@ -31,6 +36,7 @@ on:
       - "futureagi/tfc/management/commands/bootstrap_install.py"
       - "futureagi/model_hub/apps.py"
       - ".github/workflows/helm-ci.yml"
+      - ".github/workflows/helm-release.yml"
       - "release-please-config.json"
       - ".release-please-manifest.json"
       - ".prettierignore"
@@ -44,6 +50,7 @@ on:
       - "futureagi/tfc/management/commands/bootstrap_install.py"
       - "futureagi/model_hub/apps.py"
       - ".github/workflows/helm-ci.yml"
+      - ".github/workflows/helm-release.yml"
       - "release-please-config.json"
       - ".release-please-manifest.json"
       - ".prettierignore"
@@ -57,42 +64,109 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Same Helm as the release workflow's chart checks.
-  HELM_VERSION: v3.17.3
+  # The same Helm releases as helm-release.yml, pinned with their sha256
+  # (get.helm.sh/<file>.sha256sum). Helm 4 is what the release publishes with
+  # and what the kind job installs with.
+  HELM_VERSION: v4.3.0
+  HELM_SHA256: 86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
+  HELM3_VERSION: v3.22.0
+  HELM3_SHA256: 1e4ab49e429626cf6c6958d914248b78c9730803c2751b87627e171dc800e7bb
   KUBECONFORM_VERSION: v0.6.7
-  # Oldest and newest Kubernetes the chart supports (Chart.yaml kubeVersion).
-  KUBE_VERSIONS: "1.27.0 1.33.0"
+  KUBECONFORM_SHA256: 95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73
+  # The oldest Kubernetes the chart supports (Chart.yaml kubeVersion) and the
+  # newest GA minor kubeconform has schemas for.
+  KUBE_VERSIONS: "1.27.0 1.37.0"
 
 jobs:
   static:
-    name: lint, template, kubeconform
+    name: lint, template, kubeconform (Helm ${{ matrix.helm }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        helm: [4, 3]
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: azure/setup-helm@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          version: ${{ env.HELM_VERSION }}
+          persist-credentials: false
 
-      - name: Install kubeconform
+      - name: Install Helm ${{ matrix.helm }} and kubeconform
+        env:
+          MAJOR: ${{ matrix.helm }}
         run: |
           set -euo pipefail
-          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin kubeconform
-          kubeconform -v
+          if [ "$MAJOR" = 4 ]; then version=$HELM_VERSION sha=$HELM_SHA256; else version=$HELM3_VERSION sha=$HELM3_SHA256; fi
+          fetch() { # url sha256 -> file in $RUNNER_TEMP
+            curl -fsSL -o "$RUNNER_TEMP/${1##*/}" "$1"
+            echo "$2  $RUNNER_TEMP/${1##*/}" | sha256sum -c -
+          }
+          fetch "https://get.helm.sh/helm-${version}-linux-amd64.tar.gz" "$sha"
+          fetch "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" "$KUBECONFORM_SHA256"
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/helm-${version}-linux-amd64.tar.gz" -C "$RUNNER_TEMP/bin" --strip-components=1 linux-amd64/helm
+          tar -xzf "$RUNNER_TEMP/kubeconform-linux-amd64.tar.gz" -C "$RUNNER_TEMP/bin" kubeconform
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/helm" version
+          "$RUNNER_TEMP/bin/kubeconform" -v
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
       - name: Install PyYAML
         run: python -m pip install PyYAML==6.0.3
 
-      - name: Chart checks
+      - name: Chart checks (chart directory)
         env:
-          OUT_DIR: ${{ runner.temp }}/helm-rendered
+          OUT_DIR: ${{ runner.temp }}/helm-rendered/source
         run: deploy/helm/futureagi/hack/check.sh
+
+      - name: Package
+        # As helm-release.yml does, without image digests (the images of an
+        # unreleased commit do not exist).
+        run: |
+          set -euo pipefail
+          tgz=$(deploy/helm/futureagi/hack/package.sh --no-digests --destination "$RUNNER_TEMP/dist")
+          echo "TGZ=$tgz" >> "$GITHUB_ENV"
+          tar -tzf "$tgz"
+
+      - name: Chart checks (packaged .tgz)
+        # check.sh checks the chart directory it sits in: run it from the
+        # unpacked package with the maintenance scripts and CI value sets
+        # (which .helmignore leaves out) copied back in.
+        env:
+          OUT_DIR: ${{ runner.temp }}/helm-rendered/package
+        run: |
+          set -euo pipefail
+          unpacked=$(mktemp -d)
+          tar -xzf "$TGZ" -C "$unpacked"
+          cp -R deploy/helm/futureagi/hack deploy/helm/futureagi/ci "$unpacked/futureagi/"
+          "$unpacked/futureagi/hack/check.sh"
+
+      - name: No subchart, no Bitnami image
+        # The chart bundles its evaluation datastores itself and depends on no
+        # other chart; the Bitnami catalog moved to a legacy tier.
+        env:
+          RENDERED: ${{ runner.temp }}/helm-rendered
+        run: |
+          set -euo pipefail
+          failed=0
+          chart=deploy/helm/futureagi
+          if grep -nE '^dependencies:' "$chart/Chart.yaml"; then
+            echo "::error file=$chart/Chart.yaml::the chart declares dependencies: it ships no subcharts"
+            failed=1
+          fi
+          if [ -e "$chart/charts" ] || tar -tzf "$TGZ" | grep -E '^futureagi/charts/'; then
+            echo "::error::the chart has a charts/ directory: it ships no subcharts"
+            failed=1
+          fi
+          if grep -rhE '^[[:space:]]*(- )?image:' "$RENDERED" | grep -E '(^|[/:"[:space:]])bitnami(legacy|secure|charts)?/'; then
+            echo "::error::a rendered manifest uses a Bitnami image"
+            failed=1
+          fi
+          [ "$failed" = 0 ] && echo "no subchart, no Bitnami image"
+          exit "$failed"
 
       - name: The chart's version follows the platform release
         # release-please rewrites the chart's version and appVersion (the lines
@@ -100,6 +174,7 @@ jobs:
         # it runs, they equal .release-please-manifest.json. dev receives the
         # manifest only when main is merged back: there the chart may be ahead
         # of it, never behind.
+        if: matrix.helm == 4
         env:
           BRANCH: ${{ github.base_ref || github.ref_name }}
         run: |
@@ -130,10 +205,10 @@ jobs:
           [ "$failed" = 0 ] && echo "chart $version (appVersion $app), platform release $release on $BRANCH"
           exit "$failed"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: helm-rendered-manifests
+          name: helm-rendered-manifests-helm${{ matrix.helm }}
           path: ${{ runner.temp }}/helm-rendered
           retention-days: 7
 
@@ -151,7 +226,9 @@ jobs:
       BUILD_CACHE: ghcr.io/future-agi/future-agi/build-cache
       TAG: ci
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Reclaim runner disk
         # Four image builds plus a kind node holding them and the datastores.
@@ -166,18 +243,18 @@ jobs:
           timeout 60 bash -c 'until docker info >/dev/null 2>&1; do sleep 2; done'
           df -h / /mnt
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: ghcr login (layer cache reads)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build backend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: futureagi
           file: futureagi/Dockerfile.oss
@@ -189,7 +266,7 @@ jobs:
             type=registry,ref=${{ env.CACHE_REPO }}:backend
 
       - name: Build frontend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: frontend
           file: frontend/Dockerfile
@@ -201,7 +278,7 @@ jobs:
             type=registry,ref=${{ env.CACHE_REPO }}:frontend
 
       - name: Build fi-collector image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: fi-collector
           file: fi-collector/Dockerfile
@@ -213,7 +290,7 @@ jobs:
             type=registry,ref=${{ env.CACHE_REPO }}:fi-collector
 
       - name: Build agentcc-gateway image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: agentcc-gateway
           file: agentcc-gateway/Dockerfile
@@ -224,12 +301,18 @@ jobs:
             type=registry,ref=${{ env.BUILD_CACHE }}:agentcc-gateway-amd64
             type=registry,ref=${{ env.CACHE_REPO }}:gateway
 
-      - uses: azure/setup-helm@v4
-        with:
-          version: ${{ env.HELM_VERSION }}
+      - name: Install Helm
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/helm.tgz" "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "$HELM_SHA256  $RUNNER_TEMP/helm.tgz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/helm.tgz" -C "$RUNNER_TEMP/bin" --strip-components=1 linux-amd64/helm
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/helm" version
 
       - name: Install kind
-        uses: helm/kind-action@v1
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
         with:
           install_only: true
 

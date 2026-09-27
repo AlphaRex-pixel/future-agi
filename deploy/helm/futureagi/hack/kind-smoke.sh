@@ -12,17 +12,48 @@
 # $TAG in the local Docker daemon. Datastore images are pulled by the cluster.
 # KIND_CLUSTER (default futureagi) is created when missing and kept afterwards;
 # NAMESPACE defaults to futureagi.
+#
+# A packaged chart with the images it pins, as helm-release.yml runs it
+# before publishing:
+#
+#   CHART=futureagi-1.42.0.tgz PUBLISHED=1 deploy/helm/futureagi/hack/kind-smoke.sh
+#
+# CHART is a chart directory or .tgz (default: this checkout's chart).
+# PUBLISHED=1 pulls the images the chart names (its appVersion tag and stamped
+# digests) instead of loading $TAG into kind; with DOCKERHUB_USERNAME and
+# DOCKERHUB_TOKEN set, pulls are authenticated through an image pull Secret.
+# The namespace enforces Pod Security POD_SECURITY (default restricted; set
+# baseline or none to relax it), with the privileged code sandbox off.
 set -euo pipefail
 
-chart=$(cd "$(dirname "$0")/.." && pwd)
-tag=${TAG:?set TAG to the tag of the locally built Future AGI images}
+here=$(cd "$(dirname "$0")/.." && pwd)
+chart=${CHART:-$here}
+published=${PUBLISHED:-0}
+if [ "$published" = 1 ]; then
+  tag=""
+else
+  tag=${TAG:?set TAG to the tag of the locally built Future AGI images, or PUBLISHED=1}
+fi
 cluster=${KIND_CLUSTER:-futureagi}
 ns=${NAMESPACE:-futureagi}
 release=futureagi
 timeout=${HELM_TIMEOUT:-25m}
+pod_security=${POD_SECURITY:-restricted}
 images=(futureagi/future-agi futureagi/frontend futureagi/fi-collector futureagi/agentcc-gateway)
 
 work=$(mktemp -d)
+
+# The values files ship inside the chart: take them from the directory, or
+# from the unpacked package when CHART is a .tgz (helm installs the .tgz).
+case "$chart" in
+  *.tgz)
+    tar -xzf "$chart" -C "$work"
+    values_dir="$work/futureagi"
+    ;;
+  *) values_dir="$chart" ;;
+esac
+image_args=()
+[ -n "$tag" ] && image_args+=(--set image.tag="$tag")
 
 say() { printf '\n== %s\n' "$*"; }
 fail() {
@@ -49,16 +80,35 @@ if ! kind get clusters 2>/dev/null | grep -qx "$cluster"; then
 fi
 kubectl config use-context "kind-$cluster"
 
-say "load the Future AGI images ($tag)"
-for image in "${images[@]}"; do
-  docker image inspect "$image:$tag" >/dev/null || fail "$image:$tag is not in the local Docker daemon"
-  kind load docker-image "$image:$tag" --name "$cluster"
-done
+if [ "$published" = 1 ]; then
+  say "published images: the cluster pulls what the chart names"
+else
+  say "load the Future AGI images ($tag)"
+  for image in "${images[@]}"; do
+    docker image inspect "$image:$tag" >/dev/null || fail "$image:$tag is not in the local Docker daemon"
+    kind load docker-image "$image:$tag" --name "$cluster"
+  done
+fi
+
+say "namespace $ns (Pod Security: $pod_security)"
+kubectl get namespace "$ns" >/dev/null 2>&1 || kubectl create namespace "$ns"
+if [ "$pod_security" != none ]; then
+  kubectl label namespace "$ns" --overwrite \
+    "pod-security.kubernetes.io/enforce=$pod_security" \
+    "pod-security.kubernetes.io/enforce-version=latest"
+fi
+if [ "$published" = 1 ] && [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+  kubectl -n "$ns" create secret docker-registry dockerhub \
+    --docker-server=https://index.docker.io/v1/ \
+    --docker-username="$DOCKERHUB_USERNAME" --docker-password="$DOCKERHUB_TOKEN" \
+    --dry-run=client -o yaml | kubectl apply -f -
+  image_args+=(--set "global.imagePullSecrets[0].name=dockerhub")
+fi
 
 say "install (bundled datastores)"
-helm upgrade --install "$release" "$chart" --namespace "$ns" --create-namespace \
-  -f "$chart/examples/bundled.yaml" \
-  --set image.tag="$tag" \
+helm upgrade --install "$release" "$chart" --namespace "$ns" \
+  -f "$values_dir/examples/bundled.yaml" \
+  ${image_args[@]+"${image_args[@]}"} \
   --set config.telemetry=false \
   --wait --timeout "$timeout"
 kubectl -n "$ns" get pods -o wide
