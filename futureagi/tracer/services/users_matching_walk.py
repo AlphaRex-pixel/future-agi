@@ -38,8 +38,10 @@ among the estimates that answered (``_choose_witness``). A raw estimate that
 did not answer says nothing about its value (its time is the blooms over
 every granule, rare value or dense), so an answered native leaf outbids it
 only when one witness-free estimate of the range shows the native leaf
-sparser than the window (``_informative``); when nothing is left, the static
-rank's first stands. The choice is bound into the
+sparser than the window (``_informative``); that range estimate is sent on
+every first page that costs both families and whose native estimate answered
+with rows, before any raw estimate. When nothing is left, the static rank's
+first stands. The choice is bound into the
 cursor, and a continuation walks it without measuring (``_bound_witness``).
 Known misses: the estimate measures scan cost, not candidates, so a rare raw
 value spread over many granules can lose to a leaf with more users; two fresh
