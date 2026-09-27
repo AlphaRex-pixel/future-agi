@@ -45482,7 +45482,7 @@ export const TracerChartsFetchGraphResponse = zod.object({
       id: zod.string().optional(),
       name: zod.string().optional(),
       metric_statistic: zod
-        .enum(["count", "sum", "mean", "median", "percentage"])
+        .enum(["count", "sum", "mean", "percentage"])
         .optional(),
       data: zod.array(
         zod.object({
@@ -54948,7 +54948,7 @@ export const TracerObservationSpanGetGraphMethodsBody = zod.object({
     .string()
     .default(tracerObservationSpanGetGraphMethodsBodyPropertyDefault)
     .describe(
-      "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the median (p50).",
+      "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the mean (avg) span latency.",
     ),
   req_data_config: zod.object({
     id: zod.string(),
@@ -54997,10 +54997,10 @@ export const TracerObservationSpanGetGraphMethodsResponse = zod.object({
     metric_name: zod.string(),
     name: zod.string().optional(),
     metric_statistic: zod
-      .enum(["count", "sum", "mean", "median", "percentage"])
+      .enum(["count", "sum", "mean", "percentage"])
       .optional()
       .describe(
-        "Statistic of the published system-metric series per bucket. Latency is always the t-digest median (p50) of span latency. Absent for eval and annotation series.",
+        "Statistic of the published system-metric series per bucket. Latency is always the mean (avg) of span latency, filtered or not. Absent for eval and annotation series.",
       ),
     data: zod
       .array(
@@ -57582,13 +57582,10 @@ export const TracerProjectGetGraphDataResponse = zod.object({
       .passthrough()
       .describe("Any valid JSON value."),
     system_metric_statistics: zod
-      .record(
-        zod.string(),
-        zod.enum(["count", "sum", "mean", "median", "percentage"]),
-      )
+      .record(zod.string(), zod.enum(["count", "sum", "mean", "percentage"]))
       .optional()
       .describe(
-        'Statistic of each ``system_metrics`` series per bucket, e.g. {"latency": "median", "tokens": "sum", "cost": "mean", "traffic": "count"}. Latency is always the t-digest median (p50).',
+        'Statistic of each ``system_metrics`` series per bucket, e.g. {"latency": "mean", "tokens": "sum", "cost": "mean", "traffic": "count"}. Latency is always the mean (avg) span latency.',
       ),
     evaluations: zod.object({}).passthrough().describe("Any valid JSON value."),
   }),
@@ -57932,10 +57929,10 @@ export const TracerProjectGetUsersAggregateGraphDataResponse = zod.object({
     metric_name: zod.string(),
     name: zod.string().optional(),
     metric_statistic: zod
-      .enum(["count", "sum", "mean", "median", "percentage"])
+      .enum(["count", "sum", "mean", "percentage"])
       .optional()
       .describe(
-        "Statistic of the published system-metric series per bucket. Latency is always the t-digest median (p50) of span latency. Absent for eval and annotation series.",
+        "Statistic of the published system-metric series per bucket. Latency is always the mean (avg) of span latency, filtered or not. Absent for eval and annotation series.",
       ),
     data: zod
       .array(
@@ -60146,7 +60143,7 @@ export const TracerTraceSessionGetSessionGraphDataBody = zod.object({
     .string()
     .default(tracerTraceSessionGetSessionGraphDataBodyPropertyDefault)
     .describe(
-      "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the median (p50).",
+      "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the mean (avg) span latency.",
     ),
   req_data_config: zod.object({
     id: zod.string(),
@@ -60195,10 +60192,10 @@ export const TracerTraceSessionGetSessionGraphDataResponse = zod.object({
     metric_name: zod.string(),
     name: zod.string().optional(),
     metric_statistic: zod
-      .enum(["count", "sum", "mean", "median", "percentage"])
+      .enum(["count", "sum", "mean", "percentage"])
       .optional()
       .describe(
-        "Statistic of the published system-metric series per bucket. Latency is always the t-digest median (p50) of span latency. Absent for eval and annotation series.",
+        "Statistic of the published system-metric series per bucket. Latency is always the mean (avg) of span latency, filtered or not. Absent for eval and annotation series.",
       ),
     data: zod
       .array(
@@ -61342,7 +61339,7 @@ export const TracerTraceGetGraphMethodsBody = zod.object({
     .string()
     .default(tracerTraceGetGraphMethodsBodyPropertyDefault)
     .describe(
-      "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the median (p50).",
+      "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the mean (avg) span latency.",
     ),
   req_data_config: zod.object({
     id: zod.string(),
@@ -61391,10 +61388,10 @@ export const TracerTraceGetGraphMethodsResponse = zod.object({
     metric_name: zod.string(),
     name: zod.string().optional(),
     metric_statistic: zod
-      .enum(["count", "sum", "mean", "median", "percentage"])
+      .enum(["count", "sum", "mean", "percentage"])
       .optional()
       .describe(
-        "Statistic of the published system-metric series per bucket. Latency is always the t-digest median (p50) of span latency. Absent for eval and annotation series.",
+        "Statistic of the published system-metric series per bucket. Latency is always the mean (avg) of span latency, filtered or not. Absent for eval and annotation series.",
       ),
     data: zod
       .array(

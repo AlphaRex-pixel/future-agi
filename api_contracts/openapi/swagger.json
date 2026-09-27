@@ -131193,7 +131193,6 @@
                                 "count",
                                 "sum",
                                 "mean",
-                                "median",
                                 "percentage"
                             ]
                         },
@@ -131279,7 +131278,6 @@
                                         "count",
                                         "sum",
                                         "mean",
-                                        "median",
                                         "percentage"
                                     ]
                                 },
@@ -131448,7 +131446,6 @@
                                             "count",
                                             "sum",
                                             "mean",
-                                            "median",
                                             "percentage"
                                         ]
                                     }
@@ -131515,7 +131512,6 @@
                                             "count",
                                             "sum",
                                             "mean",
-                                            "median",
                                             "percentage"
                                         ]
                                     },
@@ -138911,7 +138907,7 @@
                 },
                 "property": {
                     "title": "Property",
-                    "description": "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the median (p50).",
+                    "description": "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the mean (avg) span latency.",
                     "type": "string",
                     "default": "average"
                 },
@@ -139009,13 +139005,12 @@
                 },
                 "metric_statistic": {
                     "title": "Metric statistic",
-                    "description": "Statistic of the published system-metric series per bucket. Latency is always the t-digest median (p50) of span latency. Absent for eval and annotation series.",
+                    "description": "Statistic of the published system-metric series per bucket. Latency is always the mean (avg) of span latency, filtered or not. Absent for eval and annotation series.",
                     "type": "string",
                     "enum": [
                         "count",
                         "sum",
                         "mean",
-                        "median",
                         "percentage"
                     ]
                 },
@@ -140050,7 +140045,7 @@
                 },
                 "system_metric_statistics": {
                     "title": "System metric statistics",
-                    "description": "Statistic of each ``system_metrics`` series per bucket, e.g. {\"latency\": \"median\", \"tokens\": \"sum\", \"cost\": \"mean\", \"traffic\": \"count\"}. Latency is always the t-digest median (p50).",
+                    "description": "Statistic of each ``system_metrics`` series per bucket, e.g. {\"latency\": \"mean\", \"tokens\": \"sum\", \"cost\": \"mean\", \"traffic\": \"count\"}. Latency is always the mean (avg) span latency.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "string",
@@ -140058,7 +140053,6 @@
                             "count",
                             "sum",
                             "mean",
-                            "median",
                             "percentage"
                         ]
                     }
@@ -142579,7 +142573,7 @@
                 },
                 "property": {
                     "title": "Property",
-                    "description": "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the median (p50).",
+                    "description": "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the mean (avg) span latency.",
                     "type": "string",
                     "default": "average"
                 },
@@ -142653,13 +142647,12 @@
                 },
                 "metric_statistic": {
                     "title": "Metric statistic",
-                    "description": "Statistic of the published system-metric series per bucket. Latency is always the t-digest median (p50) of span latency. Absent for eval and annotation series.",
+                    "description": "Statistic of the published system-metric series per bucket. Latency is always the mean (avg) of span latency, filtered or not. Absent for eval and annotation series.",
                     "type": "string",
                     "enum": [
                         "count",
                         "sum",
                         "mean",
-                        "median",
                         "percentage"
                     ]
                 },

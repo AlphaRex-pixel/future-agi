@@ -20,7 +20,7 @@ from typing import Any
 LATENCY_STATISTIC = "mean"
 LATENCY_METRIC = "latency"
 
-METRIC_STATISTIC_CHOICES = ("count", "sum", "mean", "median", "percentage")
+METRIC_STATISTIC_CHOICES = ("count", "sum", "mean", "percentage")
 
 _TOKEN_SUMS = dict.fromkeys(
     (

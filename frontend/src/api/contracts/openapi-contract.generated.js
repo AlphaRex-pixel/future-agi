@@ -59435,7 +59435,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
             },
             metric_statistic: {
               type: "string",
-              enum: ["count", "sum", "mean", "median", "percentage"],
+              enum: ["count", "sum", "mean", "percentage"],
             },
             data: {
               type: "array",
@@ -59508,7 +59508,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
                 },
                 metric_statistic: {
                   type: "string",
-                  enum: ["count", "sum", "mean", "median", "percentage"],
+                  enum: ["count", "sum", "mean", "percentage"],
                 },
                 data: {
                   type: "array",
@@ -59651,7 +59651,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
                   type: "object",
                   additionalProperties: {
                     type: "string",
-                    enum: ["count", "sum", "mean", "median", "percentage"],
+                    enum: ["count", "sum", "mean", "percentage"],
                   },
                 },
                 query_complete: {
@@ -59707,7 +59707,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
                   },
                   metric_statistic: {
                     type: "string",
-                    enum: ["count", "sum", "mean", "median", "percentage"],
+                    enum: ["count", "sum", "mean", "percentage"],
                   },
                   data: {
                     type: "array",
@@ -65868,7 +65868,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         property: {
           title: "Property",
           description:
-            "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the median (p50).",
+            "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the mean (avg) span latency.",
           type: "string",
           default: "average",
         },
@@ -76559,7 +76559,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         property: {
           title: "Property",
           description:
-            "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the median (p50).",
+            "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the mean (avg) span latency.",
           type: "string",
           default: "average",
         },
@@ -91811,9 +91811,9 @@ export const OPENAPI_CONTRACT = Object.freeze({
         metric_statistic: {
           title: "Metric statistic",
           description:
-            "Statistic of the published system-metric series per bucket. Latency is always the t-digest median (p50) of span latency. Absent for eval and annotation series.",
+            "Statistic of the published system-metric series per bucket. Latency is always the mean (avg) of span latency, filtered or not. Absent for eval and annotation series.",
           type: "string",
-          enum: ["count", "sum", "mean", "median", "percentage"],
+          enum: ["count", "sum", "mean", "percentage"],
         },
         data: {
           description:
@@ -91969,9 +91969,9 @@ export const OPENAPI_CONTRACT = Object.freeze({
         metric_statistic: {
           title: "Metric statistic",
           description:
-            "Statistic of the published system-metric series per bucket. Latency is always the t-digest median (p50) of span latency. Absent for eval and annotation series.",
+            "Statistic of the published system-metric series per bucket. Latency is always the mean (avg) of span latency, filtered or not. Absent for eval and annotation series.",
           type: "string",
-          enum: ["count", "sum", "mean", "median", "percentage"],
+          enum: ["count", "sum", "mean", "percentage"],
         },
         data: {
           description:
@@ -93405,11 +93405,11 @@ export const OPENAPI_CONTRACT = Object.freeze({
         system_metric_statistics: {
           title: "System metric statistics",
           description:
-            'Statistic of each ``system_metrics`` series per bucket, e.g. {"latency": "median", "tokens": "sum", "cost": "mean", "traffic": "count"}. Latency is always the t-digest median (p50).',
+            'Statistic of each ``system_metrics`` series per bucket, e.g. {"latency": "mean", "tokens": "sum", "cost": "mean", "traffic": "count"}. Latency is always the mean (avg) span latency.',
           type: "object",
           additionalProperties: {
             type: "string",
-            enum: ["count", "sum", "mean", "median", "percentage"],
+            enum: ["count", "sum", "mean", "percentage"],
           },
         },
         evaluations: {

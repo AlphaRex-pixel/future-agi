@@ -579,7 +579,7 @@ _FETCH_GRAPH_SERIES_SCHEMA = {
         "metric_name": {"type": "string"},
         "id": {"type": "string"},
         "name": {"type": "string"},
-        # System-metric series only; latency is always "median".
+        # System-metric series only; latency is always "mean".
         "metric_statistic": _FETCH_GRAPH_METRIC_STATISTIC_SCHEMA,
         "data": {"type": "array", "items": _FETCH_GRAPH_POINT_SCHEMA},
         **_FETCH_GRAPH_METADATA_PROPERTIES,

@@ -197,8 +197,8 @@ class ProjectGraphDataResultSerializer(serializers.Serializer):
         required=False,
         help_text=(
             "Statistic of each ``system_metrics`` series per bucket, e.g. "
-            '{"latency": "median", "tokens": "sum", "cost": "mean", '
-            '"traffic": "count"}. Latency is always the t-digest median (p50).'
+            '{"latency": "mean", "tokens": "sum", "cost": "mean", '
+            '"traffic": "count"}. Latency is always the mean (avg) span latency.'
         ),
     )
     evaluations = JsonValueField()

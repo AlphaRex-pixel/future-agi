@@ -1147,7 +1147,6 @@ OBSERVE_GRAPH_METRIC_STATISTIC_CHOICES = (
     "count",
     "sum",
     "mean",
-    "median",
     "percentage",
 )
 
@@ -1167,7 +1166,7 @@ class ObserveGraphDataRequestSerializer(StrictInputSerializer):
         help_text=(
             "Accepted for older clients and ignored for SYSTEM_METRIC graphs: "
             "each system metric has one statistic, named by the response's "
-            "metric_statistic. Latency is always the median (p50)."
+            "metric_statistic. Latency is always the mean (avg) span latency."
         ),
     )
     req_data_config = ObserveGraphMetricConfigField()
@@ -1205,7 +1204,8 @@ class ObserveGraphDataResultSerializer(serializers.Serializer):
         required=False,
         help_text=(
             "Statistic of the published system-metric series per bucket. "
-            "Latency is always the t-digest median (p50) of span latency. "
+            "Latency is always the mean (avg) of span latency, filtered or "
+            "not. "
             "Absent for eval and annotation series."
         ),
     )

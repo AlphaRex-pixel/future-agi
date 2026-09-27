@@ -560,13 +560,16 @@ class TestResponseContract:
         assert ok.is_valid(), ok.errors
         assert ok.validated_data["result"]["metric_statistic"] == "mean"
 
-        wrong = ObserveGraphDataResponseSerializer(
-            data={
-                "status": True,
-                "result": {**_complete(), "metric_statistic": "average"},
-            }
-        )
-        assert not wrong.is_valid()
+        # "average" was never a statistic; "median" is retired (no series
+        # publishes it any more).
+        for retired in ("average", "median"):
+            wrong = ObserveGraphDataResponseSerializer(
+                data={
+                    "status": True,
+                    "result": {**_complete(), "metric_statistic": retired},
+                }
+            )
+            assert not wrong.is_valid(), retired
 
     def test_project_graph_result_declares_bundle_statistics(self):
         from tracer.serializers.project import ProjectGraphDataResponseSerializer
