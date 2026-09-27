@@ -114,6 +114,34 @@ _RAW_SCAN_ROWS_PER_MS = 1_796
 # DASHBOARD_TRACE_READ_MAX_THREADS: re-measure if either moves.
 _RAW_LOG_GRANULE_SCAN_MS = 56
 
+# The eval and annotation charts carry the same toggle in a different
+# statement: ``latest_span_membership_source_sql`` over ``spans FINAL`` at
+# EXACT_GRAPH_READ_SETTINGS (FILTER_SELECTOR_MAX_THREADS = 1 worker), which
+# collects every trace in the window whose live root is a simulator call and
+# drops it with ``trace_id NOT IN``. Measured read-only on dev, first run of
+# each window (bytes read / granules / duration):
+#
+#   the eval chart statement (EvalMetricsQueryBuilderV2, project 2843b914):
+#     30 days 977 MiB / 96 / 1,206 ms; 90 days 4.81 GiB / 302 / 6,628 ms;
+#     180 days killed by the 20 s read-only cap after 4.73 GiB at 2.19 GiB of
+#     memory (toggle off 1,209 ms). Its older half on the cold storage tier:
+#     03-30..05-14 3.26 GiB / 107 / 15,479 ms, 05-14..06-28 2.26 GiB / 85 /
+#     11,781 ms;
+#   one annotation membership batch of 14 traces (project 5272afb0): 135 days
+#   3.87 GiB / 276 / 13,786 ms; 180 days killed at 20 s (toggle off 436 ms).
+#
+# That is 13-22 ms a granule on the hot tier and 139-145 ms on the cold one.
+# The constant is the cold rate rounded up, so it over-prices a hot window by
+# up to twelve times: the 90-day eval chart above (6.6 s) is priced at 45 s
+# and renders through the background worker. That is the direction this gate
+# errs - a rate the hot tier licenses would admit the 180-day read, which did
+# not finish in 20 s, to the 30 s wall. It is coupled to
+# FILTER_SELECTOR_MAX_THREADS, to FINAL and to the storage tiering, and was
+# measured on dev, not production: re-measure there. The annotation chart
+# issues this membership once per batch of Score rows per output partition;
+# the gate prices one.
+_RAW_LOG_MEMBERSHIP_GRANULE_SCAN_MS = 150
+
 
 def raw_graph_scan_window(
     start_date: datetime | None,
@@ -330,10 +358,52 @@ def raw_graph_scan_fits_wall(
     the bounded background worker instead of being refused outright.
     """
 
+    return _scan_fits_wall(
+        estimated_rows,
+        remaining_ms=remaining_ms,
+        raw_log_marks=raw_log_marks,
+        raw_log_ms=int(raw_log_marks or 0) * _RAW_LOG_GRANULE_SCAN_MS,
+    )
+
+
+def raw_log_membership_fits_wall(
+    estimated_rows: int | None,
+    *,
+    remaining_ms: int,
+    raw_log_marks: int | None = None,
+) -> bool:
+    """Whether an exact membership read that parses raw_log is PROVEN to fit.
+
+    The eval and annotation charts' form of the simulator toggle, priced at
+    ``_RAW_LOG_MEMBERSHIP_GRANULE_SCAN_MS`` a granule. It has
+    ``raw_graph_scan_fits_wall``'s shape so ``_schedule_unaffordable_graph_read``
+    can ask it about the background wall. The membership parses raw_log by
+    definition, so an uncounted granule set is unknown, and unknown never fits.
+    """
+
+    if raw_log_marks is None:
+        logger.info("graph_raw_log_membership_granules_unknown_not_affordable")
+        return False
+    return _scan_fits_wall(
+        estimated_rows,
+        remaining_ms=remaining_ms,
+        raw_log_marks=raw_log_marks,
+        raw_log_ms=int(raw_log_marks) * _RAW_LOG_MEMBERSHIP_GRANULE_SCAN_MS,
+    )
+
+
+def _scan_fits_wall(
+    estimated_rows: int | None,
+    *,
+    remaining_ms: int,
+    raw_log_marks: int | None,
+    raw_log_ms: int,
+) -> bool:
+    """The raw_log granules spend the wall first; the spans get the rest."""
+
     if estimated_rows is None:
         logger.info("graph_raw_scan_estimate_unknown_not_affordable")
         return False
-    raw_log_ms = int(raw_log_marks or 0) * _RAW_LOG_GRANULE_SCAN_MS
     span_ms = max(0, int(remaining_ms)) - raw_log_ms
     affordable_rows = max(0, span_ms) * _RAW_SCAN_ROWS_PER_MS
     if span_ms >= 0 and estimated_rows <= affordable_rows:
@@ -490,6 +560,7 @@ __all__ = [
     "estimate_user_graph_scan_rows",
     "raw_graph_scan_fits_wall",
     "raw_graph_scan_window",
+    "raw_log_membership_fits_wall",
     "user_graph_scan_fits_wall",
     "user_graph_scan_window",
 ]

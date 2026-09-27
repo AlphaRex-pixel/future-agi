@@ -778,7 +778,9 @@ def test_a_seed_never_readmits_a_raw_log_parse(scheduled):
 
     assert analytics.statements == []
     assert analytics.seed_probes == []
-    assert response["query_status"] in {"pending", "degraded"}
+    # 20,000 granules is past the background wall too: refused, not scheduled.
+    assert response["query_status"] == "degraded"
+    assert response["query_error_code"] == "read_budget_exceeded"
 
 
 @pytest.mark.unit
@@ -834,6 +836,221 @@ def test_measured_dev_voice_windows_still_run_inline(
     )
     assert measured_ms <= predicted_ms
     assert predicted_ms <= settings.INTERACTIVE_ANALYTICS_DEFAULT_WALL_MS
+
+
+# --- the eval and annotation charts: the toggle as a FINAL membership -------
+#
+# The Voice screen sends the toggle with EVAL and ANNOTATION charts too. Those
+# compile it into ``trace_id NOT IN`` a ``spans FINAL`` membership over the
+# whole window that parses every span's raw_log, and ran it inline on the 30 s
+# wall with no cost gate at all. On dev (read-only, EXACT_GRAPH_READ_SETTINGS)
+# the eval chart of project 2843b914 read 977 MiB in 1.2 s at 30 days and
+# 4.81 GiB in 6.6 s at 90 days, and at 180 days was killed by the 20 s cap
+# after 4.73 GiB with 2.19 GiB of memory held; toggle off, 180 days took
+# 1.2 s. One annotation batch of 14 traces on 5272afb0 took 13.8 s at 135
+# days and did not finish in 20 s at 180.
+
+EVAL_CONFIG_ID = "7c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+MEMBERSHIP_NAMESPACES = {
+    "eval": "observe-eval-graph",
+    "annotation": "observe-annotation-graph",
+}
+
+
+@pytest.fixture
+def membership_reads(monkeypatch):
+    """Stand in for the exact readers: each issues its statement inline."""
+
+    def _reader(**kwargs):
+        kwargs["analytics"].execute_ch_query("SELECT exact_membership_graph", {})
+        return {
+            "metric_name": EVAL_CONFIG_ID,
+            "data": [],
+            "query_complete": True,
+            "query_status": "complete",
+            "query_sampled": False,
+        }
+
+    monkeypatch.setattr(graph_dispatch, "read_exact_eval_graph", _reader)
+    monkeypatch.setattr(graph_dispatch, "read_exact_annotation_graph", _reader)
+
+
+def _fetch_membership(metric_type, analytics, *, filters, organization_id=ORG_ID):
+    fetch = (
+        graph_dispatch.fetch_eval_graph_ch
+        if metric_type == "eval"
+        else graph_dispatch.fetch_annotation_graph_ch
+    )
+    return fetch(
+        analytics=analytics,
+        project_id=PROJECT_ID,
+        filters=filters,
+        interval="day",
+        req_data_config={"id": EVAL_CONFIG_ID, "type": metric_type.upper()},
+        observe_type="trace",
+        organization_id=organization_id,
+        workspace_id=None,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("metric_type", ["eval", "annotation"])
+def test_toggle_on_membership_chart_is_priced_by_the_raw_log_it_parses(
+    scheduled, membership_reads, metric_type
+):
+    """Dev 2843b914 at 180 days: 494 granules, killed at 20 s on one worker."""
+    from tracer.services.clickhouse.query_builders.voice_call_list import (
+        VOICE_CALL_SIMULATOR_EXCLUSION_FILTER,
+    )
+
+    analytics = Analytics(estimated_rows=88_248, estimated_marks=494)
+
+    response = _fetch_membership(
+        metric_type, analytics, filters=_voice_filters(days=180)
+    )
+
+    assert analytics.statements == [], "the 30 s wall cannot parse this raw_log"
+    assert len(analytics.cost_probes) == 1
+    assert len(scheduled.enqueued) == 1, "the background wall can"
+    namespace, identity, _ = scheduled.enqueued[0]
+    assert namespace == MEMBERSHIP_NAMESPACES[metric_type]
+    # Everything the worker's _observe_payload reads, the toggle included.
+    assert VOICE_CALL_SIMULATOR_EXCLUSION_FILTER in identity["filters"]
+    assert identity["req_data_config"]["id"] == EVAL_CONFIG_ID
+    assert identity["observe_type"] == "trace"
+    assert identity["aggregation_context"] == "trace"
+    assert identity["organization_id"] == ORG_ID
+    assert response["query_status"] == "pending"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("metric_type", ["eval", "annotation"])
+def test_toggle_off_membership_chart_is_never_probed(
+    scheduled, membership_reads, metric_type
+):
+    """Nothing parses raw_log without the toggle: the read runs as before."""
+
+    analytics = Analytics(estimated_rows=88_248, estimated_marks=494)
+
+    response = _fetch_membership(
+        metric_type,
+        analytics,
+        filters=_voice_filters(days=180, remove_simulation_calls=False),
+    )
+
+    assert analytics.cost_probes == []
+    assert len(analytics.statements) == 1
+    assert scheduled.enqueued == []
+    assert response["query_status"] == "complete"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("metric_type", ["eval", "annotation"])
+def test_toggle_on_membership_chart_no_wall_can_parse_is_refused(
+    scheduled, membership_reads, metric_type
+):
+    """1,300 granules is over three minutes at the cold-tier rate."""
+
+    analytics = Analytics(estimated_rows=88_248, estimated_marks=1_300)
+
+    response = _fetch_membership(metric_type, analytics, filters=_voice_filters())
+
+    assert analytics.statements == []
+    assert scheduled.enqueued == []
+    assert response["query_status"] == "degraded"
+    assert response["query_error_code"] == "read_budget_exceeded"
+    assert response["query_provenance"] == "read_cost_gate"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("metric_type", ["eval", "annotation"])
+def test_toggle_on_membership_chart_with_uncountable_granules_is_not_small(
+    scheduled, membership_reads, metric_type
+):
+    analytics = Analytics(estimated_rows=5_091, estimated_marks="many")
+
+    response = _fetch_membership(metric_type, analytics, filters=_voice_filters())
+
+    assert analytics.statements == []
+    assert len(scheduled.enqueued) == 1
+    assert response["query_status"] == "pending"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("metric_type", "days", "rows", "marks", "measured_ms", "inline"),
+    [
+        # Dev, read-only, the gate's own EXPLAIN ESTIMATE over the window and
+        # the statement's first run at EXACT_GRAPH_READ_SETTINGS. The eval
+        # chart of 2843b914 at 30, 90 and 180 days; the 180-day read was
+        # killed by the 20 s cap, so 20,009 ms is a floor.
+        ("eval", 30, 5_091, 96, 1_206, True),
+        ("eval", 90, 46_552, 302, 6_628, False),
+        ("eval", 180, 88_248, 494, 20_009, False),
+        # One annotation batch of 5272afb0 at 135 and 180 days (killed).
+        ("annotation", 135, 53_041, 276, 13_786, False),
+        ("annotation", 180, 69_587, 363, 20_004, False),
+    ],
+)
+def test_measured_dev_membership_windows_take_the_lane_their_price_allows(
+    scheduled, membership_reads, metric_type, days, rows, marks, measured_ms, inline
+):
+    """The price bounds every measured read; the worker takes what 30 s cannot."""
+    from django.conf import settings
+
+    analytics = Analytics(estimated_rows=rows, estimated_marks=marks)
+
+    response = _fetch_membership(
+        metric_type, analytics, filters=_voice_filters(days=days)
+    )
+
+    predicted_ms = (
+        marks * graph_read_cost._RAW_LOG_MEMBERSHIP_GRANULE_SCAN_MS
+        + rows / graph_read_cost._RAW_SCAN_ROWS_PER_MS
+    )
+    assert measured_ms <= predicted_ms <= settings.GRAPH_BACKGROUND_WALL_MS
+    if inline:
+        assert len(analytics.statements) == 1
+        assert response["query_status"] == "complete"
+    else:
+        assert analytics.statements == []
+        assert len(scheduled.enqueued) == 1
+        assert response["query_status"] == "pending"
+
+
+@pytest.mark.unit
+def test_membership_granules_are_priced_at_the_cold_tier_rate():
+    fits = graph_read_cost.raw_log_membership_fits_wall
+    granule_ms = graph_read_cost._RAW_LOG_MEMBERSHIP_GRANULE_SCAN_MS
+
+    assert fits(0, remaining_ms=200 * granule_ms, raw_log_marks=200) is True
+    assert fits(0, remaining_ms=200 * granule_ms - 1, raw_log_marks=200) is False
+    # The membership parses raw_log by definition: no count is not "none".
+    assert fits(0, remaining_ms=180_000, raw_log_marks=None) is False
+    assert fits(None, remaining_ms=180_000, raw_log_marks=1) is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("metric_type", ["system", "eval", "annotation"])
+def test_toggle_without_simulator_numbers_parses_no_raw_log(
+    scheduled, membership_reads, monkeypatch, metric_type
+):
+    """With no numbers configured the leaf compiles to "0" and reads nothing."""
+    from tracer.services.clickhouse.query_builders import voice_call_list
+
+    monkeypatch.setattr(voice_call_list, "VAPI_PHONE_NUMBERS", ())
+    analytics = Analytics(
+        estimated_rows=FAT_VOICE_ROWS, estimated_marks=FAT_VOICE_MARKS
+    )
+
+    if metric_type == "system":
+        response = _fetch(analytics, filters=_voice_filters())
+    else:
+        response = _fetch_membership(metric_type, analytics, filters=_voice_filters())
+
+    assert len(analytics.statements) == 1
+    assert scheduled.enqueued == []
+    assert response["query_complete"] is True
 
 
 # --- the estimate reducer --------------------------------------------------

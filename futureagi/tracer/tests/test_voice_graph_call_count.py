@@ -242,6 +242,85 @@ def test_voice_chart_cost_gate_prices_the_simulator_raw_log(
         assert priced == [None]
 
 
+@pytest.fixture()
+def voice_membership_metrics(observe_project, eval_template):
+    """An eval config and an annotation label the Voice screen can chart."""
+    from model_hub.models.choices import AnnotationTypeChoices
+    from model_hub.models.develop_annotations import AnnotationsLabels
+    from tracer.models.custom_eval_config import CustomEvalConfig
+
+    eval_config = CustomEvalConfig.objects.create(
+        name="Voice Eval",
+        project=observe_project,
+        eval_template=eval_template,
+        config={},
+        mapping={},
+        filters={},
+    )
+    label = AnnotationsLabels.objects.create(
+        name="Voice Quality",
+        type=AnnotationTypeChoices.NUMERIC.value,
+        organization=observe_project.organization,
+        workspace=observe_project.workspace,
+        project=observe_project,
+        settings={"min": 0, "max": 10, "step_size": 1, "display_type": "slider"},
+    )
+    return {"EVAL": str(eval_config.id), "ANNOTATION": str(label.id)}
+
+
+@pytest.mark.parametrize("metric_type", ["EVAL", "ANNOTATION"])
+@pytest.mark.parametrize("remove_simulation_calls", [False, True])
+def test_voice_membership_chart_cost_gate_prices_the_simulator_raw_log(
+    auth_client,
+    voice_fixture,
+    voice_membership_metrics,
+    monkeypatch,
+    metric_type,
+    remove_simulation_calls,
+):
+    # Eval and annotation charts carry the toggle as a whole-window FINAL
+    # membership that parses raw_log; the view's leaf must reach the gate.
+    from tracer.services.clickhouse import graph_dispatch
+
+    probed = []
+    real_estimate = graph_dispatch.estimate_raw_log_graph_scan
+
+    def _recording_estimate(**kwargs):
+        probed.append(real_estimate(**kwargs))
+        return probed[-1]
+
+    monkeypatch.setattr(
+        graph_dispatch, "estimate_raw_log_graph_scan", _recording_estimate
+    )
+
+    response = auth_client.post(
+        "/tracer/trace/get_graph_methods/",
+        {
+            "project_id": voice_fixture["project_id"],
+            "interval": "day",
+            "property": "average",
+            "req_data_config": {
+                "id": voice_membership_metrics[metric_type],
+                "type": metric_type,
+            },
+            "filters": _window_filter(voice_fixture["window"]),
+            **_voice_scope(remove_simulation_calls),
+        },
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_200_OK, response.content
+    body = response.json()
+    result = body.get("result", body)
+    # The fixture's few granules fit the interactive wall: it still runs inline.
+    assert result["query_status"] == "complete", result
+    if remove_simulation_calls:
+        assert len(probed) == 1, "the chart is costed once, before it is read"
+        assert probed[0] is not None and probed[0][1] >= 1
+    else:
+        assert probed == []
+
+
 def test_trace_chart_still_counts_every_span(auth_client, voice_fixture):
     traffic = _graph(auth_client, voice_fixture, "traffic")
 
