@@ -137,6 +137,32 @@ func TestOrgProviderPrivateBaseURLRefusalExplainsOptIn(t *testing.T) {
 	}
 }
 
+// The RFC 6598 shared address space (100.64.0.0/10, CGNAT) counts as private:
+// without the opt-in the request is refused, not proxied there.
+func TestOrgProviderCGNATBaseURLNeedsOptIn(t *testing.T) {
+	operator := startMockOpenAI(t)
+	defer operator.Close()
+
+	srv := newOrgProviderURLTestServer(t, operator.URL, map[string]*tenant.ProviderConfig{
+		"custom": {
+			APIKey:    "org-key",
+			BaseURL:   "http://100.64.77.10:8080",
+			APIFormat: "openai",
+			Models:    []string{"mock-custom"},
+			Enabled:   true,
+		},
+	})
+
+	status, apiErr := postChat(t, srv, "mock-custom")
+
+	if status != http.StatusForbidden || apiErr.Code != "provider_base_url_blocked" {
+		t.Fatalf("status = %d code = %q, want 403 provider_base_url_blocked; message: %s", status, apiErr.Code, apiErr.Message)
+	}
+	if !strings.Contains(apiErr.Message, config.EnvAllowPrivateProviderURLs+"=true") {
+		t.Errorf("message = %q, want it to name %s", apiErr.Message, config.EnvAllowPrivateProviderURLs)
+	}
+}
+
 // A model no org provider lists keeps the plain refusal: org keys are barred
 // from config.yaml providers by design.
 func TestUnlistedModelStillNotAvailableForOrgKey(t *testing.T) {
