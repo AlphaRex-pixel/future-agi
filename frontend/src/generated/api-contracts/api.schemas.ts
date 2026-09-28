@@ -4109,6 +4109,7 @@ export interface SetupChecksResultApi {
   setup: SetupChecksResultApiSetup;
   /** @minLength 1 */
   collector_http_url: string;
+  account_exists: boolean;
   checks: SetupCheckApi[];
 }
 

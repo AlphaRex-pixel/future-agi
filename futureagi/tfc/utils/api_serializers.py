@@ -229,6 +229,7 @@ class SetupChecksResultSerializer(serializers.Serializer):
     mode = serializers.ChoiceField(choices=("live", "experiment"))
     setup = serializers.ChoiceField(choices=("standalone", "distributed", "helm"))
     collector_http_url = serializers.CharField()
+    account_exists = serializers.BooleanField()
     checks = SetupCheckSerializer(many=True)
 
 

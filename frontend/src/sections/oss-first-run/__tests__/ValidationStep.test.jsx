@@ -235,6 +235,34 @@ describe("ValidationStep", () => {
     expect(screen.queryByText(/Create your account/)).toBeNull();
   });
 
+  it("sends people to sign in once the install has made an account", async () => {
+    mockData = {
+      status: "ok",
+      mode: "live",
+      account_exists: true,
+      checks: [check()],
+    };
+    const onContinue = vi.fn();
+    render(
+      <ThemeProvider theme={theme}>
+        <ValidationStep
+          mode={LAUNCH_MODE.LIVE}
+          onSwitchMode={vi.fn()}
+          onContinue={onContinue}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(
+      await screen.findByText(/already has an account: sign in with it/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Create your account/)).toBeNull();
+    const button = screen.getByRole("button", { name: "Continue" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    expect(onContinue).toHaveBeenCalledWith({ accountExists: true });
+  });
+
   it("holds the next steps back while a production launch is blocked", async () => {
     renderStep();
     await screen.findByRole("button", { name: "Continue with Test flight" });

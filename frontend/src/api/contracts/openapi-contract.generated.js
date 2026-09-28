@@ -96345,7 +96345,14 @@ export const OPENAPI_CONTRACT = Object.freeze({
       },
     },
     SetupChecksResult: {
-      required: ["status", "mode", "setup", "collector_http_url", "checks"],
+      required: [
+        "status",
+        "mode",
+        "setup",
+        "collector_http_url",
+        "account_exists",
+        "checks",
+      ],
       type: "object",
       properties: {
         status: {
@@ -96367,6 +96374,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Collector http url",
           type: "string",
           minLength: 1,
+        },
+        account_exists: {
+          title: "Account exists",
+          type: "boolean",
         },
         checks: {
           type: "array",

@@ -93,13 +93,18 @@ export const LOCAL_COLLECTOR_URL = "http://localhost:4318";
 export const TRACING_DOCS_URL = "https://docs.futureagi.com/docs/observe";
 
 // Shown once pre-flight clears. Backticks render as inline code.
-export const nextSteps = ({ authenticated, collectorUrl }) => [
+const accountStep = ({ authenticated, accountExists }) => {
+  if (authenticated) return "Continue to your workspace.";
+  if (accountExists)
+    return "This instance already has an account: sign in with it on the next screen.";
+  return "Create your account on the next screen. You become the owner of a new workspace.";
+};
+
+export const nextSteps = ({ authenticated, accountExists, collectorUrl }) => [
   {
     id: "account",
     icon: "solar:user-id-bold",
-    text: authenticated
-      ? "Continue to your workspace."
-      : "Create your account on the next screen. You become the owner of a new workspace.",
+    text: accountStep({ authenticated, accountExists }),
   },
   {
     id: "keys",

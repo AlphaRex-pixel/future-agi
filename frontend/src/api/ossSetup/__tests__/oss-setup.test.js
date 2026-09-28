@@ -96,6 +96,27 @@ describe("fetchSetupChecks", () => {
     expect((await fetchSetupChecks("live")).collector_http_url).toBeNull();
   });
 
+  it("says whether an account exists already", async () => {
+    h.get.mockResolvedValue({
+      data: {
+        result: {
+          status: "ok",
+          mode: "live",
+          account_exists: true,
+          checks: [],
+        },
+      },
+    });
+
+    expect((await fetchSetupChecks("live")).account_exists).toBe(true);
+  });
+
+  it("keeps the sign-up path for a server that predates account_exists", async () => {
+    respond([SERVED]);
+
+    expect((await fetchSetupChecks("live")).account_exists).toBe(false);
+  });
+
   it("returns a blank remedy rather than undefined when the check passed", async () => {
     respond([{ ...SERVED, status: "passed", fix: "", docs_url: "" }]);
 

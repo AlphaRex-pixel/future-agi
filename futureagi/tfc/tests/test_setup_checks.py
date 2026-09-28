@@ -136,6 +136,7 @@ class TestSetupChecksResponseShape:
             "mode",
             "setup",
             "collector_http_url",
+            "account_exists",
             "checks",
         }
 
@@ -767,6 +768,54 @@ class TestCheckInventory:
                 assert "down_detail" not in check[mode], (
                     f"{check['id']} still declares a per-mode down_detail"
                 )
+
+
+@pytest.mark.integration
+@pytest.mark.api
+class TestAccountExists:
+    """./bin/install usually makes the owner before anyone opens the screen,
+    which then sends people to sign in instead of sign-up."""
+
+    @pytest.mark.django_db
+    def test_false_before_any_account(self, api_client):
+        from accounts.models import User
+
+        User.objects.all().delete()
+
+        assert get_checks(api_client)["account_exists"] is False
+
+    @pytest.mark.django_db
+    def test_true_once_an_account_exists_and_nothing_about_it_leaks(self, api_client):
+        from accounts.models import User
+
+        User.objects.all().delete()
+        User.objects.create_user(
+            email="owner@example.com", password="Owner-Passw0rd!", name="Owner"
+        )
+
+        result = get_checks(api_client)
+
+        assert result["account_exists"] is True
+        # A yes or no to anyone who asks: never the address.
+        assert "owner@example.com" not in str(result)
+        assert "Owner" not in str(result)
+
+    @pytest.mark.django_db
+    def test_deactivated_accounts_cannot_sign_in(self, api_client):
+        from accounts.models import User
+
+        User.objects.all().delete()
+        User.objects.create_user(
+            email="gone@example.com", password="Gone-Passw0rd!", name="Gone"
+        ).__class__.objects.update(is_active=False)
+
+        assert get_checks(api_client)["account_exists"] is False
+
+    def test_no_database_keeps_the_sign_up_path(self):
+        with patch(
+            "accounts.models.User.objects.filter", side_effect=RuntimeError("down")
+        ):
+            assert setup_checks._account_exists() is False
 
 
 @pytest.mark.integration

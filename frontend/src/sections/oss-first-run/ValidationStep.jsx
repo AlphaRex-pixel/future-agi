@@ -138,9 +138,10 @@ export default function ValidationStep({
   const checks = useMemo(() => data?.checks ?? [], [data]);
   const setupMeta = getSetupMeta(data?.setup);
   const collectorUrl = data?.collector_http_url;
+  const accountExists = Boolean(data?.account_exists);
   const steps = useMemo(
-    () => nextSteps({ authenticated, collectorUrl }),
-    [authenticated, collectorUrl],
+    () => nextSteps({ authenticated, accountExists, collectorUrl }),
+    [authenticated, accountExists, collectorUrl],
   );
 
   let connectionState = CONNECTION_STATE.CONNECTING;
@@ -690,7 +691,7 @@ export default function ValidationStep({
           fullWidth
           color="primary"
           variant="contained"
-          onClick={onContinue}
+          onClick={() => onContinue({ accountExists })}
           disabled={blocked}
           sx={{ height: 40, borderRadius: 0.5 }}
         >

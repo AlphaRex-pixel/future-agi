@@ -64,7 +64,9 @@ container per service) or ``helm`` (one pod per service, from the Helm chart).
 A ``fix`` that differs between them is written per setup, and the screen gets
 only the one that applies. It also carries ``collector_http_url``, the
 OTLP/HTTP endpoint an SDK outside the stack sends traces to
-(FI_COLLECTOR_PUBLIC_URL).
+(FI_COLLECTOR_PUBLIC_URL), and ``account_exists``: whether an active account
+exists yet, so the screen sends people to sign in rather than sign up. A
+boolean only, never an email or a count.
 """
 
 import ipaddress
@@ -806,6 +808,19 @@ def _run_probes(request_host=None) -> dict:
     return results
 
 
+def _account_exists() -> bool:
+    """Whether someone can sign in already: ./bin/install (or `manage.py
+    create_user`) often makes the owner before anyone opens the screen, which
+    then sends people to sign in instead of sign-up. A yes or no, never who:
+    the endpoint is public. No database answers False, the sign-up path."""
+    from accounts.models import User
+
+    try:
+        return User.objects.filter(is_active=True).exists()
+    except Exception:
+        return False
+
+
 def _for_setup(text, setup: str) -> str:
     """A ``fix`` is one string, or one per setup when the remedy differs."""
     if isinstance(text, dict):
@@ -878,8 +893,9 @@ class SetupChecksView(APIView):
     """Public infrastructure probe for the OSS first-run setup screen.
 
     Returns ``{"status": "ok"|"issues", "mode": ..., "setup":
-    "standalone"|"distributed"|"helm", "collector_http_url": ..., "checks":
-    [...]}``. No auth — it runs before any account exists. Self-hosted only:
+    "standalone"|"distributed"|"helm", "collector_http_url": ...,
+    "account_exists": true|false, "checks": [...]}``. No auth — it runs
+    before anyone can sign in. Self-hosted only:
     on cloud and EE the route answers 404, so neither the internal service
     topology nor the outbound probes it triggers are reachable by an
     anonymous caller.
@@ -922,6 +938,7 @@ class SetupChecksView(APIView):
                 "mode": mode,
                 "setup": setup,
                 "collector_http_url": settings.FI_COLLECTOR_PUBLIC_URL,
+                "account_exists": _account_exists(),
                 "checks": checks,
             }
             _store_snapshot(cache_key, result)
