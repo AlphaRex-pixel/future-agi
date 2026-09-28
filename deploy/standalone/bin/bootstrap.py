@@ -15,6 +15,13 @@ one-shot jobs in docker-compose.distributed.yml do, minus PeerDB:
                                trigger capture plus its drain schedules for
                                `outbox`, neither for `peerdb`/`off`
 
+Those steps are `manage.py bootstrap_install`'s (futureagi/tfc/management/
+commands/bootstrap_install.py, the Helm chart's bootstrap Job), imported and
+run in the same order, so every install path prepares the datastores the
+same way. This script adds only what the Standalone image needs: refusing a
+Distributed install's database, skipping migrate on an unchanged image,
+collectstatic, and the first-run experience below.
+
 Database mutations are allowed only inside this process; the API and every
 `docker compose exec` keep the container's NO_STARTUP_DB_MUTATIONS=true. When
 the image and the applied migrations are unchanged since the last successful
@@ -43,11 +50,9 @@ First-run experience, around that work:
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import os
-import re
 import socket
 import sys
 import threading
@@ -73,9 +78,6 @@ ADOPT_DISTRIBUTED_INSTALL_ALIASES = ("FI_ADOPT_FULL_INSTALL_DATA",)
 # Written after the first successful boot on an adopted database. The file
 # name predates the rename; installs that adopted a database already have it.
 ADOPTED = DATA / ".adopted-full-install"
-OUTBOX_CDC_MODULE = "tracer.services.clickhouse.oss_outbox_cdc"
-OBSERVED_CATALOG_TABLES = ("observed_attribute_keys", "observed_attribute_values")
-CLICKHOUSE_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
 
 # Boot progress for the UI's starting page. bin/start empties this directory
 # on every container start. World-readable: nginx's workers read it.
@@ -495,34 +497,9 @@ def hand_over(started_at: float) -> None:
     sys.exit(wait_for_api(started_at))
 
 
-def endpoint(value: str, default_port: int) -> tuple[str, int]:
-    host, _, port = value.rpartition(":")
-    return (host, int(port)) if host else (value, default_port)
-
-
-def wait_tcp(host: str, port: int, timeout: float = 300) -> None:
-    deadline = time.monotonic() + timeout
-    while True:
-        try:
-            socket.create_connection((host, port), timeout=2).close()
-            return
-        except OSError:
-            if time.monotonic() > deadline:
-                raise BootstrapError(
-                    f"{host}:{port} is not reachable after {timeout:.0f}s"
-                ) from None
-            time.sleep(1)
-
-
-def run_cli(main, argv: list[str]) -> int:
-    """Run a module's CLI entry point in this process and return its exit code."""
-    try:
-        return main(argv) or 0
-    except SystemExit as exit_:
-        return exit_.code if isinstance(exit_.code, int) else 1
-
-
-def setup_django() -> None:
+def configure_django() -> None:
+    """This process alone may mutate the databases. The backend is importable
+    from here on; main() sets Django up once the datastores answer."""
     os.environ["NO_STARTUP_DB_MUTATIONS"] = "false"
     os.environ["SERVICE_TYPE"] = "bootstrap"
     # Django's historical 0078 migration must never replay the ClickHouse SQL glob.
@@ -530,42 +507,6 @@ def setup_django() -> None:
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "tfc.settings.settings")
     sys.path.insert(0, str(PROJECT_ROOT))
     os.chdir(PROJECT_ROOT)
-
-    import django
-
-    django.setup()
-
-
-def call(command: str, **options) -> None:
-    """call_command under the same authorization as `manage.py <command>`."""
-    from django.apps import apps
-    from django.core.management import call_command
-    from django.db.models.signals import post_migrate
-    from model_hub.apps import (
-        OPERATOR_STARTUP_MUTATION_COMMANDS,
-        _seed_prompt_labels_after_migrate,
-        explicit_management_mutation_authorized,
-    )
-
-    argv = ["manage.py", command]
-    if command in OPERATOR_STARTUP_MUTATION_COMMANDS:
-        if not explicit_management_mutation_authorized(argv):
-            raise BootstrapError(
-                f"{command} is not authorized in this environment (ENV_TYPE="
-                f"{os.environ.get('ENV_TYPE', '')!r}). Hosted environments need "
-                "STARTUP_DB_MUTATION_MODE=operator on the app service."
-            )
-    if command == "migrate":
-        # ModelHubConfig.ready() connects this only when argv is `migrate`.
-        post_migrate.connect(
-            _seed_prompt_labels_after_migrate,
-            sender=apps.get_app_config("model_hub"),
-            dispatch_uid="model_hub_seed_default_prompt_labels",
-        )
-    started = time.monotonic()
-    log(f"{command} ...")
-    call_command(command, **options)
-    log(f"{command} done in {time.monotonic() - started:.1f}s")
 
 
 def refuse_foreign_database() -> bool:
@@ -674,6 +615,10 @@ def unapplied_migrations(migrations: list[str]) -> set[str]:
 
 
 def migrate_and_seed() -> str:
+    """bootstrap_install's migrate and seeds, skipped while the image and the
+    applied migrations are unchanged since the last successful boot."""
+    from tfc.management.commands import bootstrap_install
+
     fingerprint, migrations = schema_fingerprint()
     stored = FINGERPRINT.read_text().strip() if FINGERPRINT.exists() else None
     if stored == fingerprint and not unapplied_migrations(migrations):
@@ -682,190 +627,19 @@ def migrate_and_seed() -> str:
         )
         return fingerprint
     set_phase("migrating")
-    try:
-        call("createcachetable", database="default")
-    except Exception as exc:  # non-fatal, as in entrypoint.sh
-        log(f"createcachetable failed (continuing): {exc}")
-    call("migrate", interactive=False, verbosity=1)
-    call("seed_system_evals")
+    bootstrap_install.migrate_and_seed(log)
     return fingerprint
-
-
-def clickhouse_native_schema() -> None:
-    from tracer.services.clickhouse import oss_cdc_install
-
-    log("ClickHouse native schema ...")
-    if run_cli(
-        oss_cdc_install.main, ["--phase", "native", "--apply", "--timeout", "600"]
-    ):
-        raise BootstrapError("ClickHouse native schema install failed (see above)")
-
-
-def property_catalog() -> None:
-    """Python port of futureagi/scripts/property_catalog_oss/bootstrap_clickhouse.sh."""
-    import clickhouse_connect
-    from tracer.services.clickhouse.v2.apply_schema_rewriter import split_statements
-
-    source = (
-        os.environ.get("FI_CH_DATABASE")
-        or os.environ.get("CH25_DATABASE")
-        or os.environ.get("CH_DATABASE")
-        or "default"
-    )
-    target = os.environ.get("PROPERTY_CATALOG_DATABASE") or "property_catalog"
-    for name, value in (("source", source), ("PROPERTY_CATALOG_DATABASE", target)):
-        if not CLICKHOUSE_IDENTIFIER.fullmatch(value):
-            raise BootstrapError(f"{name} database must be a ClickHouse identifier")
-    if target.lower() in ("system", "information_schema") or target == source:
-        raise BootstrapError("the observed-attribute index needs its own database")
-    writer = (
-        os.environ.get("PROPERTY_CATALOG_CONSUMER_PASSWORD")
-        or "oss-observed-writer-local-only"
-    )
-    # The same reader password the API connects with.
-    reader = (
-        os.environ.get("PROPERTY_CATALOG_CH_PASSWORD")
-        or "oss-observed-reader-local-only"
-    )
-
-    log(f"observed-attribute index in {target} ...")
-    connect = {
-        "host": os.environ.get("CH_HOST", "clickhouse"),
-        "port": int(os.environ.get("CH_HTTP_PORT", "8123")),
-        "username": os.environ.get("CH_USERNAME")
-        or os.environ.get("CH_USER")
-        or "default",
-        "password": os.environ.get("CH_PASSWORD", ""),
-    }
-    admin = clickhouse_connect.get_client(**connect)
-    try:
-        admin.command(f"CREATE DATABASE IF NOT EXISTS `{target}`")
-        catalog = clickhouse_connect.get_client(database=target, **connect)
-        try:
-            schema = (
-                PROJECT_ROOT
-                / "tracer/services/clickhouse/v2/observed_catalog/schema.sql"
-            )
-            for statement in split_statements(schema.read_text()):
-                catalog.command(statement)
-        finally:
-            catalog.close()
-        # IF NOT EXISTS must not make an incompatible existing index look ready.
-        validation = (
-            PROJECT_ROOT / "scripts/property_catalog_oss/validate_clickhouse.sql"
-        )
-        rows = admin.query(
-            validation.read_text().strip().rstrip(";"), parameters={"database": target}
-        ).result_rows
-        if [tuple(row) for row in rows] not in ([(1,)], [(True,)]):
-            raise BootstrapError(
-                f"observed-attribute index in {target} is incompatible "
-                "(columns, identity, engine or constraints)"
-            )
-        for user, password, settings in (
-            ("observed_catalog_writer", writer, ""),
-            ("observed_catalog_reader", reader, " SETTINGS readonly=2"),
-        ):
-            identified = "IDENTIFIED WITH sha256_password BY {password:String} HOST ANY"
-            admin.command(
-                f"CREATE USER IF NOT EXISTS {user} {identified}",
-                parameters={"password": password},
-            )
-            admin.command(
-                f"ALTER USER {user} {identified}{settings}",
-                parameters={"password": password},
-            )
-        for table in OBSERVED_CATALOG_TABLES:
-            admin.command(
-                f"GRANT SELECT, INSERT ON `{target}`.{table} TO observed_catalog_writer"
-            )
-            admin.command(
-                f"GRANT SELECT ON `{target}`.{table} TO observed_catalog_reader"
-            )
-    finally:
-        admin.close()
-
-
-def change_data_capture() -> None:
-    """Make Postgres -> ClickHouse capture match FI_CDC_MODE, on every start.
-
-    oss_outbox_cdc.ensure_installed() installs the capture triggers and their
-    drain schedules for `outbox` (taking over from a stopped PeerDB on an
-    adopted Distributed install's database), and for `peerdb`/`off` removes what an
-    earlier `outbox` boot left, so capture never runs without a drain. It
-    syncs Temporal schedules, so it runs once Temporal answers.
-    """
-    # A plain import: `from package import module` turns a missing module
-    # into an ImportError ("cannot import name") without its name.
-    try:
-        import tracer.services.clickhouse.oss_outbox_cdc as oss_outbox_cdc
-    except ModuleNotFoundError as exc:
-        if exc.name != OUTBOX_CDC_MODULE:
-            raise
-        log("this image has no outbox CDC installer; skipping CDC")
-        return
-    # The mode ensure_installed() runs (the image sets FI_CDC_MODE=outbox).
-    try:
-        mode = oss_outbox_cdc.cdc_mode()
-    except ValueError as exc:
-        raise BootstrapError(str(exc)) from None
-
-    def ensure() -> None:
-        try:
-            result = oss_outbox_cdc.ensure_installed()
-        except ValueError as exc:
-            # The installer's own errors (OutboxCDCError, InstallError, ...)
-            # say what to do; retrying them within this boot cannot help.
-            raise BootstrapError(
-                f"change data capture (FI_CDC_MODE={mode}): {exc}"
-            ) from None
-        except Exception as exc:
-            # Driver messages can carry credentials or row data.
-            raise RuntimeError(f"{type(exc).__name__} from the CDC installer") from None
-        log(f"change data capture: {json.dumps(result, default=str)}")
-
-    log(f"change data capture (FI_CDC_MODE={mode}) ...")
-    with_retries("change data capture", ensure)
-
-
-def register_search_attributes() -> None:
-    from tfc.temporal import TEMPORAL_NAMESPACE
-    from tfc.temporal.common.client import get_client
-    from tfc.temporal.eval_tasks.registration import (
-        register_search_attributes as register,
-    )
-
-    async def run() -> bool:
-        return await register(await get_client(), TEMPORAL_NAMESPACE)
-
-    if asyncio.run(run()):
-        log("registered the eval-task search attributes")
-
-
-def with_retries(what: str, action, attempts: int = 12, delay: float = 5) -> None:
-    """The Temporal dev server accepts connections before it serves requests.
-
-    A BootstrapError is final: it already says what to do."""
-    for attempt in range(1, attempts + 1):
-        try:
-            action()
-            return
-        except BootstrapError:
-            raise
-        except Exception as exc:
-            if attempt == attempts:
-                raise
-            log(f"{what} failed ({exc}); retrying in {delay:.0f}s")
-            time.sleep(delay)
 
 
 def collect_static() -> None:
     """Done at image build (which writes STATIC_COLLECTED); here only when
     that step failed, and then once per container."""
+    from tfc.management.commands.bootstrap_install import call
+
     if STATIC_COLLECTED.exists():
         return
     try:
-        call("collectstatic", interactive=False, verbosity=0)
+        call("collectstatic", log, interactive=False, verbosity=0)
     except Exception as exc:  # non-fatal, as in entrypoint.sh
         log(f"collectstatic failed (continuing): {exc}")
         return
@@ -879,32 +653,54 @@ def main() -> None:
     READY.unlink(missing_ok=True)
     started = time.monotonic()
     set_phase("waiting")
-    for host, port in (
-        (os.environ.get("PG_HOST", "postgres"), int(os.environ.get("PG_PORT", "5432"))),
-        (
-            os.environ.get("CH_HOST", "clickhouse"),
-            int(os.environ.get("CH_HTTP_PORT", "8123")),
-        ),
-        (
-            os.environ.get("REDIS_HOST", "127.0.0.1"),
-            int(os.environ.get("REDIS_PORT", "6379")),
-        ),
-        endpoint(os.environ.get("TEMPORAL_HOST", "127.0.0.1:7233"), 7233),
-    ):
-        wait_tcp(host, port)
+    configure_django()
+    from tfc.management.commands import bootstrap_install as steps
 
-    setup_django()
+    for name, host, port in (
+        (
+            "Postgres",
+            os.environ.get("PG_HOST", "postgres"),
+            int(os.environ.get("PG_PORT") or 5432),
+        ),
+        (
+            "ClickHouse",
+            os.environ.get("CH_HOST", "clickhouse"),
+            int(os.environ.get("CH_HTTP_PORT") or 8123),
+        ),
+        (
+            "Redis",
+            os.environ.get("REDIS_HOST", "127.0.0.1"),
+            int(os.environ.get("REDIS_PORT") or 6379),
+        ),
+        (
+            "Temporal",
+            *steps.endpoint(os.environ.get("TEMPORAL_HOST", "127.0.0.1:7233"), 7233),
+        ),
+    ):
+        steps.wait_tcp(name, host, port, 300, log)
+
+    import django
+
+    django.setup()
     adopting = refuse_foreign_database()
     fingerprint = migrate_and_seed()
     set_phase("clickhouse")
-    clickhouse_native_schema()
-    property_catalog()
+    steps.clickhouse_native_schema(log, 600)
+    steps.property_catalog(log)
     set_phase("schedules")
-    with_retries("Temporal search attributes", register_search_attributes)
+    steps.with_retries(
+        "Temporal search attributes",
+        lambda: steps.register_search_attributes(log),
+        log,
+    )
     set_phase("cdc")
-    change_data_capture()
+    steps.change_data_capture(log, attempts=12, delay=5)
     set_phase("schedules")
-    with_retries("Temporal schedules", lambda: call("register_temporal_schedules"))
+    steps.with_retries(
+        "Temporal schedules",
+        lambda: steps.call("register_temporal_schedules", log),
+        log,
+    )
     collect_static()
 
     FINGERPRINT.write_text(fingerprint + "\n")
@@ -927,12 +723,16 @@ if __name__ == "__main__":
             started_at = time.time()
         sys.exit(wait_for_api(boot_started_at(started_at)))
 
+    # The shared steps fail with bootstrap_install.BootstrapError, a
+    # CommandError; like this script's own, its message says what to do.
+    from django.core.management.base import CommandError
+
     attempt_started_at = time.time()
     show_summary_once()
     _placeholder = start_placeholder()
     try:
         main()
-    except BootstrapError as exc:
+    except (BootstrapError, CommandError) as exc:
         log(f"FAILED: {exc}")
     except (Exception, SystemExit):
         traceback.print_exc()

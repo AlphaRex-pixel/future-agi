@@ -25,7 +25,6 @@ STANDALONE = ROOT / "deploy" / "standalone"
 DEFAULT_COMPOSE = ROOT / "docker-compose.yml"
 FULL_COMPOSE = ROOT / "docker-compose.distributed.yml"
 CODE_EXECUTOR = ROOT / "futureagi" / "code-executor" / "server.py"
-OUTBOX_MODULE = "tracer.services.clickhouse.oss_outbox_cdc"
 SECRETS_DIR = "/etc/futureagi/secrets"
 
 
@@ -46,16 +45,6 @@ def _programs() -> dict[str, dict[str, str]]:
         for section in parser.sections()
         if section.startswith("program:")
     }
-
-
-@pytest.fixture(scope="module")
-def bootstrap():
-    spec = importlib.util.spec_from_file_location(
-        "standalone_bootstrap", STANDALONE / "bin" / "bootstrap.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def test_default_compose_is_three_containers_plus_two_profiles() -> None:
@@ -767,69 +756,6 @@ def test_cdc_defaults_cover_schedules_and_an_adopted_peerdb() -> None:
     params = inspect.signature(oss_outbox_cdc.ensure_installed).parameters
     assert params["schedules"].default is True
     assert params["takeover_peerdb"].default is True
-
-
-class _ClickHouse:
-    def __init__(self, log, database=None, validation=1):
-        self.log = log
-        self.database = database
-        self.validation = validation
-
-    def command(self, sql, parameters=None):
-        self.log.append((self.database, sql, parameters))
-
-    def query(self, sql, parameters=None):
-        self.log.append((self.database, "VALIDATE", parameters))
-
-        class Result:
-            result_rows = [(self.validation,)]
-
-        return Result()
-
-    def close(self):
-        pass
-
-
-@pytest.mark.parametrize("validation", [1, 0])
-def test_property_catalog_matches_the_shell_bootstrap(
-    bootstrap, monkeypatch, validation
-) -> None:
-    import clickhouse_connect
-
-    log = []
-    monkeypatch.setattr(bootstrap, "PROJECT_ROOT", ROOT / "futureagi")
-    monkeypatch.setattr(
-        clickhouse_connect,
-        "get_client",
-        lambda database=None, **_: _ClickHouse(log, database, validation),
-    )
-    for key in ("FI_CH_DATABASE", "CH25_DATABASE", "CH_DATABASE"):
-        monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("PROPERTY_CATALOG_DATABASE", "property_catalog")
-    monkeypatch.setenv("PROPERTY_CATALOG_CH_PASSWORD", "reader-secret")
-    monkeypatch.setenv("PROPERTY_CATALOG_CONSUMER_PASSWORD", "writer-secret")
-    if not validation:
-        with pytest.raises(bootstrap.BootstrapError, match="incompatible"):
-            bootstrap.property_catalog()
-        return
-    bootstrap.property_catalog()
-
-    assert log[0] == (None, "CREATE DATABASE IF NOT EXISTS `property_catalog`", None)
-    tables = [sql for database, sql, _ in log if database == "property_catalog"]
-    assert len(tables) == 2
-    assert all(sql.startswith("CREATE TABLE IF NOT EXISTS") for sql in tables)
-    assert (None, "VALIDATE", {"database": "property_catalog"}) in log
-    passwords = {
-        sql.split()[2 if sql.startswith("ALTER") else 5]: params["password"]
-        for _, sql, params in log
-        if params and "password" in params
-    }
-    assert passwords == {
-        "observed_catalog_writer": "writer-secret",
-        "observed_catalog_reader": "reader-secret",
-    }
-    grants = [sql for _, sql, _ in log if sql.startswith("GRANT")]
-    assert len(grants) == 4
 
 
 # --- code-executor fallback (no nsjail), as run in the standalone install --------

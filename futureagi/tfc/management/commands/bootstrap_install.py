@@ -2,9 +2,9 @@
 
 ``python manage.py bootstrap_install`` is the bootstrap Job of the Helm chart
 (deploy/helm/futureagi: a pre-install/pre-upgrade hook, or post-install when
-the chart bundles its own datastores). It runs the steps of the Standalone
-install's deploy/standalone/bin/bootstrap.py, in the same order, so every
-install path prepares the datastores the same way:
+the chart bundles its own datastores). The Standalone install's
+deploy/standalone/bin/bootstrap.py imports these steps and runs them in the
+same order, so every install path prepares the datastores the same way:
 
   1. wait until Postgres, ClickHouse, Redis and Temporal accept connections
   2. createcachetable (a failure is logged, not fatal, as in entrypoint.sh)
@@ -130,7 +130,7 @@ def wait_tcp(
             if now >= deadline:
                 raise BootstrapError(
                     f"{name} at {host}:{port} is not reachable after {timeout:.0f}s. "
-                    "Check the host, port and network policy in the chart values."
+                    "Check its host and port, and any network policy in between."
                 ) from None
             if announced is None or now - announced >= 30:
                 log(f"waiting for {name} at {host}:{port}")
@@ -181,13 +181,17 @@ def mutations_authorized(command: str = "migrate") -> bool:
 
 def authorization_hint() -> str:
     env_type = os.environ.get("ENV_TYPE", "")
-    hint = "Set NO_STARTUP_DB_MUTATIONS=false on the bootstrap job"
+    hint = "Set NO_STARTUP_DB_MUTATIONS=false for the bootstrap"
     if env_type.strip().lower() in HOSTED_ENV_TYPES:
         hint += (
             f"; with ENV_TYPE={env_type} also SERVICE_TYPE=bootstrap and "
             "STARTUP_DB_MUTATION_MODE=operator"
         )
-    return hint + ". The Helm chart sets these on its bootstrap job only."
+    return hint + (
+        ". The Helm chart sets these on its bootstrap job only; the Standalone "
+        "bootstrap sets all but STARTUP_DB_MUTATION_MODE (set that on the app "
+        "service)."
+    )
 
 
 def call(command: str, log: Callable[[str], None], **options) -> None:
@@ -225,7 +229,7 @@ def migrate_and_seed(log: Callable[[str], None]) -> None:
         call("createcachetable", log, database="default")
     except BootstrapError:
         raise
-    except Exception as exc:  # non-fatal, as in entrypoint.sh and bootstrap.py
+    except Exception as exc:  # non-fatal, as in entrypoint.sh
         log(f"createcachetable failed (continuing): {exc}")
     call("migrate", log, interactive=False, verbosity=1)
     call("seed_system_evals", log)
@@ -251,9 +255,9 @@ def clickhouse_native_schema(log: Callable[[str], None], timeout: int) -> None:
 def property_catalog(log: Callable[[str], None], env=None) -> None:
     """The observed-attribute index: database, schema, users and grants.
 
-    Same statements as bootstrap.py's property_catalog() and
-    scripts/property_catalog_oss/bootstrap_clickhouse.sh. The ClickHouse user
-    needs CREATE DATABASE and access management (CREATE USER, GRANT)."""
+    Same statements as scripts/property_catalog_oss/bootstrap_clickhouse.sh,
+    which the Distributed stack runs with clickhouse-client. The ClickHouse
+    user needs CREATE DATABASE and access management (CREATE USER, GRANT)."""
     import clickhouse_connect
 
     from tracer.services.clickhouse.v2.apply_schema_rewriter import split_statements

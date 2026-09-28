@@ -3,17 +3,19 @@ steps main() runs and their order, what a repeat boot skips, the refusals
 and failures that stop a boot, and the script's entry point (retry back-off,
 hand-over to the waiter, waiter mode).
 
-Django, the backend packages the bootstrap imports, ClickHouse and Temporal
-are fakes in sys.modules that record what the bootstrap does in one ordered
-log. Nothing here needs the backend's dependencies or a running stack; the
-observed-attribute index SQL and the operator command list are read from the
-backend source tree."""
+The datastore steps themselves are bootstrap_install's (futureagi/tfc/
+management/commands/bootstrap_install.py) and are tested with it, in
+futureagi/tfc/tests/test_bootstrap_install.py; here they run from the backend
+source tree as the Standalone bootstrap calls them. Django, the rest of the
+backend, ClickHouse and Temporal are fakes in sys.modules that record what
+the bootstrap does in one ordered log. Nothing here needs the backend's
+dependencies or a running stack; the observed-attribute index SQL and the
+operator command list are read from the backend source tree."""
 
 from __future__ import annotations
 
 import ast
 import contextlib
-import importlib.abc
 import importlib.util
 import io
 import json
@@ -22,7 +24,6 @@ import runpy
 import sys
 import tempfile
 import time
-import traceback
 import types
 import unittest
 from pathlib import Path
@@ -38,9 +39,7 @@ _spec = importlib.util.spec_from_file_location("standalone_bootstrap_proper", SC
 bootstrap = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bootstrap)
 
-OUTBOX = bootstrap.OUTBOX_CDC_MODULE
-CATALOG_SCHEMA = BACKEND / "tracer/services/clickhouse/v2/observed_catalog/schema.sql"
-CATALOG_VALIDATION = BACKEND / "scripts/property_catalog_oss/validate_clickhouse.sql"
+OUTBOX = "tracer.services.clickhouse.oss_outbox_cdc"
 # docker-compose's service endpoints, none of them the defaults.
 SERVICES = {
     "PG_HOST": "pg.internal",
@@ -108,6 +107,14 @@ class OutboxCDCError(ValueError):
     """The installer's own error type is a ValueError."""
 
 
+class CommandError(Exception):
+    """Django's; bootstrap_install.BootstrapError is one."""
+
+
+class BaseCommand:
+    """Django's, for bootstrap_install's Command."""
+
+
 class FakeStack:
     """Postgres (through Django), ClickHouse and Temporal as the bootstrap
     sees them. ``log`` is the ordered record of what the bootstrap did."""
@@ -119,7 +126,6 @@ class FakeStack:
         self.hooks: list[tuple] = []
         self.sql: list[tuple[str, object]] = []
         self.clickhouse: list[tuple] = []
-        self.native_argv: list[list[str]] = []
         self.search_attribute_calls: list[tuple] = []
         self.cdc_calls: list[tuple] = []
         self.setup_env: dict[str, str] = {}
@@ -136,8 +142,6 @@ class FakeStack:
         self.setup_error: BaseException | None = None
         self.native_exit: object = 0
         self.validation_rows = [(1,)]
-        self.clickhouse_error: tuple[str, BaseException] | None = None
-        self.search_attributes_added = True
         self.cdc_outcomes: list = [{"mode": "outbox", "ready": True}]
         self.model_hub_config = SimpleNamespace(label="model_hub")
         self.app_configs = []
@@ -234,8 +238,6 @@ class FakeStack:
         class Client:
             def command(self, sql, parameters=None):
                 stack.clickhouse.append(("command", database, sql, parameters))
-                if stack.clickhouse_error and stack.clickhouse_error[0] in sql:
-                    raise stack.clickhouse_error[1]
 
             def query(self, sql, parameters=None):
                 stack.clickhouse.append(("query", database, sql, parameters))
@@ -248,7 +250,6 @@ class FakeStack:
 
     def native_main(self, argv):
         self.log.append("clickhouse native schema")
-        self.native_argv.append(list(argv))
         if isinstance(self.native_exit, BaseException):
             raise self.native_exit
         return self.native_exit
@@ -277,7 +278,7 @@ class FakeStack:
     async def register_search_attributes(self, client, namespace):
         self.log.append("search attributes")
         self.search_attribute_calls.append((client, namespace))
-        return self.search_attributes_added
+        return True
 
     # -- The modules ----------------------------------------------------------
 
@@ -319,6 +320,9 @@ class FakeStack:
         return {
             "django": package("django", setup=self.setup),
             "django.apps": package("django.apps", apps=apps),
+            "django.conf": package(
+                "django.conf", settings=SimpleNamespace(BASE_DIR=str(BACKEND / "tfc"))
+            ),
             "django.db": package(
                 "django.db", connection=connection, connections=connections
             ),
@@ -330,6 +334,11 @@ class FakeStack:
             "django.core": package("django.core"),
             "django.core.management": package(
                 "django.core.management", call_command=self.call_command
+            ),
+            "django.core.management.base": package(
+                "django.core.management.base",
+                BaseCommand=BaseCommand,
+                CommandError=CommandError,
             ),
             "model_hub": package("model_hub"),
             "model_hub.apps": package(
@@ -355,7 +364,9 @@ class FakeStack:
             "clickhouse_connect": package(
                 "clickhouse_connect", get_client=self.get_client
             ),
-            "tfc": package("tfc"),
+            # Its real subpackages, bootstrap_install among them, import
+            # from the source tree; the ones listed here are fakes.
+            "tfc": package("tfc", __path__=[str(BACKEND / "tfc")]),
             "tfc.temporal": package("tfc.temporal", TEMPORAL_NAMESPACE="fi-ns"),
             "tfc.temporal.common": package("tfc.temporal.common"),
             "tfc.temporal.common.client": package(
@@ -582,7 +593,7 @@ class MainTest(StackTest):
         self.stack.native_exit = 1
 
         with self.assertRaisesRegex(
-            bootstrap.BootstrapError, "ClickHouse native schema install failed"
+            CommandError, "ClickHouse native schema install failed"
         ):
             bootstrap.main()
 
@@ -605,13 +616,47 @@ class MainTest(StackTest):
     def test_a_hosted_environment_without_operator_mode_refuses_to_migrate(self):
         self.stack.authorized = False
 
+        # The refusal is final at createcachetable, whose other failures are not.
         with self.assertRaisesRegex(
-            bootstrap.BootstrapError, "^migrate is not authorized"
+            CommandError, "^createcachetable is not authorized here"
         ):
             bootstrap.main()
 
         self.assertEqual(self.stack.commands, [])
+        self.assertNotIn("createcachetable failed", self.out.getvalue())
         self.assertFalse(bootstrap.READY.exists())
+
+    def test_waits_for_a_bracketed_ipv6_temporal_and_defaults_empty_ports(self):
+        os.environ.update(
+            PG_PORT="", CH_HTTP_PORT="", REDIS_PORT="", TEMPORAL_HOST="[fd00::1]:7234"
+        )
+
+        bootstrap.main()
+
+        self.assertEqual(
+            [step for step in self.stack.log if step.startswith("tcp ")],
+            [
+                "tcp pg.internal:5432",
+                "tcp ch.internal:8123",
+                "tcp redis.internal:6379",
+                "tcp fd00::1:7234",
+            ],
+        )
+        self.assertEqual(self.stack.clickhouse[0][1]["port"], 8123)
+        self.assertTrue(bootstrap.READY.exists())
+
+    def test_logs_the_cdc_mode_the_installer_runs(self):
+        # Unset, the installer falls back to peerdb; the log must not claim
+        # a default of its own.
+        bootstrap.main()
+
+        self.assertIn(
+            "[bootstrap] change data capture (FI_CDC_MODE=peerdb) ...", self.lines()
+        )
+
+    def test_the_image_runs_the_outbox_cdc_mode(self):
+        dockerfile = (ROOT / "deploy" / "standalone" / "Dockerfile").read_text()
+        self.assertRegex(dockerfile, r"(?m)^ENV FI_CDC_MODE=outbox$")
 
     def test_adopting_a_distributed_database_is_recorded_once_the_boot_succeeds(
         self,
@@ -620,7 +665,7 @@ class MainTest(StackTest):
         os.environ["FI_ADOPT_DISTRIBUTED_INSTALL_DATA"] = "true"
         self.stack.cdc_outcomes = [OutboxCDCError("PeerDB is still running")]
 
-        with self.assertRaises(bootstrap.BootstrapError):
+        with self.assertRaises(CommandError):
             bootstrap.main()
         self.assertFalse(bootstrap.ADOPTED.exists())
 
@@ -758,54 +803,15 @@ class FingerprintTest(StackTest):
         )
 
 
-class CallTest(StackTest):
-    env: ClassVar[dict[str, str]] = {"ENV_TYPE": "prod"}
-
-    def test_migrate_connects_the_prompt_label_seed_first(self):
-        bootstrap.call("migrate", interactive=False)
-
-        self.assertEqual(self.stack.log, ["post_migrate hook", "command migrate"])
-        self.assertEqual(
-            self.stack.hooks,
-            [
-                (
-                    self.stack.seed_prompt_labels,
-                    self.stack.model_hub_config,
-                    "model_hub_seed_default_prompt_labels",
-                )
-            ],
-        )
-        self.assertEqual(self.stack.authorized_argv, [["manage.py", "migrate"]])
-        self.assertEqual(self.lines()[0], "[bootstrap] migrate ...")
-        self.assertRegex(self.lines()[1], r"^\[bootstrap\] migrate done in \d+\.\ds$")
-
-    def test_an_unauthorized_mutation_is_refused_before_it_runs(self):
-        self.stack.authorized = False
-
-        with self.assertRaises(bootstrap.BootstrapError) as caught:
-            bootstrap.call("seed_system_evals")
-
-        self.assertEqual(self.stack.commands, [])
-        self.assertIn("ENV_TYPE='prod'", str(caught.exception))
-        self.assertIn("STARTUP_DB_MUTATION_MODE=operator", str(caught.exception))
-
-    def test_other_commands_need_no_authorization(self):
-        self.stack.authorized = False
-
-        bootstrap.call("check")
-
-        self.assertEqual(self.stack.authorized_argv, [])
-        self.assertEqual(self.stack.log, ["command check"])
-
-
-class SetupDjangoTest(StackTest):
+class ConfigureDjangoTest(StackTest):
     env: ClassVar[dict[str, str]] = {
+        **SERVICES,
         "NO_STARTUP_DB_MUTATIONS": "true",
         "SERVICE_TYPE": "app",
     }
 
     def test_the_bootstrap_process_alone_may_mutate_the_databases(self):
-        bootstrap.setup_django()
+        bootstrap.main()
 
         env = self.stack.setup_env
         self.assertEqual(env["NO_STARTUP_DB_MUTATIONS"], "false")
@@ -820,406 +826,10 @@ class SetupDjangoTest(StackTest):
             FI_SKIP_CH25_MIGRATION="0", DJANGO_SETTINGS_MODULE="tfc.settings.test"
         )
 
-        bootstrap.setup_django()
+        bootstrap.configure_django()
 
-        self.assertEqual(self.stack.setup_env["FI_SKIP_CH25_MIGRATION"], "0")
-        self.assertEqual(
-            self.stack.setup_env["DJANGO_SETTINGS_MODULE"], "tfc.settings.test"
-        )
-
-
-class ClickHouseNativeSchemaTest(StackTest):
-    def test_runs_the_native_phase_of_the_installer(self):
-        bootstrap.clickhouse_native_schema()
-
-        self.assertEqual(
-            self.stack.native_argv,
-            [["--phase", "native", "--apply", "--timeout", "600"]],
-        )
-
-    def test_a_failing_installer_fails_the_boot(self):
-        for outcome in (2, SystemExit(3), SystemExit("usage")):
-            self.stack.native_exit = outcome
-            with (
-                self.subTest(outcome=outcome),
-                self.assertRaisesRegex(
-                    bootstrap.BootstrapError,
-                    r"^ClickHouse native schema install failed \(see above\)$",
-                ),
-            ):
-                bootstrap.clickhouse_native_schema()
-
-
-class PropertyCatalogTest(StackTest):
-    env: ClassVar[dict[str, str]] = {
-        "CH_HOST": "ch.internal",
-        "CH_HTTP_PORT": "8124",
-        "CH_USERNAME": "admin",
-        "CH_PASSWORD": "ch-secret",
-        "CH_DATABASE": "traces",
-        "PROPERTY_CATALOG_DATABASE": "catalog",
-        "PROPERTY_CATALOG_CONSUMER_PASSWORD": "writer-secret",
-        "PROPERTY_CATALOG_CH_PASSWORD": "reader-secret",
-    }
-
-    def test_creates_the_index_its_users_and_their_grants(self):
-        bootstrap.property_catalog()
-
-        connect = {
-            "host": "ch.internal",
-            "port": 8124,
-            "username": "admin",
-            "password": "ch-secret",
-        }
-        identified = "IDENTIFIED WITH sha256_password BY {password:String} HOST ANY"
-        statements = split_statements(CATALOG_SCHEMA.read_text())
-        self.assertTrue(statements)
-        writer = {"password": "writer-secret"}
-        reader = {"password": "reader-secret"}
-        grants = []
-        for table in ("observed_attribute_keys", "observed_attribute_values"):
-            grants += [
-                (
-                    "command",
-                    None,
-                    f"GRANT SELECT, INSERT ON `catalog`.{table} TO observed_catalog_writer",
-                    None,
-                ),
-                (
-                    "command",
-                    None,
-                    f"GRANT SELECT ON `catalog`.{table} TO observed_catalog_reader",
-                    None,
-                ),
-            ]
-        self.assertEqual(
-            self.stack.clickhouse,
-            [
-                ("connect", connect),
-                ("command", None, "CREATE DATABASE IF NOT EXISTS `catalog`", None),
-                ("connect", {"database": "catalog", **connect}),
-                *[("command", "catalog", sql, None) for sql in statements],
-                ("close", "catalog"),
-                (
-                    "query",
-                    None,
-                    CATALOG_VALIDATION.read_text().strip().rstrip(";"),
-                    {"database": "catalog"},
-                ),
-                (
-                    "command",
-                    None,
-                    f"CREATE USER IF NOT EXISTS observed_catalog_writer {identified}",
-                    writer,
-                ),
-                (
-                    "command",
-                    None,
-                    f"ALTER USER observed_catalog_writer {identified}",
-                    writer,
-                ),
-                (
-                    "command",
-                    None,
-                    f"CREATE USER IF NOT EXISTS observed_catalog_reader {identified}",
-                    reader,
-                ),
-                (
-                    "command",
-                    None,
-                    f"ALTER USER observed_catalog_reader {identified} SETTINGS readonly=2",
-                    reader,
-                ),
-                *grants,
-                ("close", None),
-            ],
-        )
-        self.assertEqual(
-            self.lines(), ["[bootstrap] observed-attribute index in catalog ..."]
-        )
-        self.assertNotIn("secret", self.out.getvalue())
-
-    def test_defaults_match_the_compose_files(self):
-        os.environ.clear()
-        os.environ["CH_USER"] = "legacy"
-
-        bootstrap.property_catalog()
-
-        self.assertEqual(
-            self.stack.clickhouse[0],
-            (
-                "connect",
-                {
-                    "host": "clickhouse",
-                    "port": 8123,
-                    "username": "legacy",
-                    "password": "",
-                },
-            ),
-        )
-        self.assertIn(
-            ("command", None, "CREATE DATABASE IF NOT EXISTS `property_catalog`", None),
-            self.stack.clickhouse,
-        )
-        passwords = [
-            parameters["password"]
-            for _, _, sql, parameters in (
-                event for event in self.stack.clickhouse if event[0] == "command"
-            )
-            if "USER" in sql
-        ]
-        self.assertEqual(
-            passwords,
-            ["oss-observed-writer-local-only"] * 2
-            + ["oss-observed-reader-local-only"] * 2,
-        )
-
-    def test_refuses_a_target_that_is_not_its_own_database(self):
-        for env, error in (
-            ({"PROPERTY_CATALOG_DATABASE": "traces"}, "needs its own database"),
-            (
-                {"FI_CH_DATABASE": "catalog", "CH_DATABASE": "traces"},
-                "needs its own database",
-            ),
-            (
-                {"CH25_DATABASE": "catalog", "CH_DATABASE": "traces"},
-                "needs its own database",
-            ),
-            ({"PROPERTY_CATALOG_DATABASE": "System"}, "needs its own database"),
-            (
-                {"PROPERTY_CATALOG_DATABASE": "information_schema"},
-                "needs its own database",
-            ),
-            (
-                {"PROPERTY_CATALOG_DATABASE": "catalog`; DROP"},
-                "^PROPERTY_CATALOG_DATABASE database must be a ClickHouse identifier$",
-            ),
-            (
-                {"CH_DATABASE": "traces-1"},
-                "^source database must be a ClickHouse identifier$",
-            ),
-        ):
-            with (
-                self.subTest(env=env),
-                mock.patch.dict(os.environ, env),
-                self.assertRaisesRegex(bootstrap.BootstrapError, error),
-            ):
-                bootstrap.property_catalog()
-        self.assertEqual(self.stack.clickhouse, [])
-
-    def test_an_incompatible_existing_index_is_not_granted(self):
-        self.stack.validation_rows = [(0,)]
-
-        with self.assertRaisesRegex(
-            bootstrap.BootstrapError,
-            r"^observed-attribute index in catalog is incompatible",
-        ):
-            bootstrap.property_catalog()
-
-        self.assertFalse(
-            [
-                event
-                for event in self.stack.clickhouse
-                if event[0] == "command"
-                and event[2].startswith(("CREATE USER", "ALTER USER", "GRANT"))
-            ]
-        )
-        self.assertEqual(self.stack.clickhouse[-1], ("close", None))
-
-    def test_a_boolean_validation_result_is_accepted(self):
-        self.stack.validation_rows = [(True,)]
-        bootstrap.property_catalog()
-        self.assertEqual(self.stack.clickhouse[-1], ("close", None))
-
-    def test_a_failing_schema_statement_closes_both_clients(self):
-        self.stack.clickhouse_error = ("CREATE TABLE", RuntimeError("read-only"))
-
-        with self.assertRaisesRegex(RuntimeError, "read-only"):
-            bootstrap.property_catalog()
-
-        self.assertEqual(
-            self.stack.clickhouse[-2:], [("close", "catalog"), ("close", None)]
-        )
-        self.assertFalse([e for e in self.stack.clickhouse if e[0] == "query"])
-
-
-class _MissingDependency(importlib.abc.MetaPathFinder, importlib.abc.Loader):
-    """The outbox installer is there, but a module it imports is not."""
-
-    def find_spec(self, name, path, target=None):
-        if name == OUTBOX:
-            return importlib.util.spec_from_loader(name, self)
-        return None
-
-    def create_module(self, spec):
-        return None
-
-    def exec_module(self, module):
-        raise ModuleNotFoundError("No module named 'psycopg'", name="psycopg")
-
-
-class ChangeDataCaptureTest(StackTest):
-    def remove_outbox_module(self):
-        del sys.modules[OUTBOX]
-        del sys.modules["tracer.services.clickhouse"].oss_outbox_cdc
-
-    def test_installs_as_the_mode_says_and_logs_the_result(self):
-        os.environ["FI_CDC_MODE"] = " PeerDB "
-        self.stack.cdc_outcomes = [{"mode": "peerdb", "removed": Path("/x")}]
-
-        bootstrap.change_data_capture()
-
-        self.assertEqual(self.stack.cdc_calls, [((), {})])
-        self.assertEqual(
-            self.lines(),
-            [
-                "[bootstrap] change data capture (FI_CDC_MODE=peerdb) ...",
-                "[bootstrap] change data capture: "
-                + json.dumps({"mode": "peerdb", "removed": "/x"}),
-            ],
-        )
-
-    def test_the_image_runs_the_outbox_mode(self):
-        dockerfile = (ROOT / "deploy" / "standalone" / "Dockerfile").read_text()
-        self.assertRegex(dockerfile, r"(?m)^ENV FI_CDC_MODE=outbox$")
-
-    def test_logs_the_mode_the_installer_runs(self):
-        # Unset, the installer falls back to peerdb; the log must not claim
-        # a default of its own.
-        bootstrap.change_data_capture()
-        self.assertEqual(
-            self.lines()[0], "[bootstrap] change data capture (FI_CDC_MODE=peerdb) ..."
-        )
-
-    def test_installer_errors_are_final_and_say_what_to_do(self):
-        os.environ["FI_CDC_MODE"] = "outbax"
-        self.stack.cdc_outcomes = [OutboxCDCError("FI_CDC_MODE must be outbox")]
-        sleeps = self.fake_time()
-
-        with self.assertRaises(bootstrap.BootstrapError) as caught:
-            bootstrap.change_data_capture()
-
-        self.assertEqual(
-            str(caught.exception),
-            "change data capture (FI_CDC_MODE=outbax): FI_CDC_MODE must be outbox",
-        )
-        self.assertEqual(len(self.stack.cdc_calls), 1)
-        self.assertEqual(sleeps, [])
-
-    def test_other_errors_are_retried_without_their_message(self):
-        self.stack.cdc_outcomes = [
-            RuntimeError("password=hunter2"),
-            {"mode": "outbox", "ready": True},
-        ]
-        sleeps = self.fake_time()
-
-        bootstrap.change_data_capture()
-
-        self.assertEqual(len(self.stack.cdc_calls), 2)
-        self.assertEqual(sleeps, [5])
-        self.assertIn(
-            "[bootstrap] change data capture failed (RuntimeError from the CDC "
-            "installer); retrying in 5s",
-            self.lines(),
-        )
-        self.assertNotIn("hunter2", self.out.getvalue())
-
-    def test_a_persistent_driver_error_fails_without_its_message(self):
-        self.stack.cdc_outcomes = [ConnectionError("row=secret-value")]
-        sleeps = self.fake_time()
-
-        with self.assertRaises(RuntimeError) as caught:
-            bootstrap.change_data_capture()
-
-        self.assertEqual(
-            str(caught.exception), "ConnectionError from the CDC installer"
-        )
-        self.assertEqual(len(self.stack.cdc_calls), 12)
-        self.assertEqual(sleeps, [5] * 11)
-        # `from None`: the traceback supervisord logs carries no driver text.
-        printed = "".join(traceback.format_exception(caught.exception))
-        self.assertNotIn("secret-value", printed + self.out.getvalue())
-
-    def test_a_missing_dependency_of_the_installer_is_not_mistaken_for_no_installer(
-        self,
-    ):
-        self.remove_outbox_module()
-        self.patch(sys, "meta_path", [_MissingDependency(), *sys.meta_path])
-
-        with self.assertRaises(ModuleNotFoundError) as caught:
-            bootstrap.change_data_capture()
-
-        self.assertEqual(caught.exception.name, "psycopg")
-        self.assertEqual(self.stack.cdc_calls, [])
-
-    def test_an_image_without_the_outbox_installer_skips_cdc(self):
-        """The module file is really absent (not a sys.modules stub): the
-        import must raise ModuleNotFoundError naming it, not a plain
-        ImportError ("cannot import name"), for the skip branch to run."""
-        self.remove_outbox_module()
-
-        bootstrap.change_data_capture()
-
-        self.assertIn("no outbox CDC installer; skipping CDC", self.out.getvalue())
-
-
-class TemporalTest(StackTest):
-    def test_registers_the_search_attributes_on_the_namespace(self):
-        bootstrap.register_search_attributes()
-
-        self.assertEqual(
-            self.stack.search_attribute_calls, [("temporal-client", "fi-ns")]
-        )
-        self.assertEqual(
-            self.lines(), ["[bootstrap] registered the eval-task search attributes"]
-        )
-
-    def test_says_nothing_when_they_already_exist(self):
-        self.stack.search_attributes_added = False
-        bootstrap.register_search_attributes()
-        self.assertEqual(self.lines(), [])
-
-    def test_with_retries_waits_out_a_temporal_that_is_not_serving_yet(self):
-        sleeps = self.fake_time()
-        outcomes = [ConnectionError("not serving"), None]
-
-        def action():
-            outcome = outcomes.pop(0)
-            if outcome:
-                raise outcome
-
-        bootstrap.with_retries("Temporal schedules", action, delay=7)
-
-        self.assertEqual(outcomes, [])
-        self.assertEqual(sleeps, [7])
-        self.assertEqual(
-            self.lines(),
-            ["[bootstrap] Temporal schedules failed (not serving); retrying in 7s"],
-        )
-
-    def test_with_retries_gives_up_with_the_last_error(self):
-        sleeps = self.fake_time()
-        calls = []
-
-        def action():
-            calls.append(1)
-            raise ConnectionError(f"attempt {len(calls)}")
-
-        with self.assertRaisesRegex(ConnectionError, "^attempt 3$"):
-            bootstrap.with_retries("x", action, attempts=3, delay=1)
-        self.assertEqual(sleeps, [1, 1])
-
-    def test_with_retries_never_retries_a_bootstrap_error(self):
-        sleeps = self.fake_time()
-        calls = []
-
-        def action():
-            calls.append(1)
-            raise bootstrap.BootstrapError("final")
-
-        with self.assertRaisesRegex(bootstrap.BootstrapError, "final"):
-            bootstrap.with_retries("x", action)
-        self.assertEqual((calls, sleeps), ([1], []))
+        self.assertEqual(os.environ["FI_SKIP_CH25_MIGRATION"], "0")
+        self.assertEqual(os.environ["DJANGO_SETTINGS_MODULE"], "tfc.settings.test")
 
 
 class CollectStaticTest(StackTest):
@@ -1253,56 +863,6 @@ class CollectStaticTest(StackTest):
         self.patch(bootstrap, "STATIC_COLLECTED", self.tmp / "missing" / "marker")
         bootstrap.collect_static()
         self.assertEqual(self.stack.log, ["command collectstatic"])
-
-
-class ServicesTest(StackTest):
-    def test_endpoint(self):
-        self.assertEqual(bootstrap.endpoint("temporal:7234", 7233), ("temporal", 7234))
-        self.assertEqual(bootstrap.endpoint("temporal", 7233), ("temporal", 7233))
-
-    def test_wait_tcp_retries_every_second_until_the_port_answers(self):
-        sleeps = self.fake_time()
-        attempts = []
-        closed = []
-
-        def connect(address, timeout=None):
-            attempts.append((address, timeout))
-            if len(attempts) < 3:
-                raise ConnectionRefusedError
-            return SimpleNamespace(close=lambda: closed.append(address))
-
-        self.patch(bootstrap.socket, "create_connection", connect)
-
-        bootstrap.wait_tcp("pg", 5432)
-
-        self.assertEqual(attempts, [(("pg", 5432), 2)] * 3)
-        self.assertEqual(sleeps, [1, 1])
-        self.assertEqual(closed, [("pg", 5432)])
-
-    def test_wait_tcp_gives_up_after_the_timeout(self):
-        sleeps = self.fake_time(monotonic=(0.0, 299.0, 301.0))
-        self.patch(
-            bootstrap.socket,
-            "create_connection",
-            mock.Mock(side_effect=OSError("unreachable")),
-        )
-
-        with self.assertRaises(bootstrap.BootstrapError) as caught:
-            bootstrap.wait_tcp("pg", 5432)
-
-        self.assertEqual(str(caught.exception), "pg:5432 is not reachable after 300s")
-        self.assertTrue(caught.exception.__suppress_context__)
-        self.assertEqual(sleeps, [1])
-
-    def test_run_cli_returns_the_exit_code(self):
-        self.assertEqual(bootstrap.run_cli(lambda argv: None, []), 0)
-        self.assertEqual(bootstrap.run_cli(lambda argv: 4, []), 4)
-        for code, expected in ((2, 2), ("error: bad flag", 1)):
-
-            def exits(argv, code=code):
-                raise SystemExit(code)
-
-            self.assertEqual(bootstrap.run_cli(exits, ["--x"]), expected)
 
 
 class WaiterEdgeTest(StackTest):

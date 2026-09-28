@@ -1,12 +1,14 @@
-"""``manage.py bootstrap_install``: the Helm chart's bootstrap Job.
+"""``manage.py bootstrap_install``: the Helm chart's bootstrap Job, whose
+steps the Standalone install's deploy/standalone/bin/bootstrap.py runs too.
 
 No datastore is contacted: every step that would reach Postgres, ClickHouse,
 Redis or Temporal is replaced, and the tests pin the order, the authorization
-contract and the failure behaviour the chart relies on.
+contract and the failure behaviour both install paths rely on.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import sys
 import uuid
@@ -21,6 +23,13 @@ from tfc.management.commands import bootstrap_install as command
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CHART = REPO_ROOT / "deploy" / "helm" / "futureagi"
+STANDALONE_BOOTSTRAP = REPO_ROOT / "deploy" / "standalone" / "bin" / "bootstrap.py"
+CATALOG_SCHEMA = (
+    REPO_ROOT / "futureagi/tracer/services/clickhouse/v2/observed_catalog/schema.sql"
+)
+CATALOG_VALIDATION = (
+    REPO_ROOT / "futureagi/scripts/property_catalog_oss/validate_clickhouse.sql"
+)
 # Before any fixture replaces it.
 REGISTER_SEARCH_ATTRIBUTES = command.register_search_attributes
 
@@ -88,6 +97,46 @@ def test_runs_every_step_in_the_standalone_bootstrap_order(
         "search attributes",
         "cdc",
         "register_temporal_schedules",
+    ]
+
+
+@pytest.mark.skipif(
+    not STANDALONE_BOOTSTRAP.is_file(), reason="deploy/ is not in this tree"
+)
+def test_the_standalone_bootstrap_runs_the_same_steps_in_the_same_order(
+    local_operator, recorded_steps, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    call_command("bootstrap_install")
+    job = [step for step in recorded_steps if not step.startswith("wait ")]
+    recorded_steps.clear()
+    spec = importlib.util.spec_from_file_location(
+        "standalone_bootstrap", STANDALONE_BOOTSTRAP
+    )
+    standalone = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(standalone)
+    # Only its own steps are replaced: no volume, no status file, a first boot
+    # of this image on the install's own database, static files collected.
+    for name, value in (
+        ("READY", tmp_path / ".bootstrap-ok"),
+        ("FINGERPRINT", tmp_path / ".bootstrap-fingerprint"),
+        ("STATIC_COLLECTED", tmp_path / "static-collected"),
+        ("configure_django", lambda: None),
+        ("write_status", lambda phase: None),
+        ("refuse_foreign_database", lambda: False),
+        ("schema_fingerprint", lambda: ("first boot", [])),
+    ):
+        monkeypatch.setattr(standalone, name, value)
+    (tmp_path / "static-collected").touch()
+    monkeypatch.setattr("django.setup", lambda: None)
+
+    standalone.main()
+
+    assert [step for step in recorded_steps if not step.startswith("wait ")] == job
+    assert [step for step in recorded_steps if step.startswith("wait ")] == [
+        "wait Postgres",
+        "wait ClickHouse",
+        "wait Redis",
+        "wait Temporal",
     ]
 
 
@@ -345,6 +394,8 @@ def test_change_data_capture_hides_driver_messages(
         command.change_data_capture(lambda _: None, attempts=2, delay=0)
     assert "hunter2" not in str(raised.value)
     assert "OSError" in str(raised.value)
+    # `from None`: the traceback carries no driver text either.
+    assert raised.value.__suppress_context__
 
 
 def test_datastore_endpoints_follow_the_configured_services(
@@ -375,80 +426,182 @@ def test_datastore_endpoints_follow_the_configured_services(
 
 
 class FakeClickHouse:
-    def __init__(self, log: list, compatible: bool = True, **connect) -> None:
-        self.log = log
-        self.connect = connect
-        self.compatible = compatible
+    """Records connections, statements and closes in one ordered log."""
+
+    def __init__(self, fake: SimpleNamespace, **connect) -> None:
+        self.fake = fake
+        self.database = connect.get("database")
+        fake.log.append(("connect", connect))
 
     def command(self, sql, parameters=None):
-        self.log.append((self.connect.get("database"), sql, parameters))
+        self.fake.log.append(("command", self.database, sql, parameters))
+        if self.fake.fail_on and self.fake.fail_on in sql:
+            raise RuntimeError("read-only")
 
     def query(self, sql, parameters=None):
-        self.log.append(("query", sql, parameters))
-        return SimpleNamespace(result_rows=[(1,)] if self.compatible else [(0,)])
+        self.fake.log.append(("query", self.database, sql, parameters))
+        return SimpleNamespace(result_rows=self.fake.rows)
 
     def close(self) -> None:
-        pass
+        self.fake.log.append(("close", self.database))
 
 
-@pytest.mark.parametrize("compatible", [True, False])
-def test_property_catalog_creates_the_index_users_and_grants(
-    monkeypatch: pytest.MonkeyPatch, compatible: bool
-) -> None:
+@pytest.fixture
+def clickhouse(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """ClickHouse as property_catalog() sees it: ``log`` is what it did,
+    ``rows`` the validation result, ``fail_on`` a statement that fails."""
     import clickhouse_connect
 
-    statements: list = []
+    fake = SimpleNamespace(log=[], rows=[(1,)], fail_on=None)
     monkeypatch.setattr(
         clickhouse_connect,
         "get_client",
-        lambda **connect: FakeClickHouse(statements, compatible, **connect),
+        lambda **connect: FakeClickHouse(fake, **connect),
     )
-    env = {
-        "CH_HOST": "ch",
-        "CH_HTTP_PORT": "8123",
-        "CH_USERNAME": "default",
-        "CH_PASSWORD": "admin",
-        "CH_DATABASE": "default",
-        "PROPERTY_CATALOG_DATABASE": "property_catalog",
-        "PROPERTY_CATALOG_CH_PASSWORD": "reader-pw",
-        "PROPERTY_CATALOG_CONSUMER_PASSWORD": "writer-pw",
-    }
+    return fake
 
-    if not compatible:
-        with pytest.raises(command.BootstrapError, match="incompatible"):
-            command.property_catalog(lambda _: None, env)
-        return
-    command.property_catalog(lambda _: None, env)
 
-    sql = [entry[1] for entry in statements if entry[0] != "query"]
-    assert sql[0] == "CREATE DATABASE IF NOT EXISTS `property_catalog`"
-    users: dict[str, set[str]] = {}
-    for database, text, parameters in statements:
-        if database == "query" or not text.startswith(("CREATE USER", "ALTER USER")):
-            continue
-        words = text.split()
-        name = words[5] if text.startswith("CREATE USER IF NOT EXISTS") else words[2]
-        users.setdefault(name, set()).add(parameters["password"])
-    assert users == {
-        "observed_catalog_writer": {"writer-pw"},
-        "observed_catalog_reader": {"reader-pw"},
-    }
-    assert (
-        "GRANT SELECT ON `property_catalog`.observed_attribute_keys TO observed_catalog_reader"
-        in sql
+CATALOG_ENV = {
+    "CH_HOST": "ch",
+    "CH_HTTP_PORT": "8124",
+    "CH_USERNAME": "admin",
+    "CH_PASSWORD": "ch-secret",
+    "CH_DATABASE": "traces",
+    "PROPERTY_CATALOG_DATABASE": "catalog",
+    "PROPERTY_CATALOG_CONSUMER_PASSWORD": "writer-secret",
+    "PROPERTY_CATALOG_CH_PASSWORD": "reader-secret",
+}
+
+
+def _user_and_grant_statements(log: list) -> list:
+    return [
+        event
+        for event in log
+        if event[0] == "command"
+        and event[2].startswith(("CREATE USER", "ALTER USER", "GRANT"))
+    ]
+
+
+def test_property_catalog_creates_the_index_users_and_grants(clickhouse) -> None:
+    from tracer.services.clickhouse.v2.apply_schema_rewriter import split_statements
+
+    logged: list[str] = []
+
+    command.property_catalog(logged.append, CATALOG_ENV)
+
+    connect = {"host": "ch", "port": 8124, "username": "admin", "password": "ch-secret"}
+    identified = "IDENTIFIED WITH sha256_password BY {password:String} HOST ANY"
+    writer = {"password": "writer-secret"}
+    reader = {"password": "reader-secret"}
+    tables = split_statements(CATALOG_SCHEMA.read_text())
+    assert len(tables) == 2
+    assert all(sql.startswith("CREATE TABLE IF NOT EXISTS") for sql in tables)
+    grants = []
+    for table in ("observed_attribute_keys", "observed_attribute_values"):
+        grants += [
+            (
+                "command",
+                None,
+                f"GRANT SELECT, INSERT ON `catalog`.{table} TO observed_catalog_writer",
+                None,
+            ),
+            (
+                "command",
+                None,
+                f"GRANT SELECT ON `catalog`.{table} TO observed_catalog_reader",
+                None,
+            ),
+        ]
+    assert clickhouse.log == [
+        ("connect", connect),
+        ("command", None, "CREATE DATABASE IF NOT EXISTS `catalog`", None),
+        ("connect", {"database": "catalog", **connect}),
+        *[("command", "catalog", sql, None) for sql in tables],
+        ("close", "catalog"),
+        (
+            "query",
+            None,
+            CATALOG_VALIDATION.read_text().strip().rstrip(";"),
+            {"database": "catalog"},
+        ),
+        (
+            "command",
+            None,
+            f"CREATE USER IF NOT EXISTS observed_catalog_writer {identified}",
+            writer,
+        ),
+        ("command", None, f"ALTER USER observed_catalog_writer {identified}", writer),
+        (
+            "command",
+            None,
+            f"CREATE USER IF NOT EXISTS observed_catalog_reader {identified}",
+            reader,
+        ),
+        (
+            "command",
+            None,
+            f"ALTER USER observed_catalog_reader {identified} SETTINGS readonly=2",
+            reader,
+        ),
+        *grants,
+        ("close", None),
+    ]
+    assert logged == [
+        "observed-attribute index in catalog ...",
+        "observed-attribute index done",
+    ]
+
+
+def test_property_catalog_defaults_match_the_compose_files(clickhouse) -> None:
+    command.property_catalog(lambda _: None, {"CH_USER": "legacy", "CH_HTTP_PORT": ""})
+
+    assert clickhouse.log[0] == (
+        "connect",
+        {"host": "clickhouse", "port": 8123, "username": "legacy", "password": ""},
     )
-    assert (
-        "GRANT SELECT, INSERT ON `property_catalog`.observed_attribute_values "
-        "TO observed_catalog_writer" in sql
-    )
+    assert clickhouse.log[1][2] == "CREATE DATABASE IF NOT EXISTS `property_catalog`"
+    assert [
+        parameters["password"]
+        for _, _, sql, parameters in _user_and_grant_statements(clickhouse.log)
+        if "USER" in sql
+    ] == [command.CATALOG_WRITER_DEFAULT] * 2 + [command.CATALOG_READER_DEFAULT] * 2
 
 
-def test_property_catalog_refuses_to_share_the_trace_database() -> None:
-    with pytest.raises(command.BootstrapError, match="its own database"):
-        command.property_catalog(
-            lambda _: None,
-            {"CH_DATABASE": "default", "PROPERTY_CATALOG_DATABASE": "default"},
-        )
+@pytest.mark.parametrize("rows", [[(1,)], [(True,)]])
+def test_property_catalog_accepts_a_compatible_index(clickhouse, rows) -> None:
+    clickhouse.rows = rows
+
+    command.property_catalog(lambda _: None, CATALOG_ENV)
+
+    assert len(_user_and_grant_statements(clickhouse.log)) == 8
+
+
+@pytest.mark.parametrize("rows", [[(0,)], [(False,)], []])
+def test_property_catalog_grants_nothing_on_an_incompatible_index(
+    clickhouse, rows
+) -> None:
+    clickhouse.rows = rows
+
+    with pytest.raises(
+        command.BootstrapError,
+        match="^observed-attribute index in catalog is incompatible",
+    ):
+        command.property_catalog(lambda _: None, CATALOG_ENV)
+
+    assert _user_and_grant_statements(clickhouse.log) == []
+    assert clickhouse.log[-1] == ("close", None)
+
+
+def test_property_catalog_closes_both_clients_when_a_statement_fails(
+    clickhouse,
+) -> None:
+    clickhouse.fail_on = "CREATE TABLE"
+
+    with pytest.raises(RuntimeError, match="read-only"):
+        command.property_catalog(lambda _: None, CATALOG_ENV)
+
+    assert clickhouse.log[-2:] == [("close", "catalog"), ("close", None)]
+    assert not [event for event in clickhouse.log if event[0] == "query"]
 
 
 def test_summary_never_prints_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -643,12 +796,21 @@ def test_clickhouse_native_schema_success_is_logged(
             {"CH_DATABASE": "traces", "PROPERTY_CATALOG_DATABASE": "catalog`x"},
             "PROPERTY_CATALOG_DATABASE database must be a ClickHouse identifier",
         ),
-        # FI_CH_DATABASE, not CH_DATABASE, is the trace database when both are set.
+        # FI_CH_DATABASE, then CH25_DATABASE, is the trace database over CH_DATABASE.
         (
             {"FI_CH_DATABASE": "property_catalog", "CH_DATABASE": "default"},
             "its own database",
         ),
+        (
+            {"CH25_DATABASE": "property_catalog", "CH_DATABASE": "default"},
+            "its own database",
+        ),
+        (
+            {"CH_DATABASE": "default", "PROPERTY_CATALOG_DATABASE": "default"},
+            "its own database",
+        ),
         ({"PROPERTY_CATALOG_DATABASE": "System"}, "its own database"),
+        ({"PROPERTY_CATALOG_DATABASE": "information_schema"}, "its own database"),
     ],
 )
 def test_property_catalog_checks_database_names_before_connecting(

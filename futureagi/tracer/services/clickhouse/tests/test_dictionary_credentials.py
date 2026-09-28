@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import importlib
-import importlib.util
 import re
 import socket
 from contextlib import contextmanager
@@ -61,7 +60,6 @@ V2_SCHEMA = BACKEND / "tracer" / "services" / "clickhouse" / "v2" / "schema"
 DATASET_VIEWS = (
     BACKEND / "tracer" / "services" / "clickhouse" / "schema" / "dataset_views.sql"
 )
-STANDALONE_BOOTSTRAP = BACKEND.parent / "deploy" / "standalone" / "bin" / "bootstrap.py"
 
 USER = "app"
 # A single quote, a backslash and a double quote: every escaping hazard.
@@ -847,20 +845,6 @@ def test_bootstrap_install_native_schema_uses_ch_password(install_env, password)
             assert_credentialed(sql)
         else:
             assert "PASSWORD" not in sql and sql in server.raw.definitions.values()
-
-
-def test_standalone_bootstrap_native_schema_uses_ch_password(install_env):
-    spec = importlib.util.spec_from_file_location(
-        "standalone_bootstrap", STANDALONE_BOOTSTRAP
-    )
-    standalone_bootstrap = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(standalone_bootstrap)
-    server = install_env(PASSWORD)
-    standalone_bootstrap.clickhouse_native_schema()
-    dicts = dictionary_statements(_native_writes(server.raw))
-    assert len(dicts) == 3
-    for sql in dicts:
-        assert_credentialed(sql)
 
 
 # ---------------------------------------------------------------------------
