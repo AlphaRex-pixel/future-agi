@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,6 +60,26 @@ func (r *logRecorder) messages(level slog.Level) []string {
 	return msgs
 }
 
+// attrs returns the values of attribute key on the records logged at level
+// with message msg.
+func (r *logRecorder) attrs(level slog.Level, msg, key string) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var vals []string
+	for _, rec := range r.records {
+		if rec.Level != level || rec.Message != msg {
+			continue
+		}
+		rec.Attrs(func(a slog.Attr) bool {
+			if a.Key == key {
+				vals = append(vals, a.Value.String())
+			}
+			return true
+		})
+	}
+	return vals
+}
+
 func recordLogs(t *testing.T) *logRecorder {
 	t.Helper()
 	rec := &logRecorder{}
@@ -95,7 +116,8 @@ func shortenStartupSync(t *testing.T, firstRetry, maxRetry, warnAfter, warnEvery
 // orgsBroken or keysBroken makes that endpoint answer 500 regardless, and
 // orgsFailNext or keysFailNext makes it answer 500 to that many more requests;
 // setting noKeys makes the keys endpoint answer an empty key set, as on a
-// fresh install.
+// fresh install, and setting orgsHang makes the orgs endpoint hold each request
+// (counted in orgsHanging) until the client gives up.
 type fakeControlPlane struct {
 	*httptest.Server
 	orgRequests  atomic.Int32
@@ -105,6 +127,8 @@ type fakeControlPlane struct {
 	orgsFailNext atomic.Int32
 	keysFailNext atomic.Int32
 	noKeys       atomic.Bool
+	orgsHang     atomic.Bool
+	orgsHanging  atomic.Int32
 }
 
 // takeFailure reports whether a request should fail because n asked for more
@@ -130,6 +154,11 @@ func newFakeControlPlane(t *testing.T, down func() bool) *fakeControlPlane {
 			cp.orgRequests.Add(1)
 			if cp.orgsBroken.Load() || takeFailure(&cp.orgsFailNext) {
 				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			if cp.orgsHang.Load() {
+				cp.orgsHanging.Add(1)
+				<-r.Context().Done()
 				return
 			}
 			if down() {
@@ -565,9 +594,48 @@ func TestRunControlPlaneSync_OneMissedPeriodicSyncIsNotAWarning(t *testing.T) {
 
 			failTimes(2)
 			check("after two failures in a row", 2, 1)
+			for _, msg := range []string{"periodic sync failed", "periodic key sync failed"} {
+				if got := logs.attrs(slog.LevelWarn, msg, "failures_in_a_row"); !slices.Equal(got, []string{"2"}) {
+					t.Fatalf("%q WARN failures_in_a_row = %q, want [2]", msg, got)
+				}
+			}
 
 			failTimes(1)
 			check("after a success and one more missed sync", 3, 1)
 		})
+	}
+}
+
+// Shutdown cancels a periodic sync in flight. That is not a failure, so it is
+// not logged: right after one missed sync it logged "context canceled" at WARN.
+func TestRunControlPlaneSync_ShutdownIsNotAPeriodicSyncFailure(t *testing.T) {
+	logs := recordLogs(t)
+	cp := newFakeControlPlane(t, func() bool { return false })
+	store, ks := NewStore(), auth.NewKeyStore(config.AuthConfig{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		RunControlPlaneSync(ctx, false, 5*time.Millisecond, cp.URL, "token", store, ks)
+		close(done)
+	}()
+
+	cp.orgsFailNext.Store(1)
+	cp.keysFailNext.Store(1)
+	waitFor(t, "one missed periodic sync", func() bool {
+		return logs.count(slog.LevelInfo, "periodic sync failed") == 1 &&
+			logs.count(slog.LevelInfo, "periodic key sync failed") == 1
+	})
+	cp.orgsHang.Store(true)
+	waitFor(t, "a periodic sync in flight", func() bool { return cp.orgsHanging.Load() == 1 })
+	cancel()
+	<-done
+
+	for _, msg := range []string{"periodic sync failed", "periodic key sync failed"} {
+		if info, warn := logs.count(slog.LevelInfo, msg), logs.count(slog.LevelWarn, msg); info != 1 || warn != 0 {
+			t.Errorf("%q logged %d INFO and %d WARN, want only the missed sync: 1 and 0 (WARN records %q)",
+				msg, info, warn, logs.messages(slog.LevelWarn))
+		}
 	}
 }

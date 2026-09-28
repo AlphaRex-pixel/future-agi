@@ -86,7 +86,8 @@ func StartPeriodicSync(ctx context.Context, interval time.Duration, baseURL, adm
 // gateway; a Distributed or Helm rollout), two are an outage. With loaded
 // (shared with the startup sync), a half's failures are all INFO until that
 // half has loaded, here or in the startup sync; without it, both halves count
-// as loaded from the start.
+// as loaded from the start. A sync cut off by ctx ending (shutdown) did not
+// fail and is not logged.
 func runPeriodicSync(ctx context.Context, interval time.Duration, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore, loaded *syncLoaded) {
 	if interval <= 0 || baseURL == "" {
 		return
@@ -112,14 +113,14 @@ func runPeriodicSync(ctx context.Context, interval time.Duration, baseURL, admin
 		case <-ticker.C:
 			syncCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			if err := SyncFromControlPlane(syncCtx, baseURL, adminToken, store); err != nil {
-				slog.Log(ctx, orgs.failed(), "periodic sync failed", "error", err)
+				orgs.failed(ctx, "periodic sync failed", err)
 			} else {
 				orgs.succeeded()
 				slog.Debug("periodic sync completed", "orgs", store.Count())
 			}
 			if keyStore != nil {
 				if err := auth.SyncKeysFromControlPlane(syncCtx, baseURL, adminToken, keyStore); err != nil {
-					slog.Log(ctx, keys.failed(), "periodic key sync failed", "error", err)
+					keys.failed(ctx, "periodic key sync failed", err)
 				} else {
 					keys.succeeded()
 				}
@@ -143,13 +144,17 @@ type periodicFailures struct {
 	inARow int
 }
 
-// failed counts a failure and returns the level to log it at.
-func (f *periodicFailures) failed() slog.Level {
-	f.inARow++
-	if f.loaded.Load() && f.inARow >= 2 {
-		return slog.LevelWarn
+// failed counts a failure and logs it as msg, unless ctx has ended.
+func (f *periodicFailures) failed(ctx context.Context, msg string, err error) {
+	if ctx.Err() != nil {
+		return
 	}
-	return slog.LevelInfo
+	f.inARow++
+	level := slog.LevelInfo
+	if f.loaded.Load() && f.inARow >= 2 {
+		level = slog.LevelWarn
+	}
+	slog.Log(ctx, level, msg, "error", err, "failures_in_a_row", f.inARow)
 }
 
 func (f *periodicFailures) succeeded() {
