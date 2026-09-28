@@ -93,7 +93,7 @@ def _metadata_object(pairs):
     return unique if len(unique) == len(pairs) else _RepeatedKeys(unique)
 
 
-def literal_choice(value, value_infos):
+def literal_choice(value: str, value_infos: str | None) -> bool:
     """Whether the cell's own metadata names ``value`` itself as the choice.
 
     ``value_infos`` is the stored JSONField text. Historical cells hold that

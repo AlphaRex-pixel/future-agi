@@ -8,10 +8,11 @@ Evaluation choice cells are decoded by ``dataset_choice_values``.
 import json
 import uuid
 from collections import Counter
+from typing import TYPE_CHECKING
 
 from django.db import InterfaceError, OperationalError, connection, transaction
 
-from tracer.services.clickhouse.read_budget import ReadDeadlineExceeded
+from tracer.services.clickhouse.read_budget import ReadDeadline, ReadDeadlineExceeded
 from tracer.services.dataset_choice_values import (
     CHOICE_DOCUMENT_SQL,
     LITERAL_CANDIDATE_SQL,
@@ -21,6 +22,9 @@ from tracer.services.postgres_read_policy import (
     ApplicationPostgresReadError,
     application_postgres_reads,
 )
+
+if TYPE_CHECKING:
+    from accounts.models.workspace import Workspace
 
 
 class DatasetValuesTooBroad(ValueError):
@@ -138,8 +142,15 @@ DATASET_METADATA_METRICS = frozenset(_DATASET_METADATA_VALUES)
 
 
 def read_dataset_metadata_values(
-    workspace, metric_name, *, search, max_values, max_bytes, deadline, wall_ms
-):
+    workspace: "Workspace",
+    metric_name: str,
+    *,
+    search: str,
+    max_values: int,
+    max_bytes: int,
+    deadline: ReadDeadline,
+    wall_ms: int,
+) -> list[str]:
     """Return a workspace's distinct dataset or column names, in byte order.
 
     ``metric_name`` is one of ``DATASET_METADATA_METRICS``. More matching
@@ -188,8 +199,15 @@ def _cell_params(dataset_id, column_id, search):
 
 
 def read_column_values(
-    dataset_id, column_id, *, search, max_values, max_bytes, deadline, wall_ms
-):
+    dataset_id: uuid.UUID | str,
+    column_id: uuid.UUID | str,
+    *,
+    search: str,
+    max_values: int,
+    max_bytes: int,
+    deadline: ReadDeadline,
+    wall_ms: int,
+) -> list[str]:
     """Return one column's distinct non-empty values containing ``search``.
 
     More matching values than ``max_values`` raise ``DatasetValuesTooBroad``,
@@ -235,8 +253,15 @@ _CHOICE_SEARCH_SQL = (
 
 
 def read_choice_column_values(
-    dataset_id, column_id, *, search, max_values, max_bytes, deadline, wall_ms
-):
+    dataset_id: uuid.UUID | str,
+    column_id: uuid.UUID | str,
+    *,
+    search: str,
+    max_values: int,
+    max_bytes: int,
+    deadline: ReadDeadline,
+    wall_ms: int,
+) -> list[tuple[str, int]]:
     """Return each distinct stored text of an eval-choice column with its modes.
 
     Mode bit 1: some cell reads the text as a container of labels. Bit 2: some

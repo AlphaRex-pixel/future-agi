@@ -17,6 +17,7 @@ Usage:
 """
 
 import json
+from collections.abc import Mapping
 from typing import Any, Optional
 
 import structlog
@@ -142,7 +143,9 @@ def get_span_attribute(span: ObservationSpan, key: str, default: Any = None) -> 
     return SpanAttributeAccessor(span).get(key, default)
 
 
-def span_raw_log(attrs, *, span_id=None) -> dict:
+def span_raw_log(
+    attrs: Mapping[str, Any], *, span_id: str | None = None
+) -> dict[str, Any]:
     """The provider call payload (``raw_log``) in a voice span's attributes.
 
     ClickHouse keeps it as a JSON string in ``attrs_string`` (collector

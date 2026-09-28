@@ -1,5 +1,7 @@
 """Responses for a dataset creation refused by the plan's dataset limit."""
 
+from typing import Protocol
+
 from rest_framework import status
 from rest_framework.response import Response
 
@@ -9,6 +11,12 @@ from tfc.utils.error_codes import get_error_message
 from tfc.utils.general_methods import GeneralMethods
 
 _gm = GeneralMethods()
+
+
+class DatasetAddUsageEntry(Protocol):
+    """The DATASET_ADD usage entry a create path gets from the usage log."""
+
+    status: str
 
 
 class DatasetLimitCheckFailed(Exception):
@@ -23,7 +31,7 @@ def dataset_limit_reached_response() -> Response:
     return _gm.too_many_requests(get_error_message("DATASET_CREATE_LIMIT_REACHED"))
 
 
-def dataset_limit_check_failed_response():
+def dataset_limit_check_failed_response() -> Response:
     # 503: the refusal is transient, like the other retryable read failures.
     # The typed code lets the frontend show this message despite the 5xx.
     return _gm.custom_error_response(
@@ -33,7 +41,9 @@ def dataset_limit_check_failed_response():
     )
 
 
-def dataset_add_refusal(call_log_row_entry, sdk_source=False):
+def dataset_add_refusal(
+    call_log_row_entry: DatasetAddUsageEntry | None, sdk_source: bool = False
+) -> Response | None:
     """Return the response refusing a DATASET_ADD usage entry, or None to proceed.
 
     No entry means the limit was never verified, so the user is asked to retry
