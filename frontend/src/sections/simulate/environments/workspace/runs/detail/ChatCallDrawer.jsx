@@ -89,7 +89,9 @@ export default function ChatCallDrawer({
   hasNext = false,
 }) {
   const [pane, setPane] = useState("transcript");
+  const [shareOpen, setShareOpen] = useState(false);
   useEffect(() => {
+    if (shareOpen) return undefined;
     const onKeyDown = (e) => {
       const tag = e.target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable) return;
@@ -103,9 +105,8 @@ export default function ChatCallDrawer({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [hasNext, hasPrev, onNext, onPrev]);
+  }, [hasNext, hasPrev, onNext, onPrev, shareOpen]);
   const [side, setSide] = useState("analytics");
-  const [shareOpen, setShareOpen] = useState(false);
   const { callDetail, isLoading } = useCallDetail(task.id);
 
   // The header and chips paint from the already-loaded row immediately, then
