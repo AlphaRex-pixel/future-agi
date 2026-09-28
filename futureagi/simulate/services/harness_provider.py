@@ -1003,7 +1003,9 @@ def scenarios_meant(
                     take(by_number.get(number, ""))
                 continue
             # "#4", "4th", "the fourth".
-            plain = re.sub(r"^(?:the|scenario|no\.?|#)\s*", "", part, flags=re.IGNORECASE)
+            plain = re.sub(
+                r"^(?:the|scenario|no\.?|#)\s*", "", part, flags=re.IGNORECASE
+            )
             plain = re.sub(r"(?<=\d)(?:st|nd|rd|th)$", "", plain, flags=re.IGNORECASE)
             if plain.isdigit():
                 take(by_number.get(int(plain), ""))
@@ -1298,8 +1300,10 @@ class HostedHarnessProvider:
                 and (child.failure or {}).get("code") == "scheduler_unavailable"
             ):
                 with transaction.atomic():
-                    child = HostedHarnessJob.no_workspace_objects.select_for_update().get(
-                        id=child.id
+                    child = (
+                        HostedHarnessJob.no_workspace_objects.select_for_update().get(
+                            id=child.id
+                        )
                     )
                     if (
                         child.state == HostedHarnessJob.State.FAILED
@@ -1488,8 +1492,9 @@ class HostedHarnessProvider:
             enqueue_message,
             serialize_conversation,
         )
+        from simulate.services.hosted_harness_ingress import _public_base_url
         from simulate.tasks.hosted_harness_conversation import (
-            ensure_hosted_harness_conversation_runtime,
+            schedule_conversation_runtime,
         )
 
         job = self._job(request, pk)
@@ -1524,6 +1529,11 @@ class HostedHarnessProvider:
                     status=status.HTTP_409_CONFLICT,
                 )
         data = request.validated_data
+        # Checked before queueing, so a message never waits on a runtime that cannot call back.
+        try:
+            base_url = _public_base_url(request)
+        except HostedHarnessError as exc:
+            return Response(exc.as_dict(), status=exc.status_code)
         try:
             conversation, _message, _created = enqueue_message(
                 job,
@@ -1535,14 +1545,8 @@ class HostedHarnessProvider:
             )
         except HostedHarnessError as exc:
             return Response(exc.as_dict(), status=exc.status_code)
-        base_url = (
-            getattr(settings, "HARNESS_PUBLIC_BASE_URL", "")
-            or request.build_absolute_uri("/")
-        ).rstrip("/")
         try:
-            ensure_hosted_harness_conversation_runtime.apply_async(
-                args=[str(conversation.id), base_url]
-            )
+            schedule_conversation_runtime(str(conversation.id), base_url)
         except Exception:
             return Response(
                 {
@@ -1802,6 +1806,7 @@ class HostedHarnessProvider:
             dict(one) for one in GROUPINGS if spoken or one["value"] != "accent"
         ]
         from simulate.services.harness_scenarios import level_labels_for
+
         response.data["level_labels"] = level_labels_for(rows, response.data["fields"])
         return response
 
@@ -1965,7 +1970,11 @@ class HostedHarnessProvider:
                     target[field] = change.get("value")
                     touched = True
                     receipts.append(
-                        {"scenario": name, "outcome": "applied", "why": f"{field} updated"}
+                        {
+                            "scenario": name,
+                            "outcome": "applied",
+                            "why": f"{field} updated",
+                        }
                     )
                     continue
                 if op == "set_persona":
@@ -1991,22 +2000,36 @@ class HostedHarnessProvider:
                         continue
                     persona = dict(target.get("persona") or {})
                     persona.update(
-                        {key: value for key, value in given.items() if value is not None}
+                        {
+                            key: value
+                            for key, value in given.items()
+                            if value is not None
+                        }
                     )
                     target["persona"] = persona
                     touched = True
                     receipts.append(
-                        {"scenario": name, "outcome": "applied", "why": "persona updated"}
+                        {
+                            "scenario": name,
+                            "outcome": "applied",
+                            "why": "persona updated",
+                        }
                     )
                     continue
                 receipts.append(
-                    {"scenario": name, "outcome": "refused", "why": f"unknown change {op!r}"}
+                    {
+                        "scenario": name,
+                        "outcome": "refused",
+                        "why": f"unknown change {op!r}",
+                    }
                 )
             # Edits pass the same gates as a written scenario.
             if touched:
                 try:
                     from fi.alk.harness.scenario import Scenario, scenario_edit_problems
-                except ImportError:  # the harness package ships in the runner image, not the web backend
+                except (
+                    ImportError
+                ):  # the harness package ships in the runner image, not the web backend
                     scenario_edit_problems = None
 
                 rejected = []
@@ -2057,7 +2080,9 @@ class HostedHarnessProvider:
                     index_scenarios(job, suite, prune=True)
                 except Exception:  # noqa: BLE001 - the edit itself applied; the index can lag
                     logger.warning(
-                        "harness_scenario_reindex_failed job_id=%s", job.id, exc_info=True
+                        "harness_scenario_reindex_failed job_id=%s",
+                        job.id,
+                        exc_info=True,
                     )
                 rewrite_authoring_scenarios(job, suite)
                 delivered = push_scenarios_into_live_sandbox(job, suite)
