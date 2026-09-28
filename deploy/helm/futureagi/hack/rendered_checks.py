@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Invariants of the rendered manifests, run by hack/check.sh.
 
-    python3 hack/rendered_checks.py <directory of rendered value sets>
+    python3 hack/rendered_checks.py <directory of rendered value sets> \
+        [--compose <repository>/docker-compose.distributed.yml]
 
-Each <name>.yaml in the directory is one `helm template` output. Needs PyYAML.
+Each <name>.yaml in the directory is one `helm template` output. With
+--compose, the Python services of the bundled and all-components renders must
+also default the behaviour settings as that compose file does. Needs PyYAML.
 """
 
 from __future__ import annotations
@@ -42,6 +45,28 @@ EXPECTED_URLS = {
         "FI_COLLECTOR_PUBLIC_URL": "https://otlp.futureagi.example.com",
     },
 }
+
+
+# Behaviour every setup gives the backend, workers and serving: not addresses
+# or credentials. docker-compose.distributed.yml's ${VAR:-default} counts as
+# its default.
+COMPOSE_BACKEND_DEFAULTS = (
+    "AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS",
+    "CH25_DROP_LEGACY_CDC_CHAIN",
+    "CH25_EVAL_LOGGER_TABLE",
+    "CH25_QUERY_TYPES_V2_ONLY",
+    "CHANNEL_LAYER_BACKEND",
+    "CH_USE_REPLICATED_ENGINES",
+    "CODE_EXECUTOR_LOCAL_FALLBACK",
+    "DJANGO_SETTINGS_MODULE",
+    "EXACT_AGGREGATION_TASK_QUEUE",
+    "FI_SKIP_CH25_MIGRATION",
+    "NO_STARTUP_DB_MUTATIONS",
+    "PROPERTY_CATALOG_CH_USER",
+    "PROPERTY_CATALOG_DATABASE",
+    "USAGE_EVENTS_ENABLED",
+)
+COMPOSE_DEFAULT = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:?-([^${}]*)\}")
 
 
 def pod_spec(doc: dict) -> dict:
@@ -234,6 +259,30 @@ def check_render(name: str, docs: list[dict]) -> list[str]:
     return failed
 
 
+def check_compose_defaults(name: str, docs: list[dict], compose: Path) -> list[str]:
+    """The long-running Python containers against the compose service of the
+    same name (x-backend-env for one it does not have)."""
+    config = yaml.safe_load(compose.read_text())
+    failed = []
+    for doc in (d for d in docs if d["kind"] == "Deployment"):
+        service = config["services"].get(component(doc), {})
+        compose_env = service.get("environment") or config["x-backend-env"]
+        for container in containers(doc):
+            values = env_values(container)
+            if "DJANGO_SETTINGS_MODULE" not in values:
+                continue
+            for key in COMPOSE_BACKEND_DEFAULTS:
+                expected = str(compose_env[key])
+                while COMPOSE_DEFAULT.search(expected):
+                    expected = COMPOSE_DEFAULT.sub(r"\1", expected)
+                if values.get(key) != expected:
+                    failed.append(
+                        f"{name}: {doc['metadata']['name']}/{container['name']} sets {key}="
+                        f"{values.get(key)!r}; {compose.name} defaults it to {expected!r}"
+                    )
+    return failed
+
+
 def by_name(docs: list[dict], kind: str) -> dict[str, dict]:
     return {d["metadata"]["name"]: d for d in docs if d["kind"] == kind}
 
@@ -313,6 +362,7 @@ def check_gitops(docs: list[dict]) -> list[str]:
 
 def main() -> int:
     out = Path(sys.argv[1])
+    compose = Path(sys.argv[3]) if sys.argv[2:3] == ["--compose"] else None
     renders = {
         path.stem: [d for d in yaml.safe_load_all(path.read_text()) if d]
         for path in sorted(out.glob("*.yaml"))
@@ -324,6 +374,9 @@ def main() -> int:
         failed += check_overrides(renders["bundled"], renders["overrides"])
     if "gitops" in renders:
         failed += check_gitops(renders["gitops"])
+    for name in ("bundled", "all-components"):
+        if compose and name in renders:
+            failed += check_compose_defaults(name, renders[name], compose)
     if failed:
         print("rendered manifests break the chart's invariants:", file=sys.stderr)
         for line in failed:

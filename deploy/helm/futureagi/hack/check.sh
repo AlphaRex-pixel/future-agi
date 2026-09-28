@@ -4,7 +4,8 @@
 #     what to set
 #   * helm lint --strict and helm template for every value set
 #   * kubeconform -strict on every rendered manifest, per Kubernetes version
-#   * invariants of the rendered manifests (hack/rendered_checks.py)
+#   * invariants of the rendered manifests (hack/rendered_checks.py), and
+#     the backend's behaviour settings against docker-compose.distributed.yml
 #   * values.yaml, values.schema.json and the README values table agree
 #   * the pre-commit Prettier run skips the templates and those generated files
 #   * the ClickHouse config files match the ones the Standalone install uses
@@ -109,7 +110,13 @@ echo "== rendered invariants"
 if grep -nE '<no value>|image:( *| *"")$' "$out"/*.yaml; then
   fail "a rendered manifest has an unset value"
 fi
-"$python" "$chart/hack/rendered_checks.py" "$out"
+# Inside the repository, the Python services also default their behaviour
+# settings as docker-compose.distributed.yml does.
+compose=()
+if [ -f "$repo/docker-compose.distributed.yml" ]; then
+  compose=(--compose "$repo/docker-compose.distributed.yml")
+fi
+"$python" "$chart/hack/rendered_checks.py" "$out" ${compose[@]+"${compose[@]}"}
 # ... and they notice pods that read AGENTCC_WEBHOOK_SECRET from
 # secrets.existingSecret while the chart's Secret holds the one given inline.
 mkdir -p "$out/broken"

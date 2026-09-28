@@ -679,6 +679,48 @@ def test_app_urls_have_working_defaults_in_both_setups() -> None:
         assert "FUTURE_AGI_CLOUD_API_URL" not in env
 
 
+# Keys the Standalone app sets otherwise than Distributed's x-backend-env,
+# each with why. Every other key the two share must be equal, so a change to
+# one setup's backend environment reaches the other.
+STANDALONE_OWN_BACKEND_ENV = {
+    # Services inside the app container, on loopback.
+    "AGENTCC_GATEWAY_INTERNAL_URL": "the gateway runs in the app container",
+    "AGENTCC_INTERNAL_URL": "the gateway runs in the app container",
+    "ALK_RUNNER_API_URL": "the API runs in the app container",
+    "FI_COLLECTOR_HOST": "the collector runs in the app container",
+    "REDIS_HOST": "Redis runs in the app container",
+    "REDIS_URL": "Redis runs in the app container, with a password",
+    "REDIS_CACHE_URL": "Redis runs in the app container, with a password",
+    "REDIS_LOCK_URL": "Redis runs in the app container, with a password",
+    "REDIS_STATE_URL": "Redis runs in the app container, with a password",
+    "CHANNEL_REDIS_URL": "Redis runs in the app container, with a password",
+    "S3_ENDPOINT_URL": "object storage runs in the app container",
+    "TEMPORAL_HOST": "the Temporal dev server runs in the app container",
+    "TEMPORAL_NAMESPACE": "the in-container Temporal serves the default one",
+    "WEBSOCKET_ENDPOINT": "the API runs in the app container",
+    "CODE_EXECUTOR_URL": "bin/start points it at the nsjail executor when asked",
+    # Choices of the setup.
+    "FI_CDC_MODE": "Standalone syncs through the outbox, Distributed through PeerDB",
+    "FUTURE_AGI_TELEMETRY_BUFFER_DIR": "/tmp is writable by the in-app sandbox",
+    "CODE_EXECUTOR_LOCAL_FALLBACK": "the API process holds every secret and /data",
+    "CH_ENABLED": "the app always has its ClickHouse",
+    "CH_USE_REPLICATED_ENGINES": "one ClickHouse node",
+}
+
+
+def test_standalone_backend_env_matches_distributed_outside_its_own_keys() -> None:
+    app = _compose(STANDALONE_COMPOSE)["services"]["app"]["environment"]
+    backend = _compose(DISTRIBUTED_COMPOSE)["x-backend-env"]
+    differing = {
+        key for key in set(app) & set(backend) if str(app[key]) != str(backend[key])
+    }
+    assert differing == set(STANDALONE_OWN_BACKEND_ENV), (
+        "differ but not listed: "
+        f"{sorted(differing - set(STANDALONE_OWN_BACKEND_ENV))}; "
+        f"listed but equal: {sorted(set(STANDALONE_OWN_BACKEND_ENV) - differing)}"
+    )
+
+
 def test_every_distributed_backend_probes_the_collector_on_the_network() -> None:
     """env_file hands .env's FI_COLLECTOR_OTLP_PORT, the host port the
     installer moves when 4317 is taken, to every service that loads it."""
