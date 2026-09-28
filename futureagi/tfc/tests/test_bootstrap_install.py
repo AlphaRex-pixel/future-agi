@@ -272,8 +272,6 @@ def test_with_retries_retries_transient_errors_only() -> None:
 def _outbox_module_in(monkeypatch: pytest.MonkeyPatch, directory: Path) -> None:
     """Import the outbox module from ``directory`` only: as an image without
     the module when it is empty."""
-    import sys
-
     import tracer.services.clickhouse as package
 
     monkeypatch.setattr(package, "__path__", [str(directory)])
@@ -301,9 +299,14 @@ def test_change_data_capture_reports_an_import_error_inside_the_module(
         "import fi_missing_dependency_for_this_test\n", encoding="utf-8"
     )
     _outbox_module_in(monkeypatch, tmp_path)
+    logged: list[str] = []
 
-    with pytest.raises(ModuleNotFoundError, match="fi_missing_dependency"):
-        command.change_data_capture(lambda _: None, attempts=1, delay=0)
+    # Not mistaken for an image without the module.
+    with pytest.raises(ModuleNotFoundError) as raised:
+        command.change_data_capture(logged.append, attempts=1, delay=0)
+
+    assert raised.value.name == "fi_missing_dependency_for_this_test"
+    assert logged == []
 
 
 def test_change_data_capture_installer_errors_are_final(
@@ -754,43 +757,6 @@ def test_the_job_retries_search_attributes_until_temporal_serves(
     with pytest.raises(RuntimeError, match="Temporal not serving yet"):
         call_command("bootstrap_install", "--temporal-attempts", "1", stdout=out)
     assert "cdc" not in recorded_steps
-
-
-def test_an_image_without_the_outbox_installer_skips_change_data_capture(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    import tracer.services.clickhouse as clickhouse
-
-    # The package as an image without the module ships it: the file is absent.
-    monkeypatch.setattr(clickhouse, "__path__", [str(tmp_path)])
-    monkeypatch.delattr(clickhouse, "oss_outbox_cdc", raising=False)
-    monkeypatch.delitem(sys.modules, command.OUTBOX_CDC_MODULE, raising=False)
-    monkeypatch.setenv("FI_CDC_MODE", "outbox")
-    logged: list[str] = []
-
-    command.change_data_capture(logged.append, attempts=1, delay=0)
-
-    assert logged == [
-        "this image has no outbox CDC installer; skipping change data capture"
-    ]
-
-
-def test_a_missing_dependency_of_the_outbox_installer_is_not_a_skip(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import tracer.services.clickhouse as clickhouse
-    from tracer.services.clickhouse import oss_outbox_cdc  # noqa: F401 - reloaded
-
-    monkeypatch.delattr(clickhouse, "oss_outbox_cdc")
-    monkeypatch.delitem(sys.modules, command.OUTBOX_CDC_MODULE)
-    monkeypatch.setitem(sys.modules, "psycopg", None)
-    logged: list[str] = []
-
-    with pytest.raises(ModuleNotFoundError) as raised:
-        command.change_data_capture(logged.append, attempts=1, delay=0)
-
-    assert raised.value.name == "psycopg"
-    assert logged == []
 
 
 def test_an_unknown_cdc_mode_fails_before_the_installer_runs(

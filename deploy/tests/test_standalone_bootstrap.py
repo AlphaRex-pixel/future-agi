@@ -641,9 +641,14 @@ class ForeignDatabaseTest(StackTest):
         self.assertIn(reason, message)
         self.assertIn("FI_ADOPT_DISTRIBUTED_INSTALL_DATA=true", message)
         self.assertIn("COMPOSE_FILE=docker-compose.distributed.yml", message)
+        # Moving data between setups is unsupported; the way out is a clean reinstall.
+        self.assertIn("./bin/uninstall --wipe-data", message)
 
     def test_a_database_this_install_created_is_accepted(self):
         self.assertFalse(bootstrap.refuse_foreign_database())
+        # The adopt flag does not make it an adoption.
+        with mock.patch.dict(os.environ, {"FI_ADOPT_DISTRIBUTED_INSTALL_DATA": "true"}):
+            self.assertFalse(bootstrap.refuse_foreign_database())
         self.assertEqual(self.stack.sql[0][1], ["peerflow%"])
         self.assertEqual(self.stack.sql[1][1], ["temporal", "temporal_visibility"])
 
