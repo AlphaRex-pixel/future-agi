@@ -1,6 +1,8 @@
 import hashlib
+from typing import TYPE_CHECKING
 
 import structlog
+from django.db.models import Q, QuerySet
 from django.utils import timezone
 
 from agentcc.models import AgentccAPIKey
@@ -10,11 +12,36 @@ from agentcc.services.gateway_client import (
     get_gateway_client,
 )
 
+if TYPE_CHECKING:
+    from accounts.models import Organization
+
 logger = structlog.get_logger(__name__)
 
 
 class GatewayKeyIdCollision(Exception):
     """The gateway returned a key ID that already belongs to another key."""
+
+
+def _live_keys(org: "Organization | None" = None) -> QuerySet[AgentccAPIKey]:
+    """Active, not deleted and not expired; the org's only, when given."""
+    qs = AgentccAPIKey.no_workspace_objects.filter(
+        status=AgentccAPIKey.ACTIVE,
+        deleted=False,
+    ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
+    if org:
+        qs = qs.filter(organization=org)
+    return qs
+
+
+def gateway_loadable_keys(
+    org: "Organization | None" = None,
+) -> QuerySet[AgentccAPIKey]:
+    """The keys the gateway should hold: live ones with a stored hash, since
+    the gateway loads keys by hash. The gateway's startup pull and Sync's push
+    both send exactly these, so a key Sync pushes is one the next pull keeps.
+    Expired keys are left out even for gateways that predate expiry
+    enforcement."""
+    return _live_keys(org).exclude(key_hash="")
 
 
 def gateway_key_payload(key):
@@ -301,30 +328,24 @@ def sync_keys(org=None):
                 },
             )
 
-    qs = AgentccAPIKey.no_workspace_objects.filter(
-        status=AgentccAPIKey.ACTIVE,
-        deleted=False,
+    return org_key_count + _restore_missing_keys(client, org, gateway_key_ids)
+
+
+def _restore_missing_keys(client, org, gateway_key_ids):
+    """Push the keys the gateway should hold but lacks (e.g. after a restart
+    without startup sync) and return how many it loaded."""
+    payload = [
+        gateway_key_payload(key)
+        for key in gateway_loadable_keys(org).exclude(
+            gateway_key_id__in=gateway_key_ids
+        )
+    ]
+    unrecoverable = (
+        _live_keys(org)
+        .filter(key_hash="")
+        .exclude(gateway_key_id__in=gateway_key_ids)
+        .count()
     )
-    if org:
-        qs = qs.filter(organization=org)
-    missing_keys = qs.exclude(gateway_key_id__in=gateway_key_ids)
-
-    return org_key_count + _restore_missing_keys(client, missing_keys)
-
-
-def _restore_missing_keys(client, missing_keys):
-    """Push active keys the gateway lacks (e.g. after a restart without startup
-    sync) and return how many it loaded."""
-    now = timezone.now()
-    payload = []
-    unrecoverable = 0
-    for key in missing_keys:
-        if key.expires_at and key.expires_at <= now:
-            continue
-        if not key.key_hash:
-            unrecoverable += 1
-            continue
-        payload.append(gateway_key_payload(key))
 
     if unrecoverable:
         logger.warning(

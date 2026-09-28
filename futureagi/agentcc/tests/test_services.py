@@ -373,9 +373,14 @@ class TestAuthBridgeKeyIdsAndSync:
         mock_client.import_keys.return_value = {"received": 1, "loaded": 1}
         mock_get_client.return_value = mock_client
 
-        synced = auth_bridge.sync_keys(org=organization)
+        with structlog.testing.capture_logs() as logs:
+            synced = auth_bridge.sync_keys(org=organization)
 
         assert synced == 1
+        (unrecoverable,) = [
+            log for log in logs if log["event"] == "sync_keys_unrecoverable"
+        ]
+        assert unrecoverable["count"] == 1  # key_no_hash
         (pushed,), _ = mock_client.import_keys.call_args
         assert [k["id"] for k in pushed] == ["key_lost"]
         assert pushed[0]["key_hash"] == lost.key_hash
