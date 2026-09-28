@@ -75,6 +75,7 @@ Set-Location $Root
 . (Join-Path $PSScriptRoot 'lib/secrets.ps1')
 . (Join-Path $PSScriptRoot 'lib/ports.ps1')
 . (Join-Path $PSScriptRoot 'lib/summary.ps1')
+. (Join-Path $PSScriptRoot 'lib/build-local.ps1')
 
 $timestamp = (Get-Date -Format 'yyyyMMdd-HHmmss')
 $LogFile = Join-Path $Root "install-$timestamp.log"
@@ -619,36 +620,10 @@ if (-not $SkipUserCreation -and -not $NonInteractive) {
 # ---- build from source (-FromSource) ----
 # Published images are built from main, so a checkout of another branch
 # needs its own: build each Future AGI image from this checkout, tag it
-# `local`, and point the stack at that tag. The standalone install's app image
-# is assembled from the other four.
-function Build-Image {
-  param([string]$Tag, [string[]]$BuildArgs)
-  Say "  building $Tag"
-  Append-Log @("running: docker build -t $Tag $($BuildArgs -join ' ')")
-  & docker build -t $Tag @BuildArgs
-  if ($LASTEXITCODE -ne 0) { Die "Building $Tag failed; the build output above has the reason." }
-  Ok "Built $Tag"
-}
+# `local` (bin/lib/build-local.ps1), and point the stack at that tag.
 if ($FromSource) {
   Step "Building images from this checkout"
-  # Standalone's app image is assembled on the slim backend variant, as the
-  # published futureagi/standalone is; Distributed runs the default one.
-  $backendVariant = @()
-  if (-not $IsDistributed) { $backendVariant = @('--build-arg', 'IMAGE_VARIANT=slim') }
-  Build-Image 'futureagi/future-agi:local' (@('-f', 'futureagi/Dockerfile.oss') + $backendVariant + @('futureagi'))
-  Build-Image 'futureagi/frontend:local' @('frontend')
-  Build-Image 'futureagi/fi-collector:local' @('fi-collector')
-  Build-Image 'futureagi/agentcc-gateway:local' @('agentcc-gateway')
-  if (-not $IsDistributed) {
-    Build-Image 'futureagi/standalone:local' @(
-      '-f', 'deploy/standalone/Dockerfile',
-      '--build-arg', 'BACKEND_IMAGE=futureagi/future-agi:local',
-      '--build-arg', 'FRONTEND_IMAGE=futureagi/frontend:local',
-      '--build-arg', 'FI_COLLECTOR_IMAGE=futureagi/fi-collector:local',
-      '--build-arg', 'AGENTCC_GATEWAY_IMAGE=futureagi/agentcc-gateway:local',
-      'deploy/standalone'
-    )
-  }
+  Build-LocalImages $IsDistributed
   Set-EnvValue 'FUTURE_AGI_VERSION' 'local'
   if ($IsDistributed) {
     # The distributed stack tags these images separately.

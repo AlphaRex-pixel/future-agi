@@ -434,14 +434,14 @@ def test_the_standalone_image_reports_its_version_to_telemetry() -> None:
     assert "**/__pycache__" in ignored
 
 
-@pytest.mark.parametrize("installer", ["install", "install.ps1"])
+@pytest.mark.parametrize("recipe", ["build-local.sh", "build-local.ps1"])
 def test_installer_build_args_are_declared_in_the_standalone_dockerfile(
-    installer,
+    recipe,
 ) -> None:
     # docker only warns about an unknown --build-arg; the image would then be
     # assembled from the published :latest components, or the backend built
-    # as the wrong variant.
-    text = (ROOT / "bin" / installer).read_text(encoding="utf-8")
+    # as the wrong variant. The installers and bin/dev build with bin/lib.
+    text = (ROOT / "bin" / "lib" / recipe).read_text(encoding="utf-8")
     build_arg = r"--build-arg['\", ]+([A-Za-z_][A-Za-z0-9_]*)="
     standalone = re.search(
         r"futureagi/standalone:local.*?deploy/standalone'?$", text, re.S | re.M

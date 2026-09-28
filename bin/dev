@@ -31,6 +31,7 @@ fi
 step() { printf "\n${BOLD}${BLUE}==>${RESET} ${BOLD}%s${RESET}\n" "$*"; }
 ok()   { printf "  ${GREEN}✓${RESET} %s\n" "$*"; }
 say()  { printf "%s\n" "$*"; }
+log_only() { :; }
 die()  { printf "\n${RED}✗ %s${RESET}\n" "$*" >&2; exit 1; }
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -56,6 +57,9 @@ docker compose version >/dev/null 2>&1 || die "docker compose v2 is required."
 
 # shellcheck source=lib/env.sh
 . "$ROOT/bin/lib/env.sh"
+# The same images, tags and backend variant as ./bin/install --from-source.
+# shellcheck source=lib/build-local.sh
+. "$ROOT/bin/lib/build-local.sh"
 PROJECT=$(compose_project_name)
 
 if [[ "$MODE" == distributed ]]; then
@@ -70,28 +74,6 @@ fi
 dc() { docker compose -p "$PROJECT" "${FILES[@]}" "$@"; }
 
 installed() { docker volume inspect "${PROJECT}_postgres-data" >/dev/null 2>&1; }
-
-build_local() {
-  # Same images, tags and backend variant as ./bin/install --from-source.
-  local what="${1:-all}"
-  case "$what" in
-    all|backend)   docker build -t futureagi/future-agi:local -f futureagi/Dockerfile.oss \
-                     --build-arg IMAGE_VARIANT=slim futureagi ;;&
-    all|frontend)  docker build -t futureagi/frontend:local frontend ;;&
-    all|collector) docker build -t futureagi/fi-collector:local fi-collector ;;&
-    all|gateway)   docker build -t futureagi/agentcc-gateway:local agentcc-gateway ;;&
-    all|backend|frontend|collector|gateway)
-      [[ "$MODE" == standalone ]] && docker build -t futureagi/standalone:local -f deploy/standalone/Dockerfile \
-        --build-arg BACKEND_IMAGE=futureagi/future-agi:local \
-        --build-arg FRONTEND_IMAGE=futureagi/frontend:local \
-        --build-arg FI_COLLECTOR_IMAGE=futureagi/fi-collector:local \
-        --build-arg AGENTCC_GATEWAY_IMAGE=futureagi/agentcc-gateway:local \
-        deploy/standalone
-      ;;
-    *) die "unknown rebuild target: $what (all, backend, frontend, collector, gateway)" ;;
-  esac
-  return 0
-}
 
 print_urls() {
   local ui="${FRONTEND_PORT:-$(env_value FRONTEND_PORT)}" api="${BACKEND_PORT:-$(env_value BACKEND_PORT)}"
@@ -110,7 +92,7 @@ case "$CMD" in
     fi
     step "Starting the $MODE stack with hot reload"
     if [[ "$MODE" == standalone ]]; then
-      docker image inspect futureagi/standalone:local >/dev/null 2>&1 || build_local all
+      docker image inspect futureagi/standalone:local >/dev/null 2>&1 || build_local_images standalone
       dc up -d --build --wait --wait-timeout 900
     else
       # The distributed overlay builds futureagi/future-agi:dev itself.
@@ -132,7 +114,7 @@ case "$CMD" in
     target="${1:-all}"
     step "Rebuilding: $target"
     if [[ "$MODE" == standalone ]]; then
-      build_local "$target"
+      build_local_images standalone "$target"
       if [[ "$target" == all || "$target" == frontend ]]; then
         dc rm -sf frontend >/dev/null 2>&1 || true
         docker volume rm "${PROJECT}_frontend-node-modules" >/dev/null 2>&1 || true

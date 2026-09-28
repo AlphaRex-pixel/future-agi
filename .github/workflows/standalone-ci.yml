@@ -225,10 +225,11 @@ jobs:
         # docker only warns about an unused --build-arg, so a renamed ARG
         # would quietly build from the Dockerfile's default: the :latest
         # images, or the default backend variant instead of -slim. Covers this
-        # workflow and both installers' --from-source builds: the standalone
-        # build's args against deploy/standalone/Dockerfile, every other
-        # installer build arg (the backend's IMAGE_VARIANT) against
-        # futureagi/Dockerfile.oss.
+        # workflow and the local builds of ./bin/install --from-source,
+        # install.ps1 -FromSource and ./bin/dev (bin/lib/build-local.*): the
+        # standalone build's args against deploy/standalone/Dockerfile, every
+        # other build arg (the backend's IMAGE_VARIANT) against
+        # futureagi/Dockerfile.oss. The scripts build nothing of their own.
         run: |
           set -euo pipefail
           declared() { sed -nE 's/^[[:space:]]*ARG[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*/\1/p' "$1" | sort -u; }
@@ -236,11 +237,15 @@ jobs:
             | sed -E "s/.*['\", ]([A-Za-z_][A-Za-z0-9_]*)=$/\1/" | sort -u; }
           standalone=$({
             printf '%s\n' "$STANDALONE_BUILD_ARGS" | sed -nE 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p'
-            { sed -n '/build_image futureagi\/standalone:local/,/[^\\]$/p' bin/install
-              sed -n "/Build-Image 'futureagi\/standalone:local'/,/)/p" bin/install.ps1; } | names
+            { sed -n '/build_local_image futureagi\/standalone:local/,/[^\\]$/p' bin/lib/build-local.sh
+              sed -n "/Build-Image 'futureagi\/standalone:local'/,/)/p" bin/lib/build-local.ps1; } | names
           } | sort -u)
-          backend=$(cat bin/install bin/install.ps1 | names | comm -23 - <(printf '%s\n' "$standalone"))
+          backend=$(cat bin/lib/build-local.sh bin/lib/build-local.ps1 | names | comm -23 - <(printf '%s\n' "$standalone"))
           failed=0
+          if own=$(grep -l -- '--build-arg' bin/install bin/install.ps1 bin/dev); then
+            echo "::error::build the local images with bin/lib/build-local.*, not in $(paste -sd' ' - <<<"$own")"
+            failed=1
+          fi
           unknown=$(comm -13 <(declared deploy/standalone/Dockerfile) <(printf '%s\n' "$standalone"))
           if [ -n "$unknown" ]; then
             echo "::error::build args not declared in deploy/standalone/Dockerfile: $(paste -sd' ' - <<<"$unknown")"

@@ -74,6 +74,8 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT/bin/lib/ports.sh"
 # shellcheck source=lib/summary.sh
 . "$ROOT/bin/lib/summary.sh"
+# shellcheck source=lib/build-local.sh
+. "$ROOT/bin/lib/build-local.sh"
 LOG_FILE="$ROOT/install-$(date +%Y%m%d-%H%M%S).log"
 exec 3>>"$LOG_FILE"
 printf "# Future AGI install log — %s\n# host: %s, uname: %s\n\n" \
@@ -716,36 +718,13 @@ fi
 # ---------------- build from source (--from-source) ----------------
 # Published images are built from main, so a checkout of another branch
 # needs its own: build each Future AGI image from this checkout, tag it
-# `local`, and point the stack at that tag. The standalone install's app image
-# is assembled from the other four.
-build_image() { # tag, then `docker build` arguments
-  local tag="$1"
-  shift
-  say "  ${DIM}building ${tag}${RESET}"
-  log_only "running: docker build -t $tag $*"
-  docker build -t "$tag" "$@" || die "Building $tag failed; the build output above has the reason."
-  ok "Built $tag"
-}
+# `local` (bin/lib/build-local.sh), and point the stack at that tag.
 if (( FROM_SOURCE == 1 )); then
   step "Building images from this checkout"
-  # Standalone's app image is assembled on the slim backend variant, as the
-  # published futureagi/standalone is; Distributed runs the default one.
-  backend_variant=()
-  if (( DISTRIBUTED == 0 )); then
-    backend_variant=(--build-arg IMAGE_VARIANT=slim)
-  fi
-  build_image futureagi/future-agi:local -f futureagi/Dockerfile.oss \
-    ${backend_variant[@]+"${backend_variant[@]}"} futureagi
-  build_image futureagi/frontend:local frontend
-  build_image futureagi/fi-collector:local fi-collector
-  build_image futureagi/agentcc-gateway:local agentcc-gateway
-  if (( DISTRIBUTED == 0 )); then
-    build_image futureagi/standalone:local -f deploy/standalone/Dockerfile \
-      --build-arg BACKEND_IMAGE=futureagi/future-agi:local \
-      --build-arg FRONTEND_IMAGE=futureagi/frontend:local \
-      --build-arg FI_COLLECTOR_IMAGE=futureagi/fi-collector:local \
-      --build-arg AGENTCC_GATEWAY_IMAGE=futureagi/agentcc-gateway:local \
-      deploy/standalone
+  if (( DISTRIBUTED == 1 )); then
+    build_local_images distributed
+  else
+    build_local_images standalone
   fi
   set_env_var FUTURE_AGI_VERSION local
   if (( DISTRIBUTED == 1 )); then

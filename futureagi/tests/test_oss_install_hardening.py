@@ -1762,7 +1762,8 @@ def _standalone_build(text: str) -> str:
 def test_installers_pass_only_build_args_the_standalone_image_declares() -> None:
     dockerfile = _read(ROOT / "deploy" / "standalone" / "Dockerfile")
     declared = set(re.findall(r"^ARG ([A-Z0-9_]+)", dockerfile, re.MULTILINE))
-    shell_text, powershell_text = _read(INSTALL_SH), _read(INSTALL_PS1)
+    shell_text = _read(INSTALL_LIB / "build-local.sh")
+    powershell_text = _read(INSTALL_LIB / "build-local.ps1")
     shell = set(re.findall(r"--build-arg ([A-Z0-9_]+)=", _standalone_build(shell_text)))
     powershell = set(
         re.findall(r"'--build-arg', '([A-Z0-9_]+)=", _standalone_build(powershell_text))
@@ -1776,9 +1777,20 @@ def test_installers_pass_only_build_args_the_standalone_image_declares() -> None
     # Standalone's app image sits on the slim backend, as the published one
     # does (bin/install is exercised by the from-source tests).
     assert (
-        "if (-not $IsDistributed) { $backendVariant = @('--build-arg', "
+        "if (-not $Distributed) { $backendVariant = @('--build-arg', "
         "'IMAGE_VARIANT=slim') }"
     ) in powershell_text
+
+
+def test_dev_builds_the_local_images_with_the_installers_recipe() -> None:
+    """./bin/dev and ./bin/install --from-source must build the same images,
+    tags and backend variant."""
+    dev = _read(ROOT / "bin" / "dev")
+    assert '. "$ROOT/bin/lib/build-local.sh"' in dev
+    assert "build_local_images standalone" in dev
+    for script in (dev, _read(INSTALL_SH), _read(INSTALL_PS1)):
+        assert "docker build" not in script
+        assert "--build-arg" not in script
 
 
 def test_a_checkout_the_docker_vm_cannot_see_fails_preflight(tmp_path: Path) -> None:
