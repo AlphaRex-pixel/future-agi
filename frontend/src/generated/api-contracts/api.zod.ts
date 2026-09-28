@@ -35336,12 +35336,7 @@ export const SimulateApiHarnessEnvironmentsReadResponse = zod.object({
         inputs: zod.array(
           zod.object({
             key: zod.string().min(1),
-            source: zod.enum([
-              "voice_recording",
-              "transcript",
-              "agent_prompt",
-              "scenario_columns.situation.value",
-            ]),
+            source: zod.string().min(1),
             label: zod.string().min(1),
           }),
         ),
@@ -35549,12 +35544,7 @@ export const SimulateApiHarnessEnvironmentsPartialUpdateResponse = zod.object({
         inputs: zod.array(
           zod.object({
             key: zod.string().min(1),
-            source: zod.enum([
-              "voice_recording",
-              "transcript",
-              "agent_prompt",
-              "scenario_columns.situation.value",
-            ]),
+            source: zod.string().min(1),
             label: zod.string().min(1),
           }),
         ),
@@ -35657,12 +35647,7 @@ export const SimulateApiHarnessEnvironmentsEvaluationsAvailableEvaluationsRespon
         inputs: zod.array(
           zod.object({
             key: zod.string().min(1),
-            source: zod.enum([
-              "voice_recording",
-              "transcript",
-              "agent_prompt",
-              "scenario_columns.situation.value",
-            ]),
+            source: zod.string().min(1),
             label: zod.string().min(1),
           }),
         ),
@@ -35830,12 +35815,7 @@ export const SimulateApiHarnessEnvironmentsEvaluationsSetToolCallEvaluationRespo
           inputs: zod.array(
             zod.object({
               key: zod.string().min(1),
-              source: zod.enum([
-                "voice_recording",
-                "transcript",
-                "agent_prompt",
-                "scenario_columns.situation.value",
-              ]),
+              source: zod.string().min(1),
               label: zod.string().min(1),
             }),
           ),

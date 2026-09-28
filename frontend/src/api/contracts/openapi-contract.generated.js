@@ -107521,12 +107521,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         source: {
           title: "Source",
           type: "string",
-          enum: [
-            "voice_recording",
-            "transcript",
-            "agent_prompt",
-            "scenario_columns.situation.value",
-          ],
+          minLength: 1,
         },
         label: {
           title: "Label",
