@@ -346,39 +346,9 @@ jobs:
       size-budget-percent: ${{ fromJSON(vars.STANDALONE_SIZE_BUDGET_PERCENT || '10') }}
       default-install-total: true
       build-args: ${{ needs.standalone-inputs.outputs.build-args }}
-      # Every bundled binary must be this architecture's and must start:
-      # a single-arch source image would otherwise ship an x86 binary in the
-      # arm64 image. Keep in sync with VERIFY_STANDALONE in standalone-ci.yml.
-      verify-command: |
-        python - <<'PY'
-        import os, platform, shutil, subprocess, sys
-        machine = {"x86_64": 0x3E, "aarch64": 0xB7}[platform.machine()]
-        failed = []
-        for argv in (["fi-collector", "--help"], ["agentcc-gateway", "--help"],
-                     ["temporal", "--version"], ["minio", "--version"],
-                     ["redis-server", "--version"], ["nginx", "-v"],
-                     ["supervisord", "--version"]):
-            path = shutil.which(argv[0])
-            if path is None:
-                failed.append(f"{argv[0]}: not on PATH")
-                continue
-            with open(os.path.realpath(path), "rb") as binary:
-                head = binary.read(20)
-            if head[:4] == b"\x7fELF" and int.from_bytes(head[18:20], "little") != machine:
-                failed.append(f"{argv[0]}: built for another architecture")
-                continue
-            try:
-                subprocess.run(argv, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, timeout=10)
-            except subprocess.TimeoutExpired:
-                pass  # it started and kept running
-            except OSError as exc:
-                failed.append(f"{argv[0]}: {exc}")
-                continue
-            print(f"ok  {path}")
-        import channels_redis, falcon, gunicorn  # noqa: F401
-        sys.exit("\n".join(failed) or None)
-        PY
+      # Every bundled binary must be this architecture's and must start
+      # (deploy/standalone/bin/verify-binaries, which standalone-ci.yml runs too).
+      verify-command: /opt/futureagi/bin/verify-binaries
     secrets:
       dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
       dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}

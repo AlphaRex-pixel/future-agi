@@ -73,39 +73,6 @@ env:
   REGISTRY: localhost:5000
   SIZE_BUDGET_PERCENT: ${{ vars.STANDALONE_SIZE_BUDGET_PERCENT || '10' }}
   SIZE_WAIVER_LABEL: image-size-approved
-  # Every bundled binary must be this architecture's and must start: a
-  # single-arch source image would otherwise put an x86 binary in the arm64
-  # image. Keep in sync with verify-command in release-images.yml.
-  VERIFY_STANDALONE: |
-    python - <<'PY'
-    import os, platform, shutil, subprocess, sys
-    machine = {"x86_64": 0x3E, "aarch64": 0xB7}[platform.machine()]
-    failed = []
-    for argv in (["fi-collector", "--help"], ["agentcc-gateway", "--help"],
-                 ["temporal", "--version"], ["minio", "--version"],
-                 ["redis-server", "--version"], ["nginx", "-v"],
-                 ["supervisord", "--version"]):
-        path = shutil.which(argv[0])
-        if path is None:
-            failed.append(f"{argv[0]}: not on PATH")
-            continue
-        with open(os.path.realpath(path), "rb") as binary:
-            head = binary.read(20)
-        if head[:4] == b"\x7fELF" and int.from_bytes(head[18:20], "little") != machine:
-            failed.append(f"{argv[0]}: built for another architecture")
-            continue
-        try:
-            subprocess.run(argv, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=10)
-        except subprocess.TimeoutExpired:
-            pass  # it started and kept running
-        except OSError as exc:
-            failed.append(f"{argv[0]}: {exc}")
-            continue
-        print(f"ok  {path}")
-    import channels_redis, falcon, gunicorn  # noqa: F401
-    sys.exit("\n".join(failed) or None)
-    PY
 
 jobs:
   changes:
@@ -398,9 +365,10 @@ jobs:
           exit "$failed"
 
       - name: Verify the bundled binaries on linux/${{ matrix.arch }}
+        # The same script release-images.yml runs before any tag moves.
         run: |
           docker pull --quiet "$REGISTRY/futureagi/standalone:ci"
-          docker run --rm --entrypoint sh "$REGISTRY/futureagi/standalone:ci" -ec "$VERIFY_STANDALONE"
+          docker run --rm --entrypoint /opt/futureagi/bin/verify-binaries "$REGISTRY/futureagi/standalone:ci"
 
       - name: Size budget (linux/${{ matrix.arch }})
         env:

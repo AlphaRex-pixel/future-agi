@@ -107,11 +107,12 @@ COPY bin/ /opt/futureagi/bin/
 # A Windows checkout (core.autocrlf) turns `#!/usr/bin/env bash` into
 # `bash\r`, and the entrypoint then fails to start.
 RUN sed -i 's/\r$//' /opt/futureagi/bin/start /opt/futureagi/bin/after-bootstrap \
-        /opt/futureagi/bin/bootstrap.py /etc/futureagi/supervisord.conf \
+        /opt/futureagi/bin/bootstrap.py /opt/futureagi/bin/verify-binaries \
+        /etc/futureagi/supervisord.conf \
         /etc/nginx/nginx.conf /etc/nginx/security-headers.conf \
         /etc/nginx/starting.html \
     && chmod 0755 /opt/futureagi/bin/start /opt/futureagi/bin/after-bootstrap \
-        /opt/futureagi/bin/bootstrap.py
+        /opt/futureagi/bin/bootstrap.py /opt/futureagi/bin/verify-binaries
 
 # glibc: fewer malloc arenas keeps the threaded Python processes smaller.
 ENV MALLOC_ARENA_MAX=2

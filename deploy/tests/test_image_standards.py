@@ -889,6 +889,85 @@ exit 0
         self.assertEqual(proc.returncode, 2)
 
 
+VERIFY_BINARIES = ROOT / "deploy" / "standalone" / "bin" / "verify-binaries"
+BUNDLED_BINARIES = (
+    "fi-collector",
+    "agentcc-gateway",
+    "temporal",
+    "minio",
+    "redis-server",
+    "nginx",
+    "supervisord",
+)
+
+
+STARTS = b"#!/bin/sh\nexit 0\n"  # a binary that starts
+
+
+def elf_header(machine: int) -> bytes:
+    """The first 20 bytes of an ELF file for `machine` (e_machine)."""
+    return b"\x7fELF" + bytes(14) + machine.to_bytes(2, "little")
+
+
+class StandaloneVerifyBinaries(unittest.TestCase):
+    """deploy/standalone/bin/verify-binaries, which standalone-ci.yml and
+    release-images.yml run inside futureagi/standalone, on an x86_64 host
+    with fake binaries."""
+
+    def run_script(self, binaries: dict[str, bytes]) -> tuple[object, str]:
+        """binaries: name -> file content. Returns the exit code and stdout."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, content in binaries.items():
+                path = Path(tmp) / name
+                path.write_bytes(content)
+                path.chmod(0o755)
+            modules = {
+                name: types.ModuleType(name)
+                for name in ("channels_redis", "falcon", "gunicorn")
+            }
+            out = io.StringIO()
+            with (
+                mock.patch.dict(os.environ, {"PATH": tmp}),
+                mock.patch.dict(sys.modules, modules),
+                mock.patch("platform.machine", return_value="x86_64"),
+                contextlib.redirect_stdout(out),
+                self.assertRaises(SystemExit) as exited,
+            ):
+                runpy.run_path(str(VERIFY_BINARIES), run_name="__main__")
+            return exited.exception.code, out.getvalue()
+
+    def test_binaries_that_start_pass(self):
+        code, out = self.run_script(dict.fromkeys(BUNDLED_BINARIES, STARTS))
+        self.assertIsNone(code)
+        self.assertEqual(out.count("ok  "), len(BUNDLED_BINARIES))
+
+    def test_a_missing_foreign_or_broken_binary_fails(self):
+        binaries = dict.fromkeys(BUNDLED_BINARIES, STARTS)
+        del binaries["nginx"]
+        binaries["minio"] = elf_header(0xB7)  # aarch64 on an x86_64 host
+        binaries["temporal"] = elf_header(0x3E)  # right machine, cannot exec
+        code, out = self.run_script(binaries)
+        failures = code.splitlines()
+        self.assertEqual(len(failures), 3, code)
+        self.assertIn("nginx: not on PATH", failures)
+        self.assertIn("minio: built for another architecture", failures)
+        self.assertTrue(any(line.startswith("temporal: ") for line in failures))
+        self.assertEqual(out.count("ok  "), len(BUNDLED_BINARIES) - 3)
+
+    def test_standalone_ci_and_the_release_run_the_one_script(self):
+        self.assertTrue(os.access(VERIFY_BINARIES, os.X_OK))
+        ci = (WORKFLOWS / "standalone-ci.yml").read_text(encoding="utf-8")
+        release = (WORKFLOWS / "release-images.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "--entrypoint /opt/futureagi/bin/verify-binaries"
+            ' "$REGISTRY/futureagi/standalone:ci"',
+            ci,
+        )
+        self.assertIn("verify-command: /opt/futureagi/bin/verify-binaries", release)
+        for workflow in (ci, release):
+            self.assertNotIn("0x3E", workflow)  # no inline copy of the script
+
+
 # ---------------------------------------------------------------------------
 # Health probes against a local server
 # ---------------------------------------------------------------------------
