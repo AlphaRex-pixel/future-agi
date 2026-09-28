@@ -529,6 +529,9 @@ services:
       AGENTCC_CONTROL_PLANE_URL: http://backend
       AGENTCC_CONTROL_PLANE_TOKEN: ${AGENTCC_ADMIN_TOKEN:-local-dev-only-admin-token-replace-me}
       AGENTCC_SYNC_ON_STARTUP: "true"
+      # Re-read keys and org settings every minute too, so a gateway that
+      # started before the app (or missed an update) catches up.
+      AGENTCC_SYNC_INTERVAL: ${AGENTCC_SYNC_INTERVAL:-60s}
       AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS: ${AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS:-false}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

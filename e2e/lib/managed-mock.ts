@@ -61,13 +61,19 @@ export function validateMockEnvironment(service: string, env: Record<string, str
     AGENTCC_ADMIN_TOKEN: 'local-dev-only-admin-token-replace-me',
     AGENTCC_INTERNAL_URL: 'http://agentcc-gateway:8080',
     AGENTCC_GATEWAY_INTERNAL_URL: 'http://agentcc-gateway:8080' };
+  // Control-plane wiring of the gateway (docker-compose.distributed.yml): it
+  // pulls keys from the backend and posts request logs back. No provider route,
+  // credential or network allowance: private provider URLs stay refused.
+  const wiring: Record<string, string> = { AGENTCC_CONTROL_PLANE_URL: 'http://backend',
+    AGENTCC_CONTROL_PLANE_TOKEN: allowed.AGENTCC_ADMIN_TOKEN, AGENTCC_SYNC_ON_STARTUP: 'true',
+    AGENTCC_SYNC_INTERVAL: '60s', AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS: 'false' };
   for (const [key, value] of Object.entries(env)) {
     if (!value) continue;
     requireSafe(!/^(https?_proxy|all_proxy|node_options|ld_preload|pythonpath|pythonstartup)$/i.test(key),
       `${service} has a proxy/preload override`);
     // The E2E backend enables webhook authentication; the worker may leave it
     // unset. This dummy secret grants no provider route or credential override.
-    if (key.startsWith('AGENTCC_')) requireSafe(allowed[key] === value ||
+    if (key.startsWith('AGENTCC_')) requireSafe(allowed[key] === value || wiring[key] === value ||
       (key === 'AGENTCC_WEBHOOK_SECRET' && value === 'e2e-agentcc-webhook-secret'),
     `${service} has an unsupported gateway override`);
     if (/_API_KEY$/.test(key) || ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'].includes(key)) {

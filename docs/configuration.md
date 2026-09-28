@@ -472,7 +472,7 @@ database, override `PG_HOST`, `PGBOUNCER_HOST` or `CH_HOST` in a
 | `EXTRA_CSRF_ORIGINS` | empty | S D H | Extra trusted CSRF origins, comma-separated. |
 | `AGENTCC_CONFIG_PATH` | `agentcc-gateway/config.example.yaml` | S D | Gateway provider config, relative to the repository root, mounted into the gateway. Copy the example to enable Anthropic, Gemini, Bedrock, Vertex and others; the copy is git-ignored. A path that does not exist stops the stack from starting. |
 | `AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS` | `false`; Helm: `agentccGateway.allowPrivateProviderURLs` | S D H | `true` lets org providers use base URLs on private networks (RFC 1918 addresses, Docker service names): a local Ollama or vLLM, see [INSTALLATION.md](../INSTALLATION.md#local-models-ollama-vllm). Read by the gateway and the API. Loopback, link-local and cloud metadata addresses stay refused. Anyone who can add a provider can then reach every service on that network, ClickHouse included (its `default` user has no password in either Compose setup), so turn it on only when they are all trusted. |
-| `AGENTCC_SYNC_INTERVAL` | unset: no periodic re-sync (Helm: `60s`, from `agentccGateway.config.control_plane.sync_interval`) | S D H | A Go duration (`60s`, `5m`): the gateway also re-reads keys and org settings from the app this often. Useful when the app can take over two minutes to come up after the gateway (Distributed on a slow host), or with several gateway replicas. |
+| `AGENTCC_SYNC_INTERVAL` | `60s` (Helm: `60s`, from `agentccGateway.config.control_plane.sync_interval`) | S D H | A Go duration (`60s`, `5m`): the gateway also re-reads keys and org settings from the app this often, so a gateway that started before the app (Distributed on a slow host) or several gateway replicas catch up. |
 | `OTEL_ENABLED` | `false` | S D H | Export the platform's own OpenTelemetry traces (monitoring Future AGI itself, not your application's traces). |
 | `FAST_STARTUP` | `false` | D H | Skip start-up checks in the backend containers. |
 | `TEMPORAL_TEST_EXECUTION_ENABLED` | `true` | S D H | Run test executions as Temporal workflows. |
@@ -576,7 +576,7 @@ nothing. Change what they are derived from instead, or use a
 | `FI_EMBEDDED_TEMPORAL_WORKER`, `TEMPORAL_GRACEFUL_SHUTDOWN_TIMEOUT` | fixed | S | The embedded worker and its drain. |
 | `TEMPORAL_TASK_QUEUE` | one queue per worker | D | Per-queue workers. |
 | `GEMINI_API_KEY` | `GOOGLE_API_KEY` | S D | The gateway's name for the Gemini key. |
-| `AGENTCC_CONTROL_PLANE_URL`, `AGENTCC_CONTROL_PLANE_TOKEN`, `AGENTCC_SYNC_ON_STARTUP` | the API (`http://127.0.0.1:8000` in S, `http://backend` in D), `AGENTCC_ADMIN_TOKEN`, `true` | S D | The gateway loads the keys and org settings made in the UI from the app when it starts (retrying for two minutes) and posts its request logs there. Standalone starts its gateway after the bootstrap, so the app is up by then. `AGENTCC_SYNC_INTERVAL` adds a periodic re-sync. |
+| `AGENTCC_CONTROL_PLANE_URL`, `AGENTCC_CONTROL_PLANE_TOKEN`, `AGENTCC_SYNC_ON_STARTUP` | the API (`http://127.0.0.1:8000` in S, `http://backend` in D), `AGENTCC_ADMIN_TOKEN`, `true` | S D | The gateway loads the keys and org settings made in the UI from the app when it starts (retrying for two minutes) and posts its request logs there. Standalone starts its gateway after the bootstrap, so the app is up by then. `AGENTCC_SYNC_INTERVAL` adds a periodic re-sync (every minute by default). |
 
 ## Legacy and retired keys
 
