@@ -871,6 +871,59 @@ class TestProviderBaseURLIsCheckedOnSave:
         assert response.status_code == 201, response.json()
         assert self._saved(org_b).base_url == "http://100.64.77.10:8080"
 
+    def test_credential_api_leaves_a_single_label_host_to_the_opt_in(
+        self, monkeypatch, secondary_org_context, secondary_org_client
+    ):
+        # A Docker service or Kubernetes Service short name has no dot, like
+        # the gateway UI's http://mock-llm:8080. Whether it may be saved is the
+        # opt-in's decision, not the URL format's.
+        monkeypatch.delenv(self.OPT_IN, raising=False)
+        org_b, _ = secondary_org_context
+
+        response = self._create(secondary_org_client, "http://mock-llm:8080")
+
+        assert response.status_code == 400, response.json()
+        assert f"{self.OPT_IN}=true" in response.json()["message"]
+        assert self._saved(org_b) is None
+
+        monkeypatch.setenv(self.OPT_IN, "true")
+        response = self._create(secondary_org_client, "http://mock-llm:8080")
+        assert response.status_code == 201, response.json()
+        cred = self._saved(org_b)
+        assert cred.base_url == "http://mock-llm:8080"
+
+        response = secondary_org_client.patch(
+            f"/agentcc/provider-credentials/{cred.id}/",
+            {"base_url": "http://mock-llm:11434/v1"},
+            format="json",
+        )
+        assert response.status_code == 200, response.json()
+        cred.refresh_from_db()
+        assert cred.base_url == "http://mock-llm:11434/v1"
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "mock-llm:8080",
+            "ftp://mock-llm/v1",
+            "http://:8080",
+            "http://mock llm:8080",
+            "http://mock-llm:80a",
+            "http://mock-llm:65536",
+        ],
+    )
+    def test_credential_api_still_refuses_what_is_not_an_http_url_with_a_host(
+        self, monkeypatch, secondary_org_context, secondary_org_client, base_url
+    ):
+        monkeypatch.setenv(self.OPT_IN, "true")
+        org_b, _ = secondary_org_context
+
+        response = self._create(secondary_org_client, base_url)
+
+        assert response.status_code == 400, response.json()
+        assert "Enter a valid URL." in str(response.json())
+        assert self._saved(org_b) is None
+
     def test_credential_api_checks_a_changed_base_url_only(
         self, monkeypatch, secondary_org_context, secondary_org_client
     ):
