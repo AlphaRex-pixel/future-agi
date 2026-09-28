@@ -316,6 +316,7 @@ export default function RunTraceTable({
             />
           ) : (
             <TraceTable
+              key={groupBy}
               columns={visibleColumns}
               groups={groups}
               rows={groupBy ? null : tasks}
