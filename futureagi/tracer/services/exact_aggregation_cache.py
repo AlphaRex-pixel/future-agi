@@ -82,19 +82,30 @@ _OPEN_WINDOW_REVALIDATION_NAMESPACES = frozenset(
 #   takes D seconds therefore occupies a worker slot at most D / (D + floor) of
 #   the time. For the ~27 s 7-day session read on the largest tenant that is
 #   27/327 = 8% at 300 s, against 27/87 = 31% at 60 s.
-# - Per project, a revalidation claims admission only while it leaves a slot
-#   free (``_revalidation_admission_limit``): with the default two slots, at
-#   most one revalidation per project runs at a time and a user's new chart
-#   always has the other. (With EXACT_AGGREGATION_MAX_INFLIGHT_PER_SCOPE=1
+# - Per admission scope (the identity's project_id, else workspace_id, else
+#   organization_id), a revalidation claims admission only while it leaves a
+#   slot free (``_revalidation_admission_limit``): with the default two
+#   slots, it claims only when the scope has NO exact job in flight, so at
+#   most one revalidation per scope runs at a time and a user's new chart
+#   always has the other slot. (With EXACT_AGGREGATION_MAX_INFLIGHT_PER_SCOPE=1
 #   there is no slot to spare, and a revalidation may take the only one.)
+#   The cost of that reservation: while ANY exact job of the same scope is in
+#   flight (another chart's cold read, an eval chart, another revalidation),
+#   an old open-window hit is served plain, complete and not refreshing, with
+#   nothing retrying until the next visit. Because the toolbar window's start
+#   moves each hour, such a hit can be up to about one hour old (plus read
+#   time), not five minutes; the only sign is its completed_at ("Last
+#   updated"). Serving it marked refreshing, or polling for a free slot, or
+#   raising the default to three slots, are owner decisions left open.
 # - A revalidation whose Temporal dispatch is accepted but never starts keeps
 #   its "running" state for the dispatch lease, exactly like an explicit
 #   refresh today: hit polls never reconcile against Temporal, so the chart
 #   shows "Refreshing data" until the poll budget pauses it; an explicit
 #   Reload takes the scheduling path, which reconciles a terminal dispatch.
-# 300 s is also the failed-state TTL, so a failing and a succeeding identity
-# are retried on the same cadence, and a revisited chart is never served more
-# than five minutes old without a refresh under way.
+# With a free slot, a revisited open-window chart older than the floor is
+# served marked refreshing while its own refresh runs; the failed-state TTL
+# (EXACT_AGGREGATION_REFRESH_FAILURE_SECONDS, also 300 s by default, an
+# independent setting) is the retry backoff after a failure.
 _DEFAULT_REVALIDATE_AFTER_SECONDS = 5 * 60
 # Configuration cannot turn every poll into a claim.
 _MIN_REVALIDATE_AFTER_SECONDS = 60
@@ -1712,8 +1723,10 @@ def _revalidate_open_window_hit(
         lease_seconds=_refresh_dispatch_seconds(),
         limit=_revalidation_admission_limit(),
     ):
-        # Foreground work holds the project's slots. The hit is still exact
-        # for its window; a later visit revalidates once a slot is free.
+        # Foreground work holds the scope's spare slot. The hit is still exact
+        # for its window as of its completed_at, and is served plain: nothing
+        # retries until a later visit finds a slot free (see the admission
+        # note at _DEFAULT_REVALIDATE_AFTER_SECONDS).
         finish_exact_refresh(namespace, identity, token, succeeded=True)
         return _decorate_refresh_state(previous, None)
     _remember_revalidation_token(namespace, identity, token)
