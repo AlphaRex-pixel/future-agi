@@ -456,65 +456,22 @@ func TestLogFlusherClose_SendsTheBacklogInBatches(t *testing.T) {
 }
 
 // Close lets a flush that is sending finish rather than sending its batch
-// again, and refuses records that arrive once it has begun, counting them.
+// again, and refuses records that arrive once it has begun, counting them. A
+// flush that gives up on its batch leaves the batch to Close: Close retries it
+// after the flush's last server error, and counts it after a client error,
+// which a retry would not change.
 func TestLogFlusherClose_WaitsForAFlushInProgress(t *testing.T) {
-	logs, restore := installCapturingLogger()
-	defer restore()
-	sending := make(chan struct{}, 10)
-	proceed := make(chan struct{})
-	wh := newFakeLogWebhook(t, func(n int, _ *http.Request) int {
-		if n == 1 {
-			sending <- struct{}{}
-			<-proceed
-		}
-		return http.StatusOK
-	})
-	letItAnswer := releaseAtCleanup(t, proceed)
-	f := NewLogFlusher(wh.URL, "secret", time.Hour, 100)
-	enqueue(f, "req-1", "req-2")
-	go f.flush()
-	<-sending
-
-	closed := make(chan struct{})
-	go func() {
-		defer close(closed)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		f.Close(ctx)
-	}()
-	waitUntilClosing(t, f)
-	enqueue(f, "req-3")
-	letItAnswer()
-
-	select {
-	case <-closed:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Close did not return")
-	}
-	if got, want := wh.delivered(), []string{"req-1", "req-2"}; !slices.Equal(got, want) {
-		t.Errorf("webhook was delivered %q, want %q", got, want)
-	}
-	if n := wh.requests(); n != 1 {
-		t.Errorf("webhook got %d requests, want 1: the batch in flight, not sent again", n)
-	}
-	if n, _, ok := undeliveredLogged(t, logs); !ok || n != 1 {
-		t.Errorf("logged undelivered = %d (logged: %v), want 1 for the record refused after Close began", n, ok)
-	}
-}
-
-// A flush that gives up on its batch while Close waits for it leaves the batch
-// to Close: Close retries it after the flush's last server error, and counts
-// it after a client error, which a retry would not change.
-func TestLogFlusherClose_TakesOverTheBatchOfAFlushThatGivesUp(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
 		status          int
+		late            []string
 		wantDelivered   []string
 		wantRequests    int
 		wantUndelivered int64
 	}{
-		{"after its last server error", http.StatusServiceUnavailable, []string{"req-1", "req-2"}, 2, 0},
-		{"after a client error", http.StatusBadRequest, nil, 1, 2},
+		{"after it delivers", http.StatusOK, []string{"req-3"}, []string{"req-1", "req-2"}, 1, 1},
+		{"after its last server error", http.StatusServiceUnavailable, nil, []string{"req-1", "req-2"}, 2, 0},
+		{"after a client error", http.StatusBadRequest, nil, nil, 1, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logs, restore := installCapturingLogger()
@@ -531,7 +488,7 @@ func TestLogFlusherClose_TakesOverTheBatchOfAFlushThatGivesUp(t *testing.T) {
 			})
 			letItAnswer := releaseAtCleanup(t, proceed)
 			f := NewLogFlusher(wh.URL, "secret", time.Hour, 100)
-			f.consecutiveFails = maxFlushRetries // this send is the flush's last try
+			f.consecutiveFails = maxFlushRetries // a failing send is the flush's last try
 			enqueue(f, "req-1", "req-2")
 			go f.flush()
 			<-sending
@@ -544,6 +501,7 @@ func TestLogFlusherClose_TakesOverTheBatchOfAFlushThatGivesUp(t *testing.T) {
 				f.Close(ctx)
 			}()
 			waitUntilClosing(t, f)
+			enqueue(f, tc.late...)
 			letItAnswer()
 
 			select {
