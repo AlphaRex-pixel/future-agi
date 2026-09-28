@@ -13,6 +13,7 @@ from rest_framework.test import APIClient
 
 from simulate.models import CallExecution, HostedHarnessJob, HostedHarnessReceipt
 from simulate.models.chat_message import ChatMessageModel
+from simulate.services.harness_scenarios import index_scenarios
 from simulate.services.hosted_harness import (
     HostedHarnessError,
     activate_attempt_capability,
@@ -33,7 +34,6 @@ from simulate.services.hosted_harness_ingestion import (
     ingest_artifact,
     ingest_result_receipt,
 )
-from simulate.services.harness_scenarios import index_scenarios
 
 BASE = "/simulate/api/harness/attempts"
 
@@ -724,6 +724,112 @@ def test_failed_scenario_is_completed_call_in_the_submitting_workspace(
         "failed": 0,
         "complete": True,
     }
+
+
+@pytest.mark.django_db
+def test_receipt_target_metrics_fill_customer_fields_not_platform_cost(
+    organization, workspace
+):
+    """A Vapi/Retell target's own cost, latency and tokens arrive on the signed receipt
+    and land in the customer fields, never in `cost_cents`, the platform's own cost."""
+    job, _ = create_hosted_job(
+        organization,
+        _payload(),
+        idempotency_key="target-metrics-key",
+        workspace=workspace,
+    )
+    capability = register_attempt(job.id, endpoint_base_url="https://platform.example")
+    client = APIClient()
+    headers = _headers(capability)
+    provisioned = client.post(
+        f"{BASE}/{capability.attempt.id}/scenarios/",
+        {
+            "operation": "provision",
+            "name": "Target metrics",
+            "modality": "voice",
+            "personas": [
+                {
+                    "scenario_key": "booking",
+                    "name": "Caller",
+                    "situation": "Books a ride",
+                    "outcome": "Ride booked",
+                }
+            ],
+        },
+        format="json",
+        **headers,
+    ).json()["result"]
+    begin = client.post(
+        f"{BASE}/{capability.attempt.id}/scenarios/",
+        {
+            "operation": "begin",
+            "run_test_id": provisioned["run_test_id"],
+            "scenario_keys": ["booking"],
+        },
+        format="json",
+        **headers,
+    )
+    assert begin.status_code == 200, begin.content
+
+    def post(call_extra):
+        receipt = {
+            "schema_version": "futureagi.harness-result.v1",
+            "job_id": str(job.id),
+            "attempt_id": str(capability.attempt.id),
+            "attempt_number": 1,
+            "scenario_key": "booking",
+            "scenario_id": provisioned["scenarios"][0]["scenario_id"],
+            "scenario_attempt": 1,
+            "world_index": 0,
+            "status": "passed",
+            "sub_goals": [],
+            "evaluations": [],
+            "call": {
+                "started_at": "2026-09-28T10:00:00.000Z",
+                "ended_at": "2026-09-28T10:01:00.000Z",
+                "duration_ms": 60_000,
+                "turns": 4,
+                "transcript_artifact": None,
+                "recording_artifacts": [],
+                **call_extra,
+            },
+            "failure": None,
+        }
+        receipt["digest"] = canonical_digest(receipt)
+        with patch("simulate.services.hosted_harness_ingestion.transaction.on_commit"):
+            response = client.post(
+                f"{BASE}/{capability.attempt.id}/results/",
+                receipt,
+                format="json",
+                **headers,
+            )
+        assert response.status_code == 200, response.content
+        call = job.scenario_registrations.get().call_execution
+        call.refresh_from_db()
+        return call
+
+    call = post(
+        {
+            "target_metrics": {
+                "provider": "vapi",
+                "usage": {
+                    "prompt_tokens": 900,
+                    "completion_tokens": 100,
+                    "total_tokens": 1000,
+                },
+                "cost_cents": 12,
+                "latency": {"turn": 1180, "model": 520, "turns": [900, 1461]},
+            }
+        }
+    )
+    assert call.customer_cost_cents == 12
+    assert call.cost_cents is None
+    assert call.customer_latency_metrics == {
+        "systemMetrics": {"turn": 1180, "model": 520},
+        "turnLatencies": [900, 1461],
+    }
+    assert call.conversation_metrics_data["input_tokens"] == 900
+    assert call.conversation_metrics_data["output_tokens"] == 100
 
 
 @pytest.mark.django_db

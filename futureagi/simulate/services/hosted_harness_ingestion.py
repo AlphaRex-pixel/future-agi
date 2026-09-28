@@ -1057,6 +1057,14 @@ def _apply_receipt_to_call(
                     "duration_seconds",
                 ]
             )
+    _apply_target_metrics(call, (call_data or {}).get("target_metrics"))
+    update_fields.extend(
+        [
+            "customer_cost_cents",
+            "customer_latency_metrics",
+            "conversation_metrics_data",
+        ]
+    )
     call.save(update_fields=list(dict.fromkeys(update_fields)))
     if resolved_modality == CallExecution.SimulationCallType.VOICE:
         _ensure_run_agent_is_voice(job)
@@ -1211,6 +1219,38 @@ def _read_hosted_tool_trace(artifact: HostedHarnessArtifact) -> list[dict[str, A
         if response is not None:
             response.close()
             response.release_conn()
+
+
+_TARGET_TOKEN_FIELDS = {
+    "prompt_tokens": "input_tokens",
+    "completion_tokens": "output_tokens",
+    "total_tokens": "total_tokens",
+}
+
+
+def _apply_target_metrics(call: CallExecution, target: dict[str, Any] | None) -> None:
+    """Store the agent under test's own provider-reported cost, latency and tokens.
+
+    These go in the customer fields the native Vapi flow fills, never in ``cost_cents`` (the
+    platform's own cost). A rerun reuses this row, so a receipt without them clears the last
+    attempt's cost and latency instead of leaving them attached to a different call.
+    """
+    target = target or {}
+    call.customer_cost_cents = target.get("cost_cents")
+    latency = dict(target.get("latency") or {})
+    turns = latency.pop("turns", [])
+    call.customer_latency_metrics = (
+        {"systemMetrics": latency, "turnLatencies": turns}
+        if latency or turns
+        else None
+    )
+    usage = target.get("usage") or {}
+    if usage:
+        metrics = dict(call.conversation_metrics_data or {})
+        for source, field in _TARGET_TOKEN_FIELDS.items():
+            if usage.get(source) is not None:
+                metrics[field] = usage[source]
+        call.conversation_metrics_data = metrics
 
 
 def _ingest_hosted_transcript(
