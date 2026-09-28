@@ -298,6 +298,10 @@ jobs:
     env:
       VERSION: ${{ inputs.version }}
       CHART_VERSION: ${{ needs.package.outputs.chart-version }}
+      # Who signs and attests the chart: this workflow, at the release tag.
+      # Every verification here, and the commands the summary prints, use them.
+      SIGNER_WORKFLOW: ${{ github.repository }}/.github/workflows/helm-release.yml
+      CERT_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/helm-release.yml@refs/tags/${{ inputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -407,10 +411,9 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
-          identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/helm-release.yml@refs/tags/$VERSION"
-          if cosign verify --new-bundle-format=false "$CHART_REF@$DIGEST" --certificate-identity "$identity" \
+          if cosign verify --new-bundle-format=false "$CHART_REF@$DIGEST" --certificate-identity "$CERT_IDENTITY" \
             --certificate-oidc-issuer "$OIDC_ISSUER" >/dev/null 2>&1; then
-            echo "::notice::$CHART_REF@$DIGEST is already signed by $identity"
+            echo "::notice::$CHART_REF@$DIGEST is already signed by $CERT_IDENTITY"
           else
             cosign sign --yes --new-bundle-format=false --use-signing-config=false "$CHART_REF@$DIGEST"
           fi
@@ -435,15 +438,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/helm-release.yml@refs/tags/$VERSION"
           # The classic .sig (see Sign); gh attestation verify checks the
           # provenance attestation.
-          cosign verify --new-bundle-format=false "$CHART_REF@$DIGEST" --certificate-identity "$identity" --certificate-oidc-issuer "$OIDC_ISSUER" >/dev/null
+          cosign verify --new-bundle-format=false "$CHART_REF@$DIGEST" --certificate-identity "$CERT_IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" >/dev/null
           cosign verify-blob "$RUNNER_TEMP/release/futureagi-$CHART_VERSION.tgz" \
             --bundle "$RUNNER_TEMP/release/futureagi-$CHART_VERSION.tgz.sigstore.json" \
-            --certificate-identity "$identity" --certificate-oidc-issuer "$OIDC_ISSUER"
+            --certificate-identity "$CERT_IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER"
           gh attestation verify "oci://$CHART_REF@$DIGEST" --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/helm-release.yml"
+            --signer-workflow "$SIGNER_WORKFLOW"
 
       - name: Attach to the GitHub Release
         id: assets
@@ -497,9 +499,8 @@ jobs:
             done
             stale "the $VERSION release carries a $tgz that is not $CHART_REF:$CHART_VERSION" "${drop[@]}"
           fi
-          identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/helm-release.yml@refs/tags/$VERSION"
           if ! cosign verify-blob "$tgz" --bundle "$tgz.sigstore.json" \
-            --certificate-identity "$identity" --certificate-oidc-issuer "$OIDC_ISSUER"; then
+            --certificate-identity "$CERT_IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER"; then
             # This run's own bundle passed the Verify step.
             on_release "$tgz.sigstore.json" || exit 1
             stale "$tgz.sigstore.json on the $VERSION release does not verify $tgz" "$tgz.sigstore.json"
@@ -547,10 +548,9 @@ jobs:
             exit 1
           fi
           cmp "$RUNNER_TEMP/anonymous/futureagi-$CHART_VERSION.tgz" "$RUNNER_TEMP/release/futureagi-$CHART_VERSION.tgz"
-          identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/helm-release.yml@refs/tags/$VERSION"
-          cosign verify --new-bundle-format=false "$CHART_REF:$CHART_VERSION" --certificate-identity "$identity" --certificate-oidc-issuer "$OIDC_ISSUER" >/dev/null
+          cosign verify --new-bundle-format=false "$CHART_REF:$CHART_VERSION" --certificate-identity "$CERT_IDENTITY" --certificate-oidc-issuer "$OIDC_ISSUER" >/dev/null
           gh attestation verify "oci://$CHART_REF:$CHART_VERSION" --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/helm-release.yml"
+            --signer-workflow "$SIGNER_WORKFLOW"
           {
             echo "### futureagi chart $CHART_VERSION"
             echo
@@ -558,8 +558,8 @@ jobs:
             echo
             echo '```sh'
             echo "helm install futureagi oci://$CHART_REF --version $CHART_VERSION -n futureagi --create-namespace -f my-values.yaml --timeout 20m"
-            echo "cosign verify $CHART_REF:$CHART_VERSION --certificate-oidc-issuer $OIDC_ISSUER --certificate-identity $identity"
-            echo "gh attestation verify oci://$CHART_REF:$CHART_VERSION --repo $GITHUB_REPOSITORY"
+            echo "cosign verify $CHART_REF:$CHART_VERSION --certificate-oidc-issuer $OIDC_ISSUER --certificate-identity $CERT_IDENTITY"
+            echo "gh attestation verify oci://$CHART_REF:$CHART_VERSION --repo $GITHUB_REPOSITORY --signer-workflow $SIGNER_WORKFLOW"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
