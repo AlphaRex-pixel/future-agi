@@ -1,12 +1,12 @@
 # Production-grade sandboxed code executor using nsjail
 # Provides an HTTP API for executing untrusted Python/JS code safely
 #
-# Security layers:
-#   1. nsjail: Linux namespaces (PID, mount, net, user) + seccomp-bpf + cgroups
-#   2. Read-only root filesystem with per-execution tmpfs
-#   3. No network access inside sandbox
-#   4. Resource limits (CPU, memory, file size, processes)
-#   5. Timeout enforcement
+# Security layers (nsjail's defaults and the flags server.py passes per run):
+#   1. PID, mount, user, IPC, UTS and cgroup namespaces
+#   2. Read-only root (-R /) with a 16 MB tmpfs at /tmp
+#   3. rlimits: address space, CPU time, open files, and file size for Python
+#   4. A wall-clock time limit
+# There is no seccomp filter, and a run shares the container's network (-N).
 #
 # System packages, the nsjail build and the sandbox Python libs live in
 # Dockerfile.base, published as futureagi/code-executor-base by
@@ -21,7 +21,7 @@
 ARG CODE_EXECUTOR_BASE=futureagi/code-executor-base:v1.1.0
 FROM ${CODE_EXECUTOR_BASE}
 
-# Copy nsjail configs and server
+# config/python.cfg is not read: server.py passes nsjail flags (see above).
 COPY config/ /sandbox/config/
 COPY server.py /sandbox/server.py
 
