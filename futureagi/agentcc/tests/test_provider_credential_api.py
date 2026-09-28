@@ -669,29 +669,36 @@ class TestFetchModelsKeepsTheSavedKeyOnItsBaseURL:
 
 @pytest.fixture
 def provider_dns():
-    """getaddrinfo stub: IP literals resolve to themselves, unknown names fail."""
+    """getaddrinfo stub: IP literals resolve to themselves, the names below to
+    fixed answers, and *.invalid fails. Any other name (localhost, the test
+    services) goes to the real resolver. Yields a mock of the lookups the stub
+    answered, which leaves out the ones it passed on."""
     answers = {
         "mock-llm": ["172.20.0.5"],
         "host.docker.internal": ["192.168.65.254"],
         "api.openai.com": ["104.18.6.192"],
     }
+    real_getaddrinfo = socket.getaddrinfo
+    answered = MagicMock()
 
     def fake_getaddrinfo(host, *args, **kwargs):
         try:
             addrs = [str(ipaddress.ip_address(host))]
         except ValueError:
-            if host not in answers:
+            if isinstance(host, str) and host.endswith(".invalid"):
+                answered(host, *args, **kwargs)
                 raise socket.gaierror(socket.EAI_NONAME, "no such host") from None
+            if host not in answers:
+                return real_getaddrinfo(host, *args, **kwargs)
             addrs = answers[host]
+        answered(host, *args, **kwargs)
         return [
             (socket.AF_INET6 if ":" in a else socket.AF_INET, 1, 6, "", (a, 0))
             for a in addrs
         ]
 
-    with patch(
-        "agentcc.services.url_safety.socket.getaddrinfo", side_effect=fake_getaddrinfo
-    ) as stub:
-        yield stub
+    with patch("agentcc.services.url_safety.socket.getaddrinfo", fake_getaddrinfo):
+        yield answered
 
 
 @pytest.mark.integration
