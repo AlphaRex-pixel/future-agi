@@ -1,6 +1,7 @@
 """Responses for a dataset creation refused by the plan's dataset limit."""
 
 from rest_framework import status
+from rest_framework.response import Response
 
 from tfc.constants.api_calls import DATASET_LIMIT_CHECK_FAILED, APICallStatusChoices
 from tfc.utils.api_errors import ApiErrorCode
@@ -12,6 +13,14 @@ _gm = GeneralMethods()
 
 class DatasetLimitCheckFailed(Exception):
     """The plan's dataset limit could not be verified, so nothing was created."""
+
+
+class DatasetLimitReached(Exception):
+    """The plan's dataset limit is reached, so nothing was created."""
+
+
+def dataset_limit_reached_response() -> Response:
+    return _gm.too_many_requests(get_error_message("DATASET_CREATE_LIMIT_REACHED"))
 
 
 def dataset_limit_check_failed_response():
@@ -36,5 +45,5 @@ def dataset_add_refusal(call_log_row_entry, sdk_source=False):
         call_log_row_entry.status == APICallStatusChoices.RESOURCE_LIMIT.value
         and not sdk_source
     ):
-        return _gm.too_many_requests(get_error_message("DATASET_CREATE_LIMIT_REACHED"))
+        return dataset_limit_reached_response()
     return None

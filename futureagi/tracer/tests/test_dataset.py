@@ -686,10 +686,16 @@ class TestAddToNewDatasetAPI:
     def test_dataset_creation_limit_reached(
         self, auth_client, observe_project, observe_spans
     ):
-        """Should return 400 when dataset creation limit is reached."""
-        with patch(
-            "tracer.views.dataset.check_if_dataset_creation_is_allowed"
-        ) as mock_check:
+        """A reached limit answers 429 like the other dataset-create routes.
+
+        It is a quota refusal, not a failure, so nothing is logged as an error.
+        """
+        with (
+            patch(
+                "tracer.views.dataset.check_if_dataset_creation_is_allowed"
+            ) as mock_check,
+            patch("tracer.views.dataset.logger") as logger,
+        ):
             mock_check.return_value = (False, {"resource_name": "dataset", "limit": 0})
 
             response = auth_client.post(
@@ -705,7 +711,12 @@ class TestAddToNewDatasetAPI:
                 format="json",
             )
 
-            assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+        assert response.json()["code"] == "rate_limited"
+        assert response.json()["message"] == get_error_message(
+            "DATASET_CREATE_LIMIT_REACHED"
+        )
+        logger.exception.assert_not_called()
 
     @pytest.mark.parametrize(
         ("is_cloud", "expected_status"),
@@ -769,11 +780,12 @@ class TestCreateNewDatasetEntitlement:
     def test_denied_entitlement_blocks_creation(
         self, mock_check, organization, workspace, user
     ):
+        from model_hub.views.utils.dataset_limit import DatasetLimitReached
         from tracer.views.dataset import create_new_dataset
 
         mock_check.return_value = (False, {"resource_name": "dataset", "limit": 3})
 
-        with pytest.raises(ValueError):
+        with pytest.raises(DatasetLimitReached):
             create_new_dataset("Blocked Dataset", organization, workspace, user.id)
 
         mock_check.assert_called_once_with(organization)

@@ -11,7 +11,9 @@ from model_hub.models.choices import DatasetSourceChoices, ModelTypes, SourceCho
 from model_hub.models.develop_dataset import Column, Dataset
 from model_hub.views.utils.dataset_limit import (
     DatasetLimitCheckFailed,
+    DatasetLimitReached,
     dataset_limit_check_failed_response,
+    dataset_limit_reached_response,
 )
 from tfc.constants.api_calls import DATASET_LIMIT_CHECK_FAILED
 from tfc.utils.base_viewset import BaseModelViewSetMixinWithUserOrg
@@ -130,6 +132,9 @@ class DatasetView(BaseModelViewSetMixinWithUserOrg, ModelViewSet):
 
         except DatasetLimitCheckFailed:
             return dataset_limit_check_failed_response()
+
+        except DatasetLimitReached:
+            return dataset_limit_reached_response()
 
         except (ValidationError, ValueError) as e:
             logger.exception(f"Error in creating dataset observe:  {str(e)}")
@@ -443,7 +448,7 @@ def create_new_dataset(new_dataset_name, organization, workspace, user_id):
         if detail.get("error_code") == DATASET_LIMIT_CHECK_FAILED:
             raise DatasetLimitCheckFailed
         if not allowed:
-            raise ValueError(get_error_message("DATASET_CREATE_LIMIT_REACHED"))
+            raise DatasetLimitReached
 
     return Dataset.no_workspace_objects.create(
         id=uuid.uuid4(),
