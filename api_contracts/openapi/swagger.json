@@ -147403,7 +147403,8 @@
                         "dashboard",
                         "eval_run",
                         "dataset",
-                        "project"
+                        "project",
+                        "call_execution"
                     ],
                     "readOnly": true
                 },
@@ -147477,7 +147478,8 @@
                     "enum": [
                         "trace",
                         "dashboard",
-                        "project"
+                        "project",
+                        "call_execution"
                     ]
                 },
                 "resource_id": {
@@ -147571,7 +147573,8 @@
                         "dashboard",
                         "eval_run",
                         "dataset",
-                        "project"
+                        "project",
+                        "call_execution"
                     ],
                     "readOnly": true
                 },
@@ -147858,7 +147861,8 @@
                         "dashboard",
                         "eval_run",
                         "dataset",
-                        "project"
+                        "project",
+                        "call_execution"
                     ]
                 },
                 "resource_id": {

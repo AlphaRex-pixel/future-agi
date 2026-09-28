@@ -27723,6 +27723,7 @@ export const SharedLinkListApiResourceType = {
   eval_run: "eval_run",
   dataset: "dataset",
   project: "project",
+  call_execution: "call_execution",
 } as const;
 
 export type SharedLinkListApiAccessType =
@@ -27756,6 +27757,7 @@ export const SharedLinkCreateApiResourceType = {
   trace: "trace",
   dashboard: "dashboard",
   project: "project",
+  call_execution: "call_execution",
 } as const;
 
 export type SharedLinkCreateApiAccessType =
@@ -27788,6 +27790,7 @@ export const SharedLinkDetailApiResourceType = {
   eval_run: "eval_run",
   dataset: "dataset",
   project: "project",
+  call_execution: "call_execution",
 } as const;
 
 export type SharedLinkDetailApiAccessType =
@@ -27854,6 +27857,7 @@ export const SharedLinkResolveResponseApiResourceType = {
   eval_run: "eval_run",
   dataset: "dataset",
   project: "project",
+  call_execution: "call_execution",
 } as const;
 
 export type SharedLinkResolveResponseApiAccessType =

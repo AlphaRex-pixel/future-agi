@@ -957,7 +957,10 @@ class CallExecutionDetailSerializer(serializers.ModelSerializer):
             )
 
             request = (self.context or {}).get("request")
-            workspace = getattr(request, "workspace", None) if request else None
+            # A shared link has no request workspace; it passes its own.
+            workspace = (self.context or {}).get("workspace") or (
+                getattr(request, "workspace", None) if request else None
+            )
             state_by_eval_config = get_error_localizer_state_by_eval_config(
                 call_execution_id, enabled_eval_config_ids, workspace
             )

@@ -62009,7 +62009,14 @@ export const TracerSharedLinksListResponse = zod.object({
     zod.object({
       id: zod.string().uuid().optional(),
       resource_type: zod
-        .enum(["trace", "dashboard", "eval_run", "dataset", "project"])
+        .enum([
+          "trace",
+          "dashboard",
+          "eval_run",
+          "dataset",
+          "project",
+          "call_execution",
+        ])
         .optional(),
       resource_id: zod.string().min(1).optional(),
       token: zod.string().min(1).optional(),
@@ -62033,7 +62040,7 @@ export const tracerSharedLinksCreateBodyAccessTypeDefault = `restricted`;
 export const tracerSharedLinksCreateBodyEmailsDefault = [];
 
 export const TracerSharedLinksCreateBody = zod.object({
-  resource_type: zod.enum(["trace", "dashboard", "project"]),
+  resource_type: zod.enum(["trace", "dashboard", "project", "call_execution"]),
   resource_id: zod
     .string()
     .min(1)
@@ -62063,7 +62070,14 @@ export const tracerSharedLinksReadResponseAccessListItemEmailMax = 254;
 export const TracerSharedLinksReadResponse = zod.object({
   id: zod.string().uuid().optional(),
   resource_type: zod
-    .enum(["trace", "dashboard", "eval_run", "dataset", "project"])
+    .enum([
+      "trace",
+      "dashboard",
+      "eval_run",
+      "dataset",
+      "project",
+      "call_execution",
+    ])
     .optional(),
   resource_id: zod.string().min(1).optional(),
   token: zod.string().min(1).optional(),
@@ -62185,6 +62199,7 @@ export const TracerSharedReadResponse = zod.object({
     "eval_run",
     "dataset",
     "project",
+    "call_execution",
   ]),
   resource_id: zod.string().min(1),
   access_type: zod.enum(["public", "restricted"]),

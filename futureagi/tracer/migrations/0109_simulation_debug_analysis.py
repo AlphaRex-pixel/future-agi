@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("tracer", "0107_investigation_attribution_explanation"),
+        ("tracer", "0108_sharedlink_call_execution_resource_type"),
         ("simulate", "0092_merge_parallelism_environment_v3"),
     ]
 
