@@ -1796,7 +1796,11 @@ def _revalidate_open_window_hit(
     ):
         # Enqueued, but the state read was lost: this request owns the claim.
         current_state = "running"
-    return _decorate_refresh_state(current, current_state)
+    # A fast (or eager) worker may already have failed this automatic
+    # refresh: the claimer sees the same plain hit every other viewer sees.
+    return _decorate_refresh_state(
+        current, _served_refresh_state(namespace, identity, current_state)
+    )
 
 
 def read_or_schedule_exact_snapshot(

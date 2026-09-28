@@ -496,6 +496,54 @@ def test_failed_automatic_revalidation_serves_the_hit_plain_to_every_viewer(
     assert temporal_status == []
 
 
+def test_claimer_whose_own_revalidation_already_failed_gets_the_hit_plain(
+    monkeypatch, temporal_status
+):
+    """A worker that fails before the claimer's re-read is still automatic.
+
+    Temporal can accept the start and a fast (or eager) worker can fail the
+    exact read before ``_revalidate_open_window_hit`` re-reads the state. The
+    request that claimed the refresh must see the same plain hit every other
+    viewer sees, not a "query failed" nobody asked for.
+    """
+
+    from tracer.tasks import exact_aggregation
+
+    monkeypatch.setattr(
+        eac, "_configured_exact_aggregation_task_queue", lambda: "tasks_xl"
+    )
+    enqueued: list[dict] = []
+
+    def fails_before_returning(**call):
+        job = call["kwargs"]
+        enqueued.append(job)
+        eac.finish_exact_refresh(
+            job["namespace"], job["identity"], job["refresh_token"], succeeded=False
+        )
+        return SimpleNamespace(id="workflow-fast-failure")
+
+    monkeypatch.setattr(
+        exact_aggregation.refresh_exact_aggregation_snapshot,
+        "apply_async",
+        fails_before_returning,
+    )
+    identity = _identity()
+    completed_at = _seed(SESSION_NS, identity, age=OLD)
+
+    claimer = _read(SESSION_NS, identity)
+    viewer = _read(SESSION_NS, identity)
+
+    assert len(enqueued) == 1
+    frozen = eac.normalize_exact_observe_identity(identity)
+    assert eac.exact_refresh_state(SESSION_NS, frozen) == "failed"
+    for served in (claimer, viewer):
+        assert served["query_status"] == "complete"
+        assert served["query_completed_at"] == completed_at
+        assert served["query_refresh_failed"] is False
+        assert served["query_refreshing"] is False
+    assert temporal_status == []
+
+
 def test_failed_explicit_refresh_still_reports_the_failure(queue):
     identity = _identity()
     _seed(SESSION_NS, identity, age=OLD)
