@@ -1033,7 +1033,9 @@ $FrontendPort = Get-EnvValue 'FRONTEND_PORT'
 if (-not $FrontendPort) { $FrontendPort = 3000 }
 $readyTimeout = Get-BoundedEnvInt 'INSTALL_READY_TIMEOUT_SECONDS' 600 60 1800
 $stabilitySeconds = Get-BoundedEnvInt 'INSTALL_STABILITY_SECONDS' 15 5 120
-$readyMax = Get-BoundedEnvInt 'INSTALL_READY_MAX_SECONDS' 2400 300 7200
+# As long as the app's healthcheck start_period (3600s): Docker keeps calling a
+# slow first boot "starting" that long, so the installer does not give up first.
+$readyMax = Get-BoundedEnvInt 'INSTALL_READY_MAX_SECONDS' 3600 300 7200
 
 function Get-AppliedMigrationCount {
   $log = (Invoke-Compose logs --tail 2000 $AppService 2>&1 | Out-String)
@@ -1168,7 +1170,7 @@ while ($true) {
   if ($now -ge $deadline) {
     Save-ReadinessDiagnostics
     $gate = if ($pendingGate) { $pendingGate } else { $GateContainers }
-    Die "Stack did not become fully ready, still waiting on $gate. Relevant service logs were appended to $LogFile"
+    Die "Stack did not become fully ready, still waiting on $gate. Relevant service logs were appended to $LogFile. The stack keeps starting: on a slow host, check 'docker compose logs -f $AppService', or raise INSTALL_READY_MAX_SECONDS (up to 7200) in .env and run the installer again."
   }
   Start-Sleep -Seconds 5
 }

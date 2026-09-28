@@ -1195,7 +1195,9 @@ bounded_env_int INSTALL_READY_TIMEOUT_SECONDS 600 60 1800
 ready_timeout="$BOUNDED_ENV_INT"
 bounded_env_int INSTALL_STABILITY_SECONDS 15 5 120
 stability_seconds="$BOUNDED_ENV_INT"
-bounded_env_int INSTALL_READY_MAX_SECONDS 2400 300 7200
+# As long as the app's healthcheck start_period (3600s): Docker keeps calling a
+# slow first boot "starting" that long, so the installer does not give up first.
+bounded_env_int INSTALL_READY_MAX_SECONDS 3600 300 7200
 ready_max="$BOUNDED_ENV_INT"
 
 # Source .env for BACKEND_PORT / FRONTEND_PORT so we hit the right host ports.
@@ -1337,7 +1339,7 @@ while true; do
 
   if (( now >= deadline )); then
     save_readiness_diagnostics
-    die "Stack did not become fully ready, still waiting on ${pending_gate:-$GATE_CONTAINERS}. Relevant service logs were appended to $LOG_FILE"
+    die "Stack did not become fully ready, still waiting on ${pending_gate:-$GATE_CONTAINERS}. Relevant service logs were appended to $LOG_FILE. The stack keeps starting: on a slow host, check '$DC logs -f ${APP_SVC}', or raise INSTALL_READY_MAX_SECONDS (up to 7200) in .env and run ./bin/install again."
   fi
   sleep 5
 done

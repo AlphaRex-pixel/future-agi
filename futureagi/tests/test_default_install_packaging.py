@@ -188,7 +188,7 @@ def test_default_app_healthcheck_covers_the_in_container_services() -> None:
         ("interval", "15s"),
         ("timeout", "10s"),
         ("retries", 5),
-        ("start_period", "900s"),
+        ("start_period", "3600s"),
     ):
         assert healthcheck[option] == value
         assert f"--{option.replace('_', '-')}={value}" in test
@@ -202,6 +202,21 @@ def test_default_app_healthcheck_covers_the_in_container_services() -> None:
         assert url in test
     env = _compose(DEFAULT_COMPOSE)["services"]["app"]["environment"]
     assert env["FI_ADMIN_ADDR"] == "127.0.0.1:9464"
+
+
+def test_installers_wait_as_long_as_docker_calls_the_app_starting() -> None:
+    """A slow host's first boot outlasted a 900s start_period (migrations
+    alone took 2260s), and `docker compose up --wait` then failed on an app
+    that finished fine. The installers give up no earlier than Docker does."""
+    start_period = _compose(DEFAULT_COMPOSE)["services"]["app"]["healthcheck"][
+        "start_period"
+    ]
+    seconds = int(start_period.removesuffix("s"))
+    assert seconds >= 3600
+    shell = (ROOT / "bin" / "install").read_text(encoding="utf-8")
+    powershell = (ROOT / "bin" / "install.ps1").read_text(encoding="utf-8")
+    assert f"bounded_env_int INSTALL_READY_MAX_SECONDS {seconds} " in shell
+    assert f"'INSTALL_READY_MAX_SECONDS' {seconds} " in powershell
 
 
 def test_postgres_has_room_for_the_api_and_the_worker() -> None:

@@ -516,7 +516,7 @@ collected them can be indexed later with `fi-observed-catalog-backfill`
 | --- | --- | --- | --- |
 | `INSTALL_READY_TIMEOUT_SECONDS` | `600` (60 to 1800) | S D | How long `./bin/install` waits for the stack to become ready. The wait extends while first-boot migrations are still running. |
 | `INSTALL_STABILITY_SECONDS` | `15` (5 to 120) | S D | How long the stack must stay ready before the installer reports success. |
-| `INSTALL_READY_MAX_SECONDS` | `2400` (300 to 7200) | S D | Hard limit on the wait, extensions included. |
+| `INSTALL_READY_MAX_SECONDS` | `3600` (300 to 7200) | S D | Hard limit on the wait, extensions included. It matches the `app` healthcheck's `start_period`: on a slow or busy host a first boot's migrations can take over half an hour. |
 
 ### Fine-grained limits
 

@@ -123,7 +123,7 @@ STOPSIGNAL SIGTERM
 # with proxies off (HTTP_PROXY from .env must not see loopback probes). The
 # app service in docker-compose.yml uses this command and repeats only the
 # timings. Replaces the backend image's own HEALTHCHECK, which probes :80.
-HEALTHCHECK --interval=15s --timeout=10s --start-period=900s --retries=5 \
+HEALTHCHECK --interval=15s --timeout=10s --start-period=3600s --retries=5 \
     CMD ["python", "-I", "-S", "-c", "import urllib.request as u; o = u.build_opener(u.ProxyHandler({})); [o.open(url, timeout=5).close() for url in ('http://127.0.0.1:8000/health/', 'http://127.0.0.1:9464/healthz', 'http://127.0.0.1:8080/healthz', 'http://127.0.0.1:3000/', 'http://127.0.0.1:9005/minio/health/live')]"]
 ENTRYPOINT ["/opt/futureagi/bin/start"]
 

@@ -290,8 +290,10 @@ services:
       interval: 15s
       timeout: 10s
       retries: 5
-      # A first boot migrates an empty database before the API starts.
-      start_period: 900s
+      # A first boot migrates an empty database before the API starts: minutes,
+      # or over half an hour on a slow or busy host. Failed probes do not
+      # count until then; a passing one marks the app healthy at once.
+      start_period: 3600s
     # Covers the Temporal worker drain (supervisord stopwaitsecs=50).
     stop_grace_period: 60s
     # Caps a fork bomb in a code eval at the container, not the host.

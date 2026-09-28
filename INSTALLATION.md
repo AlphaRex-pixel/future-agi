@@ -74,7 +74,8 @@ per service, run `./bin/install --distributed` instead; see
    [deployment telemetry](#telemetry-and-outbound-connections) sends and how
    to opt out.
 
-The first boot sets up the databases and takes a few minutes. In Standalone,
+The first boot sets up the databases and takes a few minutes (on a slow or busy
+host, its migrations alone can take over half an hour). In Standalone,
 <http://localhost:3000> meanwhile shows a **Future AGI is starting** page with the
 current phase, and the API answers `503` with
 `{"status": "starting", "phase": "..."}`. `docker compose logs -f app` starts
@@ -1061,6 +1062,20 @@ itself. If it stays on one phase, or the phase keeps starting over,
 error, waits 30 seconds and tries again. The usual causes are too little
 memory (see above) and a changed `PG_PASSWORD`
 ([below](#backend-logs-fatal-password-authentication-failed-for-user-futureagi)).
+
+On a slow or busy host the migrations of a first boot can take over half an
+hour while the log keeps printing `Applying ...` lines. Docker reports the `app`
+container as starting for up to an hour (its healthcheck's `start_period`), and
+`./bin/install` waits as long (`INSTALL_READY_MAX_SECONDS`, 3600 by default,
+at most 7200). If the installer gives up first, the stack keeps starting:
+raise that value in `.env` and run `./bin/install` again, or follow
+`docker compose logs -f app`.
+
+After it is up, Standalone keeps its Temporal server (SQLite, inside `app`)
+busy with 32 schedules. Six of them fire every 10 seconds: dataset and
+experiment evals, optimization runs, inline and span evals, and the Postgres
+to ClickHouse sync. A host short of CPU makes those pickups, and the UI, slow;
+give Docker at least the 2 CPUs the [prerequisites](#prerequisites) ask for.
 
 ### `bin/install` says the project already holds a standalone install
 
