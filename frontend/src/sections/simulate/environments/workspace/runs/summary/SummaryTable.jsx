@@ -34,8 +34,8 @@ export default function SummaryTable({ rows, evals, onOpenRun }) {
       }}
     >
     {/* Takes the card's remaining height and scrolls both ways under a
-        pinned header; the floor keeps a few rows on short screens. */}
-    <Box sx={{ overflow: "auto", flex: 1, minHeight: 320 }}>
+        pinned header. */}
+    <Box sx={{ overflow: "auto", flex: 1, minHeight: 0 }}>
       <Table stickyHeader size="small" sx={{ minWidth: 720 }}>
         <TableHead>
           <TableRow sx={{ "& th": { border: 0, py: 1, typography: "s3", color: "text.subtitle", whiteSpace: "nowrap" } }}>

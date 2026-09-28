@@ -16,6 +16,9 @@ import SummaryTable from "./SummaryTable";
 // once at least one run exists. Comparing/winner/trials are later phases,
 // surfaced as "coming soon" so the shell matches the design without faking the
 // behaviour.
+// Title, legend, graph and the runs bar (~440px) plus ~320px of table rows.
+const MIN_SUMMARY_PX = 760;
+
 export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
   const { rows, rowsChrono, evals, series } = useRunsSummary(env, envState);
   const scenarioCount = envState.scenarios?.length ?? 0;
@@ -37,10 +40,18 @@ export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
   };
 
   return (
-    // Exactly the tab's height: the header, legend and graph keep their size
-    // and the runs table takes the rest, scrolling on its own, so the graph
-    // stays in view however many runs there are.
-    <Box sx={{ p: 2, height: "100%", display: "flex", flexDirection: "column" }}>
+    // The tab's height: the header, legend and graph keep their size and the
+    // runs table takes the rest, scrolling on its own, so the graph stays in
+    // view however many runs there are. On a short panel it stops shrinking at
+    // room for the graph plus a few table rows, and the panel scrolls instead.
+    <Box
+      sx={{
+        p: 2,
+        height: `max(100%, ${MIN_SUMMARY_PX}px)`,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
       <Stack direction="row" alignItems="flex-start" spacing={2} sx={{ mb: 3, flexShrink: 0 }}>
         <Box flex={1} minWidth={0}>
           <Typography sx={{ typography: "m2", fontWeight: "fontWeightSemiBold" }}>
