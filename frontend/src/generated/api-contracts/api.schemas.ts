@@ -2427,9 +2427,11 @@ export interface APIKeyBulkItemApi {
   owner: string;
   /** @minLength 1 */
   key_hash: string;
+  key_prefix: string;
   models: string[];
   providers: string[];
   metadata: APIKeyBulkItemApiMetadata;
+  expires_at: string;
 }
 
 export interface APIKeyBulkResponseApi {

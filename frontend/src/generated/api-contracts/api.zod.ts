@@ -4306,9 +4306,11 @@ export const AgentccApiKeysBulkListResponse = zod.object({
       name: zod.string().min(1),
       owner: zod.string(),
       key_hash: zod.string().min(1),
+      key_prefix: zod.string(),
       models: zod.array(zod.string().min(1)),
       providers: zod.array(zod.string().min(1)),
       metadata: zod.record(zod.string(), zod.string()),
+      expires_at: zod.string().datetime({ offset: true }),
     }),
   ),
 });
