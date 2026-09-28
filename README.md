@@ -156,6 +156,10 @@ machine only.
 | Docker resources | 2 vCPUs, 4 GB | 4+ vCPUs, 12–16 GB |
 | Kubernetes | | [Helm chart](deploy/helm/futureagi) |
 
+Choose before you add data: there is no supported way to move a Standalone
+install's data to Distributed or Helm later
+([Switching](INSTALLATION.md#switching-between-standalone-and-distributed)).
+
 - **Configure:** every variable in `.env` is described in
   [docs/configuration.md](docs/configuration.md). Nothing is required for a
   local install; add LLM provider keys, a public URL or email when you need them.
@@ -540,7 +544,7 @@ We love contributions — bug fixes, new evaluators, framework integrations, doc
 
 Self-hosted Future AGI sends deployment telemetry, **on by default**, so we can count installs and size release testing: one registration with the **email addresses of the install's owner and administrator accounts**, then usage counts on a schedule. **No trace data, no prompts, no completions, no datasets, no API keys**, ever.
 
-To opt out, install with `./bin/install --no-telemetry`, or set `FUTURE_AGI_TELEMETRY_DISABLED=true` in `.env` (`deploy/.env.production` for the production overlay, `config.telemetry=false` for Helm) and run `docker compose up -d`. Everything else that could leave your install (HubSpot, Slack, Mixpanel, PostHog, reCAPTCHA, Sentry, Mailgun) is **off until you set its key**.
+To opt out, install with `./bin/install --no-telemetry`, or set `FUTURE_AGI_TELEMETRY_DISABLED=true` in `.env` (`deploy/.env.production` for the production overlay, `config.telemetry=false` for Helm) and run `docker compose up -d`. Opting out still sends one registration, without email addresses; block `api.futureagi.com` to send nothing. Everything else that could leave your install (HubSpot, Slack, Mixpanel, PostHog, reCAPTCHA, Sentry, Mailgun) is **off until you set its key**.
 
 [docs/telemetry.md](docs/telemetry.md) has the exact payloads, what the opt-out still sends, every setting, and every outbound connection, with what an install that allows no outbound traffic must also set.
 

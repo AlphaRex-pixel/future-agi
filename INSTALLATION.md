@@ -56,10 +56,10 @@ This installs the **Standalone** setup: three containers (the app, Postgres
 and ClickHouse) from images published on Docker Hub, about 800 MB to download.
 Give Docker 2 CPUs and 4 GB of memory (3 GB is the minimum). For one container
 per service, run `./bin/install --distributed` instead; see
-[Deployment modes](#deployment-modes). Choose before you add data: a
-Standalone install's data cannot move to Distributed or Helm later (see
-[Switching](#switching-between-standalone-and-distributed)). On a branch other
-than `main`, add `--from-source`; see
+[Deployment modes](#deployment-modes). Choose before you add data: there is
+no supported way to move a Standalone install's data to Distributed or Helm
+later (see [Switching](#switching-between-standalone-and-distributed)). On a
+branch other than `main`, add `--from-source`; see
 [Installing a branch from source](#installing-a-branch-from-source).
 
 `bin/install` does five things:
@@ -537,13 +537,14 @@ To switch, back up what you need (see [Backups](#backups)), then start fresh:
 ./bin/install
 ```
 
-For Helm, install the chart (see [Helm](#helm-distributed-on-kubernetes)),
-then remove the Compose install with `./bin/uninstall --wipe-data`.
-
 `--wipe-data` keeps `.env`, so the new install reuses its secrets. To try the
 other setup without touching this one, run it as a separate project instead:
 a second checkout with another `COMPOSE_PROJECT_NAME` and other ports in its
 `.env` (see [Host ports](docs/configuration.md#host-ports)).
+
+For Helm, install the chart (see [Helm](#helm-distributed-on-kubernetes)),
+then remove the Compose install with `./bin/uninstall --wipe-data`. The chart
+does not read `.env`: carry what you need from it over in the chart's values.
 
 ---
 
@@ -728,8 +729,10 @@ administrator accounts, and then sends usage counts on a schedule. It never
 sends traces, prompts, completions, datasets or any other content. To opt
 out, install with `./bin/install --no-telemetry` (Windows: `-NoTelemetry`), or
 set `FUTURE_AGI_TELEMETRY_DISABLED=true` in `.env` and run
-`docker compose up -d` (Helm: `config.telemetry=false`). The installer shows
-what telemetry sends before it asks for the first account's email.
+`docker compose up -d` (Helm: `config.telemetry=false`). Opting out still
+sends one registration, without email addresses; block `api.futureagi.com` to
+send nothing. The installer shows what telemetry sends before it asks for the
+first account's email.
 
 Every other outside service (HubSpot, Slack, Mixpanel, PostHog, reCAPTCHA,
 Sentry, Mailgun) stays off until you give it a key. Users' browsers load the
@@ -841,12 +844,12 @@ echo "AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS=true" >> .env
 docker compose up -d
 ```
 
-A gateway or API from before this setting ignores it and refuses them
-regardless. Anyone who can add a provider can then point the gateway and the API at any
+Anyone who can add a provider can then point the gateway and the API at any
 address on those networks, the databases included (ClickHouse's `default` user
 has no password in either Compose setup), so allow it only where all of them
-are trusted. Loopback, link-local and cloud metadata addresses stay refused.
-On Helm, set `agentccGateway.allowPrivateProviderURLs=true`.
+are trusted. Loopback, link-local and cloud metadata addresses stay refused. A
+gateway or API from before this setting ignores it and refuses every private
+URL. On Helm, set `agentccGateway.allowPrivateProviderURLs=true`.
 
 - **On the Docker host:** use `http://host.docker.internal:11434/v1` (Ollama)
   or `http://host.docker.internal:8000/v1` (vLLM), and make the server listen

@@ -84,7 +84,7 @@ On a fresh install (no volumes of this Compose project yet) `./bin/install`
 fills every key below that is empty or still a `CHANGEME-` placeholder with a
 random value and writes it to `.env`. It never changes a value afterwards. On
 an existing install it fills only `INTEGRATION_ENCRYPTION_KEY` and
-`REDIS_PASSWORD`, which hold no state, and warns about the rest.
+`REDIS_PASSWORD`, which is safe while they are unset, and warns about the rest.
 `--wipe-volumes` and `./bin/uninstall --wipe-data` make the next install fresh
 again, and a value already in `.env` is kept even then.
 
@@ -94,9 +94,9 @@ Without the installer, set them yourself before the first start:
 for `INTEGRATION_ENCRYPTION_KEY`. Left empty, the stack runs on the defaults
 below, which are published in this repository and therefore not secret.
 
-Every secret below but `PG_PASSWORD` and `INTEGRATION_ENCRYPTION_KEY` can
-change at any time: set it in `.env` and run `docker compose up -d`. Those two
-hold state, as their rows say.
+Every secret below can change at any time (set it in `.env`, then
+`docker compose up -d`), except `PG_PASSWORD` and `INTEGRATION_ENCRYPTION_KEY`
+once in use: their rows say what breaks.
 
 ### Secrets
 
@@ -404,7 +404,7 @@ listen on all interfaces too.
 | `TEMPORAL_PORT` | `7233` | D dev | Temporal gRPC, `127.0.0.1`. |
 | `TEMPORAL_UI_PORT` | `8085` | D | Temporal UI (`all` or `observability` profile, or `./bin/dev --distributed`). |
 | `PEERDB_PORT` | `9900` | D | PeerDB, `127.0.0.1`. |
-| `PEERDB_UI_PORT` | `3001` | D | PeerDB UI (`all` or `peerdb` profile). |
+| `PEERDB_UI_PORT` | `3001` | D | PeerDB UI (`all` or `peerdb` profile, or `./bin/dev --distributed`). |
 | `PROPERTY_CATALOG_KAFKA_PORT` | `29092` | D | Kafka of the observed-attribute catalog, `127.0.0.1`. |
 
 Standalone publishes no Postgres, ClickHouse, Redis, Temporal or code-eval
