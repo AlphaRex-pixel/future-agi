@@ -114,7 +114,7 @@ Renders nothing when the values are consistent.
 {{- if and (eq $gwRedis "true") (eq $v.redis.mode "external") $v.redis.external.tls -}}
 {{- $errors = append $errors "agentccGateway.redis.enabled=true shares redis.external, which is over TLS, and the gateway has no Redis TLS: set it to auto and point the gateway at a Redis without TLS with AGENTCC_REDIS_ADDRESS in agentccGateway.extraEnv, or run one replica with agentccGateway.redis.enabled=false" -}}
 {{- end -}}
-{{- if and (eq (include "futureagi.gateway.multiReplica" .) "true") (ne (include "futureagi.gateway.redis" .) "true") (not (hasKey ($gw.extraEnv | default dict) "AGENTCC_REDIS_ADDRESS")) (not (dig "redis" "address" "" ($gw.config | default dict))) (not $gw.existingConfigMap) -}}
+{{- if and (eq (include "futureagi.multiReplica" $gw) "true") (ne (include "futureagi.gateway.redis" .) "true") (not (hasKey ($gw.extraEnv | default dict) "AGENTCC_REDIS_ADDRESS")) (not (dig "redis" "address" "" ($gw.config | default dict))) (not $gw.existingConfigMap) -}}
 {{- if and (eq $v.redis.mode "external") $v.redis.external.tls -}}
 {{- $errors = append $errors "agentccGateway runs more than one replica without Redis, so each replica would count rate limits and budgets on its own, and it cannot use redis.external over TLS (the gateway has no Redis TLS): set AGENTCC_REDIS_ADDRESS in agentccGateway.extraEnv to a Redis without TLS, or run one replica with agentccGateway.redis.enabled=false" -}}
 {{- else -}}

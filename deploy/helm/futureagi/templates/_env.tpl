@@ -372,14 +372,8 @@ redis.external.tls. */}}
 {{- $mode := dig "redis" "enabled" "auto" $g | toString -}}
 {{- $tls := and (eq .Values.redis.mode "external") .Values.redis.external.tls -}}
 {{- if eq $mode "true" -}}true
-{{- else if and (eq $mode "auto") (not $tls) (eq (include "futureagi.gateway.multiReplica" .) "true") -}}true
+{{- else if and (eq $mode "auto") (not $tls) (eq (include "futureagi.multiReplica" $g) "true") -}}true
 {{- end -}}
-{{- end -}}
-
-{{/* "true" when the gateway can run more than one replica. */}}
-{{- define "futureagi.gateway.multiReplica" -}}
-{{- $g := .Values.agentccGateway -}}
-{{- if or $g.autoscaling.enabled (gt (int $g.replicas) 1) -}}true{{- end -}}
 {{- end -}}
 
 {{- define "futureagi.env.gateway" -}}

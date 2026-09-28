@@ -459,11 +459,6 @@ last '@' before the path. */ -}}
 Pod settings
 ===================================================================== */}}
 
-{{/* Security contexts: dict "defaults" <map> "overrides" <map>. */}}
-{{- define "futureagi.mergeYaml" -}}
-{{- toYaml (mergeOverwrite (deepCopy .defaults) (.overrides | default dict)) -}}
-{{- end -}}
-
 {{/* dict "root" $ "uid" <n> ["overrides" <map>]. On OpenShift (see
 futureagi.openshift.adapt) the IDs and the seccomp profile are left out, so
 the restricted-v2 SCC assigns them. */}}
