@@ -494,16 +494,20 @@ def inspect_native(
         ) from None
 
 
-def _stale_dictionaries(client, database, definitions, ch_user):
+def _stale_dictionaries(client, database, definitions, ch_user, ch_password):
     rows = _rows(
         client, _TABLES_SQL, {"database": database, "names": tuple(definitions)}, 7
     )
     names = tuple(name for name in definitions if name.endswith("_dict"))
-    return core.stale_dictionary_credentials(rows, names, ch_user=ch_user)
+    return core.stale_dictionary_credentials(
+        rows, names, ch_user=ch_user, ch_password=ch_password
+    )
 
 
 def _update_dictionary_credentials(client, database, definitions, ch_user, ch_password):
-    """Re-create existing dictionaries whose CLICKHOUSE source lacks ``ch_user``.
+    """Re-create existing dictionaries whose CLICKHOUSE source was not created
+    with ``ch_user`` and ``ch_password`` (none, another user, or a password
+    since rotated).
 
     Runs only with a password and only after the full layout passed inspection:
     a dictionary created before credentials were injected reads its source as
@@ -513,7 +517,7 @@ def _update_dictionary_credentials(client, database, definitions, ch_user, ch_pa
     """
     if not ch_password:
         return ()
-    stale = _stale_dictionaries(client, database, definitions, ch_user)
+    stale = _stale_dictionaries(client, database, definitions, ch_user, ch_password)
     for name in stale:
         try:
             client.command(
@@ -530,7 +534,7 @@ def _update_dictionary_credentials(client, database, definitions, ch_user, ch_pa
             ) from None
     if stale and (
         _inspect(client, database, definitions)
-        or _stale_dictionaries(client, database, definitions, ch_user)
+        or _stale_dictionaries(client, database, definitions, ch_user, ch_password)
     ):
         raise NativeBootstrapError(
             "dictionary source credentials not visible after re-create"

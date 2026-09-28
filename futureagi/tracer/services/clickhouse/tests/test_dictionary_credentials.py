@@ -48,6 +48,7 @@ from tracer.services.clickhouse.tests.test_oss_native_bootstrap import (
 )
 from tracer.services.clickhouse.v2 import apply_schema
 from tracer.services.clickhouse.v2.apply_schema_rewriter import (
+    credentials_fingerprint,
     dictionary_credentials_outdated,
     redact_secret,
     split_statements,
@@ -95,9 +96,12 @@ def dictionary_statements(statements):
     return [sql for sql in statements if SOURCE.search(sql)]
 
 
-def assert_credentialed(sql: str, user: str = USER, escaped: str = ESCAPED):
+def assert_credentialed(
+    sql: str, user: str = USER, escaped: str = ESCAPED, password: str = PASSWORD
+):
     assert f"USER '{user}' PASSWORD {escaped}" in sql, sql
-    assert not dictionary_credentials_outdated(sql, user)
+    assert f"COMMENT '{credentials_fingerprint(user, password)}'" in sql, sql
+    assert not dictionary_credentials_outdated(sql, user, password)
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +123,7 @@ def test_quotes_and_backslashes_are_escaped():
     # The server's tokenizer sees exactly two literals, not an injection.
     tokens = core._tokens(sql)
     assert "'o\\'neil\\\\'" in tokens and ESCAPED in tokens
-    assert not dictionary_credentials_outdated(sql, "o'neil\\")
+    assert not dictionary_credentials_outdated(sql, "o'neil\\", PASSWORD)
 
 
 def test_an_empty_user_means_default():
@@ -150,6 +154,24 @@ def test_every_dictionary_of_a_multi_statement_file_is_rewritten():
         "\n", ""
     ) == text.replace(" ", "").replace("\n", "")
     assert "dictGet('column_dict', 'name', c.column_id)" in sql
+
+
+def test_the_fingerprint_names_the_credentials_without_revealing_them():
+    fingerprint = credentials_fingerprint(USER, PASSWORD)
+    assert fingerprint.startswith("fi-source-credentials:")
+    assert PASSWORD not in fingerprint and ESCAPED[1:-1] not in fingerprint
+    assert fingerprint == credentials_fingerprint(USER, PASSWORD)
+    assert fingerprint != credentials_fingerprint(USER, PASSWORD + "2")
+    assert fingerprint != credentials_fingerprint("other", PASSWORD)
+    assert credentials_fingerprint("", "pw") == credentials_fingerprint("default", "pw")
+
+
+def test_the_fingerprint_ends_the_statement_and_is_stripped_for_comparison():
+    sql = with_dictionary_credentials(TRACE_DICT, USER, PASSWORD)
+    assert sql.endswith(
+        f"LAYOUT(HASHED()) COMMENT '{credentials_fingerprint(USER, PASSWORD)}';"
+    )
+    assert without_dictionary_credentials(sql) == TRACE_DICT
 
 
 def test_rewriting_is_idempotent():
@@ -199,29 +221,43 @@ def test_the_packaged_dictionary_sites_are_all_covered():
 
 @pytest.mark.parametrize("site,sql", list(_packaged_dictionaries()))
 def test_every_packaged_dictionary_gets_the_credentials(site, sql):
-    assert dictionary_credentials_outdated(sql, USER)
+    assert dictionary_credentials_outdated(sql, USER, PASSWORD)
     result = with_dictionary_credentials(sql, USER, PASSWORD)
     assert result.count(CREDENTIALS) == len(SOURCE.findall(sql))
-    assert not dictionary_credentials_outdated(result, USER)
+    fingerprint = f"COMMENT '{credentials_fingerprint(USER, PASSWORD)}'"
+    assert result.count(fingerprint) == len(SOURCE.findall(sql))
+    assert not dictionary_credentials_outdated(result, USER, PASSWORD)
     # Stripping them gives back the packaged contract, token for token.
     assert core._tokens(without_dictionary_credentials(result)) == core._tokens(sql)
 
 
 def test_live_metadata_with_a_hidden_password_compares_equal():
+    # ClickHouse 25.3's create_table_query for a credentialed dictionary.
     live = (
         "CREATE DICTIONARY db.trace_dict (`id` UUID) PRIMARY KEY id "
         "SOURCE(CLICKHOUSE(TABLE 'traces' USER 'app' PASSWORD '[HIDDEN]')) "
-        "LIFETIME(MIN 30 MAX 60) LAYOUT(COMPLEX_KEY_HASHED(SHARDS 4))"
+        "LIFETIME(MIN 30 MAX 60) LAYOUT(COMPLEX_KEY_HASHED(SHARDS 4)) "
+        f"COMMENT '{credentials_fingerprint(USER, PASSWORD)}'"
     )
     assert without_dictionary_credentials(live) == (
         "CREATE DICTIONARY db.trace_dict (`id` UUID) PRIMARY KEY id "
         "SOURCE(CLICKHOUSE(TABLE 'traces')) "
         "LIFETIME(MIN 30 MAX 60) LAYOUT(COMPLEX_KEY_HASHED(SHARDS 4))"
     )
-    assert not dictionary_credentials_outdated(live, USER)
-    assert dictionary_credentials_outdated(live, "someone_else")
-    assert dictionary_credentials_outdated(without_dictionary_credentials(live), USER)
-    assert not dictionary_credentials_outdated("CREATE TABLE t (x UInt8)", USER)
+    assert not dictionary_credentials_outdated(live, USER, PASSWORD)
+    assert dictionary_credentials_outdated(live, "someone_else", PASSWORD)
+    # A rotated password shows the same '[HIDDEN]'; only the COMMENT differs.
+    assert dictionary_credentials_outdated(live, USER, "rotated")
+    # Created before the fingerprint existed: re-created once.
+    assert dictionary_credentials_outdated(
+        live[: live.index(" COMMENT")], USER, PASSWORD
+    )
+    assert dictionary_credentials_outdated(
+        without_dictionary_credentials(live), USER, PASSWORD
+    )
+    assert not dictionary_credentials_outdated(
+        "CREATE TABLE t (x UInt8)", USER, PASSWORD
+    )
 
 
 def test_redaction_covers_raw_and_escaped_forms():
@@ -361,7 +397,9 @@ def test_apply_schema_cli_takes_the_password_from_ch_password(
     monkeypatch.setenv("CH_PASSWORD", "from-env")
     assert apply_schema.main(["--schema-dir", str(schema_dir)]) == 0
     for sql in dictionary_statements(_executed(local_apply.client)):
-        assert_credentialed(sql, user="default", escaped="'from-env'")
+        assert_credentialed(
+            sql, user="default", escaped="'from-env'", password="from-env"
+        )
 
 
 def test_apply_schema_cli_without_a_password_is_unchanged(
@@ -541,6 +579,37 @@ def test_native_re_creates_a_dictionary_bound_to_another_user():
     )
 
 
+ROTATED = "rotated-" + PASSWORD
+
+
+def test_native_re_creates_dictionaries_when_the_password_rotates():
+    # The live DDL shows PASSWORD '[HIDDEN]' before and after a rotation;
+    # without a re-create every dictGet (and span insert) would fail with
+    # AUTHENTICATION_FAILED.
+    client = ServerNativeClient()
+    native.bootstrap_native(
+        client, database=NATIVE_DATABASE, ch_user=USER, ch_password=PASSWORD
+    )
+    before = len(_native_writes(client))
+    assert (
+        native.bootstrap_native(
+            client, database=NATIVE_DATABASE, ch_user=USER, ch_password=ROTATED
+        )
+        == NATIVE_DICTS
+    )
+    for sql in _native_writes(client)[before:]:
+        assert sql.startswith("CREATE OR REPLACE DICTIONARY ")
+        assert_credentialed(sql, escaped=f"'rotated-{ESCAPED[1:]}", password=ROTATED)
+    # Converged: the next boot with the new password writes nothing.
+    assert (
+        native.bootstrap_native(
+            client, database=NATIVE_DATABASE, ch_user=USER, ch_password=ROTATED
+        )
+        == ()
+    )
+    assert len(_native_writes(client)) == before + len(NATIVE_DICTS)
+
+
 def test_native_leaves_existing_dictionaries_alone_without_a_password():
     client = ServerNativeClient(complete=True)
     assert native.bootstrap_native(client, database=NATIVE_DATABASE) == ()
@@ -644,6 +713,20 @@ def test_cdc_dependents_created_without_credentials_are_re_created():
     assert result.created == CDC_DICTS
     before = list(client.writes)
     assert _bootstrap_cdc(client, ch_user=USER, ch_password=PASSWORD).created == ()
+    assert client.writes == before
+
+
+def test_cdc_dependents_are_re_created_when_the_password_rotates():
+    client = ServerCDCClient()
+    _bootstrap_cdc(client, ch_user=USER, ch_password=PASSWORD)
+    result = _bootstrap_cdc(client, ch_user=USER, ch_password=ROTATED)
+    replaced = [event for event in client.events if event[0] == "REPLACE"]
+    assert [name for _, name, _ in replaced] == list(CDC_DICTS)
+    for _, _, sql in replaced:
+        assert_credentialed(sql, escaped=f"'rotated-{ESCAPED[1:]}", password=ROTATED)
+    assert result.created == CDC_DICTS
+    before = list(client.writes)
+    assert _bootstrap_cdc(client, ch_user=USER, ch_password=ROTATED).created == ()
     assert client.writes == before
 
 

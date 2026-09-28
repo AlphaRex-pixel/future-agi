@@ -580,23 +580,26 @@ def replace_dictionary_ddl(ddl: str) -> str:
     return "CREATE OR REPLACE DICTIONARY " + statement[len(_DICTIONARY_PREFIX) :]
 
 
-def stale_dictionary_credentials(rows, names, *, ch_user: str) -> tuple[str, ...]:
-    """Existing dictionaries (in ``names`` order) whose CLICKHOUSE source does not
-    name ``ch_user``. ``rows`` are system.tables rows ``(name, engine, ...,
-    create_table_query)``. A dictionary created before credentials were injected
-    reads its source as ``default`` with an empty password."""
+def stale_dictionary_credentials(
+    rows, names, *, ch_user: str, ch_password: str
+) -> tuple[str, ...]:
+    """Existing dictionaries (in ``names`` order) whose CLICKHOUSE source was
+    not created with ``ch_user`` and ``ch_password``. ``rows`` are system.tables
+    rows ``(name, engine, ..., create_table_query)``. A dictionary created
+    before credentials were injected reads its source as ``default`` with an
+    empty password; one created before a password rotation, with the old one."""
     live = {
         row[0]: row[-1]
         for row in rows
         if row[0] in names
         and row[1] == "Dictionary"
         and isinstance(row[-1], str)
-        and dictionary_credentials_outdated(row[-1], ch_user)
+        and dictionary_credentials_outdated(row[-1], ch_user, ch_password)
     }
     return tuple(name for name in names if name in live)
 
 
-def _stale_dependent_dictionaries(client, create, *, ch_user):
+def _stale_dependent_dictionaries(client, create, *, ch_user, ch_password):
     names = tuple(
         name for name in DEPENDENT if name not in _VIEW_PREREQUISITES and name in create
     )
@@ -606,18 +609,23 @@ def _stale_dependent_dictionaries(client, create, *, ch_user):
         parameters={"names": names},
         settings={"readonly": 1},
     ).result_rows
-    return stale_dictionary_credentials(rows, names, ch_user=ch_user)
+    return stale_dictionary_credentials(
+        rows, names, ch_user=ch_user, ch_password=ch_password
+    )
 
 
 def _update_dictionary_credentials(client, create, *, ch_user, ch_password):
-    """Re-create packaged dependent dictionaries lacking the source credentials.
+    """Re-create packaged dependent dictionaries lacking the source credentials
+    (or holding a rotated-out password).
 
     Only with a password: without one the packaged, credential-free DDL is the
     correct definition. Dictionaries hold no data (a cache over their source);
     ``CREATE OR REPLACE`` swaps the definition atomically. Returns their names."""
     if not ch_password:
         return ()
-    stale = _stale_dependent_dictionaries(client, create, ch_user=ch_user)
+    stale = _stale_dependent_dictionaries(
+        client, create, ch_user=ch_user, ch_password=ch_password
+    )
     for name in stale:
         client.command(
             with_dictionary_credentials(
@@ -968,7 +976,9 @@ def bootstrap_cdc(
             inspect_source=inspect_source,
             include_usage_schema=include_usage_schema,
         )
-        if _stale_dependent_dictionaries(client, create, ch_user=ch_user):
+        if _stale_dependent_dictionaries(
+            client, create, ch_user=ch_user, ch_password=ch_password
+        ):
             raise BootstrapError(
                 "dictionary source credentials not visible after re-create"
             )
