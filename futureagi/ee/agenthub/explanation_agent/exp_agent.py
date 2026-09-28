@@ -143,6 +143,7 @@ class ExplanationAgent:
         - optional pruning of tiny clusters
         """
         from sklearn.cluster import HDBSCAN  # lazy
+
         n = len(X)
         mcs = self.choose_min_cluster_size(n, pct=pct, floor=floor)
         clusterer = HDBSCAN(
@@ -450,9 +451,7 @@ class ExplanationAgent:
             # one group from an evenly spread sample, rather than failing.
             logger.info("explanation_summary_without_clustering", texts=len(texts))
             labels = np.zeros(len(texts), dtype=int)
-            reps_idx = {
-                0: self.evenly_spaced_indices(len(texts), per_cluster_samples)
-            }
+            reps_idx = {0: self.evenly_spaced_indices(len(texts), per_cluster_samples)}
         else:
             print("[2/5] Clustering (HDBSCAN)...")
             labels, model, meta = self.simple_hdbscan(

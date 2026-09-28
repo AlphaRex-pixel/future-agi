@@ -171,6 +171,7 @@ def _get_saml_client(alias, acs_url):
     from saml2 import BINDING_HTTP_POST, BINDING_HTTP_REDIRECT  # lazy
     from saml2.client import Saml2Client  # lazy
     from saml2.config import Config as Saml2Config  # lazy
+
     metadata, identity_type = _get_metadata(alias)
     saml_settings = {
         "metadata": metadata,
@@ -249,6 +250,7 @@ class ACSView(APIView):
     )
     def post(self, request, *args, **kwargs):
         from saml2 import entity  # lazy
+
         try:
             resp = request.POST.get("SAMLResponse", None)
             relay_state = request.POST.get("RelayState", "None Provided")

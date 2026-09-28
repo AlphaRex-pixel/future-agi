@@ -138,6 +138,7 @@ class KBIndexer:
             docx_path: Path to the docx file
         """
         import docx  # lazy: keep heavy import off the startup path
+
         with open(docx_path, "rb") as file:
             doc = docx.Document(file)
             text = "\n\n".join([paragraph.text for paragraph in doc.paragraphs])
@@ -166,6 +167,7 @@ class KBIndexer:
     ):
         # Optimize chunk size based on text length
         from langchain_text_splitters import RecursiveCharacterTextSplitter  # lazy
+
         chunk_size = 800
         chunk_overlap = 150
 

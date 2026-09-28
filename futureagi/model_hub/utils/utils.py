@@ -956,6 +956,7 @@ class AnnotationCorpusBuilder:
     def get_wordnet_pos(self, tag):
         """Map POS tag to WordNet POS tag for lemmatization."""
         from nltk.corpus import wordnet  # lazy
+
         if tag.startswith("J"):
             return wordnet.ADJ
         elif tag.startswith("V"):
@@ -969,6 +970,7 @@ class AnnotationCorpusBuilder:
 
     def build_annotation_corpus(self, sentences):
         import nltk  # lazy: keep heavy import off the startup path
+
         lemmatized_words = []
         sentence_words = []
 

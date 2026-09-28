@@ -15681,6 +15681,7 @@ class CreateKnowledgeBaseView(APIView):
         from docx import Document  # lazy
         from pypdf import PdfReader  # lazy
         from pypdf.errors import PdfReadError  # lazy
+
         try:
             file_name = file_obj.name
             extension = file_name.split(".")[-1].lower()

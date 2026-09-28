@@ -312,12 +312,8 @@ def test_default_fresh_check_never_opens_writer(harness):
     assert all("pg_try_advisory" not in e[1] for e in harness.events if e[0] == "pg")
 
 
-@pytest.mark.parametrize(
-    "kwargs", [{}, {"apply": True}, {"wait_for_mirrors": True}]
-)
-def test_default_install_database_is_refused_before_any_peerdb_call(
-    harness, kwargs
-):
+@pytest.mark.parametrize("kwargs", [{}, {"apply": True}, {"wait_for_mirrors": True}])
+def test_default_install_database_is_refused_before_any_peerdb_call(harness, kwargs):
     """A database the standalone install's outbox CDC set up has landing tables
     without mirrors and capture triggers nothing here drains. Switching with
     retained data is unsupported, and the refusal says what to do instead."""
