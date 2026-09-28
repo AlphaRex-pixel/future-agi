@@ -199,6 +199,17 @@ def check_render(name: str, docs: list[dict]) -> list[str]:
         failed.append(
             f"{name}: the gateway and the backend do not share AGENTCC_WEBHOOK_SECRET"
         )
+    # The gateway and the backend refuse or allow private provider URLs alike.
+    private_urls = {
+        component(doc): env_values(container).get("AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS")
+        for doc in workloads
+        for container in containers(doc)
+        if component(doc) in ("agentcc-gateway", "backend")
+    }
+    if len(private_urls) == 2 and len(set(private_urls.values())) != 1:
+        failed.append(
+            f"{name}: gateway and backend disagree on AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS"
+        )
     secret_keys = {
         (d["metadata"]["name"], key)
         for d in docs

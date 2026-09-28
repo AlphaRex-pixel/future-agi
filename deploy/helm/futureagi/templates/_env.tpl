@@ -148,6 +148,7 @@ NO_STARTUP_DB_MUTATIONS is "true" everywhere except the bootstrap job.
       "AGENTCC_GATEWAY_INTERNAL_URL" (printf "http://%s:%v" (include "futureagi.component" (dict "root" $root "component" "agentcc-gateway")) $v.agentccGateway.service.port)
       "CODE_EXECUTOR_URL" (ternary (printf "http://%s:8060" (include "futureagi.component" (dict "root" $root "component" "code-executor"))) "" $v.codeExecutor.enabled)
       "CODE_EXECUTOR_LOCAL_FALLBACK" (toString $v.codeExecutor.localFallback)
+      "AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS" (toString $v.agentccGateway.allowPrivateProviderURLs)
       "USAGE_EVENTS_ENABLED" (toString $v.config.usageEvents)
       "MODEL_SERVING_URL" (ternary (printf "http://%s:8080" (include "futureagi.component" (dict "root" $root "component" "serving"))) "" $v.serving.enabled)
       "FI_COLLECTOR_HOST" (include "futureagi.component" (dict "root" $root "component" "fi-collector"))
@@ -327,6 +328,7 @@ and the Service always find it. */}}
 {{- include "futureagi.env.llm" (dict "root" $root "overrides" $overrides "gateway" true) }}
 {{- $plain := dict
       "AGENTCC_PORT" (include "futureagi.gateway.port" $root)
+      "AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS" (toString $g.allowPrivateProviderURLs)
       "AWS_REGION" $v.secrets.llm.awsRegion
       "FI_BASE_URL" (printf "http://%s:%v" $backend $v.backend.service.port)
       "GOMEMLIMIT" $g.goMemLimit

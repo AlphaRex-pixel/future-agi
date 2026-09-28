@@ -331,11 +331,12 @@ def test_the_gateway_loads_keys_from_the_app_and_sends_it_request_logs() -> None
     assert gateway["AGENTCC_SYNC_ON_STARTUP"] == "true"
     assert gateway["AGENTCC_WEBHOOK_SECRET"] == backend["AGENTCC_WEBHOOK_SECRET"]
 
-    # A startup sync that ran before the app was up is caught up with.
-    config = yaml.safe_load(
-        (ROOT / "agentcc-gateway" / "config.example.yaml").read_text(encoding="utf-8")
-    )
-    assert config["control_plane"] == {"sync_interval": "60s"}
+    # Org providers on private networks stay refused unless the operator
+    # opts in, in the gateway and in the API alike.
+    private = "${AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS:-false}"
+    assert app["AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS"] == private
+    assert gateway["AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS"] == private
+    assert backend["AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS"] == private
 
 
 @pytest.mark.parametrize("configured", ["", "from-dot-env"])

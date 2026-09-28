@@ -696,17 +696,13 @@ logging:
 #     default_ttl: 300                 # seconds
 #     max_size: 1048576                # 1MB per entry
 
-# Pull config (keys, budgets, RBAC) from a Django control plane. The compose
-# files give its URL, token and startup sync (AGENTCC_CONTROL_PLANE_URL,
-# AGENTCC_CONTROL_PLANE_TOKEN, AGENTCC_SYNC_ON_STARTUP, AGENTCC_WEBHOOK_SECRET);
-# the re-sync also picks up keys a startup sync missed while the app was down.
-# Without a URL nothing is synced.
-control_plane:
-  # url: "http://localhost:8000"
-  # admin_token: "${CONTROL_PLANE_ADMIN_TOKEN}"
-  # webhook_secret: "${CONTROL_PLANE_WEBHOOK_SECRET}"
-  # sync_on_startup: true
-  sync_interval: 60s                   # 0 = disabled
+# Pull config (keys, budgets, RBAC) from a Django control plane.
+# control_plane:
+#   url: "http://localhost:8000"
+#   admin_token: "${CONTROL_PLANE_ADMIN_TOKEN}"
+#   webhook_secret: "${CONTROL_PLANE_WEBHOOK_SECRET}"
+#   sync_on_startup: true
+#   sync_interval: 5m                  # 0 = disabled
 
 # OpenAI-compatible Assistants API proxy.
 # assistants:

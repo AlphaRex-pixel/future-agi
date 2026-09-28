@@ -898,6 +898,40 @@ Compose mounts it read-only (see
 [Google Cloud and Vertex AI](docs/configuration.md#google-cloud-and-vertex-ai)).
 Never commit the file or bake it into an image.
 
+### Local models (Ollama, vLLM)
+
+A model server on the Docker host, or a service in your Compose project, works
+as a provider that a workspace adds in the UI (Gateway > Providers) with its
+OpenAI-compatible base URL. Provider URLs on private networks are refused
+until you allow them, for the gateway and the API alike:
+
+```bash
+echo "AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS=true" >> .env
+docker compose up -d
+```
+
+Anyone who can add a provider can then point the gateway and the API at any
+address on those networks, the databases included (ClickHouse's `default` user
+has no password in either Compose setup), so allow it only where all of them
+are trusted. Loopback, link-local and cloud metadata addresses stay refused.
+On Helm, set `agentccGateway.allowPrivateProviderURLs=true`.
+
+- **On the Docker host:** use `http://host.docker.internal:11434/v1` (Ollama)
+  or `http://host.docker.internal:8000/v1` (vLLM), and make the server listen
+  on an address containers reach (Ollama: `OLLAMA_HOST=0.0.0.0`). Docker
+  Desktop, Colima and OrbStack resolve `host.docker.internal`; on Linux, add it
+  in a `docker-compose.override.yml`, to `app` in Standalone (to
+  `agentcc-gateway` and `backend` in Distributed):
+
+  ```yaml
+  services:
+    app:
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
+  ```
+- **As a Compose service:** add it to `docker-compose.override.yml` and use its
+  service name, for example `http://ollama:11434/v1`.
+
 ---
 
 ## Email

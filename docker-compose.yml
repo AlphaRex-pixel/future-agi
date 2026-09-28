@@ -204,6 +204,10 @@ services:
       AGENTCC_CONTROL_PLANE_URL: http://127.0.0.1:8000
       AGENTCC_CONTROL_PLANE_TOKEN: ${AGENTCC_ADMIN_TOKEN:-local-dev-only-admin-token-replace-me}
       AGENTCC_SYNC_ON_STARTUP: "true"
+      # Provider base URLs on private networks (a local Ollama or vLLM); read
+      # by the gateway and the API. Off: ClickHouse and the rest of the Docker
+      # network would be reachable through a provider URL.
+      AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS: ${AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS:-false}
       AGENTCC_HARNESS_API_KEY: ${AGENTCC_HARNESS_API_KEY:-}
       AGENTCC_BASE_URL: ${AGENTCC_BASE_URL:-}
       AGENTCC_ADMIN_TOKEN: ${AGENTCC_ADMIN_TOKEN:-local-dev-only-admin-token-replace-me}

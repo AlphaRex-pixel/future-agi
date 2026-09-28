@@ -115,6 +115,10 @@ x-backend-env: &backend-env
   AGENTCC_GATEWAY_INTERNAL_URL: ${AGENTCC_GATEWAY_INTERNAL_URL:-http://agentcc-gateway:8080}
   AGENTCC_INTERNAL_API_KEY: ${AGENTCC_INTERNAL_API_KEY:-local-dev-only-shared-secret-replace-me}
   AGENTCC_WEBHOOK_SECRET: ${AGENTCC_WEBHOOK_SECRET:-}
+  # Provider base URLs on private networks (a local Ollama or vLLM); the
+  # gateway reads it too. Off: the Docker network stays out of reach of
+  # provider URLs.
+  AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS: ${AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS:-false}
   # Platform-owned virtual key for hosted ALK authoring (not a customer secret).
   AGENTCC_HARNESS_API_KEY: ${AGENTCC_HARNESS_API_KEY:-}
   AGENTCC_BASE_URL: ${AGENTCC_BASE_URL:-}
@@ -525,6 +529,7 @@ services:
       AGENTCC_CONTROL_PLANE_URL: http://backend
       AGENTCC_CONTROL_PLANE_TOKEN: ${AGENTCC_ADMIN_TOKEN:-local-dev-only-admin-token-replace-me}
       AGENTCC_SYNC_ON_STARTUP: "true"
+      AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS: ${AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS:-false}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GOOGLE_API_KEY:-}
