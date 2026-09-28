@@ -415,6 +415,15 @@ def validate_model_working(model_name, api_key, provider):
                         json=payload,
                         timeout=30,  # 30 seconds timeout
                     )
+                    # The model's own calls POST to this URL as given too, so
+                    # a bare base such as .../v1 is wrong, not just this check.
+                    if response.status_code in (404, 405):
+                        raise Exception(
+                            f"{url} answered {response.status_code} "
+                            f"{response.reason}. API Base URL must be the full "
+                            "chat-completions URL, such as "
+                            "https://your-host/v1/chat/completions."
+                        )
                     response.raise_for_status()
                     return response.text
                 except Exception as e:

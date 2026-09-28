@@ -170,7 +170,9 @@ export const getCustomModelFields = () => [
   {
     fieldName: "apiBase",
     label: "API Base URL",
-    placeholder: "Enter API base URL",
+    placeholder: "e.g. https://your-host/v1/chat/completions",
+    // The check and every model call POST to this URL as given.
+    helperText: "The full chat-completions URL, not just the /v1 base",
     required: true,
   },
 ];

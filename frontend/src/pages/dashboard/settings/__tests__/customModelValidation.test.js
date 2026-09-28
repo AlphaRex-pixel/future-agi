@@ -50,3 +50,14 @@ describe("custom model token cost validation", () => {
     costFields.forEach((field) => expect(field.inputProps.min).toBe(0));
   });
 });
+
+describe("custom model API Base URL field", () => {
+  it("asks for the full chat-completions URL, not a /v1 base", () => {
+    const apiBase = getCustomModelFields().find(
+      (field) => field.fieldName === "apiBase",
+    );
+
+    expect(apiBase.placeholder).toMatch(/\/v1\/chat\/completions$/);
+    expect(apiBase.helperText).toMatch(/full chat-completions URL/);
+  });
+});

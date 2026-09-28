@@ -17,6 +17,7 @@ import uuid
 from unittest.mock import patch
 
 import pytest
+import requests
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
@@ -668,6 +669,49 @@ class TestCustomModelsCreateView(CustomModelsAPITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch("model_hub.utils.utils.requests.post")
+    def test_create_custom_provider_base_url_404_asks_for_full_endpoint(
+        self, mock_post
+    ):
+        """A /v1 base that 404s says to use the full chat-completions URL.
+
+        The check POSTs to api_base as given, as the model's own calls do, so a
+        bare /v1 base 404s; the raw requests error left the user guessing.
+        """
+        api_base = "http://mock-llm:8080/v1"
+        not_found = requests.Response()
+        not_found.status_code = 404
+        not_found.reason = "Not Found"
+        not_found.url = api_base
+        mock_post.return_value = not_found
+
+        # The payload the Configure Custom Model form sends.
+        data = {
+            "model_provider": "custom",
+            "model_name": "my-custom-model",
+            "input_token_cost": 0,
+            "output_token_cost": 0,
+            "config_json": {
+                "headers": {"x_api_key": "custom-key"},
+                "api_base": api_base,
+                "custom_provider": True,
+            },
+        }
+
+        response = self.client.post(
+            f"{BASE_URL}/custom_models/create/", data, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(mock_post.call_args.args[0], api_base)
+        message = response.data["message"]
+        self.assertIn(api_base, message)
+        self.assertIn("full chat-completions URL", message)
+        self.assertIn("/v1/chat/completions", message)
+        self.assertFalse(
+            CustomAIModel.objects.filter(user_model_id="my-custom-model").exists()
+        )
 
     @patch("model_hub.views.custom_model.validate_model_working")
     def test_create_sagemaker_model_success(self, mock_validate):
