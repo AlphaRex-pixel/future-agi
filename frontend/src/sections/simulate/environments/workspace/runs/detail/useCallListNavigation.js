@@ -15,8 +15,8 @@ function onScreenRows(data) {
   const groups = data?.groups ?? [];
   if (!groups.length) return results;
   const byId = new Map(results.map((row) => [row.id, row]));
-  return groups
-    .flatMap((group) => group.result_ids ?? [])
+  const ids = new Set(groups.flatMap((group) => group.result_ids ?? []));
+  return [...ids]
     .map((id) => byId.get(id))
     .filter(Boolean);
 }
