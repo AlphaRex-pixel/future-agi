@@ -41,6 +41,7 @@ from model_hub.models.choices import AnnotationTypeChoices
 from model_hub.models.develop_annotations import AnnotationsLabels
 from model_hub.models.score import Score
 from tfc.constants.roles import OrganizationRoles
+from tfc.utils.error_codes import get_error_message
 from tracer.models.project import Project
 from tracer.models.span_notes import SpanNotes
 from tracer.services.clickhouse.v2.span_reader import SpanScope
@@ -765,6 +766,7 @@ def test_save_with_another_copys_queue_item_is_refused(
 
     assert response.status_code == status.HTTP_409_CONFLICT, response.content
     assert response.data["code"] == "score_project_mismatch"
+    assert response.data["message"] == get_error_message("SCORE_PROJECT_MISMATCH")
     _assert_untouched(newer_score, rating=5, project=replayed_span.newer)
     assert Score.objects.filter(label=replayed_span.label, deleted=False).count() == 2
 
@@ -795,6 +797,7 @@ def test_single_create_with_another_copys_queue_item_is_refused(
 
     assert response.status_code == status.HTTP_409_CONFLICT, response.content
     assert response.data["code"] == "score_project_mismatch"
+    assert response.data["message"] == get_error_message("SCORE_PROJECT_MISMATCH")
     _assert_untouched(older_score, rating=2, project=replayed_span.older)
 
 
@@ -871,4 +874,7 @@ def test_save_through_a_legacy_item_never_moves_another_copys_score(
 
     assert response.status_code == status.HTTP_409_CONFLICT, response.content
     assert response.data["code"] == "score_project_mismatch"
+    assert response.data["message"] == get_error_message(
+        "SCORE_PROJECT_MISMATCH_EXISTING_SCORE"
+    )
     _assert_untouched(newer_score, rating=5, project=replayed_span.newer)

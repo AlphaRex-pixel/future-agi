@@ -9,6 +9,7 @@ import pytest
 from django.http import StreamingHttpResponse
 from rest_framework import status
 
+from tfc.utils.error_codes import get_error_message
 from tracer.serializers.trace import UsersTableRowSerializer
 from tracer.services.clickhouse.query_builders.user_list import (
     UnsupportedBoundedUserListQuery,
@@ -310,6 +311,9 @@ class TestUsersExport:
 
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
         assert response.json()["code"] == "user_filter_requires_cursor"
+        assert response.json()["message"] == get_error_message(
+            "USER_FILTER_REQUIRES_CURSOR"
+        )
         execute_query.assert_not_called()
 
     @pytest.mark.parametrize("method", ["get", "post"])
