@@ -126,7 +126,7 @@ little.
 | `./bin/dev` | Start the stack with hot reload, or bring it up to date with the compose files and `.env`. |
 | `./bin/dev logs [service]` | Follow the logs; default `app` (Distributed: `backend`). E.g. `./bin/dev logs frontend`. |
 | `./bin/dev shell` | A bash shell in the backend container, in `/app/backend`. |
-| `./bin/dev manage <command> [args]` | `python manage.py <command>` in the backend container, allowed to change the database: `migrate`, `makemigrations`, `create_user`, `shell`, ... |
+| `./bin/dev manage <command> [args]` | `python manage.py <command>` in the backend container, allowed to change the database: `migrate`, `makemigrations`, `showmigrations`, `create_user`, `shell`, ... |
 | `./bin/dev rebuild [target]` | Rebuild images and restart. Targets: `all` (default), `backend`, `frontend`, `collector`, `gateway`. |
 | `./bin/dev ps` | Container status. |
 | `./bin/dev down` | Stop, keeping the data. `./bin/dev down -v` also deletes the data. |
@@ -147,7 +147,9 @@ where the project is `COMPOSE_PROJECT_NAME` from your shell or `.env`, and
 
 The API, the workers and every `docker compose exec` session run with
 `NO_STARTUP_DB_MUTATIONS=true`, so nothing changes the schema behind your back.
-`./bin/dev manage` lifts that for the one command you run.
+`./bin/dev manage` lifts that for the one command you run. It runs the
+migration commands, `makemigrations` and `shell`; commands such as `flush`,
+`loaddata` or `dbshell` stay refused, and the error lists what runs.
 
 - **Standalone** also applies pending migrations the next time the `app`
   container starts: its bootstrap step migrates whenever the code has

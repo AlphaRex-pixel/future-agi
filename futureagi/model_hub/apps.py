@@ -21,6 +21,9 @@ STARTUP_SAFE_MANAGEMENT_COMMANDS = frozenset(
         "generate_swagger",
         "grpcrunaioserver",
         "runserver",
+        # Read the migration table and the migration files; write nothing.
+        "showmigrations",
+        "sqlmigrate",
         "start_temporal_worker",
     }
 )
@@ -47,6 +50,10 @@ OPERATOR_STARTUP_MUTATION_COMMANDS = frozenset(
         "seed_system_evals",
     }
 )
+# Developer tools that only the explicit local mode (./bin/dev manage) may run:
+# makemigrations writes migration files into the checkout, and shell runs
+# arbitrary code. Hosted processes and operator jobs never get them.
+LOCAL_DEVELOPER_COMMANDS = frozenset({"makemigrations", "shell"})
 OPERATOR_STARTUP_MUTATION_MODE = "operator"
 OPERATOR_STARTUP_SERVICE_TYPE = "bootstrap"
 
@@ -132,18 +139,22 @@ def explicit_management_mutation_authorized(argv: list[str]) -> bool:
 
     Hosted deployments require the dedicated operator/bootstrap pair. Local
     and self-hosted entrypoints preserve their documented migration workflow
-    only when they explicitly export ``NO_STARTUP_DB_MUTATIONS=false``.
+    only when they explicitly export ``NO_STARTUP_DB_MUTATIONS=false``; that
+    explicit local mode also runs the ``LOCAL_DEVELOPER_COMMANDS``.
     """
 
     command = _management_command(argv)
+    explicit_local_mode = (
+        os.getenv("NO_STARTUP_DB_MUTATIONS") == "false"
+        and not hosted_startup_environment()
+    )
+    if command in LOCAL_DEVELOPER_COMMANDS:
+        return explicit_local_mode
     if command not in OPERATOR_STARTUP_MUTATION_COMMANDS:
         return False
     if operator_startup_mutation_authorized(argv):
         return True
-    return (
-        os.getenv("NO_STARTUP_DB_MUTATIONS") == "false"
-        and not hosted_startup_environment()
-    )
+    return explicit_local_mode
 
 
 def guarded_management_command(argv: list[str]) -> str | None:
@@ -207,7 +218,9 @@ class ModelHubConfig(AppConfig):
                     f"Only {sorted(OPERATOR_STARTUP_MUTATION_COMMANDS)} may run "
                     "in a one-shot SERVICE_TYPE=bootstrap process with "
                     "STARTUP_DB_MUTATION_MODE=operator, or via the explicit "
-                    "local migration mode"
+                    "local migration mode (NO_STARTUP_DB_MUTATIONS=false outside "
+                    "a hosted deployment, as ./bin/dev manage runs), which also "
+                    f"allows {sorted(LOCAL_DEVELOPER_COMMANDS)}"
                 )
             if command == "migrate":
                 post_migrate.connect(

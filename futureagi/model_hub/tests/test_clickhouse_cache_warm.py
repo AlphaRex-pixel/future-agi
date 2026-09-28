@@ -105,6 +105,59 @@ def test_local_entrypoint_authorizes_explicit_database_commands(monkeypatch, com
     assert explicit_management_mutation_authorized(["manage.py", command]) is True
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["manage.py", "makemigrations", "tracer"],
+        ["manage.py", "makemigrations", "--check", "--dry-run"],
+        ["manage.py", "shell"],
+        ["manage.py", "shell", "-c", "print(1)"],
+    ],
+)
+def test_bin_dev_manage_runs_developer_commands(monkeypatch, argv):
+    # ./bin/dev manage: `docker compose exec -e NO_STARTUP_DB_MUTATIONS=false`
+    # in the app container, whose ENV_TYPE is local.
+    monkeypatch.setenv("NO_STARTUP_DB_MUTATIONS", "false")
+    monkeypatch.setattr(sys, "argv", argv)
+    connect = Mock()
+    monkeypatch.setattr("model_hub.apps.post_migrate.connect", connect)
+
+    assert explicit_management_mutation_authorized(argv) is True
+    ModelHubConfig("model_hub", sys.modules["model_hub"]).ready()
+    connect.assert_not_called()
+
+
+@pytest.mark.parametrize("command", ["makemigrations", "shell"])
+@pytest.mark.parametrize(
+    "environment",
+    [
+        # A plain `docker compose exec` session.
+        {"NO_STARTUP_DB_MUTATIONS": "true"},
+        # A hosted process, even when it asks for the local mode.
+        {"NO_STARTUP_DB_MUTATIONS": "false", "ENV_TYPE": "production"},
+        {"NO_STARTUP_DB_MUTATIONS": "false", "ENV_TYPE": "staging"},
+        {"NO_STARTUP_DB_MUTATIONS": "false", "CLOUD_DEPLOYMENT": "US"},
+        # An operator job runs only its allowlisted commands.
+        {
+            "NO_STARTUP_DB_MUTATIONS": "false",
+            "ENV_TYPE": "production",
+            "SERVICE_TYPE": "bootstrap",
+            "STARTUP_DB_MUTATION_MODE": "operator",
+        },
+    ],
+)
+def test_developer_commands_need_the_explicit_local_mode(
+    monkeypatch, command, environment
+):
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(sys, "argv", ["manage.py", command])
+
+    assert explicit_management_mutation_authorized(["manage.py", command]) is False
+    with pytest.raises(RuntimeError, match=f"^{command} is disabled"):
+        ModelHubConfig("model_hub", sys.modules["model_hub"]).ready()
+
+
 @pytest.mark.parametrize("env_type", ["prod", "production", "staging"])
 def test_hosted_backend_cannot_use_local_explicit_database_mode(monkeypatch, env_type):
     monkeypatch.setenv("ENV_TYPE", env_type)
@@ -146,6 +199,8 @@ def test_operator_bootstrap_does_not_authorize_open_ended_processes(monkeypatch,
     [
         ["manage.py", "check", "--database", "default"],
         ["manage.py", "collectstatic", "--noinput"],
+        ["manage.py", "showmigrations", "tracer"],
+        ["manage.py", "sqlmigrate", "tracer", "0001"],
         ["manage.py", "generate_swagger", "/tmp/swagger.json"],
         ["/app/backend/manage.py", "grpcrunaioserver"],
         ["/usr/lib/python3/site-packages/django/__main__.py", "runserver"],
