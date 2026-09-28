@@ -98,6 +98,25 @@ PROVIDER_TARGET_CONNECTORS = {"vapi", "retell", "retell_chat", "phone"}
 
 # Mirrors the SDK's own E.164 rule so a malformed number is refused at admission.
 _E164 = re.compile(r"^\+[1-9]\d{6,14}$")
+_PHONE_FIXED_NATIONAL_DIGITS = (("91", 10), ("1", 10))
+
+
+def phone_number_error(value: str) -> str | None:
+    """The reason ``value`` is not a dialable number, or None when it is."""
+    number = str(value or "").strip()
+    if not _E164.fullmatch(number):
+        return "phone_number must be in E.164 format, e.g. +14155551234"
+    digits = number[1:]
+    for country, length in _PHONE_FIXED_NATIONAL_DIGITS:
+        if digits.startswith(country):
+            if len(digits) - len(country) != length:
+                return (
+                    f"phone_number must have exactly {length} digits after the "
+                    f"+{country} country code"
+                )
+            break
+    return None
+
 
 TARGET_SYSTEM_PROMPT_MAX_CHARS = 65_536
 
@@ -208,10 +227,8 @@ class HarnessAgentSerializer(serializers.Serializer):
                         "config": "phone_number is supported only for connect-only Vapi or Retell voice agents"
                     }
                 )
-            if not _E164.fullmatch(str(config.get("phone_number") or "").strip()):
-                raise serializers.ValidationError(
-                    {"config": "phone_number must be in E.164 format"}
-                )
+            if error := phone_number_error(config.get("phone_number")):
+                raise serializers.ValidationError({"config": error})
             if any(
                 str(name).lower().startswith(("sip_", "livekit_")) for name in config
             ):
@@ -248,12 +265,8 @@ class HarnessAgentSerializer(serializers.Serializer):
                 raise serializers.ValidationError(
                     {"config": "phone dialer and LiveKit settings are platform-owned"}
                 )
-            if not _E164.fullmatch(str(config.get("phone_number") or "").strip()):
-                raise serializers.ValidationError(
-                    {
-                        "config": "phone_number must be in E.164 format, e.g. +14155551234"
-                    }
-                )
+            if error := phone_number_error(config.get("phone_number")):
+                raise serializers.ValidationError({"config": error})
             prompt = str(config.get("target_system_prompt") or "").strip()
             if not prompt or len(prompt) > 65536:
                 raise serializers.ValidationError(
