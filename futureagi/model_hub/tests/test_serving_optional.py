@@ -21,6 +21,7 @@ import pandas as pd
 import pytest
 import requests
 import yaml
+from structlog.testing import capture_logs
 
 from agentic_eval.core.embeddings import serving_client
 from agentic_eval.core.embeddings.serving_client import (
@@ -399,6 +400,71 @@ class TestExplanationSummaryWithoutEmbeddings:
 
         assert len(clusters) == 1
         assert clusters[0]["size"] == 25
+
+    def test_a_short_embedding_batch_falls_back_instead_of_mislabelling(
+        self, explanation_agent
+    ):
+        """Labels are positional: 22 vectors for 25 texts would shift every
+        later explanation into the wrong cluster."""
+        explanation_agent.embedding_model.side_effect = lambda batch: [
+            [1.0, 0.0] for _ in batch[1:]
+        ]
+
+        with capture_logs() as logs:
+            clusters = explanation_agent.evaluate(explanation=_explanations(25))
+
+        assert [
+            (e["event"], e["texts"], e["embeddings"]) for e in logs if "embeddings" in e
+        ] == [("explanation_embedding_count_mismatch", 25, 22)]
+        assert len(clusters) == 1
+        assert clusters[0]["size"] == 25
+        assert clusters[0]["member_ids"] == [f"call-{i}" for i in range(25)]
+
+
+def _two_topics(batch):
+    """reason number 0-11 point one way, 12-24 the other (with a little spread)."""
+    vectors = []
+    for text in batch:
+        i = int(text.rsplit(" ", 1)[1])
+        vectors.append([1.0, 0.01 * i] if i < 12 else [0.01 * i, 1.0])
+    return vectors
+
+
+class TestExplanationClusteringWithServing:
+    def test_explanations_are_clustered_and_summarised_per_cluster(
+        self, explanation_agent
+    ):
+        explanation_agent.embedding_model.side_effect = _two_topics
+
+        clusters = explanation_agent.evaluate(explanation=_explanations(25))
+
+        # Embedded in batches of 10, every text once.
+        batches = [c.args[0] for c in explanation_agent.embedding_model.call_args_list]
+        assert [len(b) for b in batches] == [10, 10, 5]
+        assert [t for b in batches for t in b] == [
+            f"reason number {i}" for i in range(25)
+        ]
+        by_size = sorted(clusters, key=lambda c: c["size"])
+        assert [c["size"] for c in by_size] == [12, 13]
+        assert [c["member_ids"] for c in by_size] == [
+            [f"call-{i}" for i in range(12)],
+            [f"call-{i}" for i in range(12, 25)],
+        ]
+        for cluster in by_size:
+            # The 10 closest to the centroid, all from the cluster itself.
+            assert len(cluster["representative_ids"]) == 10
+            assert set(cluster["representative_ids"]) <= set(cluster["member_ids"])
+        summarised = {
+            frozenset(c.args[1])
+            for c in explanation_agent.summarize_cluster.call_args_list
+        }
+        assert summarised == {
+            frozenset(
+                f"reason number {r.removeprefix('call-')}"
+                for r in c["representative_ids"]
+            )
+            for c in by_size
+        }
 
     def test_the_dataset_summary_completes_instead_of_failing(
         self, explanation_agent, model_serving_down
