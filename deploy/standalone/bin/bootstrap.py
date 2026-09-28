@@ -795,7 +795,6 @@ def change_data_capture() -> None:
     earlier `outbox` boot left, so capture never runs without a drain. It
     syncs Temporal schedules, so it runs once Temporal answers.
     """
-    mode = (os.environ.get("FI_CDC_MODE") or "outbox").strip().lower()
     # A plain import: `from package import module` turns a missing module
     # into an ImportError ("cannot import name") without its name.
     try:
@@ -803,10 +802,13 @@ def change_data_capture() -> None:
     except ModuleNotFoundError as exc:
         if exc.name != OUTBOX_CDC_MODULE:
             raise
-        log(
-            f"FI_CDC_MODE={mode}, but this image has no outbox CDC installer; skipping CDC"
-        )
+        log("this image has no outbox CDC installer; skipping CDC")
         return
+    # The mode ensure_installed() runs (the image sets FI_CDC_MODE=outbox).
+    try:
+        mode = oss_outbox_cdc.cdc_mode()
+    except ValueError as exc:
+        raise BootstrapError(str(exc)) from None
 
     def ensure() -> None:
         try:

@@ -253,6 +253,10 @@ class FakeStack:
             raise self.native_exit
         return self.native_exit
 
+    def cdc_mode(self, env=None):
+        """oss_outbox_cdc.cdc_mode(): the backend's default is peerdb."""
+        return os.environ.get("FI_CDC_MODE", "peerdb").strip().lower()
+
     def ensure_installed(self, *args, **kwargs):
         self.log.append("change data capture")
         self.cdc_calls.append((args, kwargs))
@@ -308,6 +312,7 @@ class FakeStack:
         )
         outbox = package(
             OUTBOX,
+            cdc_mode=self.cdc_mode,
             ensure_installed=self.ensure_installed,
             OutboxCDCError=OutboxCDCError,
         )
@@ -1074,9 +1079,17 @@ class ChangeDataCaptureTest(StackTest):
             ],
         )
 
-    def test_the_default_mode_is_outbox(self):
+    def test_the_image_runs_the_outbox_mode(self):
+        dockerfile = (ROOT / "deploy" / "standalone" / "Dockerfile").read_text()
+        self.assertRegex(dockerfile, r"(?m)^ENV FI_CDC_MODE=outbox$")
+
+    def test_logs_the_mode_the_installer_runs(self):
+        # Unset, the installer falls back to peerdb; the log must not claim
+        # a default of its own.
         bootstrap.change_data_capture()
-        self.assertIn("(FI_CDC_MODE=outbox)", self.lines()[0])
+        self.assertEqual(
+            self.lines()[0], "[bootstrap] change data capture (FI_CDC_MODE=peerdb) ..."
+        )
 
     def test_installer_errors_are_final_and_say_what_to_do(self):
         os.environ["FI_CDC_MODE"] = "outbax"

@@ -110,6 +110,9 @@ RUN sed -i 's/\r$//' /opt/futureagi/bin/start /opt/futureagi/bin/after-bootstrap
 
 # glibc: fewer malloc arenas keeps the threaded Python processes smaller.
 ENV MALLOC_ARENA_MAX=2
+# Postgres -> ClickHouse change data capture without PeerDB: capture triggers
+# drained by the embedded Temporal worker. The backend's default is peerdb.
+ENV FI_CDC_MODE=outbox
 
 VOLUME ["/data"]
 EXPOSE 3000 8000 4317 4318 8080 9005
