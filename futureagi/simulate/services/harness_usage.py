@@ -12,11 +12,11 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from simulate.models import HostedHarnessAttempt, HostedHarnessJob
+from simulate.services.harness_environment import _VOICE_CONNECTORS
 from simulate.services.hosted_harness import HostedHarnessError
 from tfc.ee_gating import is_oss
 
 _ACTIONS = frozenset({"harness_authoring", "text_call", "voice_call"})
-_VOICE_CONNECTORS = frozenset({"livekit", "vapi", "retell"})
 _REPORT_KEY = "usage_reports"
 _AUTHORING_REPORT_KEY = "authoring_usage_reports"
 _NON_BILLABLE_FAILURE_DOMAINS = frozenset(
