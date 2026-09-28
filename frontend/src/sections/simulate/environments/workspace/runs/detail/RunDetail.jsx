@@ -61,6 +61,7 @@ export default function RunDetail({
   testId,
   executionId,
   onStartRun,
+  creditBanner = null,
 }) {
   const navigate = useNavigate();
   const [tab, setTab] = useState("tasks");
@@ -256,6 +257,7 @@ export default function RunDetail({
           Debug failures
         </Button>
       </Stack>
+      {creditBanner}
 
       <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <Box sx={{ p: 2 }}>
@@ -438,4 +440,5 @@ RunDetail.propTypes = {
   testId: PropTypes.string,
   executionId: PropTypes.string,
   onStartRun: PropTypes.func,
+  creditBanner: PropTypes.node,
 };

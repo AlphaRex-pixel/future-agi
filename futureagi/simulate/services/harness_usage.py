@@ -69,6 +69,15 @@ def require_harness_authoring(organization_id: str) -> None:
     _require_harness_action(organization_id, "harness_authoring")
 
 
+def require_harness_call_usage(job: HostedHarnessJob) -> None:
+    from simulate.services.hosted_harness import _resolve_scenario_modality
+
+    action = (
+        "voice_call" if _resolve_scenario_modality(job, {}) == "voice" else "text_call"
+    )
+    _require_harness_action(str(job.organization_id), action)
+
+
 def require_harness_run_usage(organization_id: str, payload: dict) -> None:
     """Check authoring and any call rail that the submitted connector identifies."""
 

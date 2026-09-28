@@ -1260,6 +1260,15 @@ class HostedHarnessProvider:
                 {"detail": "Idempotency-Key header is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        from simulate.services.harness_usage import require_harness_call_usage
+
+        try:
+            require_harness_call_usage(environment)
+        except Exception as exc:
+            response = _usage_limit_response(exc)
+            if response is not None:
+                return response
+            raise
         try:
             child, created = create_selected_harness_run(
                 environment,

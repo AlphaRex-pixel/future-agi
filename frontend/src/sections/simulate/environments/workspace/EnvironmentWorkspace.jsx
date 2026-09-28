@@ -16,6 +16,7 @@ import {
   canRunHeader,
   stageOutputsToWorld,
   harnessEnvironmentQuery,
+  harnessJobQuery,
 } from "src/api/simulate-environments/environment";
 import { useBuildProgress } from "src/api/simulate-environments/buildProgress";
 import { useWorkspaceChat } from "src/api/simulate-environments/workspaceChat";
@@ -23,6 +24,8 @@ import { harnessIdempotencyKey } from "src/api/harness/harness";
 import { runHarnessEnvironment } from "src/api/simulate-environments/harnessEnvironments";
 import { runSimulationTarget } from "src/api/simulate-environments/runs";
 import { listAllScenarioKeys } from "src/api/simulate-environments/scenarioSelection";
+import { CreditExhaustionBanner } from "src/components/CreditExhaustionBanner";
+import { useCreditExhaustion } from "src/hooks/use-credit-exhaustion";
 
 import { useEnvironmentsStore } from "../store/useEnvironmentsStore";
 import { useEnvState } from "../store/envState";
@@ -93,12 +96,20 @@ export default function EnvironmentWorkspace() {
     building || buildFailed ? undefined : bootstrapState,
   );
   const { tab, setTab } = useWorkspaceTab();
+  const {
+    exhaustionError,
+    handleError: handleCreditError,
+    handleUpgradeClick,
+    handleDismiss: dismissCreditBanner,
+    clearError: clearCreditError,
+  } = useCreditExhaustion({ feature: "hosted_harness" });
   const chat = useWorkspaceChat(env, { source });
   const registerFork = useEnvironmentsStore((s) => s.forkEnvironment);
   const selection = useScenarioSelection();
   const queryClient = useQueryClient();
   const pendingSubmission = useRef(null);
   const runMutation = useMutation({
+    meta: { errorHandled: true },
     mutationFn: async ({ ids, trials }) => {
       // Run-all reads the keys from the server list: the bootstrap
       // `envState.scenarios` is seeded once and keeps a key an amend dropped.
@@ -134,6 +145,7 @@ export default function EnvironmentWorkspace() {
       if (error?.statusCode >= 400 && error.statusCode < 500) {
         pendingSubmission.current = null;
       }
+      handleCreditError(error);
       enqueueSnackbar(errorMessage(error), { variant: "error" });
     },
   });
@@ -160,6 +172,29 @@ export default function EnvironmentWorkspace() {
   // overlay) — the sandbox hero shows real tools/rules/tables as they land, a
   // neutral skeleton before.
   const derivedWorld = stageOutputsToWorld(progress.job?.stage_outputs || []);
+
+  const jobQuery = useQuery(harnessJobQuery(envId, { enabled: backed }));
+  const usageLimit = jobQuery.data?.usage_limit;
+  const hadRemoteUsageLimit = useRef(false);
+  useEffect(() => {
+    if (usageLimit) {
+      if (!hadRemoteUsageLimit.current) {
+        hadRemoteUsageLimit.current = true;
+        handleCreditError(usageLimit);
+      }
+    } else if (hadRemoteUsageLimit.current) {
+      hadRemoteUsageLimit.current = false;
+      clearCreditError();
+    }
+  }, [usageLimit, handleCreditError, clearCreditError]);
+  const creditBanner = (
+    <CreditExhaustionBanner
+      error={exhaustionError}
+      onUpgrade={handleUpgradeClick}
+      onDismiss={dismissCreditBanner}
+      sx={{ mx: 2, mt: 2 }}
+    />
+  );
 
   const executionMatch = useMatch(EXECUTION_PATTERN);
 
@@ -236,6 +271,7 @@ export default function EnvironmentWorkspace() {
           runBlockedReason={buildFailed ? WORKSPACE_COPY.failedTooltip : WORKSPACE_COPY.buildingTooltip}
           locked
         />
+        {creditBanner}
         <Box sx={{ flex: 1, minHeight: 0, overflow: "hidden", p: 2 }}>
           <BuildingStage
             progress={progress}
@@ -266,7 +302,7 @@ export default function EnvironmentWorkspace() {
             `source === "harness"` test WorkspacePanels/EvalsStep use) rides
             along the same context route, so RunDetail can gate the real API
             picker on it. */}
-        <Outlet context={{ env, envState, backed, onStartRun: startRun }} />
+        <Outlet context={{ env, envState, backed, onStartRun: startRun, creditBanner }} />
       </Box>
     );
   }
@@ -368,6 +404,7 @@ export default function EnvironmentWorkspace() {
         onStartRun={startRun}
         selectionActive={selectionActive}
       />
+      {creditBanner}
 
       <SystemBanners env={env} envState={envState} patch={patch} />
       <VersionBar env={env} envState={envState} />
