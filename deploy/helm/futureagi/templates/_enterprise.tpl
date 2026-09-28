@@ -63,6 +63,32 @@ github: {id: GITHUB_CLIENT_ID, secret: GITHUB_CLIENT_SECRET, callback: /saml2_au
 microsoft: {id: MICROSOFT_CLIENT_ID, secret: MICROSOFT_CLIENT_SECRET, callback: /saml2_auth/microsoft/callback/, label: Microsoft}
 {{- end -}}
 
+{{/* The Secret each externalSecrets.secrets group creates, as JSON
+{group: {path, name}}: path is the existingSecret value that names it, name
+that value ("" when unset). external-secrets.yaml writes that Secret and
+validate.yaml requires the name. */}}
+{{- define "futureagi.externalSecrets.targets" -}}
+{{- $out := dict -}}
+{{- range $group, $path := dict
+      "app" "secrets.existingSecret"
+      "llm" "secrets.llm.existingSecret"
+      "license" "license.existingSecret"
+      "email" "config.email.existingSecret"
+      "google" "auth.google.existingSecret"
+      "github" "auth.github.existingSecret"
+      "microsoft" "auth.microsoft.existingSecret"
+      "admin" "bootstrap.admin.existingSecret"
+      "postgres" "postgres.existingSecret"
+      "clickhouse" "clickhouse.existingSecret"
+      "redis" "redis.existingSecret"
+      "objectStorage" "objectStorage.existingSecret" -}}
+{{- $name := $.Values -}}
+{{- range splitList "." $path }}{{ $name = get ($name | default dict) . }}{{ end -}}
+{{- $_ := set $out $group (dict "path" $path "name" ($name | default "" | toString)) -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
 {{/* Providers with a client configured, as a list of names. */}}
 {{- define "futureagi.sso.enabled" -}}
 {{- $out := list -}}

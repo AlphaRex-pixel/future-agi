@@ -192,7 +192,7 @@ empty is no storageClassName (the cluster default), "-" is storageClassName
 {{- if and (eq (toString $v.global.airgap) "true") $v.serving.enabled (not $v.serving.persistence.enabled) -}}
 {{- $errors = append $errors "global.airgap with serving.enabled needs serving.persistence.enabled=true and the models pre-seeded on that volume (serving cannot download them offline; see examples/airgap.yaml), or serving.enabled=false" -}}
 {{- end -}}
-{{- range $provider := list "google" "github" "microsoft" -}}
+{{- range $provider, $_ := include "futureagi.sso.envNames" . | fromYaml -}}
 {{- $p := dig $provider dict ($v.auth | default dict) -}}
 {{- if and (not $p.existingSecret) (ne (empty $p.clientId) (empty $p.clientSecret)) -}}
 {{- $errors = append $errors (printf "auth.%s needs both clientId and clientSecret (or existingSecret)" $provider) -}}
@@ -200,16 +200,15 @@ empty is no storageClassName (the cluster default), "-" is storageClassName
 {{- end -}}
 {{- $es := $v.externalSecrets | default dict -}}
 {{- if $es.enabled -}}
-{{- $targets := dict "app" $v.secrets.existingSecret "llm" $v.secrets.llm.existingSecret "license" $l.existingSecret "email" (dig "email" "existingSecret" "" $v.config) "google" (dig "google" "existingSecret" "" ($v.auth | default dict)) "github" (dig "github" "existingSecret" "" ($v.auth | default dict)) "microsoft" (dig "microsoft" "existingSecret" "" ($v.auth | default dict)) "admin" (dig "admin" "existingSecret" "" $v.bootstrap) "postgres" $v.postgres.existingSecret "clickhouse" $v.clickhouse.existingSecret "redis" $v.redis.existingSecret "objectStorage" $v.objectStorage.existingSecret -}}
-{{- $paths := dict "app" "secrets.existingSecret" "llm" "secrets.llm.existingSecret" "license" "license.existingSecret" "email" "config.email.existingSecret" "google" "auth.google.existingSecret" "github" "auth.github.existingSecret" "microsoft" "auth.microsoft.existingSecret" "admin" "bootstrap.admin.existingSecret" "postgres" "postgres.existingSecret" "clickhouse" "clickhouse.existingSecret" "redis" "redis.existingSecret" "objectStorage" "objectStorage.existingSecret" -}}
+{{- $targets := include "futureagi.externalSecrets.targets" . | fromJson -}}
 {{- if not $es.secrets -}}
 {{- $errors = append $errors "externalSecrets.enabled needs at least one entry in externalSecrets.secrets" -}}
 {{- end -}}
 {{- range $group, $spec := $es.secrets | default dict -}}
 {{- if not (hasKey $targets $group) -}}
 {{- $errors = append $errors (printf "externalSecrets.secrets.%s: unknown group; use one of %s" $group (keys $targets | sortAlpha | join ", ")) -}}
-{{- else if not (get $targets $group) -}}
-{{- $errors = append $errors (printf "externalSecrets.secrets.%s needs %s: the name of the Secret it creates, which the chart then reads" $group (get $paths $group)) -}}
+{{- else if not (dig $group "name" "" $targets) -}}
+{{- $errors = append $errors (printf "externalSecrets.secrets.%s needs %s: the name of the Secret it creates, which the chart then reads" $group (dig $group "path" "" $targets)) -}}
 {{- end -}}
 {{- if not (or (dig "secretStoreRef" "name" "" ($spec | default dict)) (dig "secretStoreRef" "name" "" $es)) -}}
 {{- $errors = append $errors (printf "externalSecrets.secrets.%s needs a store: externalSecrets.secretStoreRef.name or its own secretStoreRef.name" $group) -}}

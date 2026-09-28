@@ -899,7 +899,12 @@ def check_external_secrets(docs: list[dict]) -> list[str]:
     bootstrap job, and the chart generates none of them."""
     failed = []
     external = {d["spec"]["target"]["name"]: d for d in docs if d["kind"] == "ExternalSecret"}
-    wanted = {"futureagi-app", "futureagi-llm", "futureagi-license", "futureagi-postgres", "futureagi-s3"}
+    # examples/external-secrets.yaml, then ci/external-secrets.yaml: one per group.
+    wanted = {
+        "futureagi-app", "futureagi-llm", "futureagi-license", "futureagi-postgres", "futureagi-s3",
+        "futureagi-email", "futureagi-google", "futureagi-github", "futureagi-microsoft",
+        "futureagi-admin", "futureagi-clickhouse", "futureagi-redis",
+    }
     if set(external) != wanted:
         failed.append(f"external-secrets: targets {sorted(external)}, expected {sorted(wanted)}")
     for target, doc in external.items():
@@ -917,7 +922,10 @@ def check_external_secrets(docs: list[dict]) -> list[str]:
     if not wanted <= read:
         failed.append(f"external-secrets: no pod reads {sorted(wanted - read)}")
     data = chart_secret(docs).get("data") or {}
-    for key in ("SECRET_KEY", "EE_LICENSE_KEY", "PG_PASSWORD", "S3_ACCESS_KEY"):
+    for key in (
+        "SECRET_KEY", "EE_LICENSE_KEY", "PG_PASSWORD", "S3_ACCESS_KEY", "MAILGUN_API_KEY", "AUTH0_CLIENT_SECRET",
+        "GITHUB_CLIENT_SECRET", "MICROSOFT_CLIENT_SECRET", "CH_PASSWORD", "REDIS_PASSWORD",
+    ):
         if key in data:
             failed.append(f"external-secrets: the chart still generates {key}")
     return failed

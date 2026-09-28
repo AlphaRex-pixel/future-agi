@@ -70,7 +70,7 @@ value_sets=(
   "proxy-ca|examples/external.yaml ci/proxy-ca.yaml"
   "airgap|examples/external.yaml examples/airgap.yaml"
   "dockerhub-mirror|examples/bundled.yaml ci/dockerhub-mirror.yaml"
-  "external-secrets|examples/external.yaml examples/external-secrets.yaml"
+  "external-secrets|examples/external.yaml examples/external-secrets.yaml ci/external-secrets.yaml"
   "openshift|examples/bundled.yaml ci/openshift.yaml"
 )
 
