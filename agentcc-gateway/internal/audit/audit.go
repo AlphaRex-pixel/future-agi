@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -126,6 +127,12 @@ type Logger struct {
 	minSev     Severity
 	done       chan struct{}
 	dropped    atomic.Int64
+
+	// Emit holds mu to read and Close to write, so an event from a request
+	// that finishes after Close is dropped rather than sent on the closed
+	// channel.
+	mu     sync.RWMutex
+	closed bool // under mu
 }
 
 // NewLogger creates an audit logger from config.
@@ -185,7 +192,7 @@ func NewLoggerWithSinks(sinks []Sink, categories []string, minSeverity Severity,
 	return l
 }
 
-// Emit sends an audit event. Non-blocking; drops if buffer full.
+// Emit sends an audit event. Non-blocking; drops if buffer full or closed.
 func (l *Logger) Emit(e *Event) {
 	// Apply category filter.
 	if len(l.categories) > 0 && !l.categories[e.Category] {
@@ -194,6 +201,13 @@ func (l *Logger) Emit(e *Event) {
 
 	// Apply severity filter.
 	if ParseSeverity(e.Severity) < l.minSev {
+		return
+	}
+
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if l.closed {
+		l.dropped.Add(1)
 		return
 	}
 
@@ -211,14 +225,22 @@ func (l *Logger) Emit(e *Event) {
 	}
 }
 
-// Dropped returns the number of events dropped due to buffer full.
+// Dropped returns the number of events dropped due to buffer full, or
+// emitted after Close.
 func (l *Logger) Dropped() int64 {
 	return l.dropped.Load()
 }
 
 // Close closes the event channel and waits for drain to complete.
 func (l *Logger) Close() {
+	l.mu.Lock()
+	if l.closed {
+		l.mu.Unlock()
+		return
+	}
+	l.closed = true
 	close(l.events)
+	l.mu.Unlock()
 	<-l.done
 	for _, s := range l.sinks {
 		s.Close()

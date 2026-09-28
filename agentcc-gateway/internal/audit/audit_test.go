@@ -211,6 +211,33 @@ func TestLogger_ConcurrentEmit(t *testing.T) {
 	}
 }
 
+// Shutdown does not wait for every request, so an event can be emitted while
+// Close runs, or after: it is dropped and counted, not sent on the closed channel.
+func TestLogger_EmitDuringAndAfterClose(t *testing.T) {
+	sink := &testSink{}
+	l := NewLoggerWithSinks([]Sink{sink}, nil, SeverityInfo, 8)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				l.Emit(&Event{Category: "auth", Action: "test", Severity: "info"})
+			}
+		}()
+	}
+	l.Close()
+	wg.Wait()
+	before := l.Dropped()
+	l.Emit(&Event{Category: "auth", Action: "late", Severity: "info"})
+
+	if got := l.Dropped() - before; got != 1 {
+		t.Errorf("Emit after Close dropped %d events, want 1", got)
+	}
+	l.Close() // a second Close returns
+}
+
 func TestLogger_EmptyCategories_AllowAll(t *testing.T) {
 	sink := &testSink{}
 	l := NewLoggerWithSinks([]Sink{sink}, nil, SeverityInfo, 100) // nil categories = all

@@ -793,6 +793,31 @@ func TestEmitter_Dropped(t *testing.T) {
 	<-e.ch
 }
 
+// Shutdown does not wait for every request, so a record can be emitted while
+// Close runs, or after: it is dropped and counted, not sent on the closed channel.
+func TestEmitter_EmitDuringAndAfterClose(t *testing.T) {
+	e := NewTraceEmitter(config.RequestLoggingConfig{Enabled: true, BufferSize: 8, Workers: 1})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				e.Emit(TraceRecord{RequestID: "r"})
+			}
+		}()
+	}
+	e.Close()
+	wg.Wait()
+	before := e.Dropped()
+	e.Emit(TraceRecord{RequestID: "late"})
+
+	if got := e.Dropped() - before; got != 1 {
+		t.Errorf("Emit after Close dropped %d records, want 1", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Integration
 // ---------------------------------------------------------------------------
@@ -812,6 +837,21 @@ func TestPlugin_Close(t *testing.T) {
 
 	if p.emitter.Dropped() != 0 {
 		t.Errorf("Dropped() = %d, want 0", p.emitter.Dropped())
+	}
+}
+
+// A request that finishes after the plugin is closed is not logged, and does
+// not crash the gateway.
+func TestProcessResponse_AfterClose(t *testing.T) {
+	p := New(enabledCfg(), nil)
+	p.Close()
+
+	rc := newRC()
+	rc.Response = &models.ChatCompletionResponse{}
+	p.ProcessResponse(context.Background(), rc)
+
+	if got := p.emitter.Dropped(); got != 1 {
+		t.Errorf("Dropped() = %d, want 1", got)
 	}
 }
 

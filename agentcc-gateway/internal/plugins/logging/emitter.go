@@ -16,7 +16,12 @@ type TraceEmitter struct {
 	wg      sync.WaitGroup
 	cfg     config.RequestLoggingConfig
 	dropped atomic.Int64
-	closed  atomic.Bool
+
+	// Emit holds mu to read and Close to write, so a request that finishes
+	// after Close (shutdown does not wait for every one) is dropped rather
+	// than sent on the closed channel.
+	mu     sync.RWMutex
+	closed bool // under mu
 }
 
 // NewTraceEmitter creates a TraceEmitter and starts worker goroutines.
@@ -43,8 +48,15 @@ func NewTraceEmitter(cfg config.RequestLoggingConfig) *TraceEmitter {
 	return e
 }
 
-// Emit sends a trace record to the buffer. Non-blocking: drops the record if the buffer is full.
+// Emit sends a trace record to the buffer. Non-blocking: drops the record if the buffer is full
+// or the emitter is closed.
 func (e *TraceEmitter) Emit(record TraceRecord) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.closed {
+		e.dropped.Add(1)
+		return
+	}
 	select {
 	case e.ch <- record:
 	default:
@@ -57,10 +69,14 @@ func (e *TraceEmitter) Emit(record TraceRecord) {
 
 // Close closes the channel and waits for workers to drain with a timeout.
 func (e *TraceEmitter) Close() {
-	if !e.closed.CompareAndSwap(false, true) {
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
 		return
 	}
+	e.closed = true
 	close(e.ch)
+	e.mu.Unlock()
 
 	done := make(chan struct{})
 	go func() {
