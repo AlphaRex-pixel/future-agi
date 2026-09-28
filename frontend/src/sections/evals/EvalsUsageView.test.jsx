@@ -157,4 +157,3 @@ describe("Eval Usage grid 30 Days run column", () => {
     expect(column.colId).toBe("last_30_run");
   });
 });
-

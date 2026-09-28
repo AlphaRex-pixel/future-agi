@@ -276,7 +276,7 @@ const TraceDetailDrawerChild = ({
     data: observationSpanWithoutLoadingState,
     isLoading: isLoadingObservationSpan,
   } = useQuery({
-    queryKey: ["observationSpan", selectedNode?.id, fetch],
+    queryKey: ["observationSpan", selectedNode?.id, projectIdToUse, fetch],
     enabled: Boolean(selectedNode?.id) && !showEvalLoadingStates && fetch,
     queryFn: () =>
       axios.get(
@@ -290,7 +290,12 @@ const TraceDetailDrawerChild = ({
     data: observationSpanWithLoadingState,
     isLoading: isLoadingDetailedObservationSpan,
   } = useQuery({
-    queryKey: ["observationSpan-loading", selectedNode?.id, fetch],
+    queryKey: [
+      "observationSpan-loading",
+      selectedNode?.id,
+      projectIdToUse,
+      fetch,
+    ],
     enabled: Boolean(selectedNode?.id) && showEvalLoadingStates && fetch,
     queryFn: () =>
       axios.get(
