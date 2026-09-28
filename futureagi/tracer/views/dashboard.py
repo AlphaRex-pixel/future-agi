@@ -157,11 +157,13 @@ from tracer.services.dashboard_metrics_catalog import (
     resolve_property_catalog_project_scope,
 )
 from tracer.services.dataset_choice_values import (
+    InvalidChoiceCell,
+    evaluation_choice_labels,
+)
+from tracer.services.dataset_filter_values import (
     DATASET_METADATA_METRICS,
     UNAVAILABLE_READ_ERRORS,
     DatasetValuesTooBroad,
-    InvalidChoiceCell,
-    evaluation_choice_labels,
     read_choice_column_values,
     read_column_values,
     read_dataset_metadata_values,

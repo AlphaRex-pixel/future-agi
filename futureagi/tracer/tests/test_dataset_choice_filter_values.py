@@ -163,7 +163,7 @@ def deny_sockets(monkeypatch):
 
 @pytest.fixture
 def reader(dashboard_source):
-    from tracer.services import dataset_choice_values
+    from tracer.services import dataset_choice_values, dataset_filter_values
 
     source = ast.parse(dashboard_source)
     method = next(
@@ -199,15 +199,17 @@ def reader(dashboard_source):
         "_run_filter_value_pg_read": lambda deadline, fn: fn(),
         "ReadDeadlineExceeded": DeadlineExceeded,
         **{
-            name: getattr(dataset_choice_values, name)
+            name: getattr(dataset_filter_values, name)
             for name in (
                 "UNAVAILABLE_READ_ERRORS",
                 "DatasetValuesTooBroad",
-                "InvalidChoiceCell",
-                "evaluation_choice_labels",
                 "read_choice_column_values",
                 "read_column_values",
             )
+        },
+        **{
+            name: getattr(dataset_choice_values, name)
+            for name in ("InvalidChoiceCell", "evaluation_choice_labels")
         },
         "_FINITE_NATIVE_FILTER_VALUE_MAX": 5000,
         "_LEGACY_NATIVE_FILTER_VALUE_MAX": 1000,
@@ -286,7 +288,7 @@ def reader(dashboard_source):
         with (
             patch.dict(sys.modules, {"model_hub.models.develop_dataset": model}),
             patch.object(
-                dataset_choice_values,
+                dataset_filter_values,
                 "_read",
                 lambda deadline, wall_ms, read: read(postgres),
             ),

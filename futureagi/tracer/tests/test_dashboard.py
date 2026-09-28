@@ -1887,7 +1887,7 @@ class TestMetricsEndpoint:
     def test_dataset_native_values_use_remaining_wall_and_result_ceiling(
         self, organization, workspace
     ):
-        from tracer.services import dataset_choice_values
+        from tracer.services import dataset_filter_values
         from tracer.views.dashboard import (
             _FINITE_NATIVE_FILTER_VALUE_MAX_RESULT_BYTES,
             DashboardViewSet,
@@ -1904,7 +1904,7 @@ class TestMetricsEndpoint:
             workspace=workspace,
             auth=None,
         )
-        run_statements = dataset_choice_values._read
+        run_statements = dataset_filter_values._read
         statements = []
 
         def observed_statements(deadline, wall_ms, read):
@@ -1922,7 +1922,7 @@ class TestMetricsEndpoint:
             return run_statements(deadline, wall_ms, observed_read)
 
         with patch.object(
-            dataset_choice_values, "_read", side_effect=observed_statements
+            dataset_filter_values, "_read", side_effect=observed_statements
         ):
             response = DashboardViewSet()._filter_values_dataset(
                 request,
@@ -1948,7 +1948,7 @@ class TestMetricsEndpoint:
     def test_dataset_native_values_do_not_relabel_programming_errors_as_retryable(self):
         from django.db import OperationalError, ProgrammingError
 
-        from tracer.services import dataset_choice_values
+        from tracer.services import dataset_filter_values
         from tracer.services.postgres_read_policy import ApplicationPostgresReadError
         from tracer.views.dashboard import DashboardViewSet
 
@@ -1959,7 +1959,7 @@ class TestMetricsEndpoint:
         )
 
         def read_values(error):
-            with patch.object(dataset_choice_values, "_read", side_effect=error):
+            with patch.object(dataset_filter_values, "_read", side_effect=error):
                 return DashboardViewSet()._filter_values_dataset(
                     request,
                     "dataset",

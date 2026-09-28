@@ -199,7 +199,7 @@ def test_eval_cells_whose_metadata_cannot_name_them_ship_no_metadata(
     column cross the result-byte cap and answer 503 (about 55k cells at dev's
     ~1.2 KB of metadata per cell).
     """
-    from tracer.services import dataset_choice_values
+    from tracer.services import dataset_filter_values
 
     column = _column(dataset, data_type="array", source="evaluation")
     reason = "an explanation " * 64
@@ -220,13 +220,13 @@ def test_eval_cells_whose_metadata_cannot_name_them_ship_no_metadata(
         )
     _cell(column, "[west]", value_infos={"output": "choices", "data": "[west]"})
 
-    decoder = dataset_choice_values.literal_choice
+    decoder = dataset_filter_values.literal_choice
     with (
         patch(
             "tracer.views.dashboard._FINITE_NATIVE_FILTER_VALUE_MAX_RESULT_BYTES",
             16 * 1024,
         ),
-        patch.object(dataset_choice_values, "literal_choice", wraps=decoder) as decoded,
+        patch.object(dataset_filter_values, "literal_choice", wraps=decoder) as decoded,
     ):
         assert _suggestions(auth_client, column) == ["[west]", "neutral", "positive"]
     assert [call.args[0] for call in decoded.call_args_list] == ["[west]"]
@@ -253,7 +253,7 @@ def test_container_cells_ship_no_metadata_however_it_was_encoded(
     storage and any label with a slash, quote or accent. Past the byte budget
     (64 MiB, ~21k such cells) the picker answered 503 on every open.
     """
-    from tracer.services import dataset_choice_values
+    from tracer.services import dataset_filter_values
 
     column = _column(dataset, data_type="array", source="evaluation")
     shapes = {
@@ -269,13 +269,13 @@ def test_container_cells_ship_no_metadata_however_it_was_encoded(
             _cell(column, stored, value_infos=_choice_metadata(labels, encoded=False))
     _cell(column, "[west]", value_infos={"output": "choices", "data": "[west]"})
 
-    decoder = dataset_choice_values.literal_choice
+    decoder = dataset_filter_values.literal_choice
     with (
         patch(
             "tracer.views.dashboard._FINITE_NATIVE_FILTER_VALUE_MAX_RESULT_BYTES",
             16 * 1024,
         ),
-        patch.object(dataset_choice_values, "literal_choice", wraps=decoder) as decoded,
+        patch.object(dataset_filter_values, "literal_choice", wraps=decoder) as decoded,
     ):
         assert _suggestions(auth_client, column) == [
             "[west]",

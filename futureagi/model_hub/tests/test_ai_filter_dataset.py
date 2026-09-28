@@ -35,14 +35,14 @@ class FetchDatasetColumnValuesTests(unittest.TestCase):
     def _fetch(self, rows, data_type="text", search_query="ish"):
         """Run the helper with ``rows`` as the PostgreSQL value read."""
         from model_hub.views import ai_filter
-        from tracer.services import dataset_choice_values
+        from tracer.services import dataset_filter_values
 
         fetch = mock.Mock(
             return_value=[{"val": row, "result_bytes": 0} for row in rows]
         )
         with (
             mock.patch.object(
-                dataset_choice_values,
+                dataset_filter_values,
                 "_read",
                 side_effect=lambda deadline, wall_ms, read: read(fetch),
             ) as read,
@@ -120,11 +120,11 @@ class FetchDatasetColumnValuesTests(unittest.TestCase):
         from django.db import OperationalError
 
         from model_hub.views import ai_filter
-        from tracer.services import dataset_choice_values
+        from tracer.services import dataset_filter_values
 
         with (
             mock.patch.object(
-                dataset_choice_values,
+                dataset_filter_values,
                 "_read",
                 side_effect=OperationalError("canceling statement due to timeout"),
             ),

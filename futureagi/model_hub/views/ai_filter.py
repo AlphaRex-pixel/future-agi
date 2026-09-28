@@ -656,7 +656,7 @@ def _fetch_dataset_column_values(
     import json as _json
 
     from tracer.services.clickhouse.read_budget import ReadDeadline
-    from tracer.services.dataset_choice_values import (
+    from tracer.services.dataset_filter_values import (
         UNAVAILABLE_READ_ERRORS,
         DatasetValuesTooBroad,
         read_column_values,
