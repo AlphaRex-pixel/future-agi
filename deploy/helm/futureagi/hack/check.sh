@@ -29,6 +29,8 @@ helm=${HELM:-helm}
 kubeconform=${KUBECONFORM:-kubeconform}
 # Python 3 with PyYAML.
 python=${PYTHON:-python3}
+# The oldest Kubernetes the chart supports (Chart.yaml kubeVersion) and the
+# newest GA minor kubeconform has schemas for; the workflows use these too.
 kube_versions=${KUBE_VERSIONS:-"1.27.0 1.37.0"}
 # JSON schemas of CRD kinds (Gateway API routes, ...), by group and version.
 crd_schemas=${CRD_SCHEMAS:-"https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json"}

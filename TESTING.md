@@ -154,12 +154,12 @@ passwords in URLs) out, that `hack/support-bundle.sh` stops its port-forward
 when it finishes or is killed, and that `.prettierignore` keeps the
 pre-commit formatter off the templates and the files `values_docs.py` writes.
 `KUBE_VERSIONS` picks the Kubernetes versions kubeconform validates against
-(CI: `1.27.0 1.37.0`), and `CRD_SCHEMAS` a mirror of the CRD schema catalog
-for the Gateway API, GKE, External Secrets, Argo CD and Flux kinds when CI has
-no network. `kind-smoke.sh` also checks that the first admin from
-`bootstrap.admin.existingSecret` signs in, that a resize of a bundled
-datastore's volume is refused and that `helm rollback` restores the chart's
-Secret.
+(default, and CI: `1.27.0 1.37.0`), and `CRD_SCHEMAS` a mirror of the CRD
+schema catalog for the Gateway API, GKE, External Secrets, Argo CD and Flux
+kinds when CI has no network. `kind-smoke.sh` also checks that the first
+admin from `bootstrap.admin.existingSecret` signs in, that a resize of a
+bundled datastore's volume is refused and that `helm rollback` restores the
+chart's Secret.
 
 The chart is published by `helm-release.yml`, not by hand: at a `vX.Y.Z` tag,
 after the images exist, it packages the chart with the images' digests

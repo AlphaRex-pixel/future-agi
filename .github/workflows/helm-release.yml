@@ -80,25 +80,6 @@ env:
   CHART_REPO: ghcr.io/future-agi/charts
   CHART_REF: ghcr.io/future-agi/charts/futureagi
   OIDC_ISSUER: https://token.actions.githubusercontent.com
-  # Helm 4 packages, pushes and checks; Helm 3 checks too (the chart supports
-  # both). Pinned with their sha256 (get.helm.sh/<file>.sha256sum).
-  HELM_VERSION: v4.3.0
-  HELM_SHA256: 86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
-  HELM3_VERSION: v3.22.0
-  HELM3_SHA256: 1e4ab49e429626cf6c6958d914248b78c9730803c2751b87627e171dc800e7bb
-  KUBECONFORM_VERSION: v0.6.7
-  KUBECONFORM_SHA256: 95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73
-  # Same as helm-ci.yml and hack/check.sh: the oldest Kubernetes the chart
-  # supports (Chart.yaml kubeVersion) and the newest GA minor kubeconform has
-  # schemas for.
-  KUBE_VERSIONS: "1.27.0 1.37.0"
-  COSIGN_VERSION: v3.1.3
-  # setup-oras installs this release by URL and sha256 (the release's
-  # oras_<version>_checksums.txt, linux_amd64): by version it knows only the
-  # ORAS releases it bundles, and v2.0.1 stops at 1.3.3. helm-ci.yml's
-  # release-tools job installs every tool pinned here on each pull request.
-  ORAS_VERSION: 1.3.4
-  ORAS_SHA256: f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454
 
 jobs:
   package:
@@ -134,23 +115,10 @@ jobs:
           persist-credentials: false
 
       - name: Install Helm 4, Helm 3 and kubeconform
-        run: |
-          set -euo pipefail
-          fetch() { # url sha256 -> file in $RUNNER_TEMP
-            curl -fsSL -o "$RUNNER_TEMP/${1##*/}" "$1"
-            echo "$2  $RUNNER_TEMP/${1##*/}" | sha256sum -c -
-          }
-          fetch "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" "$HELM_SHA256"
-          fetch "https://get.helm.sh/helm-${HELM3_VERSION}-linux-amd64.tar.gz" "$HELM3_SHA256"
-          fetch "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" "$KUBECONFORM_SHA256"
-          mkdir -p "$RUNNER_TEMP/bin" "$RUNNER_TEMP/helm3"
-          tar -xzf "$RUNNER_TEMP/helm-${HELM_VERSION}-linux-amd64.tar.gz" -C "$RUNNER_TEMP/bin" --strip-components=1 linux-amd64/helm
-          tar -xzf "$RUNNER_TEMP/helm-${HELM3_VERSION}-linux-amd64.tar.gz" -C "$RUNNER_TEMP/helm3" --strip-components=1 linux-amd64/helm
-          tar -xzf "$RUNNER_TEMP/kubeconform-linux-amd64.tar.gz" -C "$RUNNER_TEMP/bin" kubeconform
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/bin/helm" version
-          "$RUNNER_TEMP/helm3/helm" version
-          "$RUNNER_TEMP/bin/kubeconform" -v
+        uses: ./.github/actions/setup-helm-tools
+        with:
+          helm: "4 3"
+          kubeconform: "true"
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -213,7 +181,7 @@ jobs:
           CHART_VERSION: ${{ steps.version.outputs.chart-version }}
         run: |
           set -euo pipefail
-          for helm in "$RUNNER_TEMP/bin/helm" "$RUNNER_TEMP/helm3/helm"; do
+          for helm in "$RUNNER_TEMP/helm4/helm" "$RUNNER_TEMP/helm3/helm"; do
             unpacked=$(mktemp -d)
             tar -xzf "$RUNNER_TEMP/dist/futureagi-$CHART_VERSION.tgz" -C "$unpacked"
             cp -R deploy/helm/futureagi/hack deploy/helm/futureagi/ci "$unpacked/futureagi/"
@@ -278,19 +246,11 @@ jobs:
           timeout 60 bash -c 'until docker info >/dev/null 2>&1; do sleep 2; done'
           df -h / /mnt
 
-      - name: Install Helm
-        run: |
-          set -euo pipefail
-          curl -fsSL -o "$RUNNER_TEMP/helm.tgz" "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
-          echo "$HELM_SHA256  $RUNNER_TEMP/helm.tgz" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/bin"
-          tar -xzf "$RUNNER_TEMP/helm.tgz" -C "$RUNNER_TEMP/bin" --strip-components=1 linux-amd64/helm
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-
-      - name: Install kind
-        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+      - name: Install Helm and kind
+        uses: ./.github/actions/setup-helm-tools
         with:
-          install_only: true
+          helm: "4"
+          kind: "true"
 
       - name: Install, check and upgrade on kind
         # kind-smoke.sh with PUBLISHED=1 installs CHART, the .tgz, exactly as
@@ -342,30 +302,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: deploy/helm
+          sparse-checkout: |
+            deploy/helm
+            .github/actions
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: helm-chart-${{ needs.package.outputs.chart-version }}
           path: ${{ runner.temp }}/dist
 
-      - name: Install Helm
-        run: |
-          set -euo pipefail
-          curl -fsSL -o "$RUNNER_TEMP/helm.tgz" "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
-          echo "$HELM_SHA256  $RUNNER_TEMP/helm.tgz" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/bin"
-          tar -xzf "$RUNNER_TEMP/helm.tgz" -C "$RUNNER_TEMP/bin" --strip-components=1 linux-amd64/helm
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Install Helm, cosign and ORAS
+        uses: ./.github/actions/setup-helm-tools
         with:
-          cosign-release: ${{ env.COSIGN_VERSION }}
-
-      - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
-        with:
-          url: https://github.com/oras-project/oras/releases/download/v${{ env.ORAS_VERSION }}/oras_${{ env.ORAS_VERSION }}_linux_amd64.tar.gz
-          checksum: ${{ env.ORAS_SHA256 }}
+          helm: "4"
+          cosign: "true"
+          oras: "true"
 
       - name: Log in to ghcr.io
         # helm has its own registry config; docker's is read by oras and cosign.

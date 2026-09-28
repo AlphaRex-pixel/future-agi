@@ -17,10 +17,12 @@
 #           (release-please moves it), and hack/package.sh turns release
 #           notes into artifacthub.io/changes as expected.
 #   release-tools
-#           installs every tool helm-release.yml pins, with its own Install
-#           steps, versions and actions, and publishes nothing: that workflow
-#           runs only on a release tag, after the images are published, so a
-#           pin that cannot install would otherwise first fail a release.
+#           installs cosign and ORAS, which only helm-release.yml uses, through
+#           .github/actions/setup-helm-tools (where every tool of both
+#           workflows is pinned; static and kind install Helm, kubeconform and
+#           kind with it), and publishes nothing: helm-release.yml runs only on
+#           a release tag, after the images are published, so a pin that
+#           cannot install would otherwise first fail a release.
 #   kind    builds the backend, frontend, fi-collector and agentcc-gateway
 #           images from this checkout, installs the chart with Helm 4 on kind
 #           with every datastore bundled, and runs
@@ -46,6 +48,7 @@ on:
       - "futureagi/model_hub/apps.py"
       - ".github/workflows/helm-ci.yml"
       - ".github/workflows/helm-release.yml"
+      - ".github/actions/setup-helm-tools/**"
       - "release-please-config.json"
       - ".release-please-manifest.json"
       - ".prettierignore"
@@ -62,6 +65,7 @@ on:
       - "futureagi/model_hub/apps.py"
       - ".github/workflows/helm-ci.yml"
       - ".github/workflows/helm-release.yml"
+      - ".github/actions/setup-helm-tools/**"
       - "release-please-config.json"
       - ".release-please-manifest.json"
       - ".prettierignore"
@@ -73,20 +77,6 @@ permissions:
 concurrency:
   group: helm-ci-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
-env:
-  # The same Helm releases as helm-release.yml, pinned with their sha256
-  # (get.helm.sh/<file>.sha256sum). Helm 4 is what the release publishes with
-  # and what the kind job installs with.
-  HELM_VERSION: v4.3.0
-  HELM_SHA256: 86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
-  HELM3_VERSION: v3.22.0
-  HELM3_SHA256: 1e4ab49e429626cf6c6958d914248b78c9730803c2751b87627e171dc800e7bb
-  KUBECONFORM_VERSION: v0.6.7
-  KUBECONFORM_SHA256: 95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73
-  # The oldest Kubernetes the chart supports (Chart.yaml kubeVersion) and the
-  # newest GA minor kubeconform has schemas for.
-  KUBE_VERSIONS: "1.27.0 1.37.0"
 
 jobs:
   static:
@@ -103,23 +93,10 @@ jobs:
           persist-credentials: false
 
       - name: Install Helm ${{ matrix.helm }} and kubeconform
-        env:
-          MAJOR: ${{ matrix.helm }}
-        run: |
-          set -euo pipefail
-          if [ "$MAJOR" = 4 ]; then version=$HELM_VERSION sha=$HELM_SHA256; else version=$HELM3_VERSION sha=$HELM3_SHA256; fi
-          fetch() { # url sha256 -> file in $RUNNER_TEMP
-            curl -fsSL -o "$RUNNER_TEMP/${1##*/}" "$1"
-            echo "$2  $RUNNER_TEMP/${1##*/}" | sha256sum -c -
-          }
-          fetch "https://get.helm.sh/helm-${version}-linux-amd64.tar.gz" "$sha"
-          fetch "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" "$KUBECONFORM_SHA256"
-          mkdir -p "$RUNNER_TEMP/bin"
-          tar -xzf "$RUNNER_TEMP/helm-${version}-linux-amd64.tar.gz" -C "$RUNNER_TEMP/bin" --strip-components=1 linux-amd64/helm
-          tar -xzf "$RUNNER_TEMP/kubeconform-linux-amd64.tar.gz" -C "$RUNNER_TEMP/bin" kubeconform
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/bin/helm" version
-          "$RUNNER_TEMP/bin/kubeconform" -v
+        uses: ./.github/actions/setup-helm-tools
+        with:
+          helm: ${{ matrix.helm }}
+          kubeconform: "true"
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -285,137 +262,20 @@ jobs:
           retention-days: 7
 
   release-tools:
-    name: install the tools helm-release.yml pins
+    name: install the tools only helm-release.yml uses
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: .github/workflows
+          sparse-checkout: .github/actions
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Install cosign and ORAS
+        uses: ./.github/actions/setup-helm-tools
         with:
-          python-version: "3.12"
-
-      - name: helm-release.yml's pins and Install steps
-        # Exports its env for the steps below and writes each of its `run:`
-        # steps named "Install <tool>..." to a script. Fails when an action it
-        # installs a tool with is not used in this job with the same ref and
-        # inputs (or the reverse), or when this file's env disagrees with its
-        # env.
-        run: |
-          set -euo pipefail
-          python -m pip install PyYAML==6.0.3
-          python - <<'PY'
-          import os
-          import re
-          import sys
-
-          import yaml
-
-          release_file = ".github/workflows/helm-release.yml"
-          with open(release_file) as f:
-              release = yaml.safe_load(f)
-          with open(".github/workflows/helm-ci.yml") as f:
-              ci = yaml.safe_load(f)
-          # Actions that install no tool, or that publish.
-          not_tools = {
-              "actions/checkout",
-              "actions/upload-artifact",
-              "actions/download-artifact",
-              "actions/attest-build-provenance",
-          }
-
-
-          def steps(workflow, job_id=None):
-              for name, job in workflow["jobs"].items():
-                  if job_id is None or name == job_id:
-                      yield from job.get("steps") or []
-
-
-          def actions(workflow, job_id=None):
-              return [
-                  (step["uses"], step.get("with") or {})
-                  for step in steps(workflow, job_id)
-                  if "uses" in step and step["uses"].split("@")[0] not in not_tools
-              ]
-
-
-          errors = [
-              f"env {key} is {value} in helm-ci.yml, {release['env'][key]} here"
-              for key, value in ci["env"].items()
-              if key in release["env"] and str(value) != str(release["env"][key])
-          ]
-          wanted, installed = actions(release), actions(ci, "release-tools")
-          errors += [
-              f"{uses} (with: {inputs}) is not in helm-ci.yml's release-tools job with the same inputs"
-              for uses, inputs in wanted
-              if (uses, inputs) not in installed
-          ]
-          errors += [
-              f"helm-ci.yml's release-tools job uses {uses} (with: {inputs}), which this workflow does not"
-              for uses, inputs in installed
-              if (uses, inputs) not in wanted
-          ]
-          scripts = []
-          for step in steps(release):
-              # "Install Helm", not "Install, check and upgrade on kind".
-              if "run" not in step or not re.match(r"Install [A-Za-z]", step.get("name", "")) or step["run"] in scripts:
-                  continue
-              if "$" + "{{" in step["run"] or step.get("env"):  # split: Actions would expand it here
-                  errors.append(f"step {step['name']!r}: helm-ci.yml runs Install steps as written, so they take no expressions or step env")
-              scripts.append(step["run"])
-          if errors:
-              for error in errors:
-                  print(f"::error file={release_file}::{error}")
-              sys.exit(1)
-          with open(os.environ["GITHUB_ENV"], "a") as f:
-              for key, value in release["env"].items():
-                  f.write(f"{key}={value}\n")
-          os.makedirs(os.path.join(os.environ["RUNNER_TEMP"], "install"))
-          for i, script in enumerate(scripts):
-              with open(os.path.join(os.environ["RUNNER_TEMP"], "install", f"{i:02d}.sh"), "w") as f:
-                  f.write(script)
-          print(f"{len(wanted)} tool actions and {len(scripts)} Install steps of {release_file}")
-          PY
-
-      - name: Run helm-release.yml's Install steps
-        run: |
-          set -euo pipefail
-          for script in "$RUNNER_TEMP"/install/*.sh; do
-            echo "::group::$script"
-            cat "$script"
-            bash --noprofile --norc -eo pipefail "$script"
-            echo "::endgroup::"
-          done
-
-      # The actions helm-release.yml installs tools with, with its inputs (the
-      # first step checks that they are the same).
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        with:
-          cosign-release: ${{ env.COSIGN_VERSION }}
-
-      - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
-        with:
-          url: https://github.com/oras-project/oras/releases/download/v${{ env.ORAS_VERSION }}/oras_${{ env.ORAS_VERSION }}_linux_amd64.tar.gz
-          checksum: ${{ env.ORAS_SHA256 }}
-
-      - name: Install kind
-        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
-        with:
-          install_only: true
-
-      - name: The installed tools are the pinned versions
-        run: |
-          set -euo pipefail
-          helm version --short | grep -F "$HELM_VERSION+"
-          "$RUNNER_TEMP/helm3/helm" version --short | grep -F "$HELM3_VERSION+"
-          kubeconform -v | grep -Fx "$KUBECONFORM_VERSION"
-          cosign version 2>&1 | grep -E "^GitVersion: +$COSIGN_VERSION\$"
-          oras version | grep -E "^Version: +$ORAS_VERSION\$"
-          kind version
-          python -c 'import yaml; print("PyYAML", yaml.__version__)'
+          cosign: "true"
+          oras: "true"
 
   kind:
     name: install on kind (bundled datastores)
@@ -506,20 +366,11 @@ jobs:
             type=registry,ref=${{ env.BUILD_CACHE }}:agentcc-gateway-amd64
             type=registry,ref=${{ env.CACHE_REPO }}:gateway
 
-      - name: Install Helm
-        run: |
-          set -euo pipefail
-          curl -fsSL -o "$RUNNER_TEMP/helm.tgz" "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
-          echo "$HELM_SHA256  $RUNNER_TEMP/helm.tgz" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/bin"
-          tar -xzf "$RUNNER_TEMP/helm.tgz" -C "$RUNNER_TEMP/bin" --strip-components=1 linux-amd64/helm
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/bin/helm" version
-
-      - name: Install kind
-        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+      - name: Install Helm and kind
+        uses: ./.github/actions/setup-helm-tools
         with:
-          install_only: true
+          helm: "4"
+          kind: "true"
 
       - name: Install, check and upgrade on kind
         env:
