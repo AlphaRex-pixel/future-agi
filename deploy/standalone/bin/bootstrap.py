@@ -72,12 +72,10 @@ STATIC_COLLECTED = Path("/etc/futureagi/static-collected")
 RETRY_DELAY_SECONDS = 30
 TRUE = ("1", "true", "yes", "on")
 # Set to adopt a database created by the Distributed setup (see
-# refuse_foreign_database). The name it had before the rename still works.
+# refuse_foreign_database).
 ADOPT_DISTRIBUTED_INSTALL = "FI_ADOPT_DISTRIBUTED_INSTALL_DATA"
-ADOPT_DISTRIBUTED_INSTALL_ALIASES = ("FI_ADOPT_FULL_INSTALL_DATA",)
-# Written after the first successful boot on an adopted database. The file
-# name predates the rename; installs that adopted a database already have it.
-ADOPTED = DATA / ".adopted-full-install"
+# Written after the first successful boot on an adopted database.
+ADOPTED = DATA / ".adopted-distributed-install"
 
 # Boot progress for the UI's starting page. bin/start empties this directory
 # on every container start. World-readable: nginx's workers read it.
@@ -562,10 +560,7 @@ def refuse_foreign_database() -> bool:
                 )
     if not reasons:
         return False
-    if any(
-        os.environ.get(name, "").lower() in TRUE
-        for name in (ADOPT_DISTRIBUTED_INSTALL, *ADOPT_DISTRIBUTED_INSTALL_ALIASES)
-    ):
+    if os.environ.get(ADOPT_DISTRIBUTED_INSTALL, "").lower() in TRUE:
         log(f"adopting a distributed install's database ({'; '.join(reasons)})")
         return True
     raise BootstrapError(

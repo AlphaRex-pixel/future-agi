@@ -420,7 +420,7 @@ class StackTest(unittest.TestCase):
             ("PROJECT_ROOT", BACKEND),
             ("READY", data / ".bootstrap-ok"),
             ("FINGERPRINT", data / ".bootstrap-fingerprint"),
-            ("ADOPTED", data / ".adopted-full-install"),
+            ("ADOPTED", data / ".adopted-distributed-install"),
             ("BUILD_ID", self.tmp / "build-id"),
             ("STATIC_COLLECTED", self.tmp / "static-collected"),
             ("RUN_DIR", run),
@@ -706,21 +706,26 @@ class ForeignDatabaseTest(StackTest):
         self.stack.peerdb_slots = 2
         self.assert_refused("it has PeerDB replication slots")
 
-        for name, value in (
-            ("FI_ADOPT_DISTRIBUTED_INSTALL_DATA", "true"),
-            ("FI_ADOPT_DISTRIBUTED_INSTALL_DATA", "YES"),
-            # The name the flag had before the rename.
-            ("FI_ADOPT_FULL_INSTALL_DATA", "1"),
-        ):
-            with self.subTest(name=name), mock.patch.dict(os.environ, {name: value}):
+        for value in ("true", "YES", "1"):
+            with (
+                self.subTest(value=value),
+                mock.patch.dict(
+                    os.environ, {"FI_ADOPT_DISTRIBUTED_INSTALL_DATA": value}
+                ),
+            ):
                 self.assertTrue(bootstrap.refuse_foreign_database())
         self.assertIn(
             "[bootstrap] adopting a distributed install's database "
             "(it has PeerDB replication slots)",
             self.lines(),
         )
-        with mock.patch.dict(os.environ, {"FI_ADOPT_DISTRIBUTED_INSTALL_DATA": "no"}):
-            self.assert_refused("PeerDB replication slots")
+        for env in (
+            {"FI_ADOPT_DISTRIBUTED_INSTALL_DATA": "no"},
+            # A name the flag never shipped under.
+            {"FI_ADOPT_FULL_INSTALL_DATA": "true"},
+        ):
+            with self.subTest(env=env), mock.patch.dict(os.environ, env):
+                self.assert_refused("PeerDB replication slots")
 
     def test_temporal_databases_refuse_until_an_adopted_boot_succeeded(self):
         self.stack.temporal_databases = 1
