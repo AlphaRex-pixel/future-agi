@@ -86,10 +86,8 @@ func TestClickHouseDirectObservedCatalogFromOTLPHTTP(t *testing.T) {
 	if got := observedLocalSQL(t, origin, directDB, "SELECT source_kind, value_json FROM observed_attribute_values WHERE attribute_key = 'model'"); got != "system_attribute\t\"direct-model\"" {
 		t.Fatal("system model suggestion missing", got)
 	}
+	smoke.requireTrustedScope(t, origin, directDB)
 	for _, table := range []string{observedcatalog.KeyTable, observedcatalog.ValueTable} {
-		if got := observedLocalSQL(t, origin, directDB, "SELECT count() FROM "+table+" WHERE organization_id != '"+smoke.result.OrgID+"' OR workspace_id != '"+smoke.result.WorkspaceID+"' OR project_id != '"+smoke.project+"'"); got != "0" {
-			t.Fatal("index used untrusted payload scope", table, got)
-		}
 		logical := "SELECT * EXCEPT (first_seen, last_seen), min(first_seen), max(last_seen) FROM %s." + table + " GROUP BY ALL ORDER BY ALL FORMAT JSONEachRow"
 		direct := observedLocalSQL(t, origin, "default", fmt.Sprintf(logical, directDB))
 		viaConsumer := observedLocalSQL(t, origin, "default", fmt.Sprintf(logical, consumerDB))

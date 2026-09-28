@@ -122,11 +122,7 @@ func TestObservedCatalogHTTPToLocalStack(t *testing.T) {
 	if got := observedLocalSQL(t, origin, catalogDB, "SELECT count() FROM observed_attribute_values WHERE attribute_key = 'customer.items' AND attribute_type = 'array' AND value_json IN ('\"1\"', '1', 'true')"); got != "3" {
 		t.Fatal("array member scalar kinds lost", got)
 	}
-	for _, table := range []string{observedcatalog.KeyTable, observedcatalog.ValueTable} {
-		if got := observedLocalSQL(t, origin, catalogDB, "SELECT count() FROM "+table+" WHERE organization_id != '"+smoke.result.OrgID+"' OR workspace_id != '"+smoke.result.WorkspaceID+"' OR project_id != '"+smoke.project+"'"); got != "0" {
-			t.Fatal("catalog used untrusted payload scope", table, got)
-		}
-	}
+	smoke.requireTrustedScope(t, origin, catalogDB)
 }
 
 // observedIntegrationOrigin is OBS_TEST_CH_URL, which must name a ClickHouse
@@ -271,6 +267,18 @@ func (smoke *observedOTLPSmoke) restartSpool(t *testing.T) {
 		t.Fatal(err)
 	}
 	smoke.spool = spool
+}
+
+// requireTrustedScope fails if a row of either index table in database has an
+// organization, workspace or project other than the ones authentication
+// resolved.
+func (smoke *observedOTLPSmoke) requireTrustedScope(t *testing.T, origin, database string) {
+	t.Helper()
+	for _, table := range []string{observedcatalog.KeyTable, observedcatalog.ValueTable} {
+		if got := observedLocalSQL(t, origin, database, "SELECT count() FROM "+table+" WHERE organization_id != '"+smoke.result.OrgID+"' OR workspace_id != '"+smoke.result.WorkspaceID+"' OR project_id != '"+smoke.project+"'"); got != "0" {
+			t.Fatal("index used untrusted payload scope", table, got)
+		}
+	}
 }
 
 type observedHandoff struct {
