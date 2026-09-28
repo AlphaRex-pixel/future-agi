@@ -361,6 +361,36 @@ func TestLoadFromEnv_AllowPrivateProviderURLs(t *testing.T) {
 	}
 }
 
+// A gateway given the control-plane URL reloads Django's keys on start and,
+// with an interval, keeps them in step; the shared admin token authenticates
+// those calls unless a separate control-plane token is set.
+func TestLoadFromEnv_ControlPlaneSync(t *testing.T) {
+	t.Setenv("AGENTCC_CONTROL_PLANE_URL", "http://backend:8000")
+	t.Setenv("AGENTCC_SYNC_ON_STARTUP", "true")
+	t.Setenv("AGENTCC_SYNC_INTERVAL", "30s")
+	t.Setenv("AGENTCC_ADMIN_TOKEN", "shared-admin-token")
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if !cfg.ControlPlane.SyncOnStartup || cfg.ControlPlane.SyncInterval != 30*time.Second {
+		t.Errorf("sync_on_startup = %v, sync_interval = %v, want true, 30s", cfg.ControlPlane.SyncOnStartup, cfg.ControlPlane.SyncInterval)
+	}
+	if cfg.ControlPlane.AdminToken != "shared-admin-token" {
+		t.Errorf("control plane token = %q, want the admin token", cfg.ControlPlane.AdminToken)
+	}
+
+	t.Setenv("AGENTCC_CONTROL_PLANE_TOKEN", "separate-token")
+	cfg, err = Load("")
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+	if cfg.ControlPlane.AdminToken != "separate-token" {
+		t.Errorf("control plane token = %q, want the explicit one", cfg.ControlPlane.AdminToken)
+	}
+}
+
 func testLicensePublicKey(t *testing.T) string {
 	t.Helper()
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)

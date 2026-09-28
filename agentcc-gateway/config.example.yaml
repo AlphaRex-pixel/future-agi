@@ -697,6 +697,11 @@ logging:
 #     max_size: 1048576                # 1MB per entry
 
 # Pull config (keys, budgets, RBAC) from a Django control plane.
+# Env: AGENTCC_CONTROL_PLANE_URL, AGENTCC_CONTROL_PLANE_TOKEN (defaults to the
+# admin token), AGENTCC_WEBHOOK_SECRET, AGENTCC_SYNC_ON_STARTUP,
+# AGENTCC_SYNC_INTERVAL. Without sync_on_startup, keys created in the UI stop
+# working when the gateway restarts; with more than one replica, set an
+# interval so a key created on one reaches the others.
 # control_plane:
 #   url: "http://localhost:8000"
 #   admin_token: "${CONTROL_PLANE_ADMIN_TOKEN}"

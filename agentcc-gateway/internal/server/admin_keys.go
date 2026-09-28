@@ -3,7 +3,10 @@ package server
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -108,6 +111,49 @@ func (h *KeyHandlers) CreateKey(w http.ResponseWriter, r *http.Request) {
 		"providers":  key.AllowedProviders,
 		"created_at": key.CreatedAt,
 	})
+}
+
+// ImportKeys handles POST /-/keys/sync: the control plane pushes keys it holds
+// that this gateway lacks, such as after a restart without startup sync. Keys
+// travel by hash; the raw key never leaves the control plane. Additive: a key
+// whose hash is already loaded is left as it is, revoked or not.
+func (h *KeyHandlers) ImportKeys(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+
+	var req struct {
+		Keys []auth.SyncedKey `json:"keys"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 10<<20)).Decode(&req); err != nil {
+		models.WriteError(w, models.ErrBadRequest("invalid_json", "Invalid JSON: "+err.Error()))
+		return
+	}
+	for i, k := range req.Keys {
+		if k.ID == "" || !isSHA256Hex(k.KeyHash) {
+			models.WriteError(w, models.ErrBadRequest("invalid_key",
+				fmt.Sprintf("keys[%d]: id and a hex SHA-256 key_hash are required", i)))
+			return
+		}
+	}
+
+	loaded := h.keyStore.LoadFromHashes(req.Keys)
+	slog.Info("keys imported from control plane", "received", len(req.Keys), "loaded", loaded)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"received": len(req.Keys),
+		"loaded":   loaded,
+	})
+}
+
+func isSHA256Hex(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
 }
 
 // GetKey handles GET /-/keys/{key_id}.

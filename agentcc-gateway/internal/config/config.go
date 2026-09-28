@@ -1042,6 +1042,13 @@ func Load(path string) (*Config, error) {
 
 	loadFromEnv(cfg)
 
+	// The control plane checks the gateway's calls against the same shared
+	// admin token (Django's AGENTCC_ADMIN_TOKEN), so a gateway told only the
+	// one token can still sync keys and org configs.
+	if cfg.ControlPlane.URL != "" && cfg.ControlPlane.AdminToken == "" {
+		cfg.ControlPlane.AdminToken = cfg.Admin.Token
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
@@ -1106,6 +1113,11 @@ func loadFromEnv(cfg *Config) {
 	}
 	if v := os.Getenv("AGENTCC_SYNC_ON_STARTUP"); v != "" {
 		cfg.ControlPlane.SyncOnStartup = v == "true" || v == "1"
+	}
+	if v := os.Getenv("AGENTCC_SYNC_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.ControlPlane.SyncInterval = d
+		}
 	}
 	if v := os.Getenv("AGENTCC_WEBHOOK_SECRET"); v != "" {
 		cfg.ControlPlane.WebhookSecret = v

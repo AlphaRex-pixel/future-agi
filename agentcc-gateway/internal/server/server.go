@@ -552,6 +552,7 @@ func New(cfg *config.Config, configPath string, registry *providers.Registry, en
 		s.keyHandlers = NewKeyHandlers(keyStore, cfg.Admin.Token)
 		router.Handle("GET", "/-/keys", s.keyHandlers.ListKeys)
 		router.Handle("POST", "/-/keys", s.keyHandlers.CreateKey)
+		router.Handle("POST", "/-/keys/sync", s.keyHandlers.ImportKeys)
 		router.Handle("GET", "/-/keys/{key_id}", s.keyHandlers.GetKey)
 		router.Handle("DELETE", "/-/keys/{key_id}", s.keyHandlers.RevokeKey)
 		router.Handle("PUT", "/-/keys/{key_id}", s.keyHandlers.UpdateKey)

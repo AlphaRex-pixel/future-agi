@@ -260,8 +260,10 @@ func (ks *KeyStore) Create(name, owner string, models, providers []string, metad
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
 
-	ks.counter++
-	id := fmt.Sprintf("key_%d", ks.counter)
+	id := newKeyID()
+	for ks.byID[id] != nil {
+		id = newKeyID()
+	}
 
 	key := &APIKey{
 		ID:               id,
@@ -364,6 +366,7 @@ type SyncedKey struct {
 	Name      string            `json:"name"`
 	Owner     string            `json:"owner"`
 	KeyHash   string            `json:"key_hash"`
+	KeyPrefix string            `json:"key_prefix"`
 	Models    []string          `json:"models"`
 	Providers []string          `json:"providers"`
 	Metadata  map[string]string `json:"metadata"`
@@ -376,6 +379,7 @@ func syncedKeyToAPIKey(sk SyncedKey, id string) *APIKey {
 	return &APIKey{
 		ID:               id,
 		KeyHash:          sk.KeyHash,
+		KeyPrefix:        sk.KeyPrefix,
 		Name:             sk.Name,
 		Owner:            sk.Owner,
 		Status:           "active",
@@ -407,10 +411,12 @@ func (ks *KeyStore) LoadFromHashes(keys []SyncedKey) int {
 			continue
 		}
 
-		ks.counter++
 		id := sk.ID
 		if id == "" {
-			id = fmt.Sprintf("key_%d", ks.counter)
+			id = newKeyID()
+		}
+		if idTaken(ks.byID, id, sk) {
+			continue
 		}
 
 		key := syncedKeyToAPIKey(sk, id)
@@ -470,10 +476,12 @@ func (ks *KeyStore) SyncFromHashes(keys []SyncedKey) int {
 			continue
 		}
 
-		ks.counter++
 		id := sk.ID
 		if id == "" {
-			id = fmt.Sprintf("key_%d", ks.counter)
+			id = newKeyID()
+		}
+		if idTaken(ks.byID, id, sk) {
+			continue
 		}
 
 		key := syncedKeyToAPIKey(sk, id)
@@ -486,7 +494,32 @@ func (ks *KeyStore) SyncFromHashes(keys []SyncedKey) int {
 	return loaded
 }
 
+// idTaken reports whether id already belongs to a different key, and logs it.
+// Such a synced key is skipped rather than loaded over the other one: the
+// displaced key would stay usable by hash but drop out of byID, and revoking
+// the synced ID would then revoke the wrong key.
+func idTaken(byID map[string]*APIKey, id string, sk SyncedKey) bool {
+	existing, ok := byID[id]
+	if !ok || existing.KeyHash == sk.KeyHash {
+		return false
+	}
+	slog.Warn("key sync: skipping key whose id belongs to another key",
+		"id", id, "name", sk.Name, "existing_name", existing.Name, "existing_source", existing.Source)
+	return true
+}
+
 // --- Helpers ---
+
+// newKeyID returns the ID for a key the gateway mints. It is random, not
+// counted: the control plane stores keys by ID and outlives this process, so a
+// counter that restarts at key_1 would reissue IDs it already holds.
+func newKeyID() string {
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("crypto/rand.Read failed: %v", err))
+	}
+	return "key_" + hex.EncodeToString(b)
+}
 
 // HashKey returns the SHA-256 hex hash of a key.
 func HashKey(key string) string {
