@@ -54,7 +54,9 @@ work=$(mktemp -d)
 dir="$work/$name"
 mkdir -p "$dir/logs" "$dir/describe"
 # The port-forward (the only background process) is stopped on every exit:
-# finished, failed, Ctrl-C (a background job ignores SIGINT) or killed.
+# finished, failed, Ctrl-C (a background job ignores SIGINT) or killed. bash
+# runs the EXIT trap on HUP, INT and TERM as well, then dies of the signal,
+# so a caller knows it was interrupted: trapping them to exit would hide it.
 forward=""
 stop_forward() {
   [ -n "$forward" ] || return 0
@@ -63,9 +65,6 @@ stop_forward() {
   forward=""
 }
 trap 'stop_forward; rm -rf "$work"' EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
 selector="app.kubernetes.io/instance=$release"
 k() { "$kubectl" -n "$namespace" "$@"; }
 

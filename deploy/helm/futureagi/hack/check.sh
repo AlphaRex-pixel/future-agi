@@ -284,7 +284,7 @@ echo "== hack/support-bundle.sh leaves no port-forward behind"
 # Against a fake kubectl, helm and curl: kubectl's port-forward is one
 # long-lived process, as the real one is, that records its PID. The script
 # must stop it, and remove its working directory, when it finishes and when
-# it is stopped with SIGTERM.
+# it is killed.
 fake="$out/support-bundle"
 rm -rf "$fake"
 mkdir -p "$fake/bin" "$fake/tmp"
@@ -306,7 +306,7 @@ case " $* " in
 esac
 SH
 chmod +x "$fake/bin/kubectl" "$fake/bin/helm" "$fake/bin/curl"
-# env execs the script: $! of a background run is the script itself.
+# env execs the script: the process run or signalled is the script itself.
 support_bundle=(env FAKE_STATE="$fake" KUBECTL="$fake/bin/kubectl" HELM="$fake/bin/helm" PATH="$fake/bin:$PATH"
   TMPDIR="$fake/tmp" bash "$chart/hack/support-bundle.sh" -o "$fake/out")
 port_forward_stopped() {
@@ -323,18 +323,43 @@ touch "$fake/healthy"
 "${support_bundle[@]}" >"$fake/run.txt" 2>&1 || { cat "$fake/run.txt" >&2; fail "support-bundle.sh against a fake cluster"; }
 ls "$fake/out"/futureagi-support-futureagi-*.tar.gz >/dev/null || fail "support-bundle.sh wrote no bundle"
 port_forward_stopped "finished"
+# Killed while it waits for the backend, with SIGTERM and with Ctrl-C (SIGINT
+# to its whole process group): after cleaning up it must die of the signal,
+# so that a caller (a loop stopped with Ctrl-C) knows. A shell's $? reads
+# 128+n either way, hence Python.
+cat >"$fake/kill.py" <<'PY'
+# kill.py FAKE SIGNAL CMD...: runs CMD, sends it SIGNAL once its port-forward
+# is up (INT to the process group, as Ctrl-C does) and says how it ended.
+import os
+import signal
+import subprocess
+import sys
+import time
+
+fake, sig, cmd = sys.argv[1], signal.Signals["SIG" + sys.argv[2]], sys.argv[3:]
+pid_file = os.path.join(fake, "port-forward.pid")
+with open(os.path.join(fake, "run.txt"), "w") as log:
+    bundle = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+for _ in range(100):
+    if os.path.exists(pid_file) and os.path.getsize(pid_file):
+        break
+    time.sleep(0.1)
+try:
+    if sig == signal.SIGINT:
+        os.killpg(bundle.pid, sig)
+    else:
+        bundle.send_signal(sig)
+except ProcessLookupError:
+    pass
+code = bundle.wait()
+print(f"killed by {sig.name}" if code == -sig else f"exited {code}")
+PY
 rm -f "$fake/healthy"
-"${support_bundle[@]}" >"$fake/run.txt" 2>&1 &
-bundle=$!
-for _ in $(seq 1 100); do
-  [ -e "$fake/port-forward.pid" ] && break
-  sleep 0.1
+for sig in TERM INT; do
+  how=$("$python" "$fake/kill.py" "$fake" "$sig" "${support_bundle[@]}") || true
+  [ "$how" = "killed by SIG$sig" ] || { cat "$fake/run.txt" >&2; fail "support-bundle.sh ${how:-failed} on SIG$sig, not killed by it"; }
+  port_forward_stopped "killed with SIG$sig"
 done
-kill -TERM "$bundle"
-status=0
-wait "$bundle" || status=$?
-[ "$status" -eq 143 ] || { cat "$fake/run.txt" >&2; fail "support-bundle.sh exited $status on SIGTERM, not 143"; }
-port_forward_stopped "stopped with SIGTERM"
 rm -rf "$fake"
 echo "ok   stopped"
 
