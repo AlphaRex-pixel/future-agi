@@ -21,7 +21,7 @@ const maxFlushRetries = 3 // drop records after this many consecutive failures
 // about it at most this often.
 const overflowWarnInterval = 10 * time.Second
 
-// On shutdown, Close tries the webhook up to finalFlushAttempts times, this far
+// On shutdown, Close tries each batch up to finalFlushAttempts times, this far
 // apart, before its deadline: a backend that is restarting may be back.
 var (
 	finalFlushAttempts  = 3
@@ -298,7 +298,7 @@ func (f *LogFlusher) flush() {
 }
 
 // Close stops accepting records and makes a last attempt to deliver the
-// buffered ones, trying the webhook up to finalFlushAttempts times until ctx
+// buffered ones, trying each batch up to finalFlushAttempts times until ctx
 // ends. A flush already sending finishes first (or is cut off when ctx ends),
 // so no batch is sent twice. It logs how many records were not delivered.
 func (f *LogFlusher) Close(ctx context.Context) {
@@ -317,17 +317,15 @@ func (f *LogFlusher) Close(ctx context.Context) {
 	defer f.sendMu.Unlock()
 
 	records := f.take()
+	var undelivered int
 	var err error
 	if len(records) > 0 {
-		err = f.deliver(ctx, records)
+		undelivered, err = f.deliver(ctx, records)
 	}
 
 	f.mu.Lock()
-	undelivered := f.lost
+	undelivered += f.lost
 	f.mu.Unlock()
-	if err != nil {
-		undelivered += len(records)
-	}
 	switch {
 	case undelivered > 0:
 		attrs := []any{"undelivered", undelivered}
@@ -346,9 +344,22 @@ func (f *LogFlusher) Close(ctx context.Context) {
 	slog.Info("log flusher stopped")
 }
 
-// deliver sends records, trying again after a failed send or a server error,
-// up to finalFlushAttempts sends in all while ctx lasts.
-func (f *LogFlusher) deliver(ctx context.Context, records []TraceRecord) error {
+// deliver sends records in batches of at most maxBuffer, so one failed send
+// does not lose the whole backlog: up to twice maxBuffer buffered records, plus
+// as many from a flush that gave its batch back. It stops at the first batch it
+// cannot deliver and returns how many records it did not deliver, and why.
+func (f *LogFlusher) deliver(ctx context.Context, records []TraceRecord) (int, error) {
+	for start := 0; start < len(records); start += f.maxBuffer {
+		if err := f.deliverBatch(ctx, records[start:min(start+f.maxBuffer, len(records))]); err != nil {
+			return len(records) - start, err
+		}
+	}
+	return 0, nil
+}
+
+// deliverBatch sends one batch, trying again after a failed send or a server
+// error, up to finalFlushAttempts sends in all while ctx lasts.
+func (f *LogFlusher) deliverBatch(ctx context.Context, records []TraceRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err // a send cut off at the deadline left these: don't encode them
 	}

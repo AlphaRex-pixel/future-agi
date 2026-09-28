@@ -390,16 +390,68 @@ func TestLogFlusherClose_IsBoundedWhenTheWebhookHangs(t *testing.T) {
 	}
 }
 
-// After a send cut off at Close's deadline, the last flush gives up before
-// it encodes the batch, which can hold four times maxBuffer records.
+// After a send cut off at Close's deadline, the last flush gives up on the
+// backlog without encoding any of it.
 func TestLogFlusherDeliver_DoesNotEncodeAfterTheDeadline(t *testing.T) {
 	f := NewLogFlusher("http://127.0.0.1:1", "secret", time.Hour, 100)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	// Encoding this record fails, so any other error means deliver encoded it.
 	records := []TraceRecord{{RequestID: "req-1", RequestBodyJSON: json.RawMessage("{")}}
-	if err := f.deliver(ctx, records); !errors.Is(err, context.Canceled) {
-		t.Errorf("deliver after the deadline returned %v, want %v before encoding", err, context.Canceled)
+	if n, err := f.deliver(ctx, records); n != 1 || !errors.Is(err, context.Canceled) {
+		t.Errorf("deliver after the deadline returned %d, %v, want 1, %v before encoding", n, err, context.Canceled)
+	}
+}
+
+// Close sends a backlog larger than maxBuffer in batches of maxBuffer, and
+// stops at the first batch it cannot deliver: that batch and the ones after
+// it are undelivered, not the whole backlog.
+func TestLogFlusherClose_SendsTheBacklogInBatches(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		answerFirst     int
+		wantDelivered   []string
+		wantRequests    int
+		wantUndelivered int64
+	}{
+		{"when the second batch fails", http.StatusOK, []string{"req-1", "req-2"}, 1 + finalFlushAttempts, 2},
+		{"when the first batch fails", http.StatusServiceUnavailable, nil, finalFlushAttempts, 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			shortRetryWait(t)
+			logs, restore := installCapturingLogger()
+			defer restore()
+			wh := newFakeLogWebhook(t, func(n int, _ *http.Request) int {
+				if n == 1 {
+					return tc.answerFirst
+				}
+				return http.StatusServiceUnavailable
+			})
+			const maxBuffer = 2
+			f := NewLogFlusher(wh.URL, "secret", time.Hour, maxBuffer)
+			enqueueN(f, 2*maxBuffer)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			f.Close(ctx)
+
+			wh.mu.Lock()
+			for _, batch := range wh.batches {
+				if len(batch) > maxBuffer {
+					t.Errorf("webhook was sent a batch of %d records, want at most %d", len(batch), maxBuffer)
+				}
+			}
+			wh.mu.Unlock()
+			if got := wh.delivered(); !slices.Equal(got, tc.wantDelivered) {
+				t.Errorf("webhook was delivered %q, want %q", got, tc.wantDelivered)
+			}
+			if n := wh.requests(); n != tc.wantRequests {
+				t.Errorf("webhook got %d requests, want %d", n, tc.wantRequests)
+			}
+			if n, _, _ := undeliveredLogged(t, logs); n != tc.wantUndelivered {
+				t.Errorf("logged undelivered = %d, want %d", n, tc.wantUndelivered)
+			}
+		})
 	}
 }
 
