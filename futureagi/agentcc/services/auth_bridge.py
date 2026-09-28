@@ -335,6 +335,18 @@ def _restore_missing_keys(client, missing_keys):
     if not payload:
         return 0
 
-    loaded = client.import_keys(payload).get("loaded", 0)
+    try:
+        loaded = client.import_keys(payload).get("loaded", 0)
+    except GatewayClientError as e:
+        # A gateway older than POST /-/keys/sync cannot take keys back. Sync
+        # still did the rest, so report what it could not restore.
+        if e.status_code not in (404, 405):
+            raise
+        logger.warning(
+            "sync_keys_missing_from_gateway",
+            missing=len(payload),
+            hint="this gateway cannot import keys: upgrade it, or restart it to trigger startup sync",
+        )
+        return 0
     logger.info("sync_keys_restored", pushed=len(payload), loaded=loaded)
     return loaded

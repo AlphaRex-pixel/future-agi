@@ -10,6 +10,7 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+import structlog
 from django.utils import timezone
 
 from accounts.models import Organization
@@ -384,6 +385,58 @@ class TestAuthBridgeKeyIdsAndSync:
         # What goes over the wire must be JSON, never the raw key.
         json.dumps(pushed)
         assert "key" not in pushed[0]
+
+    @pytest.mark.parametrize("status_code", [404, 405])
+    @patch("agentcc.services.auth_bridge.get_gateway_client")
+    def test_sync_still_works_with_a_gateway_that_cannot_import_keys(
+        self, mock_get_client, status_code, organization, workspace
+    ):
+        # A gateway older than POST /-/keys/sync: Sync reports the keys it
+        # could not restore instead of failing.
+        AgentccAPIKey.objects.create(
+            gateway_key_id="key_lost",
+            name="lost-on-restart",
+            organization=organization,
+            workspace=workspace,
+            key_hash="d" * 64,
+        )
+        mock_client = MagicMock()
+        mock_client.list_keys.return_value = {"data": []}
+        mock_client.import_keys.side_effect = GatewayClientError(
+            f"Gateway returned {status_code}: not found", status_code=status_code
+        )
+        mock_get_client.return_value = mock_client
+
+        with structlog.testing.capture_logs() as logs:
+            synced = auth_bridge.sync_keys(org=organization)
+
+        assert synced == 0
+        (warning,) = [
+            log for log in logs if log["event"] == "sync_keys_missing_from_gateway"
+        ]
+        assert warning["log_level"] == "warning"
+        assert warning["missing"] == 1
+
+    @patch("agentcc.services.auth_bridge.get_gateway_client")
+    def test_sync_fails_when_the_gateway_refuses_the_import(
+        self, mock_get_client, organization, workspace
+    ):
+        AgentccAPIKey.objects.create(
+            gateway_key_id="key_lost",
+            name="lost-on-restart",
+            organization=organization,
+            workspace=workspace,
+            key_hash="d" * 64,
+        )
+        mock_client = MagicMock()
+        mock_client.list_keys.return_value = {"data": []}
+        mock_client.import_keys.side_effect = GatewayClientError(
+            "Gateway returned 500: boom", status_code=500
+        )
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(GatewayClientError):
+            auth_bridge.sync_keys(org=organization)
 
     @patch("agentcc.services.auth_bridge.get_gateway_client")
     def test_sync_revokes_on_the_gateway_what_django_revoked(
