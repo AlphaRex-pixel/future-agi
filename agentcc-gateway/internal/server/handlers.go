@@ -1187,13 +1187,13 @@ func orgProviderError(model, providerID string, err error) *models.APIError {
 
 	var urlErr *providers.BaseURLError
 	if errors.As(err, &urlErr) {
-		status, code := http.StatusForbidden, "provider_base_url_blocked"
+		status, errType, code := http.StatusForbidden, models.ErrTypePermission, "provider_base_url_blocked"
 		if urlErr.Reason == providers.BaseURLInvalid || urlErr.Reason == providers.BaseURLUnresolvable {
-			status, code = http.StatusBadGateway, "provider_base_url_unusable"
+			status, errType, code = http.StatusBadGateway, models.ErrTypeServer, "provider_base_url_unusable"
 		}
 		return &models.APIError{
 			Status: status,
-			Type:   models.ErrTypePermission,
+			Type:   errType,
 			Code:   code,
 			Message: fmt.Sprintf("model %q is served by your organization's provider %q, but the gateway will not call it: %s.",
 				model, providerID, urlErr.PublicMessage()),

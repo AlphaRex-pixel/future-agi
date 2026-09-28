@@ -144,6 +144,49 @@ func TestOrgProviderPrivateBaseURLRefusalExplainsOptIn(t *testing.T) {
 	}
 }
 
+// An org provider the gateway cannot set up is a 502 server error, not a
+// refusal: a base_url that is not usable says why, and any other build
+// failure keeps its cause to the gateway log.
+func TestOrgProviderBuildFailureIsA502ServerError(t *testing.T) {
+	operator := startMockOpenAI(t)
+	defer operator.Close()
+
+	for _, tt := range []struct {
+		name, baseURL, apiFormat, wantCode, wantMessage string
+	}{
+		{"unresolvable host", "http://no-such-host.invalid:8080", "openai", "provider_base_url_unusable", "does not resolve"},
+		{"not an http URL", "ftp://files.example.com", "openai", "provider_base_url_unusable", "not a valid http(s) URL"},
+		{"unsupported api_format", "http://203.0.113.7:8080", "no-such-format", "provider_unavailable", "check its configuration"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := newOrgProviderURLTestServer(t, operator.URL, map[string]*tenant.ProviderConfig{
+				"custom": {
+					APIKey:    "org-key",
+					BaseURL:   tt.baseURL,
+					APIFormat: tt.apiFormat,
+					Models:    []string{"mock-custom"},
+					Enabled:   true,
+				},
+			})
+
+			status, apiErr := postChat(t, srv, "mock-custom")
+
+			if status != http.StatusBadGateway || apiErr.Code != tt.wantCode {
+				t.Fatalf("status = %d code = %q, want 502 %s; message: %s", status, apiErr.Code, tt.wantCode, apiErr.Message)
+			}
+			if apiErr.Type != models.ErrTypeServer {
+				t.Errorf("type = %q, want %q", apiErr.Type, models.ErrTypeServer)
+			}
+			if !strings.Contains(apiErr.Message, tt.wantMessage) {
+				t.Errorf("message = %q, want it to say %q", apiErr.Message, tt.wantMessage)
+			}
+			if strings.Contains(apiErr.Message, "no-such-format") {
+				t.Errorf("message = %q leaks the build error", apiErr.Message)
+			}
+		})
+	}
+}
+
 // A model no org provider lists keeps the plain refusal: org keys are barred
 // from config.yaml providers by design.
 func TestUnlistedModelStillNotAvailableForOrgKey(t *testing.T) {
