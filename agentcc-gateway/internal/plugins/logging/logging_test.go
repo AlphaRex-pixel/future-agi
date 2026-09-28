@@ -818,6 +818,35 @@ func TestEmitter_EmitDuringAndAfterClose(t *testing.T) {
 	}
 }
 
+// Records dropped after Close, which has already logged the drops so far, are
+// logged once, not silently counted, and not once per record.
+func TestEmitter_WarnsOnceOfRecordsDroppedAfterClose(t *testing.T) {
+	logs, restore := installCapturingLogger()
+	defer restore()
+	e := NewTraceEmitter(config.RequestLoggingConfig{Enabled: true, BufferSize: 8, Workers: 1})
+	e.Close()
+	before := logs.count()
+
+	for i := 0; i < 3; i++ {
+		e.Emit(TraceRecord{RequestID: "late"})
+	}
+
+	if got := e.Dropped(); got != 3 {
+		t.Errorf("dropped %d records emitted after Close, want 3", got)
+	}
+	var warnings int
+	logs.mu.Lock()
+	for _, rec := range logs.records[before:] {
+		if rec.Level == slog.LevelWarn {
+			warnings++
+		}
+	}
+	logs.mu.Unlock()
+	if warnings != 1 {
+		t.Errorf("logged %d warnings for 3 records dropped after Close, want 1", warnings)
+	}
+}
+
 // Emit warns of a dropped record after it lets go of the emitter, so a slow
 // log write does not hold up Close.
 func TestEmitter_CloseDoesNotWaitOnADropWarning(t *testing.T) {

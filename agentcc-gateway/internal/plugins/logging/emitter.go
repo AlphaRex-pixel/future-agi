@@ -26,6 +26,8 @@ type TraceEmitter struct {
 	// than sent on the closed channel.
 	mu     sync.RWMutex
 	closed bool // under mu
+
+	warnedClosed atomic.Bool // an Emit after Close has logged the drop
 }
 
 // NewTraceEmitter creates a TraceEmitter and starts worker goroutines.
@@ -70,8 +72,14 @@ func (e *TraceEmitter) Emit(record TraceRecord) {
 	}
 	// Outside mu, so a slow log write does not hold up Close.
 	e.dropped.Add(1)
-	if !closed {
+	switch {
+	case !closed:
 		slog.Warn("request.trace.dropped",
+			"request_id", record.RequestID,
+		)
+	case e.warnedClosed.CompareAndSwap(false, true):
+		// Close has logged the drops so far; log the late ones once.
+		slog.Warn("trace emitter: dropping records emitted after close",
 			"request_id", record.RequestID,
 		)
 	}
