@@ -450,6 +450,26 @@ def test_sync_registers_or_deletes_both_schedules(monkeypatch):
     ]
 
 
+def test_sync_wrapper_uses_the_shared_client_from_sync_code(monkeypatch):
+    """ensure_installed() calls the sync wrapper from the platform bootstrap."""
+    import tfc.temporal.common.client as client_module
+    import tfc.temporal.schedules.outbox_cdc as module
+
+    shared, calls = object(), []
+
+    async def get_client():
+        return shared
+
+    async def sync(client, *, enabled):
+        calls.append((client, enabled))
+
+    monkeypatch.setattr(client_module, "get_client", get_client)
+    monkeypatch.setattr(module, "a_sync_outbox_cdc_schedules", sync)
+    assert module.sync_outbox_cdc_schedules(enabled=True) is None
+    module.sync_outbox_cdc_schedules(enabled=False)
+    assert calls == [(shared, True), (shared, False)]
+
+
 def test_activities_are_no_ops_outside_outbox_mode(monkeypatch):
     from tracer.tasks import outbox_cdc as tasks
 
@@ -501,6 +521,37 @@ def test_drain_activity_passes_the_source_and_reports_lag(monkeypatch):
         ("outbox_cdc_attention", ["activity", "errors"]),
         ("outbox_cdc_lagging", ["lag_seconds", "outbox_depth"]),
     ]
+
+
+@pytest.mark.parametrize(
+    "result, warned, errored",
+    [
+        ({"lag_seconds": 5.0, "outbox_depth": 50_001}, [50_001], []),
+        ({"lag_seconds": 5.0, "outbox_depth": 50_000}, [], []),
+        # A lagging drain is already an error; no second, weaker message.
+        ({"lag_seconds": 601.0, "outbox_depth": 90_000}, [], ["outbox_cdc_lagging"]),
+        ({}, [], []),
+    ],
+)
+def test_a_deep_outbox_that_keeps_up_is_a_backlog_warning(
+    monkeypatch, result, warned, errored
+):
+    from tracer.tasks import outbox_cdc as tasks
+
+    warnings, errors = [], []
+    monkeypatch.setattr(
+        tasks.logger,
+        "warning",
+        lambda event, **kw: warnings.append((event, kw)),
+    )
+    monkeypatch.setattr(tasks.logger, "error", lambda event, **kw: errors.append(event))
+
+    tasks._report("outbox_cdc_drain", result)
+
+    assert warnings == [
+        ("outbox_cdc_backlog", {"outbox_depth": depth}) for depth in warned
+    ]
+    assert errors == errored
 
 
 # ---------------------------------------------------------------------------
