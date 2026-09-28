@@ -415,16 +415,8 @@ const EvalUsageTab = ({
                 py: 0.5,
               }}
             >
-              <StatPill label="Runs" value={stats.runs_period ?? 0} />
-              <Box
-                sx={{ width: "1px", height: 14, backgroundColor: "divider" }}
-              />
               {/* Usage counts successful runs only; errors stay in the logs. */}
-              <StatPill
-                label="Success"
-                value={stats.success_count ?? 0}
-                color="success.main"
-              />
+              <StatPill label="Runs" value={stats.runs_period ?? 0} />
             </Box>
           )}
         </Box>

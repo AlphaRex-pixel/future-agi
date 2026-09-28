@@ -529,7 +529,7 @@ describe("EvalUsageTab exact read states", () => {
     render(<EvalUsageTab templateId="eval-1" />);
 
     expect(screen.getByText(/Runs: 3/i)).toBeInTheDocument();
-    expect(screen.getByText(/Success: 3/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Success:/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Errors:/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Task Completion Rate/i)).not.toBeInTheDocument();
   });
