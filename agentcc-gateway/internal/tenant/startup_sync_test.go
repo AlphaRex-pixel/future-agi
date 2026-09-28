@@ -80,13 +80,15 @@ func shortenStartupSync(t *testing.T, firstRetry, maxRetry, warnAfter, warnEvery
 
 // fakeControlPlane answers 503 on both bulk endpoints while down reports true,
 // then serves one org and one API key (sk-agentcc-ui-key, as key_7). Setting
-// orgsBroken or keysBroken makes that endpoint answer 500 regardless.
+// orgsBroken or keysBroken makes that endpoint answer 500 regardless; setting
+// noKeys makes the keys endpoint answer an empty key set, as on a fresh install.
 type fakeControlPlane struct {
 	*httptest.Server
 	orgRequests atomic.Int32
 	keyRequests atomic.Int32
 	orgsBroken  atomic.Bool
 	keysBroken  atomic.Bool
+	noKeys      atomic.Bool
 }
 
 func newFakeControlPlane(t *testing.T, down func() bool) *fakeControlPlane {
@@ -116,6 +118,10 @@ func newFakeControlPlane(t *testing.T, down func() bool) *fakeControlPlane {
 			}
 			if down() {
 				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			if cp.noKeys.Load() {
+				json.NewEncoder(w).Encode(map[string]any{"status": true, "result": []any{}})
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]any{
@@ -401,4 +407,53 @@ func TestRunControlPlaneSync_PeriodicSyncIsQuietUntilItLoads(t *testing.T) {
 	waitFor("a WARN for a periodic failure after loading", func() bool {
 		return logs.count(slog.LevelWarn, "periodic sync failed") >= 1
 	})
+}
+
+// A fresh install has no API keys until the first one is created, so the
+// control plane answers an empty key set on every periodic sync. That is not a
+// failure: no WARN, however many syncs see it. A real failure still warns, and
+// the first key still loads.
+func TestRunControlPlaneSync_NoKeysYetIsNotAWarning(t *testing.T) {
+	logs := recordLogs(t)
+	shortenStartupSync(t, time.Hour, time.Hour, time.Hour, time.Hour)
+	cp := newFakeControlPlane(t, func() bool { return false })
+	cp.noKeys.Store(true)
+	store, ks := NewStore(), auth.NewKeyStore(config.AuthConfig{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		RunControlPlaneSync(ctx, true, 5*time.Millisecond, cp.URL, "token", store, ks)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for !cond() {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	waitFor("periodic key syncs of the empty key set", func() bool { return cp.keyRequests.Load() >= 5 })
+	if warns := logs.messages(slog.LevelWarn); len(warns) != 0 {
+		t.Fatalf("logged WARN records %q for an empty key set", warns)
+	}
+
+	cp.keysBroken.Store(true)
+	waitFor("a WARN for a periodic key sync failure", func() bool {
+		return logs.count(slog.LevelWarn, "periodic key sync failed") >= 1
+	})
+
+	cp.keysBroken.Store(false)
+	cp.noKeys.Store(false)
+	waitFor("the first key to load", func() bool { return ks.Authenticate("sk-agentcc-ui-key") != nil })
+	assertSynced(t, store, ks)
 }

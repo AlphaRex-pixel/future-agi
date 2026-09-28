@@ -57,8 +57,10 @@ func SyncKeysFromControlPlane(ctx context.Context, baseURL, adminToken string, k
 		return fmt.Errorf("key sync: status=false")
 	}
 
+	// No keys is normal until the first one is created, and every periodic
+	// sync sees it. SyncFromHashes warns if it would drop keys synced earlier.
 	if len(envelope.Result) == 0 {
-		slog.Warn("key sync: control plane returned empty key set",
+		slog.Debug("key sync: control plane returned empty key set",
 			"url", endpoint,
 		)
 	}
