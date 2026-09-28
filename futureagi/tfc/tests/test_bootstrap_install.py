@@ -719,15 +719,25 @@ def test_the_job_retries_search_attributes_until_temporal_serves(
     assert "cdc" not in recorded_steps
 
 
+@pytest.mark.xfail(
+    strict=True,
+    raises=ImportError,
+    reason=(
+        "KNOWN BUG: with oss_outbox_cdc.py absent, `from tracer.services.clickhouse "
+        "import oss_outbox_cdc` raises ImportError ('cannot import name'), not "
+        "ModuleNotFoundError, so the skip branch never runs and the Job fails"
+    ),
+)
 def test_an_image_without_the_outbox_installer_skips_change_data_capture(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import tracer.services.clickhouse as clickhouse
-    from tracer.services.clickhouse import oss_outbox_cdc  # noqa: F401 - then hidden
 
+    # The package as an image without the module ships it: the file is absent.
+    monkeypatch.setattr(clickhouse, "__path__", [str(tmp_path)])
+    monkeypatch.delattr(clickhouse, "oss_outbox_cdc", raising=False)
+    monkeypatch.delitem(sys.modules, command.OUTBOX_CDC_MODULE, raising=False)
     monkeypatch.setenv("FI_CDC_MODE", "outbox")
-    monkeypatch.delattr(clickhouse, "oss_outbox_cdc")
-    monkeypatch.setitem(sys.modules, command.OUTBOX_CDC_MODULE, None)
     logged: list[str] = []
 
     command.change_data_capture(logged.append, attempts=1, delay=0)
