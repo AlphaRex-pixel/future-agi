@@ -1253,12 +1253,6 @@ func (h *Handlers) resolveProvider(ctx context.Context, rc *models.RequestContex
 	}
 
 	// Try primary model first.
-	// Non-internal keys must not resolve to global (FutureAGI-credentialed) providers —
-	// they should only use org-configured providers (resolved above) or be rejected.
-	if h.keyStore != nil && rc.Metadata["key_type"] != "internal" && !middleware.IsLicenseAuthorized(ctx) {
-		return nil, h.unavailableModelError(rc, model)
-	}
-
 	result, err := h.registry.ResolveWithRouting(model)
 	if err == nil {
 		rc.Provider = result.Provider.ID()
