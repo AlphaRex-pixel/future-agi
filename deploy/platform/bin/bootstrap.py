@@ -796,8 +796,10 @@ def change_data_capture() -> None:
     syncs Temporal schedules, so it runs once Temporal answers.
     """
     mode = (os.environ.get("FI_CDC_MODE") or "outbox").strip().lower()
+    # A plain import: `from package import module` turns a missing module
+    # into an ImportError ("cannot import name") without its name.
     try:
-        from tracer.services.clickhouse import oss_outbox_cdc
+        import tracer.services.clickhouse.oss_outbox_cdc as oss_outbox_cdc
     except ModuleNotFoundError as exc:
         if exc.name != OUTBOX_CDC_MODULE:
             raise

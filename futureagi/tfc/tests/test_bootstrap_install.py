@@ -269,6 +269,43 @@ def test_with_retries_retries_transient_errors_only() -> None:
     assert len(calls) == 1
 
 
+def _outbox_module_in(monkeypatch: pytest.MonkeyPatch, directory: Path) -> None:
+    """Import the outbox module from ``directory`` only: as an image without
+    the module when it is empty."""
+    import sys
+
+    import tracer.services.clickhouse as package
+
+    monkeypatch.setattr(package, "__path__", [str(directory)])
+    monkeypatch.delattr(package, "oss_outbox_cdc", raising=False)
+    monkeypatch.delitem(sys.modules, command.OUTBOX_CDC_MODULE, raising=False)
+
+
+def test_change_data_capture_skips_an_image_without_the_outbox_module(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _outbox_module_in(monkeypatch, tmp_path)
+    logged: list[str] = []
+
+    command.change_data_capture(logged.append, attempts=1, delay=0)
+
+    assert logged == [
+        "this image has no outbox CDC installer; skipping change data capture"
+    ]
+
+
+def test_change_data_capture_reports_an_import_error_inside_the_module(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "oss_outbox_cdc.py").write_text(
+        "import fi_missing_dependency_for_this_test\n", encoding="utf-8"
+    )
+    _outbox_module_in(monkeypatch, tmp_path)
+
+    with pytest.raises(ModuleNotFoundError, match="fi_missing_dependency"):
+        command.change_data_capture(lambda _: None, attempts=1, delay=0)
+
+
 def test_change_data_capture_installer_errors_are_final(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

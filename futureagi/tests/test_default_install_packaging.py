@@ -976,13 +976,42 @@ def test_cdc_defaults_cover_schedules_and_an_adopted_peerdb() -> None:
     assert params["takeover_peerdb"].default is True
 
 
-def test_cdc_without_the_outbox_module_still_boots(bootstrap, monkeypatch) -> None:
+def _outbox_module_in(monkeypatch, directory) -> None:
+    """Import the outbox module from ``directory`` only: as an image without
+    the module when it is empty. A None in sys.modules would not do: it makes
+    `from package import module` raise the ModuleNotFoundError a missing file
+    never does."""
     import tracer.services.clickhouse as package
 
+    monkeypatch.setattr(package, "__path__", [str(directory)])
     monkeypatch.delattr(package, "oss_outbox_cdc", raising=False)
-    monkeypatch.setitem(sys.modules, OUTBOX_MODULE, None)
+    monkeypatch.delitem(sys.modules, OUTBOX_MODULE, raising=False)
+
+
+def test_cdc_without_the_outbox_module_still_boots(
+    bootstrap, monkeypatch, tmp_path
+) -> None:
+    _outbox_module_in(monkeypatch, tmp_path)
+    logged = []
+    monkeypatch.setattr(bootstrap, "log", logged.append)
     for mode in ("outbox", "peerdb", "off"):
         monkeypatch.setenv("FI_CDC_MODE", mode)
+        bootstrap.change_data_capture()
+    assert len(logged) == 3
+    assert all("no outbox CDC installer; skipping CDC" in line for line in logged)
+
+
+def test_cdc_reports_an_import_error_inside_the_outbox_module(
+    bootstrap, monkeypatch, tmp_path
+) -> None:
+    (tmp_path / "oss_outbox_cdc.py").write_text(
+        "import fi_missing_dependency_for_this_test\n", encoding="utf-8"
+    )
+    _outbox_module_in(monkeypatch, tmp_path)
+    monkeypatch.setenv("FI_CDC_MODE", "outbox")
+    with pytest.raises(
+        ModuleNotFoundError, match="fi_missing_dependency_for_this_test"
+    ):
         bootstrap.change_data_capture()
 
 

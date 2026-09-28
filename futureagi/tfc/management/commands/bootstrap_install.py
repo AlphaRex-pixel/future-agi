@@ -352,8 +352,10 @@ def change_data_capture(
     ensure_installed() installs capture and its drain schedules for
     ``outbox`` and removes what an earlier ``outbox`` run left for
     ``peerdb``/``off``, so capture never runs without a drain."""
+    # A plain import: `from package import module` turns a missing module
+    # into an ImportError ("cannot import name") without its name.
     try:
-        from tracer.services.clickhouse import oss_outbox_cdc
+        import tracer.services.clickhouse.oss_outbox_cdc as oss_outbox_cdc
     except ModuleNotFoundError as exc:
         if exc.name != OUTBOX_CDC_MODULE:
             raise
