@@ -165,7 +165,8 @@ x-backend-env: &backend-env
   CH_USER: default
 
   CH_USERNAME: ${CH_USERNAME:-default}
-  CH_PASSWORD: ""
+  # ./bin/install generates it on a fresh install (clickhouse below).
+  CH_PASSWORD: ${CH_PASSWORD:-}
 
   CH_ENABLED: ${CH_ENABLED:-true}
 
@@ -623,11 +624,16 @@ services:
       # allowlist) — what every other service expects from local-dev CH.
       CLICKHOUSE_SKIP_USER_SETUP: "1"
       CLICKHOUSE_DB: ${CH_DATABASE:-default}
+      # The default user's password (deploy/clickhouse/users.d), which the
+      # entrypoint also logs in with to create CLICKHOUSE_DB. Empty on
+      # installs made before ./bin/install generated one.
+      CLICKHOUSE_PASSWORD: ${CH_PASSWORD:-}
     ports:
       - "127.0.0.1:${CH_HTTP_PORT:-8123}:8123"
       - "127.0.0.1:${CH_PORT:-9000}:9000"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
+      - ./deploy/clickhouse/users.d/zz-default-password.xml:/etc/clickhouse-server/users.d/zz-default-password.xml:ro
       # `tiered` storage policy required by the v2 spans schema
       # (002_spans_v2.sql). Same XML used by the CI test rig at
       # futureagi/.ci/. Without it apply_schema fails with
@@ -657,6 +663,8 @@ services:
     environment:
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "9000"
+      # As the default user, which creates the index's users.
+      CLICKHOUSE_PASSWORD: ${CH_PASSWORD:-}
       PROPERTY_CATALOG_SOURCE_DATABASE: ${FI_CH_DATABASE:-${CH25_DATABASE:-${CH_DATABASE:-default}}}
       PROPERTY_CATALOG_DATABASE: ${PROPERTY_CATALOG_DATABASE:-property_catalog}
       PROPERTY_CATALOG_CONSUMER_PASSWORD: ${PROPERTY_CATALOG_CONSUMER_PASSWORD:-oss-observed-writer-local-only}
@@ -807,6 +815,8 @@ services:
       # Point at the same ClickHouse the backend uses (HTTP port 8123).
       FI_CH_URL: http://clickhouse:8123
       FI_CH_DATABASE: ${FI_CH_DATABASE:-${CH25_DATABASE:-${CH_DATABASE:-default}}}
+      FI_CH_USERNAME: ${CH_USERNAME:-default}
+      FI_CH_PASSWORD: ${CH_PASSWORD:-}
       # Auth: collector validates API keys against Django's Postgres. Without
       # these it falls back to the baked-in default (postgres://user:password@db:5432/tfc),
       # whose host `db` doesn't exist here -> every trace 503s. Keep endpoint
@@ -1174,7 +1184,7 @@ services:
       DST_CH_HOST: clickhouse
       DST_CH_PORT: 9000
       DST_CH_USER: ${CH_USERNAME:-default}
-      DST_CH_PASSWORD: ""
+      DST_CH_PASSWORD: ${CH_PASSWORD:-}
       DST_CH_DB: ${CH_DATABASE:-default}
     depends_on:
       postgres-schema-bootstrap:

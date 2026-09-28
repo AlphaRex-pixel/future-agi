@@ -512,7 +512,7 @@ fi
 # what each kind of install gets).
 FRESH_INSTALL=1
 if (( ${#STALE_VOLS[@]} > 0 && WIPE_VOLS == 0 )); then FRESH_INSTALL=0; fi
-write_secrets "$FRESH_INSTALL" "$DISTRIBUTED"
+write_secrets "$FRESH_INSTALL" "$DISTRIBUTED" "$project_name"
 
 # ---------------- sandbox profile ----------------
 # With COMPOSE_PROFILES=sandbox the app sends code evals to the nsjail

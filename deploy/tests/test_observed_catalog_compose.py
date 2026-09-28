@@ -646,8 +646,19 @@ class ProductionCatalogContractTests(unittest.TestCase):
         bootstrap = services["property-catalog-clickhouse-bootstrap"]
         self.assertFalse(bootstrap.get("command"))
         env = bootstrap["environment"]
+        # ClickHouse's default user provisions the index's users, with the
+        # password ClickHouse itself is given.
         self.assertNotIn("CLICKHOUSE_USER", env)
-        self.assertNotIn("CLICKHOUSE_PASSWORD", env)
+        self.assertEqual(env["CLICKHOUSE_PASSWORD"], "")
+        for password in ("generated-ch-password", "with $dollar"):
+            with self.subTest(password=password):
+                services = compose(CH_PASSWORD=password)["services"]
+                bootstrap = services["property-catalog-clickhouse-bootstrap"]
+                given = bootstrap["environment"]["CLICKHOUSE_PASSWORD"]
+                clickhouse = services["clickhouse"]["environment"]
+                # Compose config escapes dollars; never print credentials.
+                self.assertTrue(given == password.replace("$", "$$"))
+                self.assertTrue(given == clickhouse["CLICKHOUSE_PASSWORD"])
         for name, value in (
             ("PROPERTY_CATALOG_API_PASSWORD", "oss-observed-reader-local-only"),
             ("PROPERTY_CATALOG_CONSUMER_PASSWORD", "oss-observed-writer-local-only"),

@@ -397,6 +397,8 @@ fi
 
 case "$1" in
   inspect)
+    # The environment of the project's clickhouse container, as JSON.
+    case " $* " in *".Config.Env"*) printf '%s\n' "$FAGI_STUB_CLICKHOUSE_ENV"; exit 0 ;; esac
     case "${last_arg#cid-}" in
       property-catalog-kafka)
         printf 'running|0|0|%s|%s\n' "$FAGI_STUB_KAFKA_HEALTH" "$started" ;;
@@ -437,6 +439,8 @@ case "$1" in
       *'.Label "com.docker.compose.service"'*)
         for service in $FAGI_STUB_SERVICES; do printf '%s\n' "$service"; done
         [ -n "$FAGI_STUB_APP_CONTAINER" ] && printf 'app\n' ;;
+      *"service=clickhouse"*)
+        [ -n "$FAGI_STUB_CLICKHOUSE_ENV" ] && printf 'cid-clickhouse\n' ;;
     esac
     exit 0 ;;
   manifest)
@@ -562,6 +566,8 @@ def _installer_sandbox(
         "FAGI_STUB_PULL": "ok",
         "FAGI_STUB_MANIFEST": "found",
         "FAGI_STUB_BUSY_PORTS": "",
+        # Empty: this project has no clickhouse container.
+        "FAGI_STUB_CLICKHOUSE_ENV": "",
     }
     environment.update(stub_env)
     return script, environment, state
@@ -1098,6 +1104,7 @@ SECRET_KEYS = (
     "MINIO_ROOT_PASSWORD",
     "AGENTCC_INTERNAL_API_KEY",
     "AGENTCC_ADMIN_TOKEN",
+    "CH_PASSWORD",
     "REDIS_PASSWORD",
 )
 
@@ -1154,19 +1161,121 @@ def test_an_existing_install_keeps_its_secrets_and_fills_only_stateless_keys(
     assert code == 0, stderr
     values = _env_values(repo)
     assert values["SECRET_KEY"] == "kept-secret"
-    # Postgres keeps its first password in the volume: never generated here.
-    for key in ("PG_PASSWORD", "MINIO_ROOT_PASSWORD", "AGENTCC_INTERNAL_API_KEY"):
+    # Postgres keeps its first password in the volume, and the ClickHouse
+    # this install runs has none: never generated here.
+    for key in (
+        "PG_PASSWORD",
+        "MINIO_ROOT_PASSWORD",
+        "AGENTCC_INTERNAL_API_KEY",
+        "CH_PASSWORD",
+    ):
         assert key not in values
     assert values["AGENTCC_ADMIN_TOKEN"] == ""
     assert (
         "PG_PASSWORD MINIO_ROOT_PASSWORD AGENTCC_INTERNAL_API_KEY AGENTCC_ADMIN_TOKEN "
-        "still use the defaults published in this repository"
+        "CH_PASSWORD still use the defaults published in this repository"
     ) in stderr
     # No state depends on these three, so an existing install gets them too.
     assert re.fullmatch(r"[0-9a-f]{64}", values["REDIS_PASSWORD"])
     assert len(base64.urlsafe_b64decode(values["INTEGRATION_ENCRYPTION_KEY"])) == 32
     # Without it the app refuses the gateway's request logs.
     assert re.fullmatch(r"[0-9a-f]{64}", values["AGENTCC_WEBHOOK_SECRET"])
+
+
+CLICKHOUSE_BEFORE_CH_PASSWORD = (
+    '["CLICKHOUSE_SKIP_USER_SETUP=1","CLICKHOUSE_DB=default"]'
+)
+
+
+@pytest.mark.parametrize(
+    ("container_env", "refused"),
+    [
+        # Created by a release whose compose file ignored CH_PASSWORD.
+        (CLICKHOUSE_BEFORE_CH_PASSWORD, True),
+        # Already started with it.
+        ('["CLICKHOUSE_DB=default","CLICKHOUSE_PASSWORD=from-dot-env"]', False),
+        # No container to tell by (after `docker compose down`).
+        ("", False),
+    ],
+)
+def test_a_clickhouse_password_never_changes_an_existing_install_silently(
+    tmp_path: Path, container_env: str, refused: bool
+) -> None:
+    script, environment, _ = _installer_sandbox(
+        tmp_path,
+        CI="1",
+        FAGI_STUB_VOLUMES="futureagi_app-data futureagi_postgres-data",
+        FAGI_STUB_CLICKHOUSE_ENV=container_env,
+    )
+    repo = script.parents[1]
+    (repo / ".env").write_text(
+        SANDBOX_ENV_EXAMPLE + "CH_PASSWORD=from-dot-env\n", encoding="utf-8"
+    )
+
+    code, _, stderr = _run_installer(script, environment, "--no-up")
+
+    assert code == (1 if refused else 0), stderr
+    assert ("Delete the CH_PASSWORD line from .env" in stderr) == refused
+    assert _env_values(repo)["CH_PASSWORD"] == "from-dot-env"
+    if refused:
+        code, _, stderr = _run_installer(script, environment, "--force", "--no-up")
+        assert code == 0, stderr
+        assert "(continuing: --force)" in stderr
+
+
+@pytest.mark.parametrize(
+    ("fresh", "dot_env", "container_env", "expected"),
+    [
+        (True, "", "", "Generated CH_PASSWORD"),
+        (False, "", "", "CH_PASSWORD still use the defaults published"),
+        (
+            False,
+            "CH_PASSWORD=from-dot-env\n",
+            CLICKHOUSE_BEFORE_CH_PASSWORD,
+            "PREFLIGHT CH_PASSWORD is set in .env",
+        ),
+    ],
+)
+def test_power_shell_installer_writes_the_same_secrets(
+    tmp_path: Path, fresh: bool, dot_env: str, container_env: str, expected: str
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("pwsh is unavailable")
+    (tmp_path / ".env").write_text(dot_env, encoding="utf-8")
+    script = "\n".join(
+        [
+            f". '{INSTALL_LIB / 'env.ps1'}'; . '{INSTALL_LIB / 'secrets.ps1'}'",
+            "function Ok { param($m) Write-Output $m }",
+            "function Warn { param($m) Write-Output $m }",
+            'function Fail-Preflight { param($m) Write-Output "PREFLIGHT $m" }',
+            "function Invoke-Probe { param($Command) & $Command }",
+            f"$containerEnv = '{container_env}'",
+            "function docker {",
+            "  if ($args[0] -eq 'ps' -and $containerEnv) { 'cid-clickhouse' }",
+            "  elseif ($args[0] -eq 'inspect') { $containerEnv }",
+            "}",
+            f"Write-Secrets ${str(fresh).lower()} $false 'futureagi'",
+        ]
+    )
+
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", script],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert expected in result.stdout
+    values = _env_values(tmp_path)
+    if fresh:
+        # The keys bin/lib/secrets.sh generates, in the same format.
+        for key in SECRET_KEYS:
+            assert re.fullmatch(r"[0-9a-f]{64}", values[key]), key
+    else:
+        assert values.get("CH_PASSWORD", "") == dot_env.partition("=")[2].strip()
 
 
 @pytest.mark.parametrize(

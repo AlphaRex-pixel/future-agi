@@ -355,9 +355,13 @@ container's Redis requires a password.
 What it does not isolate is the network. Eval code shares the app container's
 network namespace, so it can connect to everything the app reaches: the
 Temporal dev server on loopback (no authentication), Postgres and ClickHouse
-over the Docker network (ClickHouse's `default` user has no password in either
-Compose setup), and anything else your network allows. Concurrent evals also
-run as the same user.
+over the Docker network (their passwords are not in the eval's environment;
+ClickHouse has none on installs made before the installer generated
+`CH_PASSWORD`), and anything else your network allows. Concurrent evals also
+run as the same user. The `app` container is unprivileged, so it cannot
+firewall one user's traffic (that needs `NET_ADMIN`) or give an eval a network
+namespace of its own (Docker's default seccomp profile refuses one without
+`SYS_ADMIN`), and the platform does not add either capability to it.
 
 So the built-in sandbox suits installs where everyone who can write a code
 eval is trusted with the data, such as a laptop or a single team. For installs
@@ -665,12 +669,29 @@ sent. See [Telemetry and outbound connections](#telemetry-and-outbound-connectio
 
 On a fresh install `./bin/install` generates the secrets and writes them to
 `.env`. Without it, the compose files fall back to defaults that are published
-in this repository, and so are the same on every install, while the API (port
-8000) and the gateway (port 8090) listen on all interfaces: set your own
-before anyone else can reach the deployment. Which keys these are, their
-defaults, how to generate one, what the installer does on an existing install
-and what breaks when you change one later are in
+in this repository, and so are the same on every install (for `CH_PASSWORD`,
+no password at all), while the API (port 8000) and the gateway (port 8090)
+listen on all interfaces: set your own before anyone else can reach the
+deployment. Which keys these are, their defaults, how to generate one, what
+the installer does on an existing install and what breaks when you change one
+later are in
 [docs/configuration.md](docs/configuration.md#1-generated-by-the-installer).
+
+`CH_PASSWORD` is the password of ClickHouse's `default` user. ClickHouse
+reads it at every start, as do the app, the collector and PeerDB, so a new
+value would take effect at once, except where it was stored: the
+dictionaries ClickHouse reads spans through, and on Distributed PeerDB's
+`ch_dest` peer. The installer therefore generates it on a fresh install
+only. An install created before it did keeps running without a password:
+the installer leaves it empty, warns, and stops if `.env` holds a value
+such an install never used (delete that line, or re-run with `--force`
+once you mean it). To give such an install a password, set `CH_PASSWORD`
+and run `docker compose up -d`: the bootstrap then re-creates the
+dictionaries with it. On Distributed the Postgres → ClickHouse sync stops
+until the `ch_dest` peer in PeerDB carries the new password too, so leave
+it empty there unless you update that peer. Changing a password that is
+already set is not supported yet: the dictionaries keep the old one. No
+`<`, `>` or `&` in it: ClickHouse reads it into its XML configuration.
 
 ### Ports reference
 

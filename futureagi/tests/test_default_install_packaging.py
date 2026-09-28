@@ -79,6 +79,55 @@ def test_no_privileged_service_is_published_beyond_the_host() -> None:
                 )
 
 
+CH_PASSWORD = "${CH_PASSWORD:-}"
+CLICKHOUSE_USERS = (
+    ROOT / "deploy" / "clickhouse" / "users.d" / "zz-default-password.xml"
+)
+
+
+def test_clickhouse_and_every_client_of_its_default_user_share_ch_password() -> None:
+    """ClickHouse reads CH_PASSWORD at every start; a client without it gets
+    AUTHENTICATION_FAILED on an install whose .env sets one."""
+    assert '<password from_env="CLICKHOUSE_PASSWORD"/>' in CLICKHOUSE_USERS.read_text(
+        encoding="utf-8"
+    )
+    mount = (
+        "./deploy/clickhouse/users.d/zz-default-password.xml:"
+        "/etc/clickhouse-server/users.d/zz-default-password.xml:ro"
+    )
+    password_keys = ("CH_PASSWORD", "FI_CH_PASSWORD", "DST_CH_PASSWORD")
+    for compose in (STANDALONE_COMPOSE, DISTRIBUTED_COMPOSE):
+        services = _compose(compose)["services"]
+        clickhouse = services.pop("clickhouse")
+        # Also the entrypoint's login when it creates CLICKHOUSE_DB.
+        assert clickhouse["environment"]["CLICKHOUSE_PASSWORD"] == CH_PASSWORD
+        assert mount in clickhouse["volumes"]
+        for name, service in services.items():
+            env = service.get("environment") or {}
+            # The observed-attribute index's own users have their own passwords.
+            clients = [
+                key
+                for key, value in env.items()
+                if re.search(r"(^|//)clickhouse(:|$)", str(value))
+                and not key.startswith(("FI_OBSERVED_CATALOG_", "PROPERTY_CATALOG_"))
+            ]
+            if not clients:
+                continue
+            given = {
+                key: env[key]
+                for key in (*password_keys, "CLICKHOUSE_PASSWORD")
+                if key in env
+            }
+            assert given, (
+                f"{compose.name}: {name} reaches ClickHouse without a password"
+            )
+            assert set(given.values()) == {CH_PASSWORD}, f"{compose.name}: {name}"
+            # The collector sends credentials only along with a user name.
+            if name in ("app", "fi-collector"):
+                assert env["FI_CH_USERNAME"] == "${CH_USERNAME:-default}", name
+                assert env["FI_CH_PASSWORD"] == CH_PASSWORD, name
+
+
 def test_standalone_app_service_contract() -> None:
     app = _compose(STANDALONE_COMPOSE)["services"]["app"]
     env = app["environment"]

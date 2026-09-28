@@ -423,7 +423,7 @@ if ($WipeVolumes) {
 # A fresh install has no volumes of this project (bin/lib/secrets.ps1 says
 # what each kind of install gets).
 $freshInstall = ($existingVolumes.Count -eq 0) -or $wipe
-Write-Secrets $freshInstall $IsDistributed
+Write-Secrets $freshInstall $IsDistributed $projectName
 
 # ---- sandbox profile ----
 # With COMPOSE_PROFILES=sandbox the app sends code evals to the nsjail

@@ -340,6 +340,7 @@ class StartupComposeContractTests(unittest.TestCase):
                     overrides={
                         "PG_USER": "custom_source_user",
                         "CH_USERNAME": "custom_ch_user",
+                        "CH_PASSWORD": "custom-ch-password",
                     },
                 )
                 backend = services["backend"]["environment"]
