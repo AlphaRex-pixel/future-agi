@@ -100,6 +100,20 @@ describe("observePresetDateFilter", () => {
     }
   });
 
+  it("returns null for presets it does not own", () => {
+    // The Observe sites never offer the sub-day presets; if one is ever
+    // passed, it must not silently send a window that moves every second.
+    for (const option of ["30 mins", "6 hrs", "Custom", "nope", undefined]) {
+      expect(observePresetDateFilter(option, NOW)).toBeNull();
+    }
+    expect(observePresetDateFilter("Today", NOW)).toEqual(
+      presetToRange("Today", NOW).map(formatDate),
+    );
+    expect(observePresetDateFilter("Yesterday", NOW)).toEqual(
+      presetToRange("Yesterday", NOW).map(formatDate),
+    );
+  });
+
   it("is byte-identical within one hour and moves across the hour", () => {
     for (const option of ROLLING) {
       expect(observePresetDateFilter(option, SAME_HOUR)).toEqual(
