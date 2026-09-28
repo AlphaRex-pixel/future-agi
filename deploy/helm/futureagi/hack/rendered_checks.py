@@ -155,6 +155,34 @@ def check_render(name: str, docs: list[dict]) -> list[str]:
                         f"{name}: gateway containerPort {port} differs from server.port"
                     )
 
+    # The collector writes observed attributes (property suggestions) into the
+    # index the bootstrap job provisions: its database, as its writer.
+    by_component = {component(d): pod_spec(d)["containers"][0] for d in workloads}
+    collector, bootstrap = by_component.get("fi-collector"), by_component.get("bootstrap")
+    if collector and bootstrap:
+        writes, provisions = env_values(collector), env_values(bootstrap)
+
+        def secret_key(container: dict, variable: str) -> dict | None:
+            for entry in container.get("env", []):
+                if entry["name"] == variable:
+                    return entry.get("valueFrom", {}).get("secretKeyRef")
+            return None
+
+        writer = secret_key(collector, "FI_OBSERVED_CATALOG_CH_PASSWORD")
+        if (
+            writes.get("FI_OBSERVED_CATALOG_MODE") != "direct"
+            or writes.get("FI_OBSERVED_CATALOG_CH_URL") != writes.get("FI_CH_URL")
+            or writes.get("FI_OBSERVED_CATALOG_CH_DATABASE")
+            != provisions.get("PROPERTY_CATALOG_DATABASE")
+            or writes.get("FI_OBSERVED_CATALOG_CH_USERNAME") != "observed_catalog_writer"
+            or not writer
+            or writer != secret_key(bootstrap, "PROPERTY_CATALOG_CONSUMER_PASSWORD")
+        ):
+            failed.append(
+                f"{name}: fi-collector does not write the observed-attribute index "
+                "the bootstrap job provisions"
+            )
+
     # The Secret comes back with `helm rollback`.
     for secret in (d for d in docs if d["kind"] == "Secret"):
         hook = secret["metadata"].get("annotations", {}).get("helm.sh/hook", "")

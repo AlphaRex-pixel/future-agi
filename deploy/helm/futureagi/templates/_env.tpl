@@ -229,6 +229,10 @@ compare: /app/backend/tfc/compare
 
 {{/* =====================================================================
 fi-collector: OTLP in, ClickHouse out, API keys checked against Postgres.
+Observed attributes (property suggestions) go straight into the index the
+bootstrap job creates, as its writer: FI_OBSERVED_CATALOG_MODE=direct. With
+FI_OBSERVED_CATALOG_KAFKA_BROKERS in fiCollector.extraEnv the collector
+publishes them to Kafka instead, for your own fi-property-catalog-consumer.
 ===================================================================== */}}
 {{- define "futureagi.env.collector" -}}
 {{- $root := .root -}}
@@ -237,6 +241,7 @@ fi-collector: OTLP in, ClickHouse out, API keys checked against Postgres.
 {{- $pgHost := include "futureagi.postgres.host" $root -}}
 {{- $pgPort := include "futureagi.postgres.port" $root -}}
 {{- $redisTls := and (eq $v.redis.mode "external") $v.redis.external.tls -}}
+{{- $observedMode := get $overrides "FI_OBSERVED_CATALOG_MODE" | default (ternary "kafka" "direct" (hasKey $overrides "FI_OBSERVED_CATALOG_KAFKA_BROKERS")) | toString -}}
 {{- if not (hasKey $overrides "FI_CH_PASSWORD") }}
 {{ include "futureagi.clickhouse.passwordEnv" (dict "root" $root "name" "FI_CH_PASSWORD") }}
 {{- end }}
@@ -249,6 +254,11 @@ fi-collector: OTLP in, ClickHouse out, API keys checked against Postgres.
 {{- if and (not $redisTls) (eq (include "futureagi.redis.auth" $root) "true") (not (hasKey $overrides "FI_AUTH_REDIS_PASSWORD")) }}
 {{ include "futureagi.redis.passwordEnv" (dict "root" $root "name" "FI_AUTH_REDIS_PASSWORD") }}
 {{- end }}
+{{- if and (eq $observedMode "direct") (not (hasKey $overrides "FI_OBSERVED_CATALOG_CH_PASSWORD")) }}
+{{ include "futureagi.secretEnv" (dict "name" "FI_OBSERVED_CATALOG_CH_PASSWORD" "secret" (include "futureagi.appSecretName" $root) "key" "PROPERTY_CATALOG_CONSUMER_PASSWORD") }}
+{{- end }}
+{{- /* The observed-attribute spool gets half its default cap: it shares the
+pod's 1Gi emptyDir with the dead-letter file. */ -}}
 {{- $plain := dict
       "FI_CH_URL" (printf "http://%s:%s" (include "futureagi.clickhouse.host" $root) (include "futureagi.clickhouse.httpPort" $root))
       "FI_CH_DATABASE" $v.clickhouse.database
@@ -266,9 +276,16 @@ fi-collector: OTLP in, ClickHouse out, API keys checked against Postgres.
       "FI_HTTP_ADDR" ":4318"
       "FI_ADMIN_ADDR" ":9464"
       "FI_DEAD_LETTER_FILE" "/var/lib/fi-collector/dead_letter.jsonl"
-      "FI_OBSERVED_CATALOG_MODE" "disabled"
+      "FI_OBSERVED_CATALOG_MODE" $observedMode
+      "FI_OBSERVED_CATALOG_SPOOL_DIR" "/var/lib/fi-collector/observed-catalog"
+      "FI_OBSERVED_CATALOG_MAX_SPOOL_BYTES" "268435456"
       "GOMEMLIMIT" $v.fiCollector.goMemLimit
 -}}
+{{- if eq $observedMode "direct" -}}
+{{- $_ := set $plain "FI_OBSERVED_CATALOG_CH_URL" (get $plain "FI_CH_URL") -}}
+{{- $_ := set $plain "FI_OBSERVED_CATALOG_CH_DATABASE" $v.clickhouse.propertyCatalogDatabase -}}
+{{- $_ := set $plain "FI_OBSERVED_CATALOG_CH_USERNAME" "observed_catalog_writer" -}}
+{{- end -}}
 {{- if not $redisTls }}{{ $_ := set $plain "FI_AUTH_REDIS_ADDR" (printf "%s:%s" (include "futureagi.redis.host" $root) (include "futureagi.redis.port" $root)) }}{{ end -}}
 {{- $plain = mergeOverwrite $plain $overrides -}}
 {{- range $name := keys $plain | sortAlpha }}

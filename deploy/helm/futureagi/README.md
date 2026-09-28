@@ -167,6 +167,15 @@ port-forward). Set `urls.otlp` when you expose the collector another way.
 `helm test futureagi -n futureagi` checks that the API, UI, collector and
 gateway answer.
 
+fi-collector also fills the observed-attribute index: the span attributes and
+values that trace filters, dashboard widgets and tasks suggest. It writes the
+index itself, as its `observed_catalog_writer` user
+(`FI_OBSERVED_CATALOG_MODE=direct`); no Kafka is involved. With
+`bootstrap.propertyCatalog=false`, create the index and that user before
+sending traces. To publish to your own Kafka and `fi-property-catalog-consumer`
+instead, set `FI_OBSERVED_CATALOG_KAFKA_BROKERS` in `fiCollector.extraEnv`;
+`FI_OBSERVED_CATALOG_MODE: disabled` there turns suggestions off.
+
 ## Upgrade
 
 ```sh
@@ -299,7 +308,7 @@ puts back the target revision's copy), reading them back on every upgrade:
 | `INTEGRATION_ENCRYPTION_KEY` | Fernet key of stored integration credentials | stored credentials cannot be decrypted |
 | `AGENTCC_INTERNAL_API_KEY` | the backend's key on the LLM gateway | the pods pick up the new one on restart |
 | `AGENTCC_ADMIN_TOKEN` | the gateway's admin API and control-plane sync | as above |
-| `PROPERTY_CATALOG_API_PASSWORD`, `PROPERTY_CATALOG_CONSUMER_PASSWORD` | ClickHouse users of the observed-attribute index | the bootstrap job resets them |
+| `PROPERTY_CATALOG_API_PASSWORD`, `PROPERTY_CATALOG_CONSUMER_PASSWORD` | ClickHouse users of the observed-attribute index (the API reads it, fi-collector writes it) | the bootstrap job resets them |
 
 Bundled datastores get generated passwords in the same Secret. A bundled
 PostgreSQL keeps the password it was initialized with: set
@@ -430,6 +439,7 @@ job to PreSync (PostSync for the job when a datastore is bundled).
 | UI loads but every call fails | `urls.api` / `ingress.api.host`; with port-forwards, forward the backend to localhost:8000 |
 | Custom code evals fail with "sandbox unavailable" | `codeExecutor` (see Security) |
 | The first-run setup screen marks a service down | `kubectl get pods`, then that service's logs |
+| Filters and widgets suggest no attributes, fi-collector logs `observed catalog replay failed` | the observed-attribute index and its `observed_catalog_writer` user (created by the bootstrap job unless `bootstrap.propertyCatalog=false`) |
 
 ## Developing the chart
 
