@@ -9,6 +9,7 @@ import PlatformLogo from "../components/PlatformLogo";
 import { PLATFORM_LOGOS } from "../components/platformLogos";
 import { COUNTRY_BY_ISO } from "../components/countryCodes";
 import ContactInformation from "./ContactInformation";
+import { isValidPhoneNumber } from "../components/phoneNumber";
 import ScenarioCount from "./ScenarioCount";
 import { DEFAULT_SCENARIOS, isValidScenarioCount } from "./scenarioCountRules";
 import RuntimePreflight from "./RuntimePreflight";
@@ -81,9 +82,8 @@ export default function PanelHostedPlatform() {
   // Others has no WebRTC path, so it requires a number regardless of simMode;
   // other voice envs only require it in Phone mode.
   const phoneRequired = agentType === AGENT_TYPES.VOICE && (isOther || simMode === "phone");
-  // Digits only — a number rehydrated from an older draft may still carry
-  // letters or formatting the input now strips.
-  const phoneOk = !phoneRequired || /^\d+$/.test(contactNumber);
+  const phoneOk =
+    !phoneRequired || isValidPhoneNumber(COUNTRY_BY_ISO[countryIso]?.dial, contactNumber);
   const credsOk = isOther ? !!otherPrompt.trim() : (!!id.trim() && !!key.trim());
   const canGo = !!chosen && credsOk && phoneOk;
 

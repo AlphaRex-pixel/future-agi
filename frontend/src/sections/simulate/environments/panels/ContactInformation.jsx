@@ -3,6 +3,8 @@ import { alpha } from "@mui/material/styles";
 import { Box, Stack, Typography, Switch } from "@mui/material";
 import Field from "../components/Field";
 import CountryCodeSelect from "../components/CountryCodeSelect";
+import { COUNTRY_BY_ISO } from "../components/countryCodes";
+import { phoneNumberError } from "../components/phoneNumber";
 
 // E.164 caps a full number at 15 digits; the country code has its own select,
 // so the number field only ever holds digits.
@@ -35,6 +37,7 @@ export default function ContactInformation({
   phoneOnly = false,
 }) {
   const effectiveMode = phoneOnly ? "phone" : mode;
+  const contactError = phoneNumberError(COUNTRY_BY_ISO[countryIso]?.dial, contactNumber);
   const header =
     effectiveMode === "phone"
       ? {
@@ -86,6 +89,7 @@ export default function ContactInformation({
               value={contactNumber}
               onChange={(value) => onContactNumber(toContactDigits(value))}
               inputProps={{ inputMode: "numeric" }}
+              error={contactError}
               mono
             />
           </Box>
