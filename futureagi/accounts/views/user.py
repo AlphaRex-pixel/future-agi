@@ -34,6 +34,7 @@ from accounts.serializers import UserSerializer
 from accounts.serializers.contracts import (
     ACCOUNTS_ERROR_RESPONSES,
     AccountsAccessTokenResponseSerializer,
+    AccountsErrorResponseSerializer,
     AccountsRedisDeleteResponseSerializer,
     AccountsRedisSetResponseSerializer,
     AccountsTokenPairResponseSerializer,
@@ -150,7 +151,11 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
     @validated_request(
         request_serializer=LoginRequestSerializer,
-        responses={200: AccountsTokenPairResponseSerializer, **ACCOUNTS_ERROR_RESPONSES},
+        responses={
+            200: AccountsTokenPairResponseSerializer,
+            **ACCOUNTS_ERROR_RESPONSES,
+            503: AccountsErrorResponseSerializer,
+        },
         reject_unknown_fields=True,
     )
     def post(self, request, *args, **kwargs):
@@ -461,7 +466,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 {
                     "error": "Login temporarily unavailable",
                     "error_code": "LOGIN_SERVICE_UNAVAILABLE",
-                    "message": "Sign-in is temporarily unavailable. Please try again in a moment.",
+                    "message": get_error_message("LOGIN_SERVICE_UNAVAILABLE"),
                 },
             )
 

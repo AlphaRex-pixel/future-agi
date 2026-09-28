@@ -7054,9 +7054,14 @@ export type accountsTokenCreateResponse500 = {
   status: 500;
 };
 
+export type accountsTokenCreateResponse503 = {
+  data: AccountsErrorResponseApi;
+  status: 503;
+};
+
 export type accountsTokenCreateResponseDefault = {
   data: ManagementAPIErrorResponseApi;
-  status: Exclude<HTTPStatusCodes, 200 | 400 | 401 | 403 | 404 | 500>;
+  status: Exclude<HTTPStatusCodes, 200 | 400 | 401 | 403 | 404 | 500 | 503>;
 };
 
 export type accountsTokenCreateResponseSuccess =
@@ -7069,6 +7074,7 @@ export type accountsTokenCreateResponseError = (
   | accountsTokenCreateResponse403
   | accountsTokenCreateResponse404
   | accountsTokenCreateResponse500
+  | accountsTokenCreateResponse503
   | accountsTokenCreateResponseDefault
 ) & {
   headers: Headers;

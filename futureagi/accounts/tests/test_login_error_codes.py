@@ -15,6 +15,7 @@ Covers:
 
 import json
 import time
+from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -26,6 +27,8 @@ from django_redis.exceptions import ConnectionInterrupted
 from redis.exceptions import ConnectionError as RedisConnectionError
 from rest_framework import status
 from rest_framework.test import APIClient
+
+from tfc.utils.error_codes import get_error_message
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -397,7 +400,7 @@ class TestInfrastructureErrorCode:
         result = _result(resp)
         assert result["error_code"] == "LOGIN_SERVICE_UNAVAILABLE"
         assert "remaining_attempts" not in result
-        assert result["message"]
+        assert result["message"] == get_error_message("LOGIN_SERVICE_UNAVAILABLE")
 
     @pytest.mark.parametrize(
         "error",
@@ -464,6 +467,19 @@ class TestInfrastructureErrorCode:
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
         assert _result(resp)["error_code"] == "LOGIN_INVALID_CREDENTIALS"
         assert cache.get(f"login_attempts_{user.email}") == 1
+
+    def test_503_is_declared_in_the_login_contract(self):
+        from accounts.views.user import CustomTokenObtainPairView
+
+        declared = CustomTokenObtainPairView.post._swagger_auto_schema["responses"]
+        assert 503 in declared
+        swagger = json.loads(
+            (
+                Path(__file__).resolve().parents[3]
+                / "api_contracts/openapi/swagger.json"
+            ).read_text()
+        )
+        assert "503" in swagger["paths"]["/accounts/token/"]["post"]["responses"]
 
 
 # ---------------------------------------------------------------------------
