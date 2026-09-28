@@ -242,8 +242,11 @@ test('managed mock background rechecks an awaited safety veto immediately before
 
 test('managed stack routing has runtime labels, network and read-only source proof', async ({}, testInfo) => {
   const receipt = inspectManagedMock();
-  expect(receipt.services.map(s => s.service)).toEqual([
-    'agentcc-gateway', 'mock-llm', 'backend', 'worker', 'frontend', 'postgres', 'clickhouse']);
+  // Standalone runs the gateway, backend, worker and UI in one `app` container
+  // (lib/managed-mock-standalone.ts).
+  expect(receipt.services.map(s => s.service)).toEqual(process.env.E2E_STACK === 'standalone'
+    ? ['app', 'mock-llm', 'postgres', 'clickhouse']
+    : ['agentcc-gateway', 'mock-llm', 'backend', 'worker', 'frontend', 'postgres', 'clickhouse']);
   expect(receipt.gatewaySha).toMatch(/^[a-f0-9]{64}$/);
   expect(receipt.mockSha).toMatch(/^[a-f0-9]{64}$/);
   await testInfo.attach('verified-managed-mock', { contentType: 'application/json', body: JSON.stringify(receipt) });
@@ -252,6 +255,9 @@ test('managed stack routing has runtime labels, network and read-only source pro
 // Standalone post-recreation attestation. Deliberately outside the offline
 // `--grep 'managed mock'` selection; no actor/model fixture or dispatch.
 test('managed background routing has source, serving health and owned poller proof', async ({}, testInfo) => {
+  // The Standalone inspection does not re-express the background constructor
+  // attestation (managed-mock-background.py pins Distributed host names).
+  test.skip(process.env.E2E_STACK === 'standalone', 'Distributed-only attestation');
   const receipt = inspectManagedMock({ evalBackground: true });
   await testInfo.attach('verified-managed-background-routing', {
     contentType: 'application/json', body: JSON.stringify(receipt),
