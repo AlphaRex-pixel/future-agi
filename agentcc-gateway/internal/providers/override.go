@@ -35,23 +35,12 @@ type OrgProviderCache struct {
 }
 
 // NewOrgProviderCache creates a cache pre-loaded with base provider configs.
-func NewOrgProviderCache(baseCfgs map[string]config.ProviderConfig) *OrgProviderCache {
+// allowPrivateBaseURLs lets org base URLs point at private and LAN addresses.
+func NewOrgProviderCache(baseCfgs map[string]config.ProviderConfig, allowPrivateBaseURLs bool) *OrgProviderCache {
 	return &OrgProviderCache{
-		providers: make(map[string]Provider),
-		baseCfgs:  baseCfgs,
-	}
-}
-
-// SetAllowPrivateBaseURLs sets whether org base URLs may point at private and
-// LAN addresses. Providers built under the previous setting are dropped.
-func (c *OrgProviderCache) SetAllowPrivateBaseURLs(allow bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.allowPrivateBaseURLs = allow
-	for key, p := range c.providers {
-		p.Close()
-		delete(c.providers, key)
+		providers:            make(map[string]Provider),
+		baseCfgs:             baseCfgs,
+		allowPrivateBaseURLs: allowPrivateBaseURLs,
 	}
 }
 

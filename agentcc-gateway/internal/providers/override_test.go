@@ -174,7 +174,7 @@ func TestGetOrCreate_TenantBaseURLWinsOverConfigYAML(t *testing.T) {
 
 	cache := NewOrgProviderCache(map[string]config.ProviderConfig{
 		"openai": {BaseURL: operator.URL, APIKey: "operator-key", APIFormat: "openai", Models: []string{"gpt-4o"}},
-	})
+	}, false)
 	p, err := cache.GetOrCreateWithTenantConfig("org-1", "openai", "org-key", &tenant.ProviderConfig{
 		APIKey:    "org-key",
 		BaseURL:   "http://localhost:" + port,
@@ -216,9 +216,7 @@ func TestGetOrCreate_DialRefusesAHostThatNoLongerResolvesPublic(t *testing.T) {
 	stubLookupIP(t, map[string][]string{"localhost": {"203.0.113.7"}})
 
 	for _, allowPrivate := range []bool{false, true} {
-		cache := NewOrgProviderCache(nil)
-		cache.SetAllowPrivateBaseURLs(allowPrivate)
-		p, err := cache.GetOrCreateWithTenantConfig("org-1", "custom", "org-key", &tenant.ProviderConfig{
+		p, err := NewOrgProviderCache(nil, allowPrivate).GetOrCreateWithTenantConfig("org-1", "custom", "org-key", &tenant.ProviderConfig{
 			APIKey:    "org-key",
 			BaseURL:   "http://localhost:" + port,
 			APIFormat: "openai",
@@ -248,7 +246,7 @@ func TestGetOrCreate_DialRefusesAHostThatNoLongerResolvesPublic(t *testing.T) {
 func TestGetOrCreate_RefusedTenantBaseURLDoesNotFallBackToConfigYAML(t *testing.T) {
 	cache := NewOrgProviderCache(map[string]config.ProviderConfig{
 		"openai": {BaseURL: "https://api.openai.com", APIKey: "operator-key", APIFormat: "openai"},
-	})
+	}, false)
 	p, err := cache.GetOrCreateWithTenantConfig("org-1", "openai", "org-key", &tenant.ProviderConfig{
 		APIKey:  "org-key",
 		BaseURL: "http://10.20.30.40:8080",
@@ -270,23 +268,11 @@ func TestGetOrCreate_PrivateBaseURLNeedsOptIn(t *testing.T) {
 	stubLookupIP(t, map[string][]string{"mock-llm": {"172.20.0.5"}})
 	tenantCfg := &tenant.ProviderConfig{APIKey: "org-key", BaseURL: "http://mock-llm:8080", Enabled: true}
 
-	cache := NewOrgProviderCache(nil)
-	if _, err := cache.GetOrCreateWithTenantConfig("org-1", "custom", "org-key", tenantCfg); err == nil {
+	if _, err := NewOrgProviderCache(nil, false).GetOrCreateWithTenantConfig("org-1", "custom", "org-key", tenantCfg); err == nil {
 		t.Fatal("private base_url accepted without the opt-in")
 	}
-
-	cache.SetAllowPrivateBaseURLs(true)
-	if _, err := cache.GetOrCreateWithTenantConfig("org-1", "custom", "org-key", tenantCfg); err != nil {
+	if _, err := NewOrgProviderCache(nil, true).GetOrCreateWithTenantConfig("org-1", "custom", "org-key", tenantCfg); err != nil {
 		t.Fatalf("private base_url refused with the opt-in: %v", err)
-	}
-	if cache.Count() != 1 {
-		t.Fatalf("Count() = %d, want 1", cache.Count())
-	}
-
-	// Turning the opt-in off must not leave providers built under it behind.
-	cache.SetAllowPrivateBaseURLs(false)
-	if cache.Count() != 0 {
-		t.Errorf("Count() = %d after SetAllowPrivateBaseURLs(false), want 0", cache.Count())
 	}
 }
 
