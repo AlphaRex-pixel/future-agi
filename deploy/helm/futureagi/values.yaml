@@ -738,7 +738,7 @@ agentccGateway:
   topologySpreadConstraints: []
 
 serving:
-  # -- Embedding model server for embedding-based evals, knowledge bases, Vector DB columns and Error Feed clustering [MODEL_SERVING_URL]. Off: those features are unavailable and the setup screen marks them off.
+  # -- Embedding model server for embedding-based evals, knowledge bases, Vector DB columns and (with an Enterprise Edition license) Error Feed clustering [MODEL_SERVING_URL]. Off: those features are unavailable and the setup screen marks them off.
   enabled: false
   image:
     # -- Registry. Empty: `image.registry`.

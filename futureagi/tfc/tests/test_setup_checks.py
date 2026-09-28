@@ -769,6 +769,15 @@ class TestCheckInventory:
                     f"{check['id']} still declares a per-mode down_detail"
                 )
 
+    def test_no_row_promises_a_feature_the_open_source_app_lacks(self, api_client):
+        """The screen only runs on open-source installs (404 on EE and cloud),
+        where Error Feed is a locked cloud feature."""
+        for probe_results in (all_up(), all_down()):
+            result = get_checks(api_client, probe_results=probe_results)
+            assert "Error Feed" not in str(result)
+        serving = next(c for c in CHECKS if c["id"] == "model_serving")
+        assert "Error Feed" not in str(serving)
+
 
 @pytest.mark.integration
 @pytest.mark.api

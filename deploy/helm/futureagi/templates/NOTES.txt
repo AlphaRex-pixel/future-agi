@@ -92,8 +92,8 @@ NOTE     Custom code evals are refused: the code sandbox is off. Turn it on with
 {{- end }}
 {{- if not $v.serving.enabled }}
 
-NOTE     Embedding-based evals, knowledge bases and Error Feed clustering are off
-         (serving.enabled=false).
+NOTE     Embedding-based evals and knowledge bases (and, with an Enterprise
+         Edition license, Error Feed clustering) are off (serving.enabled=false).
 {{- end }}
 {{- if $v.config.telemetry }}
 

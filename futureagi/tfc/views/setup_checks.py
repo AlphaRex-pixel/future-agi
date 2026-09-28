@@ -637,10 +637,10 @@ CHECKS = (
     },
     {
         "id": "model_serving",
-        "label": "Agent fixer (evals + Error Feed)",
+        # Error Feed, which clusters with it, is not in the open-source app.
+        "label": "Agent fixer (evals)",
         "down_detail": (
-            "Embedding-based evals, ground truth, Vector DB columns and Error "
-            "Feed clustering will not run"
+            "Embedding-based evals, ground truth and Vector DB columns will not run"
         ),
         "probe": _model_serving_up,
         "fix": _same_on_compose(
@@ -653,8 +653,8 @@ CHECKS = (
         # mode.
         "absent": {
             "detail": (
-                "Embedding-based evals, ground truth, Vector DB columns and "
-                "Error Feed clustering are off; everything else works"
+                "Embedding-based evals, ground truth and Vector DB columns are "
+                "off; everything else works"
             ),
             "fix": {
                 STANDALONE: "Optional. Turn it on with the `ml` profile: `docker compose --profile ml up -d`.",

@@ -310,7 +310,8 @@ COMPOSE_PROFILES=ml,sandbox
 ```
 
 - **`ml`** adds `serving`, the embedding model server behind embedding-based
-  evals, knowledge bases and eval clustering. Without it those features report
+  evals and knowledge bases (and Error Feed clustering, which needs an
+  Enterprise Edition license). Without it those features report
   that model serving is not deployed; everything else works. It needs a few
   more GB of memory once its models load. The image runs PyTorch on the CPU.
   On a host with an NVIDIA GPU, set `SERVING_VERSION=<version>-gpu` (or
@@ -1316,9 +1317,9 @@ docker compose up -d frontend     # Distributed
 
 ### Pre-flight says **Agent fixer** failed
 
-`serving` is not answering, so embedding-based evals, ground truth, Vector DB
-columns and Error Feed clustering will not run. Tracing, prompts and datasets
-keep working.
+`serving` is not answering, so embedding-based evals, ground truth and Vector
+DB columns will not run (and, with an Enterprise Edition license, Error Feed
+clustering). Tracing, prompts and datasets keep working.
 
 In Standalone `serving` is optional and off, and the check then shows as
 skipped: add `ml` to `COMPOSE_PROFILES` in `.env` and run

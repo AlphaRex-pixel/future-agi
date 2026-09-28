@@ -750,7 +750,7 @@ Bracketed names are the environment variables a key sets;
 | `agentccGateway.tolerations` | `[]` | Tolerations. Empty: the top-level `tolerations`. |
 | `agentccGateway.affinity` | `{}` | Affinity. Empty: the top-level `affinity`. |
 | `agentccGateway.topologySpreadConstraints` | `[]` | Topology spread constraints. Empty: the top-level `topologySpreadConstraints`. |
-| `serving.enabled` | `false` | Embedding model server for embedding-based evals, knowledge bases, Vector DB columns and Error Feed clustering [MODEL_SERVING_URL]. Off: those features are unavailable and the setup screen marks them off. |
+| `serving.enabled` | `false` | Embedding model server for embedding-based evals, knowledge bases, Vector DB columns and (with an Enterprise Edition license) Error Feed clustering [MODEL_SERVING_URL]. Off: those features are unavailable and the setup screen marks them off. |
 | `serving.image.registry` | `""` | Registry. Empty: `image.registry`. |
 | `serving.image.repository` | `"futureagi/serving"` | Repository of the model server image. |
 | `serving.image.tag` | `""` | Tag. Empty: `image.tag`, else the chart's appVersion. Append `-gpu` for the CUDA image (linux/amd64). |
