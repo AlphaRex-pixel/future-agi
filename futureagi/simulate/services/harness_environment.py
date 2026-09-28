@@ -569,7 +569,7 @@ def _selected_evals(job: HostedHarnessJob) -> list[dict[str, Any]]:
         entry = eval_entry(
             template,
             {
-                key: value
+                key: value if isinstance(value, str) else json.dumps(value)
                 for key, value in (config.mapping or {}).items()
                 if key in required_keys
             },
@@ -602,21 +602,22 @@ def _scenario_column_labels(run_test, configs) -> dict[str, str]:
     """
     from model_hub.models.develop_dataset import Column
 
-    candidates = set()
+    raw_by_id: dict[str, set[str]] = {}
     for config in configs:
         for value in (config.mapping or {}).values():
             try:
-                candidates.add(str(uuid.UUID(str(value))))
+                raw_by_id.setdefault(str(uuid.UUID(str(value))), set()).add(value)
             except ValueError:
                 continue
-    if not candidates:
+    if not raw_by_id:
         return {}
     dataset_ids = run_test.scenarios.values_list("dataset_id", flat=True)
     return {
-        str(column_id): str(name)
+        raw: str(name)
         for column_id, name in Column.objects.filter(
-            id__in=candidates, dataset_id__in=dataset_ids
+            id__in=raw_by_id, dataset_id__in=dataset_ids
         ).values_list("id", "name")
+        for raw in raw_by_id[str(column_id)]
     }
 
 

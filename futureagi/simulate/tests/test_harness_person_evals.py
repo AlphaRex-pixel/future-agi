@@ -161,6 +161,109 @@ def test_grade_this_run_by_name_with_a_person_added_eval(
 
 
 @pytest.mark.django_db
+def test_a_non_string_mapping_value_does_not_break_the_environment_detail(
+    env_client, environment, workspace
+):
+    template = _unoffered(required_keys=("output",))
+    added = _old_add(
+        env_client,
+        environment,
+        workspace,
+        template,
+        name="non string mapping",
+        mapping={"output": ["call.transcript"]},
+    )
+    assert added.status_code == 201, added.content
+    (item,) = _detail_selected(env_client, environment, workspace)[0]["inputs"]
+    assert item["source"] == '["call.transcript"]'
+    assert item["label"] == '["call.transcript"]'
+
+
+@pytest.mark.django_db
+def test_env_add_at_the_cap_is_idempotent_for_a_bound_name(
+    env_client, environment, workspace
+):
+    from unittest.mock import patch
+
+    from simulate.services.harness_evals import add_selected_eval
+
+    names = [f"cap_fill_{i}" for i in range(MOST_SELECTED_EVALS)]
+    for i, name in enumerate(names):
+        _template(name, ["conversation"], tags=("Conversation",), eval_id=i + 1)
+    with patch(
+        "simulate.services.harness_evals.offerable_eval_names",
+        return_value=frozenset(names),
+    ):
+        first = [add_selected_eval(environment.run_test, n, "voice") for n in names]
+        again = add_selected_eval(environment.run_test, names[0], "voice")
+    assert again.id == first[0].id
+
+
+@pytest.mark.django_db
+def test_grade_by_the_template_name_of_a_renamed_person_eval(
+    env_client,
+    environment,
+    finished_run,
+    workspace,
+    dispatch,
+    django_capture_on_commit_callbacks,
+):
+    template = _unoffered()
+    _old_add(
+        env_client,
+        environment,
+        workspace,
+        template,
+        name="renamed",
+        mapping={"input": "persona.name", "output": "call.transcript"},
+    )
+    _call(finished_run, metadata=_graded())
+    with django_capture_on_commit_callbacks(execute=True):
+        r = env_client.post(
+            f"{ENVIRONMENTS}/{environment.id}/runs/{finished_run.id}/evaluations/",
+            {"name": template.name},
+            format="json",
+            HTTP_X_WORKSPACE_ID=str(workspace.id),
+        )
+    assert r.status_code == 202, r.content
+    assert r.json()["queued"] == 1
+
+
+def test_serializer_accepts_a_scenario_column_id_as_a_source():
+    from simulate.serializers.harness_environment import (
+        HarnessEnvironmentEvalInputSerializer,
+    )
+
+    serializer = HarnessEnvironmentEvalInputSerializer(
+        data={
+            "key": "input",
+            "source": "6cdd4513-0000-4000-8000-000000000000",
+            "label": "situation",
+        }
+    )
+    assert serializer.is_valid()
+
+
+@pytest.mark.django_db
+def test_an_upper_case_column_id_still_gets_its_name(
+    env_client, environment, workspace
+):
+    template = _unoffered(required_keys=("output",))
+    situation = _scenario_column(environment, "situation")
+    added = _old_add(
+        env_client,
+        environment,
+        workspace,
+        template,
+        name="upper case id",
+        mapping={"output": str(situation.id).upper()},
+    )
+    assert added.status_code == 201, added.content
+    (item,) = _detail_selected(env_client, environment, workspace)[0]["inputs"]
+    assert item["label"] == "situation"
+
+
+@pytest.mark.django_db
 def test_people_are_not_capped(env_client, environment, workspace):
     for index in range(MOST_SELECTED_EVALS + 2):
         template = _unoffered(name=f"person_cap_{index}", required_keys=("output",))
