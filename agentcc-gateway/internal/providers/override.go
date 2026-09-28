@@ -91,37 +91,18 @@ func (c *OrgProviderCache) GetOrCreateWithTenantConfig(orgID, providerID, apiKey
 			return nil, fmt.Errorf("org %s provider %s: %w", orgID, providerID, err)
 		}
 
-		// Managed mode: build base config from tenant's provider config.
-		timeout := time.Duration(tenantCfg.Timeout) * time.Second
-		if timeout <= 0 {
-			timeout = 60 * time.Second
-		}
-		maxConc := tenantCfg.MaxConcurrent
-		if maxConc <= 0 {
-			maxConc = 100
-		}
-		poolSize := tenantCfg.ConnPoolSize
-		if poolSize <= 0 {
-			poolSize = 100
-		}
+		// Managed mode: the org's upstream, with defaults for what it leaves
+		// unset. resolveOrgConfig applies the rest of the org's config.
 		apiFormat := tenantCfg.APIFormat
 		if apiFormat == "" {
 			apiFormat = inferAPIFormat(providerID)
 		}
 		baseCfg = config.ProviderConfig{
-			BaseURL:            tenantCfg.BaseURL,
-			APIKey:             apiKey,
-			APIFormat:          apiFormat,
-			APIPathPrefix:      tenantCfg.APIPathPrefix,
-			DefaultTimeout:     timeout,
-			MaxConcurrent:      maxConc,
-			ConnPoolSize:       poolSize,
-			Models:             tenantCfg.Models,
-			AWSAccessKeyID:     tenantCfg.AWSAccessKeyID,
-			AWSSecretAccessKey: tenantCfg.AWSSecretAccessKey,
-			AWSRegion:          tenantCfg.AWSRegion,
-			AWSSessionToken:    tenantCfg.AWSSessionToken,
-			ServiceAccountJSON: tenantCfg.ServiceAccountJSON,
+			BaseURL:        tenantCfg.BaseURL,
+			APIFormat:      apiFormat,
+			DefaultTimeout: 60 * time.Second,
+			MaxConcurrent:  100,
+			ConnPoolSize:   100,
 		}
 		ok = true
 	}
