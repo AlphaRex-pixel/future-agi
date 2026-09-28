@@ -27,10 +27,6 @@ class DatasetLimitReached(Exception):
     """The plan's dataset limit is reached, so nothing was created."""
 
 
-def dataset_limit_reached_response() -> Response:
-    return _gm.too_many_requests(get_error_message("DATASET_CREATE_LIMIT_REACHED"))
-
-
 def dataset_limit_check_failed_response() -> Response:
     # 503: the refusal is transient, like the other retryable read failures.
     # The typed code lets the frontend show this message despite the 5xx.
@@ -55,5 +51,5 @@ def dataset_add_refusal(
         call_log_row_entry.status == APICallStatusChoices.RESOURCE_LIMIT.value
         and not sdk_source
     ):
-        return dataset_limit_reached_response()
+        return _gm.too_many_requests(get_error_message("DATASET_CREATE_LIMIT_REACHED"))
     return None

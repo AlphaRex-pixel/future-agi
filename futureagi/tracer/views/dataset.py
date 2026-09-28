@@ -14,7 +14,6 @@ from model_hub.views.utils.dataset_limit import (
     DatasetLimitCheckFailed,
     DatasetLimitReached,
     dataset_limit_check_failed_response,
-    dataset_limit_reached_response,
 )
 from tfc.utils.api_errors import ApiErrorCode
 from tfc.utils.api_serializers import DatasetLimitCheckFailedErrorSerializer
@@ -137,7 +136,12 @@ class DatasetView(BaseModelViewSetMixinWithUserOrg, ModelViewSet):
             return dataset_limit_check_failed_response()
 
         except DatasetLimitReached:
-            return dataset_limit_reached_response()
+            # 400, not the sibling routes' 429: the frontend shows a 429 only
+            # through the usage entry's upgrade alert, which this route does
+            # not send, so a 429 here would refuse without telling the user.
+            return self._gm.bad_request(
+                get_error_message("DATASET_CREATE_LIMIT_REACHED")
+            )
 
         except (ValidationError, ValueError) as e:
             logger.exception(f"Error in creating dataset observe:  {str(e)}")

@@ -686,9 +686,12 @@ class TestAddToNewDatasetAPI:
     def test_dataset_creation_limit_reached(
         self, auth_client, observe_project, observe_spans
     ):
-        """A reached limit answers 429 like the other dataset-create routes.
+        """A reached limit answers 400 with the plan-limit message.
 
-        It is a quota refusal, not a failure, so nothing is logged as an error.
+        The frontend shows a 429 only through the usage entry's upgrade alert,
+        which this route does not send, so the message has to arrive as a 400
+        for the user to see it. It is a quota refusal, not a failure, so
+        nothing is logged as an error.
         """
         with (
             patch(
@@ -711,8 +714,7 @@ class TestAddToNewDatasetAPI:
                 format="json",
             )
 
-        assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
-        assert response.json()["code"] == "rate_limited"
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.json()["message"] == get_error_message(
             "DATASET_CREATE_LIMIT_REACHED"
         )
