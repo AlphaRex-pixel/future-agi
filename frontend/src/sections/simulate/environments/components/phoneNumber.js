@@ -2,6 +2,7 @@ const MIN_DIGITS = 10;
 const MAX_DIGITS = 12;
 const MAX_NATIONAL_DIGITS = 10;
 const KEEPS_TRUNK_ZERO = new Set(["39"]);
+const FIXED_NATIONAL_DIGITS = { 1: 10, 91: 10 };
 
 export function nationalDigits(dial, number) {
   const raw = String(number || "").trim();
@@ -17,6 +18,13 @@ export function phoneNumberError(dial, number) {
   const dialDigits = raw.startsWith("+") ? "" : String(dial || "").replace(/\D/g, "");
   const national = nationalDigits(dial, raw);
   const total = dialDigits.length + national.length;
+  const typedCode = raw.startsWith("+") ? ["91", "1"].find((code) => national.startsWith(code)) : null;
+  const code = typedCode || dialDigits;
+  const fixed = FIXED_NATIONAL_DIGITS[code];
+  if (fixed) {
+    const length = typedCode ? national.length - typedCode.length : national.length;
+    return length === fixed ? null : `Enter exactly ${fixed} digits after +${code}`;
+  }
   if (raw.startsWith("+")) {
     if (total < MIN_DIGITS || total > MAX_DIGITS) {
       return `Enter ${MIN_DIGITS} to ${MAX_DIGITS} digits including the country code`;

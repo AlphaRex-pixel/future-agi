@@ -103,6 +103,8 @@ _E164 = re.compile(r"^\+[1-9]\d{6,14}$")
 _PHONE_MIN_DIGITS = 10
 _PHONE_MAX_DIGITS = 12
 _PHONE_MAX_NATIONAL_DIGITS = 10
+# Country codes whose national numbers are always exactly this long.
+_PHONE_FIXED_NATIONAL_DIGITS = {"1": 10, "91": 10}
 _PHONE_COUNTRY_CODES = sorted(
     {
         "1", "7", "20", "27", "30", "31", "32", "33", "34", "36", "39", "40", "41",
@@ -145,6 +147,12 @@ def phone_number_error(value: str) -> str | None:
     country = next((c for c in _PHONE_COUNTRY_CODES if digits.startswith(c)), None)
     if country is None:
         return "phone_number must start with a known country code"
+    fixed = _PHONE_FIXED_NATIONAL_DIGITS.get(country)
+    if fixed is not None and len(digits) - len(country) != fixed:
+        return (
+            f"phone_number must have exactly {fixed} digits after the +{country} "
+            "country code"
+        )
     if len(digits) - len(country) > _PHONE_MAX_NATIONAL_DIGITS:
         return (
             f"phone_number has too many digits after the +{country} country code "
