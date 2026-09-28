@@ -1493,6 +1493,7 @@ def test_job_api_preserves_requested_width_above_fixed_cpu_for_admission(user):
     client = APIClient()
     client.force_authenticate(user=user)
     payload = _payload()
+    payload["agent"]["connector"] = "retell_chat"
     payload["runtime"]["parallelism"] = 3
     payload["runtime"]["cpu_units"] = 2
     with patch("simulate.temporal.client.start_hosted_harness_gateway_workflow"):

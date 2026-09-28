@@ -772,7 +772,11 @@ class TestRunResultsV3Views:
         if layout == "child_run":
             # The suite lives on the environment; the run's call carries its key.
             environment = job()
-            job(environment=environment, run_test=test_execution.run_test)
+            job(
+                environment=environment,
+                run_test=test_execution.run_test,
+                test_execution=test_execution,
+            )
             HostedHarnessScenario.no_workspace_objects.create(
                 job=environment, **authored
             )
@@ -790,23 +794,37 @@ class TestRunResultsV3Views:
         url = f"/simulate/v3/test-executions/{test_execution.id}/calls/"
 
         expected = {
-            "goal": ("Verify the caller's guest PIN", "Verify the caller's guest PIN"),
-            "sub_goal": ("pin_verified", "pin_verified"),
-            "accent": ("Indian", "Indian"),
-            "age": ("40-50", "40-50"),
-            "attack": ("prompt_injection", "Injected instruction"),
-            "task": ("authenticate_pin", "Authenticate pin"),
+            "goal": [
+                ("Verify the caller's guest PIN", "Verify the caller's guest PIN")
+            ],
+            "sub_goal": [
+                ("exact_greeting", "Exact greeting"),
+                ("pin_verified", "Pin verified"),
+            ],
+            "accent": [("Indian", "Indian")],
+            "age": [("40-50", "40-50")],
+            "attack": [("prompt_injection", "Injected instruction")],
+            "task": [("authenticate_pin", "Authenticate pin")],
         }
-        for axis, (key, label) in expected.items():
+        for axis, levels in expected.items():
             body = auth_client.get(url, {"group_by": axis}).json()
-            group = next(g for g in body["groups"] if str(call.id) in g["result_ids"])
-            assert (group["key"], group["label"]) == (key, label), axis
+            groups = [g for g in body["groups"] if str(call.id) in g["result_ids"]]
+            assert sorted((g["key"], g["label"]) for g in groups) == levels, axis
+            assert all(g["total"] == 1 for g in groups), axis
             # A call with no authored scenario keeps the existing goal fallbacks.
             others = [g for g in body["groups"] if str(call.id) not in g["result_ids"]]
             assert axis == "goal" or all(g["key"] == "Ungrouped" for g in others), axis
 
-            scoped = auth_client.get(url, {"group_by": axis, "group_key": key}).json()
-            assert [row["id"] for row in scoped["results"]] == [str(call.id)], axis
+            for key, _ in levels:
+                scoped = auth_client.get(
+                    url, {"group_by": axis, "group_key": key}
+                ).json()
+                assert [row["id"] for row in scoped["results"]] == [str(call.id)], axis
+        ungrouped = auth_client.get(
+            url, {"group_by": "sub_goal", "group_key": "Ungrouped"}
+        ).json()
+        assert str(call.id) not in [row["id"] for row in ungrouped["results"]]
+        assert ungrouped["count"] == len(analytics_call_executions) - 1
         row = next(
             r for r in auth_client.get(url).json()["results"] if r["id"] == str(call.id)
         )

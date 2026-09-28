@@ -413,6 +413,12 @@ describe("runCallsQueryOptions", () => {
     });
   });
 
+  it("leaves group_by off the request when no grouping is chosen", async () => {
+    const options = runCallsQueryOptions("ex1", { groupBy: "" });
+    await options.queryFn();
+    expect(axios.get.mock.calls.at(-1)[1].params).not.toHaveProperty("group_by");
+  });
+
   it("lets a reader switch the table hook off", () => {
     renderHook(() => useRunCalls("ex1", { enabled: false }), {
       wrapper: makeWrapper(),
