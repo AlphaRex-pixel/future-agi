@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	gatewayadmin "github.com/futureagi/agentcc-gateway/internal/contracts/generated"
 )
 
 // keySyncHTTPClient is a shared, reusable HTTP client for key sync.
@@ -44,10 +46,12 @@ func SyncKeysFromControlPlane(ctx context.Context, baseURL, adminToken string, k
 		return fmt.Errorf("key sync returned status %d from %s: %s", resp.StatusCode, endpoint, body)
 	}
 
-	// Django response format: {"status": true, "result": [...]}
+	// Django response format: {"status": true, "result": [...]}. Fields the
+	// gateway does not know are ignored: refusing them would leave an older
+	// gateway with no synced keys behind a newer control plane.
 	var envelope struct {
-		Status bool        `json:"status"`
-		Result []SyncedKey `json:"result"`
+		Status bool                      `json:"status"`
+		Result []*gatewayadmin.SyncedKey `json:"result"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 10<<20)).Decode(&envelope); err != nil {
 		return fmt.Errorf("parsing key sync response: %w", err)
@@ -55,6 +59,18 @@ func SyncKeysFromControlPlane(ctx context.Context, baseURL, adminToken string, k
 
 	if !envelope.Status {
 		return fmt.Errorf("key sync: status=false")
+	}
+
+	// A malformed key is left out rather than failing the sync: it could not
+	// authenticate anyway, and every other key would go with it.
+	keys := make([]SyncedKey, 0, len(envelope.Result))
+	for i, k := range envelope.Result {
+		key, err := SyncedKeyFromContract(k)
+		if err != nil {
+			slog.Warn("key sync: leaving out a malformed key", "index", i, "error", err)
+			continue
+		}
+		keys = append(keys, key)
 	}
 
 	// No keys is normal until the first one is created, and every periodic
@@ -65,7 +81,7 @@ func SyncKeysFromControlPlane(ctx context.Context, baseURL, adminToken string, k
 		)
 	}
 
-	loaded := ks.SyncFromHashes(envelope.Result)
+	loaded := ks.SyncFromHashes(keys)
 	slog.Info("key sync from control plane completed",
 		"keys_received", len(envelope.Result),
 		"keys_synced", loaded,

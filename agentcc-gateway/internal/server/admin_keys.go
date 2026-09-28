@@ -3,13 +3,11 @@ package server
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/futureagi/agentcc-gateway/internal/auth"
 	gatewayadmin "github.com/futureagi/agentcc-gateway/internal/contracts/generated"
@@ -132,12 +130,7 @@ func (h *KeyHandlers) ImportKeys(w http.ResponseWriter, r *http.Request) {
 	}
 	keys := make([]auth.SyncedKey, len(req.Keys))
 	for i, k := range req.Keys {
-		if k == nil || k.ID == "" || !isSHA256Hex(k.KeyHash) {
-			models.WriteError(w, models.ErrBadRequest("invalid_key",
-				fmt.Sprintf("keys[%d]: id and a hex SHA-256 key_hash are required", i)))
-			return
-		}
-		key, err := syncedKeyFromContract(k)
+		key, err := auth.SyncedKeyFromContract(k)
 		if err != nil {
 			models.WriteError(w, models.ErrBadRequest("invalid_key", fmt.Sprintf("keys[%d]: %v", i, err)))
 			return
@@ -151,42 +144,6 @@ func (h *KeyHandlers) ImportKeys(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(gatewayadmin.ImportKeysResponse{Received: len(keys), Loaded: loaded})
-}
-
-// syncedKeyFromContract converts a key as the control plane sends it.
-func syncedKeyFromContract(k *gatewayadmin.SyncedKey) (auth.SyncedKey, error) {
-	key := auth.SyncedKey{
-		ID:        k.ID,
-		KeyHash:   k.KeyHash,
-		Models:    k.Models,
-		Providers: k.Providers,
-		Metadata:  k.Metadata,
-	}
-	if k.Name != nil {
-		key.Name = *k.Name
-	}
-	if k.Owner != nil {
-		key.Owner = *k.Owner
-	}
-	if k.KeyPrefix != nil {
-		key.KeyPrefix = *k.KeyPrefix
-	}
-	if k.ExpiresAt != nil {
-		t, err := time.Parse(time.RFC3339, *k.ExpiresAt)
-		if err != nil {
-			return auth.SyncedKey{}, fmt.Errorf("expires_at: %w", err)
-		}
-		key.ExpiresAt = &t
-	}
-	return key, nil
-}
-
-func isSHA256Hex(s string) bool {
-	if len(s) != 64 {
-		return false
-	}
-	_, err := hex.DecodeString(s)
-	return err == nil
 }
 
 // GetKey handles GET /-/keys/{key_id}.

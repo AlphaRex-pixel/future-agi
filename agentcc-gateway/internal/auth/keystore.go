@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/futureagi/agentcc-gateway/internal/config"
+	gatewayadmin "github.com/futureagi/agentcc-gateway/internal/contracts/generated"
 )
 
 // USDToMicros converts a USD float to microdollars (millionths of a dollar).
@@ -358,19 +360,60 @@ func (ks *KeyStore) Count() int {
 	return len(ks.byID)
 }
 
-// SyncedKey represents a key received from the Django control plane during
-// startup sync. It contains the pre-computed SHA-256 hash (the raw key is
-// never sent over the wire).
+// SyncedKey is a key the Django control plane holds, as the store loads it.
+// It carries the pre-computed SHA-256 hash (the raw key is never sent over the
+// wire). SyncedKeyFromContract builds it from the wire shape.
 type SyncedKey struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	Owner     string            `json:"owner"`
-	KeyHash   string            `json:"key_hash"`
-	KeyPrefix string            `json:"key_prefix"`
-	Models    []string          `json:"models"`
-	Providers []string          `json:"providers"`
-	Metadata  map[string]string `json:"metadata"`
-	ExpiresAt *time.Time        `json:"expires_at"`
+	ID        string
+	Name      string
+	Owner     string
+	KeyHash   string
+	KeyPrefix string
+	Models    []string
+	Providers []string
+	Metadata  map[string]string
+	ExpiresAt *time.Time
+}
+
+// SyncedKeyFromContract checks and converts a key as the control plane sends
+// it, both when the gateway pulls the key set and when Django pushes keys to
+// POST /-/keys/sync.
+func SyncedKeyFromContract(k *gatewayadmin.SyncedKey) (SyncedKey, error) {
+	if k == nil || k.ID == "" || !isSHA256Hex(k.KeyHash) {
+		return SyncedKey{}, errors.New("id and a hex SHA-256 key_hash are required")
+	}
+	key := SyncedKey{
+		ID:        k.ID,
+		KeyHash:   k.KeyHash,
+		Models:    k.Models,
+		Providers: k.Providers,
+		Metadata:  k.Metadata,
+	}
+	if k.Name != nil {
+		key.Name = *k.Name
+	}
+	if k.Owner != nil {
+		key.Owner = *k.Owner
+	}
+	if k.KeyPrefix != nil {
+		key.KeyPrefix = *k.KeyPrefix
+	}
+	if k.ExpiresAt != nil {
+		t, err := time.Parse(time.RFC3339, *k.ExpiresAt)
+		if err != nil {
+			return SyncedKey{}, fmt.Errorf("expires_at: %w", err)
+		}
+		key.ExpiresAt = &t
+	}
+	return key, nil
+}
+
+func isSHA256Hex(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
 }
 
 // syncedKeyToAPIKey is the single construction site for both sync paths, so a

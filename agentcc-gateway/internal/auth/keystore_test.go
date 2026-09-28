@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/futureagi/agentcc-gateway/internal/config"
+	gatewayadmin "github.com/futureagi/agentcc-gateway/internal/contracts/generated"
 )
 
 // helper to build a minimal AuthConfig with the given key configs.
@@ -436,20 +437,31 @@ func syncKeyStore() *KeyStore {
 	return NewKeyStore(authCfg())
 }
 
+// fromWire decodes a key as the control plane sends it and converts it the way
+// both sync paths do.
+func fromWire(t *testing.T, payload string) SyncedKey {
+	t.Helper()
+	var wire gatewayadmin.SyncedKey
+	if err := json.Unmarshal([]byte(payload), &wire); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	sk, err := SyncedKeyFromContract(&wire)
+	if err != nil {
+		t.Fatalf("SyncedKeyFromContract: %v", err)
+	}
+	return sk
+}
+
 // Decoding the wire payload is where the original bug lived (the field was
 // dropped); DRF emits RFC3339 with offset + fractional seconds.
 func TestSyncedKey_DecodesExpiresAt(t *testing.T) {
-	const payload = `{
+	hash := HashKey("sk-agentcc-contractor")
+	sk := fromWire(t, `{
 		"id": "ck_1",
 		"name": "contractor",
-		"key_hash": "abc123",
+		"key_hash": "`+hash+`",
 		"expires_at": "2030-06-15T12:30:45.123456Z"
-	}`
-
-	var sk SyncedKey
-	if err := json.Unmarshal([]byte(payload), &sk); err != nil {
-		t.Fatalf("unmarshal failed: %v", err)
-	}
+	}`)
 	if sk.ExpiresAt == nil {
 		t.Fatal("expected ExpiresAt to decode from the wire, got nil")
 	}
@@ -459,10 +471,7 @@ func TestSyncedKey_DecodesExpiresAt(t *testing.T) {
 	}
 
 	// Null expiry must decode to nil (never-expiring keys).
-	var nullSk SyncedKey
-	if err := json.Unmarshal([]byte(`{"key_hash":"h","expires_at":null}`), &nullSk); err != nil {
-		t.Fatalf("unmarshal null failed: %v", err)
-	}
+	nullSk := fromWire(t, `{"id":"ck_2","key_hash":"`+hash+`","expires_at":null}`)
 	if nullSk.ExpiresAt != nil {
 		t.Errorf("expected nil ExpiresAt for null wire value, got %v", *nullSk.ExpiresAt)
 	}
@@ -471,13 +480,8 @@ func TestSyncedKey_DecodesExpiresAt(t *testing.T) {
 // Real wire payload with a past expiry, decoded then synced, must be rejected.
 func TestSyncedExpiredKey_DecodeToReject(t *testing.T) {
 	const rawKey = "sk-agentcc-synced-expired"
-	payload := `{"id":"ck_exp","name":"c","key_hash":"` + HashKey(rawKey) +
-		`","expires_at":"2000-01-01T00:00:00Z"}`
-
-	var sk SyncedKey
-	if err := json.Unmarshal([]byte(payload), &sk); err != nil {
-		t.Fatalf("unmarshal failed: %v", err)
-	}
+	sk := fromWire(t, `{"id":"ck_exp","name":"c","key_hash":"`+HashKey(rawKey)+
+		`","expires_at":"2000-01-01T00:00:00Z"}`)
 
 	ks := syncKeyStore()
 	ks.SyncFromHashes([]SyncedKey{sk})
