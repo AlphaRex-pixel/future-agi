@@ -1887,7 +1887,7 @@ class TestMetricsEndpoint:
     def test_dataset_native_values_use_remaining_wall_and_result_ceiling(
         self, organization, workspace
     ):
-        from tracer.views import dashboard
+        from tracer.services import dataset_choice_values
         from tracer.views.dashboard import (
             _FINITE_NATIVE_FILTER_VALUE_MAX_RESULT_BYTES,
             DashboardViewSet,
@@ -1904,10 +1904,10 @@ class TestMetricsEndpoint:
             workspace=workspace,
             auth=None,
         )
-        run_statements = dashboard._run_filter_value_pg_statements
+        run_statements = dataset_choice_values._read
         statements = []
 
-        def observed_statements(deadline, read):
+        def observed_statements(deadline, wall_ms, read):
             def observed_read(fetch):
                 def observed_fetch(sql, params):
                     rows = fetch(sql, params)
@@ -1919,11 +1919,10 @@ class TestMetricsEndpoint:
 
                 return read(observed_fetch)
 
-            return run_statements(deadline, observed_read)
+            return run_statements(deadline, wall_ms, observed_read)
 
-        with patch(
-            "tracer.views.dashboard._run_filter_value_pg_statements",
-            side_effect=observed_statements,
+        with patch.object(
+            dataset_choice_values, "_read", side_effect=observed_statements
         ):
             response = DashboardViewSet()._filter_values_dataset(
                 request,
@@ -1947,8 +1946,9 @@ class TestMetricsEndpoint:
         assert params["organization_id"] == organization.id
 
     def test_dataset_native_values_do_not_relabel_programming_errors_as_retryable(self):
-        from django.db import OperationalError
+        from django.db import OperationalError, ProgrammingError
 
+        from tracer.services import dataset_choice_values
         from tracer.views.dashboard import DashboardViewSet
 
         deadline = MagicMock()
@@ -1958,10 +1958,7 @@ class TestMetricsEndpoint:
         )
 
         def read_values(error):
-            with patch(
-                "tracer.views.dashboard._run_filter_value_pg_statements",
-                side_effect=error,
-            ):
+            with patch.object(dataset_choice_values, "_read", side_effect=error):
                 return DashboardViewSet()._filter_values_dataset(
                     request,
                     "dataset",
@@ -1970,10 +1967,14 @@ class TestMetricsEndpoint:
                     deadline=deadline,
                 )
 
-        response = read_values(RuntimeError("broken query builder"))
-        assert response.status_code == 500
-        assert response.data["code"] == "server_error"
-        # A PostgreSQL statement_timeout surfaces as a DatabaseError.
+        for defect in (
+            RuntimeError("broken query builder"),
+            ProgrammingError('relation "model_hub_dataset" does not exist'),
+        ):
+            response = read_values(defect)
+            assert response.status_code == 500
+            assert response.data["code"] == "server_error"
+        # A PostgreSQL statement_timeout surfaces as an OperationalError.
         response = read_values(OperationalError("canceling statement"))
         assert response.status_code == 503
         assert response.data["code"] == "service_unavailable"
@@ -2337,27 +2338,44 @@ class TestMetricsEndpoint:
         def families(_self, _scope, _query):
             # (…, primary, …, kind, queryset, fields, convert)
             return [
-                ("", "", "evals", "", "eval_config",
-                 _Recorder("eval_config"), ("id",), lambda row: row),
-                ("", "", "evals", "", "eval_template",
-                 _Recorder("eval_template"), ("id",), lambda row: row),
+                (
+                    "",
+                    "",
+                    "evals",
+                    "",
+                    "eval_config",
+                    _Recorder("eval_config"),
+                    ("id",),
+                    lambda row: row,
+                ),
+                (
+                    "",
+                    "",
+                    "evals",
+                    "",
+                    "eval_template",
+                    _Recorder("eval_template"),
+                    ("id",),
+                    lambda row: row,
+                ),
             ]
 
-        source = CurrentDefinitionSource(deadline=SimpleNamespace(
-            remaining_ms=lambda floor_ms=1: 10_000
-        ))
+        source = CurrentDefinitionSource(
+            deadline=SimpleNamespace(remaining_ms=lambda floor_ms=1: 10_000)
+        )
 
         with (
             patch.object(CurrentDefinitionSource, "_families", families),
-            patch.object(CurrentDefinitionSource, "_read",
-                         lambda _self, read: read()),
+            patch.object(CurrentDefinitionSource, "_read", lambda _self, read: read()),
         ):
-            source.resolve(scope=scope, property_id=f"eval_config:{metric_id}",
-                           source="evals")
+            source.resolve(
+                scope=scope, property_id=f"eval_config:{metric_id}", source="evals"
+            )
             config_seen = list(seen)
             seen.clear()
-            source.resolve(scope=scope, property_id=f"eval_template:{metric_id}",
-                           source="evals")
+            source.resolve(
+                scope=scope, property_id=f"eval_template:{metric_id}", source="evals"
+            )
             template_seen = list(seen)
 
         # Each request touches ONLY its own family -- no cross-family guessing.
@@ -2371,6 +2389,7 @@ class TestMetricsEndpoint:
             assert all(set(kw) == {"id"} for _, kw in recorded)
             assert all(kw["id"] == metric_id for _, kw in recorded)
             assert not any("eval_template_id" in kw for _, kw in recorded)
+
     def test_property_registry_id_is_bound_to_persisted_filter_family(self):
         from rest_framework import serializers
 

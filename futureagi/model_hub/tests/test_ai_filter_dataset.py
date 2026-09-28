@@ -35,10 +35,16 @@ class FetchDatasetColumnValuesTests(unittest.TestCase):
     def _fetch(self, rows, data_type="text", search_query="ish"):
         """Run the helper with ``rows`` as the PostgreSQL value read."""
         from model_hub.views import ai_filter
+        from tracer.services import dataset_choice_values
 
+        fetch = mock.Mock(
+            return_value=[{"val": row, "result_bytes": 0} for row in rows]
+        )
         with (
             mock.patch.object(
-                ai_filter, "_dataset_column_value_rows", return_value=rows
+                dataset_choice_values,
+                "_read",
+                side_effect=lambda deadline, wall_ms, read: read(fetch),
             ) as read,
             mock.patch("model_hub.models.develop_dataset.Column.objects") as cols,
         ):
@@ -46,28 +52,30 @@ class FetchDatasetColumnValuesTests(unittest.TestCase):
             values = ai_filter._fetch_dataset_column_values(
                 DATASET_ID, COLUMN_ID, search_query=search_query
             )
-        return values, read
+        return values, SimpleNamespace(read=read, fetch=fetch)
 
     def test_text_column_returns_raw_values(self):
         vals, read = self._fetch(["English", "Spanish", "French"])
         self.assertEqual(vals, ["English", "Spanish", "French"])
-        sql, params = read.call_args.args
+        sql, params = read.fetch.call_args.args
         self.assertEqual(params["search"], "ish")
         self.assertEqual(params["result_limit"], 101)
-        self.assertLessEqual(read.call_args.kwargs["deadline"].remaining_ms(), 4000)
+        deadline, wall_ms, _read = read.read.call_args.args
+        self.assertEqual(wall_ms, 4000)
+        self.assertLessEqual(deadline.remaining_ms(), 4000)
 
     def test_values_are_read_from_postgres_not_the_cdc_mirror(self):
         """The ClickHouse mirror is ordered by cell id and trails every write,
         so grounding reads the column from PostgreSQL through its index."""
         _vals, read = self._fetch([], search_query="x")
-        sql, params = read.call_args.args
+        sql, params = read.fetch.call_args.args
         self.assertIn(
             "FROM model_hub_cell "
             "WHERE dataset_id = %(dataset_id)s "
             "AND column_id = %(column_id)s "
             "AND deleted = false "
             "AND value <> '' "
-            "AND strpos(lower(value), lower(%(search)s)) > 0 ",
+            "AND (%(search)s = '' OR strpos(lower(value), lower(%(search)s)) > 0) ",
             sql,
         )
         self.assertNotIn("FINAL", sql)
@@ -112,11 +120,12 @@ class FetchDatasetColumnValuesTests(unittest.TestCase):
         from django.db import OperationalError
 
         from model_hub.views import ai_filter
+        from tracer.services import dataset_choice_values
 
         with (
             mock.patch.object(
-                ai_filter,
-                "_dataset_column_value_rows",
+                dataset_choice_values,
+                "_read",
                 side_effect=OperationalError("canceling statement due to timeout"),
             ),
             mock.patch("model_hub.models.develop_dataset.Column.objects") as cols,

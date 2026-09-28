@@ -1,4 +1,4 @@
-"""Offline reader contracts: execute the real method, never import Django.
+"""Offline reader contracts: execute the real method, never configure Django.
 
 ORM/PostgreSQL boundaries are recording doubles; this does not attest PG filter
 membership (test_dataset_column_values_pg.py does). Run with -c /dev/null --noconftest, explicit root, network denied.
@@ -160,6 +160,8 @@ def deny_sockets(monkeypatch):
 
 @pytest.fixture
 def reader(dashboard_source):
+    from tracer.services import dataset_choice_values
+
     source = ast.parse(dashboard_source)
     method = next(
         node
@@ -168,7 +170,7 @@ def reader(dashboard_source):
         and node.name == "_filter_values_dataset_column"
     )
     postgres = Mock()
-    state = {"oversized_statement": None, "interpretations": True}
+    state = {"oversized_statement": None, "interpretations": True, "failure": None}
     column = NS(data_type="array", source="evaluation")
     manager = Mock()
     manager.select_related.return_value.get.return_value = column
@@ -192,10 +194,18 @@ def reader(dashboard_source):
     )
     scope = {
         "_run_filter_value_pg_read": lambda deadline, fn: fn(),
-        "_run_filter_value_pg_statements": lambda deadline, read: read(postgres),
         "ReadDeadlineExceeded": DeadlineExceeded,
-        "DatabaseError": type("DatabaseError", (Exception,), {}),
-        "DashboardBoundedReadError": type("BoundedReadError", (Exception,), {}),
+        **{
+            name: getattr(dataset_choice_values, name)
+            for name in (
+                "UNAVAILABLE_READ_ERRORS",
+                "DatasetValuesTooBroad",
+                "InvalidChoiceCell",
+                "evaluation_choice_labels",
+                "read_choice_column_values",
+                "read_column_values",
+            )
+        },
         "_FINITE_NATIVE_FILTER_VALUE_MAX": 5000,
         "_LEGACY_NATIVE_FILTER_VALUE_MAX": 1000,
         "_FINITE_NATIVE_FILTER_VALUE_MAX_RESULT_BYTES": 1048576,
@@ -240,6 +250,8 @@ def reader(dashboard_source):
             )
 
         def fetch(sql, params):
+            if state["failure"] is not None:
+                raise state["failure"]
             if "value_infos" not in sql:
                 counts = {}
                 for value, _infos in cells:
@@ -249,12 +261,13 @@ def reader(dashboard_source):
                     for value, count in counts.items()
                 ]
             else:
-                # SQL ships only cells that may be literals; shipping every
-                # cell is a superset the decoder must answer identically.
+                # SQL ships only cells of the asked texts that may be literals;
+                # shipping every such cell is a superset the decoder must
+                # answer identically.
                 rows = [
                     {"id": index, "val": value, "value_infos": infos}
                     for index, (value, infos) in enumerate(cells)
-                    if state["interpretations"]
+                    if state["interpretations"] and value in params["literal_values"]
                 ]
                 for row in rows:
                     row["result_bytes"] = 0
@@ -264,7 +277,14 @@ def reader(dashboard_source):
 
         postgres.reset_mock()
         postgres.side_effect = fetch
-        with patch.dict(sys.modules, {"model_hub.models.develop_dataset": model}):
+        with (
+            patch.dict(sys.modules, {"model_hub.models.develop_dataset": model}),
+            patch.object(
+                dataset_choice_values,
+                "_read",
+                lambda deadline, wall_ms, read: read(postgres),
+            ),
+        ):
             return scope[method.name](
                 view,
                 request,
@@ -480,7 +500,7 @@ CELL_SCOPE = (
 @pytest.mark.parametrize("origin", ["evaluation", "others"])
 def test_scope_search_deadline_and_cursor_are_forwarded_unchanged(reader, origin):
     reader.column.source = origin
-    response = reader.invoke(["west"], search="we", cursor="bound-cursor")
+    response = reader.invoke(["['west']"], search="we", cursor="bound-cursor")
     statements = [call.args for call in reader.postgres.call_args_list]
     # Eval choices read their interpretation metadata in a second statement of
     # the same snapshot, only after the value inventory proved finite.
@@ -536,23 +556,28 @@ def test_an_oversized_result_is_refused_not_truncated(reader, statement):
     """PostgreSQL has no result-byte cap, so each read stops one row past it."""
 
     reader.state["oversized_statement"] = statement
-    assert reader.invoke(["west"])["status"] == 503
+    assert reader.invoke(["['west']"])["status"] == 503
     reader.view._finite_native_filter_values_response.assert_not_called()
 
 
 def test_deadline_and_inventory_remain_fail_closed(reader):
+    from django.db import OperationalError, ProgrammingError
+
+    from tracer.services.clickhouse.read_budget import ReadDeadlineExceeded
+
     reader.deadline.remaining_ms.side_effect = [DeadlineExceeded()]
     assert reader.invoke(["west"])["status"] == 503
     reader.deadline.remaining_ms.side_effect = None
-    run_statements = reader.scope["_run_filter_value_pg_statements"]
-    for error in (DeadlineExceeded, reader.scope["DatabaseError"]):
-        # A PostgreSQL statement_timeout surfaces as a DatabaseError.
-        def timed_out(deadline, read, error=error):
-            raise error("canceling statement due to statement timeout")
-
-        reader.scope["_run_filter_value_pg_statements"] = timed_out
-        assert reader.invoke(["west"])["status"] == 503
-    reader.scope["_run_filter_value_pg_statements"] = run_statements
+    # A PostgreSQL statement_timeout surfaces as an OperationalError. A broken
+    # statement is a defect a retry cannot fix, so it is not relabelled.
+    for error, answer in (
+        (ReadDeadlineExceeded("read deadline exceeded"), 503),
+        (OperationalError("canceling statement due to statement timeout"), 503),
+        (ProgrammingError('relation "model_hub_cell" does not exist'), 500),
+    ):
+        reader.state["failure"] = error
+        assert reader.invoke(["west"])["status"] == answer
+    reader.state["failure"] = None
     reader.scope["_FINITE_NATIVE_FILTER_VALUE_MAX"] = 1
     assert reader.invoke(["east", "west"])["status"] == 422
     assert reader.invoke(['["east", "west"]'])["status"] == 422
@@ -851,19 +876,25 @@ def test_metadata_ships_only_for_cells_that_may_be_literals(reader):
         LITERAL_CANDIDATE_SQL,
     )
 
+    # A scalar is its own label either way, so it asks for no metadata.
     reader.invoke(["west"])
-    metadata = reader.postgres.call_args_list[1].args[0]
+    assert reader.postgres.call_count == 1
+    reader.invoke(["west", "[\u96ea]"])
+    metadata, params = reader.postgres.call_args_list[1].args
     assert metadata.startswith("SELECT * FROM (SELECT *, sum(")
     assert "SELECT id, val, value_infos FROM (" in metadata
     assert f"{CHOICE_DOCUMENT_SQL} AS document FROM model_hub_cell " in metadata
-    assert f") AS cells WHERE {LITERAL_CANDIDATE_SQL}" in metadata
+    assert "%(ascii_forms)s::jsonb ->> value AS ascii_form, " in metadata
+    assert "AND value = ANY(%(literal_values)s::text[]) OFFSET 0) AS cells " in metadata
+    assert f") AS cells WHERE {LITERAL_CANDIDATE_SQL}) AS inventory" in metadata
+    assert params["literal_values"] == ["[\u96ea]"]
+    assert json.loads(params["ascii_forms"]) == {"[\u96ea]": '"[\\u96ea]"'}
     for arm in (
-        "strpos(val, '[') > 0 OR strpos(val, '{') > 0",
         "length(value_infos) <= 16384",
-        "val ~ '[^ -~]'",
-        "strpos(val, chr(92)) > 0",
-        "strpos(document, chr(92) || 'u00') > 0",
-        "strpos(document, '\"' || val || '\"') > 0",
+        "strpos(document, to_jsonb(val)::text) > 0",
+        "strpos(document, ascii_form) > 0",
+        "octet_length(document) <> char_length(document)",
+        "strpos(document, chr(127)) > 0",
     ):
         assert arm in LITERAL_CANDIDATE_SQL
 

@@ -11,6 +11,7 @@ received any of these cells.
 
 import json
 import uuid
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -229,3 +230,266 @@ def test_eval_cells_whose_metadata_cannot_name_them_ship_no_metadata(
     ):
         assert _suggestions(auth_client, column) == ["[west]", "neutral", "positive"]
     assert [call.args[0] for call in decoded.call_args_list] == ["[west]"]
+
+
+# The producer's json.dumps escaped every non-ASCII character of a reason, so
+# each of these historical cells carried \u00XX escapes in its metadata.
+_REASON = "L\u2019\u00e9motion dominante est claire. " * 32
+
+
+def _choice_metadata(labels, *, encoded=True, **fields):
+    metadata = {"output": "choices", "data": labels, "reason": _REASON, **fields}
+    return json.dumps(metadata) if encoded else metadata
+
+
+@pytest.mark.django_db
+def test_container_cells_ship_no_metadata_however_it_was_encoded(
+    auth_client, dataset, lagging_mirror
+):
+    """Metadata ships only for cells it can name as literals, at any size.
+
+    Every cell of dev column 94f8a212 (``['anger', 'annoyance']``, ~3.1 KB of
+    metadata each) shipped its metadata to Python, and so would JSON-list
+    storage and any label with a slash, quote or accent. Past the byte budget
+    (64 MiB, ~21k such cells) the picker answered 503 on every open.
+    """
+    from tracer.services import dataset_choice_values
+
+    column = _column(dataset, data_type="array", source="evaluation")
+    shapes = {
+        "['anger', 'annoyance']": ["anger", "annoyance"],
+        "['N/A']": ["N/A"],
+        "['n\u00e9gatif']": ["n\u00e9gatif"],
+        repr(["Doesn't answer"]): ["Doesn't answer"],
+        '["Yes"]': ["Yes"],
+    }
+    for _ in range(12):
+        for stored, labels in shapes.items():
+            _cell(column, stored, value_infos=_choice_metadata(labels))
+            _cell(column, stored, value_infos=_choice_metadata(labels, encoded=False))
+    _cell(column, "[west]", value_infos={"output": "choices", "data": "[west]"})
+
+    decoder = dataset_choice_values.literal_choice
+    with (
+        patch(
+            "tracer.views.dashboard._FINITE_NATIVE_FILTER_VALUE_MAX_RESULT_BYTES",
+            16 * 1024,
+        ),
+        patch.object(dataset_choice_values, "literal_choice", wraps=decoder) as decoded,
+    ):
+        assert _suggestions(auth_client, column) == [
+            "[west]",
+            "anger",
+            "annoyance",
+            "Doesn't answer",
+            "N/A",
+            "n\u00e9gatif",
+            "Yes",
+        ]
+    assert [call.args[0] for call in decoded.call_args_list] == ["[west]"]
+
+
+def _labels_deciding_every_cell(column):
+    """The picker's answer with every live cell's literal bit decided in Python.
+
+    This is what the reader returned when it shipped each candidate's metadata
+    to ``literal_choice``: only bracketed storage reads differently as a
+    literal, and a single undecodable storage text refuses the whole column.
+    """
+    from django.db import connection
+
+    from tracer.services.dataset_choice_values import (
+        InvalidChoiceCell,
+        evaluation_choice_labels,
+        literal_choice,
+    )
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT value, value_infos::text FROM model_hub_cell "
+            "WHERE column_id = %s AND deleted = false AND value <> ''",
+            [column.id],
+        )
+        cells = cursor.fetchall()
+    modes = {}
+    for value, infos in cells:
+        literal = ("[" in value or "{" in value) and literal_choice(value, infos)
+        modes[value] = modes.get(value, 0) | (2 if literal else 1)
+    labels = set()
+    try:
+        for value, mode in modes.items():
+            if mode & 1:
+                labels.update(evaluation_choice_labels(value))
+            if mode & 2:
+                labels.update(evaluation_choice_labels(value, literal=True))
+    except InvalidChoiceCell:
+        return None
+    return labels
+
+
+@pytest.mark.django_db
+def test_literal_bits_equal_deciding_every_cell_in_python(
+    auth_client, dataset, lagging_mirror
+):
+    column = _column(dataset, data_type="array", source="evaluation")
+    containers = {
+        "['anger', 'annoyance']": ["anger", "annoyance"],
+        "['n\u00e9gatif', '\u96ea']": ["n\u00e9gatif", "\u96ea"],
+        repr(["Doesn't answer", "O'Reilly"]): ["Doesn't answer", "O'Reilly"],
+        '["Yes", "No"]': ["Yes", "No"],
+        "['N/A']": ["N/A"],
+        "{'choice': 'positive', 'score': 0.9}": {"result": "positive"},
+        '{"choices": ["up", "down"], "score": 0.5}': {"choice": ["up", "down"]},
+    }
+    for stored, data in containers.items():
+        for encoded in (True, False):
+            _cell(column, stored, value_infos=_choice_metadata(data, encoded=encoded))
+    literals = [
+        ("[west]", {"output": "choices", "data": {"result": "[west]"}}),
+        ("[east]", json.dumps({"output": "choices", "data": {"choice": "[east]"}})),
+        ("{north}", {"output": "choices", "data": "{north}", "reason": _REASON}),
+        ("[s\u00fcd]", json.dumps({"output": "choices", "data": "[s\u00fcd]"})),
+        (
+            "[s\u00fcd-ost]",
+            json.dumps(
+                {"output": "choices", "data": "[s\u00fcd-ost]"}, ensure_ascii=False
+            ),
+        ),
+        # Legal JSON escapes no producer here writes: \/, an escaped printable
+        # character in upper-case hex, and one accent escaped beside a literal.
+        ("[a/b]", '{"output": "choices", "data": "[a\\/b]"}'),
+        ("[up]", '{"output": "choices", "data": "\\u005Bup]"}'),
+        ("[\u00e9t\u00e9]", '{"output": "choices", "data": "[\\u00e9t\u00e9]"}'),
+    ]
+    for stored, infos in literals:
+        _cell(column, stored, value_infos=infos)
+    # One storage text, a literal in one cell and a list in another.
+    _cell(column, '["both"]', value_infos={"output": "choices", "data": '["both"]'})
+    _cell(column, '["both"]', value_infos=_choice_metadata(["both"]))
+    # Metadata naming another value, or repeating a key, names no literal.
+    _cell(column, "['north']", value_infos={"output": "choices", "data": "[west]"})
+    _cell(
+        column,
+        '["dup"]',
+        value_infos='{"output": "choices", "data": "[\\"dup\\"]", "data": "[\\"dup\\"]"}',
+    )
+    # A deleted cell is neither a literal nor a container of its storage text.
+    _cell(
+        column, '["gone"]', value_infos={"output": "choices", "data": '["gone"]'}
+    ).delete()
+    _cell(column, '["kept"]', value_infos=_choice_metadata(["kept"]))
+    deleted_literal = _cell(
+        column, '["kept"]', value_infos={"output": "choices", "data": '["kept"]'}
+    )
+    deleted_literal.deleted = True
+    deleted_literal.save()
+
+    expected = _labels_deciding_every_cell(column)
+    assert '["both"]' in expected and '["kept"]' not in expected
+    values = _suggestions(auth_client, column)
+    assert len(values) == len(expected)
+    assert set(values) == expected
+
+
+@contextmanager
+def _defective_value_sql():
+    """Make the readers' own SQL name a missing table, as a defect in it would."""
+    from django.db import connection
+
+    def break_value_reads(execute, sql, params, many, context):
+        return execute(
+            sql.replace("FROM model_hub_", "FROM missing_model_hub_"),
+            params,
+            many,
+            context,
+        )
+
+    with connection.execute_wrapper(break_value_reads):
+        yield
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("source", ["OTHERS", "evaluation"])
+def test_a_defect_in_the_value_read_is_a_logged_server_error(
+    auth_client, dataset, lagging_mirror, source
+):
+    """A retry cannot fix a broken statement, so it must reach Sentry."""
+    column = _column(dataset, data_type="array", source=source)
+    _cell(column, "['west']")
+
+    with (
+        _defective_value_sql(),
+        patch("tracer.views.dashboard.logger") as logger,
+    ):
+        response = auth_client.get(
+            URL,
+            {
+                "source": "dataset_column",
+                "metric_name": str(column.id),
+                "dataset_id": str(column.dataset_id),
+            },
+        )
+
+    assert response.status_code == 500, response.content
+    assert response.json()["code"] == "server_error"
+    logger.exception.assert_called_once()
+    assert logger.exception.call_args.args == (
+        "dataset_column_filter_values_query_failed",
+    )
+    logger.warning.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_a_statement_timeout_stays_a_retryable_503(
+    auth_client, dataset, lagging_mirror
+):
+    from django.db import connection
+
+    column = _column(dataset, data_type="array", source="evaluation")
+    _cell(column, "['west']")
+
+    def outlast_the_wall(execute, sql, params, many, context):
+        if "FROM model_hub_cell" in sql:
+            sql = f"SELECT slow.* FROM ({sql}) AS slow, pg_sleep(5)"
+        return execute(sql, params, many, context)
+
+    # The read gives each statement the remaining wall as its timeout.
+    with (
+        patch("tracer.views.dashboard._FILTER_VALUES_INTERACTIVE_TIMEOUT_MS", 300),
+        connection.execute_wrapper(outlast_the_wall),
+        patch("tracer.views.dashboard.logger") as logger,
+    ):
+        response = auth_client.get(
+            URL,
+            {
+                "source": "dataset_column",
+                "metric_name": str(column.id),
+                "dataset_id": str(column.dataset_id),
+            },
+        )
+
+    assert response.status_code == 503, response.content
+    assert response.json()["code"] == "service_unavailable"
+    assert logger.warning.call_args.kwargs["error_type"] == "OperationalError"
+    logger.exception.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_ai_filter_grounding_logs_a_defect_in_its_value_read(dataset, lagging_mirror):
+    from model_hub.views import ai_filter
+
+    column = _column(dataset)
+    _cell(column, "qa_value_alpha")
+
+    with (
+        _defective_value_sql(),
+        patch.object(ai_filter, "logger") as logger,
+        pytest.raises(ai_filter.SmartFilterGroundingError) as refused,
+    ):
+        ai_filter._fetch_dataset_column_values(
+            dataset.id, column.id, search_query="qa_value"
+        )
+
+    assert refused.value.code == "ai_filter_grounding_unavailable"
+    logger.exception.assert_called_once()
+    assert logger.exception.call_args.args == ("dataset_column_values_query_failed",)

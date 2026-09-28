@@ -225,3 +225,40 @@ def test_an_answer_over_the_byte_cap_is_refused(auth_client, dataset, lagging_mi
 
     assert response.status_code == 503, response.content
     assert response.json()["code"] == "service_unavailable"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("metric_name", ["dataset", "column_name"])
+def test_a_defect_in_the_name_read_is_a_logged_server_error(
+    auth_client, dataset, lagging_mirror, metric_name
+):
+    """A retry cannot fix a broken statement, so it must reach Sentry."""
+    from django.db import connection
+
+    _cell(_column(dataset, "qa_answer"))
+
+    def break_name_reads(execute, sql, params, many, context):
+        return execute(
+            sql.replace("FROM model_hub_", "FROM missing_model_hub_"),
+            params,
+            many,
+            context,
+        )
+
+    with (
+        connection.execute_wrapper(break_name_reads),
+        patch("tracer.views.dashboard.logger") as logger,
+    ):
+        response = auth_client.get(
+            URL,
+            {
+                "source": "datasets",
+                "metric_name": metric_name,
+                "metric_type": "system_metric",
+            },
+        )
+
+    assert response.status_code == 500, response.content
+    assert response.json()["code"] == "server_error"
+    assert logger.exception.call_args.args == ("fetch_dataset_filter_values_failed",)
+    logger.warning.assert_not_called()
