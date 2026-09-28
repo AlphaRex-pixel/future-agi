@@ -1,3 +1,4 @@
+import { useState } from "react";
 import PropTypes from "prop-types";
 import { alpha } from "@mui/material/styles";
 import { Box, Stack, Typography, Switch } from "@mui/material";
@@ -37,7 +38,10 @@ export default function ContactInformation({
   phoneOnly = false,
 }) {
   const effectiveMode = phoneOnly ? "phone" : mode;
-  const contactError = phoneNumberError(COUNTRY_BY_ISO[countryIso]?.dial, contactNumber);
+  const [contactTouched, setContactTouched] = useState(false);
+  const contactError = contactTouched
+    ? phoneNumberError(COUNTRY_BY_ISO[countryIso]?.dial, contactNumber)
+    : null;
   const header =
     effectiveMode === "phone"
       ? {
@@ -88,7 +92,7 @@ export default function ContactInformation({
               placeholder="Number to call for the simulation"
               value={contactNumber}
               onChange={(value) => onContactNumber(toContactDigits(value))}
-              inputProps={{ inputMode: "numeric" }}
+              inputProps={{ inputMode: "numeric", onBlur: () => setContactTouched(true) }}
               error={contactError}
               mono
             />

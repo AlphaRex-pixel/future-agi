@@ -1,8 +1,10 @@
-const MIN_DIGITS = 10;
-const MAX_DIGITS = 12;
-const MAX_NATIONAL_DIGITS = 10;
+const MIN_DIGITS = 7;
+const MAX_DIGITS = 15;
 const KEEPS_TRUNK_ZERO = new Set(["39"]);
-const FIXED_NATIONAL_DIGITS = { 1: 10, 91: 10 };
+const FIXED_NATIONAL_DIGITS = [
+  ["91", 10],
+  ["1", 10],
+];
 
 export function nationalDigits(dial, number) {
   const raw = String(number || "").trim();
@@ -15,32 +17,20 @@ export function nationalDigits(dial, number) {
 export function phoneNumberError(dial, number) {
   const raw = String(number || "").trim();
   if (!raw) return null;
-  const dialDigits = raw.startsWith("+") ? "" : String(dial || "").replace(/\D/g, "");
-  const national = nationalDigits(dial, raw);
-  const total = dialDigits.length + national.length;
-  const typedCode = raw.startsWith("+") ? ["91", "1"].find((code) => national.startsWith(code)) : null;
-  const code = typedCode || dialDigits;
-  const fixed = FIXED_NATIONAL_DIGITS[code];
+  const typed = raw.startsWith("+");
+  const dialDigits = typed ? "" : String(dial || "").replace(/\D/g, "");
+  const digits = dialDigits + nationalDigits(dial, raw);
+  if (!/^[1-9]/.test(digits)) return "Enter a valid country code";
+  const fixed = FIXED_NATIONAL_DIGITS.find(([code]) => digits.startsWith(code));
   if (fixed) {
-    const length = typedCode ? national.length - typedCode.length : national.length;
-    return length === fixed ? null : `Enter exactly ${fixed} digits after +${code}`;
+    const [code, length] = fixed;
+    return digits.length - code.length === length ? null : `Enter exactly ${length} digits after +${code}`;
   }
-  if (raw.startsWith("+")) {
-    if (total < MIN_DIGITS || total > MAX_DIGITS) {
-      return `Enter ${MIN_DIGITS} to ${MAX_DIGITS} digits including the country code`;
-    }
-    return null;
-  }
-  if (national.length > MAX_NATIONAL_DIGITS) {
-    return `Enter at most ${MAX_NATIONAL_DIGITS} digits after the country code`;
-  }
-  if (total < MIN_DIGITS) {
-    return `Enter at least ${MIN_DIGITS - dialDigits.length} digits`;
-  }
-  if (total > MAX_DIGITS) {
-    return `Enter at most ${MAX_DIGITS - dialDigits.length} digits`;
-  }
-  return null;
+  if (digits.length >= MIN_DIGITS && digits.length <= MAX_DIGITS) return null;
+  if (typed) return `Enter ${MIN_DIGITS} to ${MAX_DIGITS} digits including the country code`;
+  return digits.length < MIN_DIGITS
+    ? `Enter at least ${MIN_DIGITS - dialDigits.length} digits`
+    : `Enter at most ${MAX_DIGITS - dialDigits.length} digits`;
 }
 
 export const isValidPhoneNumber = (dial, number) =>
