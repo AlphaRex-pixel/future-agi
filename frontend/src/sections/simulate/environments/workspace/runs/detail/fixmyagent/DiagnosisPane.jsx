@@ -7,7 +7,6 @@ import {
   Typography,
   CircularProgress,
   Button,
-  Link,
 } from "@mui/material";
 
 import Iconify from "src/components/iconify";
@@ -100,29 +99,6 @@ function summaryOf({ summary }) {
     : `Your agent held every goal on ${plural(measuredCalls, "call")}.`;
 }
 
-// Calls that errored never count against the agent; each line links to its
-// calls so the exclusion can be checked.
-function coverageOf({ summary }) {
-  const excluded = summary?.excludedCallIds ?? [];
-  const unread = summary?.unanalyzedCallIds ?? [];
-  return [
-    excluded.length > 0 && {
-      text: `${plural(excluded.length, "call")} didn't complete, so ${
-        excluded.length === 1 ? "it isn't" : "they aren't"
-      } counted.`,
-      callIds: excluded,
-    },
-    unread.length > 0 && {
-      text: `${plural(unread.length, "call")} ${
-        unread.length === 1 ? "hasn't" : "haven't"
-      } been analysed yet, so some issues may be missing.`,
-      callIds: unread,
-      // Most of these are a model hiccup; one retry reads them again.
-      retryable: true,
-    },
-  ].filter(Boolean);
-}
-
 export default function DiagnosisPane({
   analysis,
   isLoading,
@@ -182,33 +158,6 @@ export default function DiagnosisPane({
             <Typography sx={{ typography: "s2" }}>
               {summaryOf(analysis)}
             </Typography>
-            {coverageOf(analysis).map(({ text, callIds, retryable }) => (
-              <Typography
-                key={text}
-                sx={{ typography: "s3", color: "text.subtitle", mt: 0.25 }}
-              >
-                {text}{" "}
-                <Link
-                  component="button"
-                  onClick={() => onViewCalls?.(callIds)}
-                  sx={{ typography: "s3", verticalAlign: "baseline" }}
-                >
-                  View
-                </Link>
-                {retryable && onRetry && (
-                  <>
-                    {" · "}
-                    <Link
-                      component="button"
-                      onClick={onRetry}
-                      sx={{ typography: "s3", verticalAlign: "baseline" }}
-                    >
-                      Try again
-                    </Link>
-                  </>
-                )}
-              </Typography>
-            ))}
             {analysis.groupingPending && (
               <Typography
                 sx={{ typography: "s3", color: "text.subtitle", mt: 0.25 }}
@@ -255,8 +204,6 @@ DiagnosisPane.propTypes = {
       brokenGoals: PropTypes.number,
       brokenCalls: PropTypes.number,
       oneOffs: PropTypes.number,
-      excludedCallIds: PropTypes.arrayOf(PropTypes.string),
-      unanalyzedCallIds: PropTypes.arrayOf(PropTypes.string),
     }),
     goals: PropTypes.array,
     oneOffs: PropTypes.array,

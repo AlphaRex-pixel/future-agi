@@ -74,8 +74,6 @@ describe("mapDebugAnalysis", () => {
       brokenGoals: 1,
       brokenCalls: 3,
       oneOffs: 1,
-      excludedCallIds: ["c7", "c8"],
-      unanalyzedCallIds: ["c9"],
     });
     expect(analysis.goals[0]).toMatchObject({
       goal: "exact_greeting",

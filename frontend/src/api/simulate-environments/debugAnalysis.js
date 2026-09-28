@@ -48,8 +48,6 @@ export function mapDebugAnalysis(raw) {
       brokenGoals: summary.broken_goal_count,
       brokenCalls: summary.broken_call_count,
       oneOffs: summary.one_off_count,
-      excludedCallIds: summary.excluded_call_ids ?? [],
-      unanalyzedCallIds: summary.unanalyzed_call_ids ?? [],
     },
     goals: (raw?.goals ?? []).map((goal) => ({
       goal: goal.goal,

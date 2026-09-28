@@ -5,7 +5,6 @@ import {
   render,
   screen,
   waitForElementToBeRemoved,
-  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -148,8 +147,6 @@ const ANALYSIS = {
     brokenGoals: 1,
     brokenCalls: 3,
     oneOffs: 1,
-    excludedCallIds: [],
-    unanalyzedCallIds: [],
   },
   goals: [
     {
@@ -463,30 +460,6 @@ describe("RunDetail", () => {
     expect(screen.getByText("3 failing of 12 measured")).toBeInTheDocument();
   });
 
-  it("says when calls did not complete, without blaming anyone", async () => {
-    useDebugAnalysis.mockReturnValue(
-      debugHook({
-        ...ANALYSIS,
-        summary: { ...ANALYSIS.summary, excludedCallIds: ["c7", "c8", "c9"] },
-      }),
-    );
-    const user = userEvent.setup();
-    renderDetail();
-
-    await user.click(screen.getByRole("button", { name: "Debug failures" }));
-    const line = screen.getByText(
-      /^3 calls didn't complete, so they aren't counted\./,
-    );
-    // Neutral about why: the drawer never blames the platform.
-    expect(screen.queryByText(/our side/)).toBeNull();
-    // The exclusion can be checked, not just taken on trust.
-    await user.click(within(line).getByRole("button", { name: "View" }));
-
-    expect(
-      screen.getByText('run-trace-table:{"callExecutionId":["c7","c8","c9"]}'),
-    ).toBeInTheDocument();
-  });
-
   it("folds long tails into one row so the rows still add up", async () => {
     const ways = Array.from({ length: 7 }, (_, i) => ({
       id: `w${i}`,
@@ -517,31 +490,6 @@ describe("RunDetail", () => {
 
     await user.click(fold);
     expect(screen.getByText("Way number 6")).toBeInTheDocument();
-  });
-
-  it("says when some calls could not be analysed", async () => {
-    const request = vi.fn();
-    useDebugAnalysis.mockReturnValue(
-      debugHook(
-        {
-          ...ANALYSIS,
-          summary: { ...ANALYSIS.summary, unanalyzedCallIds: ["c4"] },
-        },
-        { request },
-      ),
-    );
-    const user = userEvent.setup();
-    renderDetail();
-
-    await user.click(screen.getByRole("button", { name: "Debug failures" }));
-
-    const line = screen.getByText(
-      /^1 call hasn't been analysed yet, so some issues may be missing\./,
-    );
-    expect(screen.queryByText(/didn't complete/)).toBeNull();
-    // Most unread calls read fine on a second pass.
-    await user.click(within(line).getByRole("button", { name: "Try again" }));
-    expect(request).toHaveBeenCalled();
   });
 
   it("hands a goal's broken calls to the calls table", async () => {
