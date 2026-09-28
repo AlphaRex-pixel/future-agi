@@ -395,24 +395,62 @@ describe("AddEvaluationDrawer — load states", () => {
     <QueryClientProvider client={c}>{ui}</QueryClientProvider>
   );
 
-  it("keeps the picker open when a later refresh of the run test's evals fails", async () => {
+  it("warns when reopening on a list that failed to refresh", async () => {
+    const c = client();
+    const { rerender } = rtlRender(
+      withClient(c, <AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />),
+    );
+    await screen.findByTestId("eval-picker");
+    rerender(
+      withClient(
+        c,
+        <AddEvaluationDrawer open={false} env={ENV} onClose={vi.fn()} />,
+      ),
+    );
+    await act(() =>
+      c.invalidateQueries({ queryKey: ["simulate-environments", "run-test"] }),
+    );
+    axios.get.mockRejectedValue({ statusCode: 503, detail: "busy" });
+    rerender(
+      withClient(c, <AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />),
+    );
+    await waitFor(() =>
+      expect(enqueueSnackbar).toHaveBeenCalledWith(
+        "Couldn’t refresh the evaluations already added here, so that list may be out of date.",
+        { variant: "warning" },
+      ),
+    );
+    expect(picker.props.addedEvals).toHaveLength(2);
+  });
+
+  it("keeps the same picker mounted while a refresh is in flight and after it fails", async () => {
     const c = client();
     rtlRender(
       withClient(c, <AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />),
     );
-    await screen.findByTestId("eval-picker");
-    axios.get.mockRejectedValue({
-      statusCode: 503,
-      detail: "Simulations are temporarily unavailable. Please retry.",
-    });
-    await act(() =>
-      c.refetchQueries({
-        queryKey: ["simulate-environments", "run-test", "rt-1"],
+    const node = await screen.findByTestId("eval-picker");
+    let fail;
+    axios.get.mockReturnValue(
+      new Promise((_, reject) => {
+        fail = reject;
       }),
     );
-    await new Promise((r) => setTimeout(r, 20));
-    expect(screen.getByTestId("eval-picker")).toBeInTheDocument();
-    expect(picker.props.addedEvals).toHaveLength(2);
+    act(() => {
+      c.refetchQueries({
+        queryKey: ["simulate-environments", "run-test", "rt-1"],
+      });
+    });
+    await waitFor(() =>
+      expect(
+        c.getQueryState(["simulate-environments", "run-test", "rt-1"])
+          .fetchStatus,
+      ).toBe("fetching"),
+    );
+    expect(screen.queryByTestId("eval-picker")).toBe(node);
+    await act(async () => {
+      fail({ statusCode: 503, detail: "busy" });
+    });
+    expect(screen.getByTestId("eval-picker")).toBe(node);
   });
 
   it("shows a spinner, not the not-built message, while the run test's evals load", async () => {
@@ -434,6 +472,49 @@ describe("AddEvaluationDrawer — load states", () => {
     getHarnessEnvironment.mockResolvedValue(detail());
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByTestId("eval-picker");
+  });
+
+  it("one Retry reloads both reads when both failed", async () => {
+    const c = client();
+    c.setQueryData(["harness-environment", "env-1"], detail());
+    getHarnessEnvironment.mockRejectedValue({
+      statusCode: 500,
+      detail: "boom",
+    });
+    axios.get.mockRejectedValue({ statusCode: 503, detail: "busy" });
+    rtlRender(
+      withClient(c, <AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />),
+    );
+    expect(await screen.findByText("boom")).toBeInTheDocument();
+    await waitFor(() => expect(axios.get).toHaveBeenCalled());
+    getHarnessEnvironment.mockResolvedValue(detail());
+    axios.get.mockResolvedValue({
+      data: { simulate_eval_configs_detail: CONFIGS },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByTestId("eval-picker");
+  });
+
+  it("retrying only the run test does not reload the environment", async () => {
+    axios.get.mockRejectedValue({ statusCode: 503, detail: "busy" });
+    render(<AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />);
+    expect(await screen.findByText("busy")).toBeInTheDocument();
+    const before = getHarnessEnvironment.mock.calls.length;
+    axios.get.mockResolvedValue({
+      data: { simulate_eval_configs_detail: CONFIGS },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByTestId("eval-picker");
+    expect(getHarnessEnvironment.mock.calls.length).toBe(before);
+  });
+
+  it("opens the picker on a run test with no evals yet", async () => {
+    axios.get.mockResolvedValue({
+      data: { simulate_eval_configs_detail: [] },
+    });
+    render(<AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />);
+    await screen.findByTestId("eval-picker");
+    expect(picker.props.addedEvals).toEqual([]);
   });
 
   it("hides the picker once closed, even with everything cached", async () => {

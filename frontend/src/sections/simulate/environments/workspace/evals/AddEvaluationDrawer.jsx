@@ -1,5 +1,5 @@
 import PropTypes from "prop-types";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Box, Button, CircularProgress, Stack } from "@mui/material";
 import { enqueueSnackbar } from "notistack";
@@ -31,6 +31,8 @@ const GRADE_FALLBACK = "Couldn’t grade this run. Try again.";
 const DETAIL_FALLBACK = EVALS_COPY.addedError;
 const NO_INPUTS =
   "This evaluation has no inputs to map, so it can't run in an environment.";
+const STALE_LIST =
+  "Couldn’t refresh the evaluations already added here, so that list may be out of date.";
 // A stable empty array: `= []` as a hook default is a fresh reference on every
 // render, which would re-run both `useMemo`s below even when the run test's
 // configs have not changed.
@@ -73,6 +75,15 @@ export default function AddEvaluationDrawer({
   const configs = runTestQuery.data ?? NO_CONFIGS;
   const addToRunTest = useAddRunTestEval();
   const gradeRun = useAddRunEvaluation();
+
+  const refreshFailed =
+    open && runTestQuery.isError && runTestQuery.data !== undefined;
+
+  // A failed refresh keeps the last list in the picker, and this read opts out
+  // of the global error toast, so this is the only sign the list may be stale.
+  useEffect(() => {
+    if (refreshFailed) enqueueSnackbar(STALE_LIST, { variant: "warning" });
+  }, [refreshFailed, runTestQuery.errorUpdatedAt]);
 
   // The picker needs the run test's own eval list to know what is already
   // bound (nothing already on the run can be picked again), so it must
