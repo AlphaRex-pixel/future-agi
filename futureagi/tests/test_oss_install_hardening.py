@@ -12,10 +12,12 @@ import termios
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 # The property catalog, Kafka and the split collector live in the distributed stack.
 COMPOSE_FILE = ROOT / "docker-compose.distributed.yml"
+STANDALONE_COMPOSE_FILE = ROOT / "docker-compose.yml"
 INSTALL_SH = ROOT / "bin" / "install"
 INSTALL_PS1 = ROOT / "bin" / "install.ps1"
 # Sourced by bin/install, bin/uninstall and bin/dev.
@@ -1209,6 +1211,82 @@ def test_installer_checks_the_host_ports_of_the_chosen_stack(
     assert not absent & checked
     if not args:
         assert checked == expected
+
+
+def _published_ports(compose: Path, profile: str) -> set[str]:
+    """VAR:DEFAULT of each host port the compose file publishes with only
+    `profile` in COMPOSE_PROFILES ("": none)."""
+    published = set()
+    for service in yaml.safe_load(_read(compose))["services"].values():
+        if service.get("profiles") and profile not in service["profiles"]:
+            continue
+        for mapping in service.get("ports", []):
+            found = re.fullmatch(
+                r"(?:127\.0\.0\.1:)?\$\{([A-Z_]+):-(\d+)\}:\d+", mapping
+            )
+            assert found, (
+                f"{compose.name}: a port the installers cannot check: {mapping}"
+            )
+            published.add(f"{found[1]}:{found[2]}")
+    return published
+
+
+def _setups_and_profiles() -> list[tuple[Path, bool, str]]:
+    return [
+        (compose, compose == COMPOSE_FILE, profile)
+        for compose in (STANDALONE_COMPOSE_FILE, COMPOSE_FILE)
+        for profile in [
+            "",
+            *sorted(
+                {
+                    name
+                    for service in yaml.safe_load(_read(compose))["services"].values()
+                    for name in service.get("profiles", [])
+                }
+            ),
+        ]
+    ]
+
+
+@pytest.mark.parametrize(
+    ("compose", "distributed", "profile"),
+    _setups_and_profiles(),
+    ids=lambda value: value.name if isinstance(value, Path) else str(value),
+)
+def test_the_installers_check_every_port_the_compose_file_publishes(
+    compose: Path, distributed: bool, profile: str
+) -> None:
+    expected = _published_ports(compose, profile)
+    assert expected
+
+    shell = subprocess.run(
+        ["bash", "-c", '. bin/lib/ports.sh; stack_ports "$1" "$2"', "-"]
+        + [str(int(distributed)), profile],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert set(shell.stdout.split()) == expected
+
+    if shutil.which("pwsh") is None:
+        pytest.skip("pwsh is unavailable")
+    powershell = subprocess.run(
+        [
+            "pwsh",
+            "-NoProfile",
+            "-Command",
+            f". '{INSTALL_LIB / 'ports.ps1'}'; "
+            f"$ports = Get-StackPorts ${str(distributed).lower()} @('{profile}'); "
+            '$ports.Keys | ForEach-Object { "${_}:$($ports[$_])" }',
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert powershell.returncode == 0, powershell.stderr
+    assert set(powershell.stdout.split()) == expected
 
 
 def test_from_source_builds_every_image_in_order_and_never_pulls_them(
