@@ -109,6 +109,40 @@ if grep -nE '<no value>|image:( *| *"")$' "$out"/*.yaml; then
   fail "a rendered manifest has an unset value"
 fi
 "$python" "$chart/hack/rendered_checks.py" "$out"
+# ... and they notice pods that read AGENTCC_WEBHOOK_SECRET from
+# secrets.existingSecret while the chart's Secret holds the one given inline.
+mkdir -p "$out/broken"
+"$python" - "$out/all-components.yaml" >"$out/broken/all-components.yaml" <<'EOF'
+import sys
+
+import yaml
+
+
+def point(node):
+    if isinstance(node, dict):
+        ref = node.get("valueFrom", {}).get("secretKeyRef")
+        if node.get("name") == "AGENTCC_WEBHOOK_SECRET" and ref:
+            ref["name"] = "futureagi-app"
+        for value in node.values():
+            point(value)
+    elif isinstance(node, list):
+        for value in node:
+            point(value)
+
+
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+point(docs)
+yaml.safe_dump_all(docs, sys.stdout)
+EOF
+if "$python" "$chart/hack/rendered_checks.py" "$out/broken" >"$out/broken.txt" 2>&1; then
+  fail "rendered_checks.py passes pods that read the webhook secret from the wrong Secret"
+fi
+grep -qF "no Secret holds AGENTCC_WEBHOOK_SECRET ('futureagi-app'" "$out/broken.txt" || {
+  cat "$out/broken.txt" >&2
+  fail "rendered_checks.py does not name the missing webhook secret"
+}
+rm -rf "$out/broken" "$out/broken.txt"
+echo "ok   a webhook secret no Secret holds is caught"
 
 echo "== values, schema and README"
 "$python" "$chart/hack/values_docs.py" --check

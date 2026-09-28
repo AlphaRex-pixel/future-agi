@@ -217,9 +217,11 @@ def check_render(name: str, docs: list[dict]) -> list[str]:
         for key in d.get("data") or {}
     }
     rendered_secrets = {d["metadata"]["name"] for d in docs if d["kind"] == "Secret"}
+    holders = {ref for ref in secret_keys if ref[1] == "AGENTCC_WEBHOOK_SECRET"}
     for ref in set(webhook.values()):
-        # A Secret the chart does not render is secrets.existingSecret.
-        if ref[0] in rendered_secrets and ref not in secret_keys:
+        # Pods may read it from a Secret the chart does not render
+        # (secrets.existingSecret) only when the chart renders no copy of it.
+        if ref not in secret_keys and (holders or ref[0] in rendered_secrets):
             failed.append(f"{name}: no Secret holds AGENTCC_WEBHOOK_SECRET {ref}")
 
     # The Secret comes back with `helm rollback`.
