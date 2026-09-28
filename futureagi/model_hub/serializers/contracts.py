@@ -13,6 +13,7 @@ from model_hub.serializers.optimize_dataset import (
 from model_hub.serializers.performance_report import PerformanceReportSerializer
 from model_hub.services.ai_eval_writer_service import OUTPUT_FORMAT_PROMPTS
 from model_hub.services.dataset_validators import MAX_PAGE_SIZE as DATASET_MAX_PAGE_SIZE
+from model_hub.utils.SQL_queries import EVAL_TEMPLATE_SORT_COLUMNS
 from tfc.utils.api_errors import API_ERROR_TYPE_CHOICES
 from tfc.utils.serializer_fields import JsonValueField, StringOrObjectField
 from tracer.serializers.filters import (
@@ -3036,6 +3037,20 @@ class LegacyEvalTemplatesRequestSerializer(serializers.Serializer):
         required=False,
         default=list,
     )
+
+    def validate_sort(self, value):
+        """Accept only the columns the Evaluations > Usage grid sorts by."""
+        for item in value:
+            column_id = item.get("column_id") if isinstance(item, dict) else None
+            if (
+                not isinstance(column_id, str)
+                or column_id not in EVAL_TEMPLATE_SORT_COLUMNS
+            ):
+                raise serializers.ValidationError(
+                    "Sort column_id must be one of: "
+                    f"{', '.join(EVAL_TEMPLATE_SORT_COLUMNS)}."
+                )
+        return value
 
 
 class HuggingFaceDatasetConfigRequestSerializer(serializers.Serializer):
