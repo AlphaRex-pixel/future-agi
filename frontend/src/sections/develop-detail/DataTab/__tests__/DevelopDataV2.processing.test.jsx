@@ -7,12 +7,13 @@ import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
 import { AllEnterpriseModule } from "ag-grid-enterprise";
 
 // Renders the real grid (AG Grid server-side row model) against a scripted
-// dataset-detail endpoint: the upload is processing until request number
-// `server.doneFrom`, and each response can be delayed.
+// dataset-detail endpoint: `server.isDone(request, kind)` decides whether the
+// upload has finished processing when each request is served, and
+// `server.delayMs(request, kind)` how long its response takes.
 const { getMock, gridState, server, Null, Passthrough } = vi.hoisted(() => ({
   getMock: vi.fn(),
   gridState: { api: null },
-  server: { doneFrom: Infinity, delayMs: () => 0, requests: 0 },
+  server: { isDone: () => false, delayMs: () => 0, requests: [] },
   Null: () => null,
   Passthrough: ({ children }) => children,
 }));
@@ -63,7 +64,19 @@ vi.mock("../common", async (importOriginal) => ({
   }),
 }));
 vi.mock("../DataTabStatusBar", () => ({ default: Null }));
-vi.mock("../DevelopFilters/DevelopFilterBox", () => ({ default: Null }));
+// The real filter box keeps an enabled observer on the page-0 query, so every
+// invalidation of that query refetches it.
+vi.mock("../DevelopFilters/DevelopFilterBox", async () => {
+  const { useDatasetColumnConfig } = await import(
+    "src/api/develop/develop-detail"
+  );
+  return {
+    default: function DevelopFilterBox() {
+      useDatasetColumnConfig("dataset-1", false, true);
+      return null;
+    },
+  };
+});
 vi.mock("../TopBanner", () => ({ default: Null }));
 vi.mock("../DatapointDrawerV2/DatapointDrawerV2", () => ({ default: Null }));
 vi.mock("../AddRowData", () => ({ default: Null }));
@@ -107,15 +120,17 @@ const ROW_IDS = ["row-1", "row-2", "row-3"];
 const PLACEHOLDER_IDS = DUMMY_ROWS.map(({ rowId }) => String(rowId));
 
 const detailResponse = (_url, { params }) => {
-  const request = server.requests++;
-  const done = request >= server.doneFrom;
+  const kind = params.column_config_only ? "columns" : "page";
+  const request = server.requests.length;
+  const done = server.isDone(request, kind);
+  server.requests.push(`${kind}:${done ? "done" : "processing"}`);
   let result;
   if (!done) {
     result = { column_config: [], is_processing_data: true };
-    if (!params.column_config_only) {
+    if (kind === "page") {
       result = { ...result, table: [], metadata: { total_rows: 0 } };
     }
-  } else if (params.column_config_only) {
+  } else if (kind === "columns") {
     result = { column_config: COLUMNS };
   } else {
     result = {
@@ -124,7 +139,6 @@ const detailResponse = (_url, { params }) => {
       metadata: { total_rows: ROW_IDS.length },
     };
   }
-  const kind = params.column_config_only ? "columns" : "page";
   return new Promise((resolve) => {
     setTimeout(
       () => resolve({ data: { result } }),
@@ -170,8 +184,8 @@ describe("DevelopDataV2 while an uploaded file is processing", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     gridState.api = null;
-    server.requests = 0;
-    server.doneFrom = Infinity;
+    server.requests = [];
+    server.isDone = () => false;
     server.delayMs = () => 0;
     getMock.mockReset();
     getMock.mockImplementation(detailResponse);
@@ -182,24 +196,44 @@ describe("DevelopDataV2 while an uploaded file is processing", () => {
   });
 
   it("replaces the placeholder rows once processing finishes", async () => {
+    let finished = false;
+    server.isDone = () => finished;
     renderGrid();
     await advance(1000);
     expect(gridRowIds()).toEqual(PLACEHOLDER_IDS);
 
-    server.doneFrom = server.requests;
+    finished = true;
     await advance(30000);
 
     expect(gridRowIds()).toEqual(ROW_IDS);
   });
 
-  it("replaces them when a page request from before processing ended lands late", async () => {
-    // Requests: 0 column config (processing), 1 the grid's first page, held
-    // for 6s; processing ends before request 2, the 5s poll's page read.
-    // The grid refresh fired once the column config reports done joins the
-    // still-pending request 1 and gets the processing placeholders back.
-    server.doneFrom = 2;
+  it("replaces them when processing ends between a poll's page and column reads", async () => {
+    // As in the failed e2e run: the poll's page reads still see the upload
+    // processing and its column-config read sees it done. The filter box's
+    // refetch left that processing page in the cache as fresh, and the grid
+    // refresh fired by the column config served it again.
+    let columnReads = 0;
+    server.isDone = (_request, kind) => {
+      if (kind === "columns") columnReads += 1;
+      return columnReads >= 2;
+    };
+    renderGrid();
+    await advance(1000);
+    expect(gridRowIds()).toEqual(PLACEHOLDER_IDS);
+
+    await advance(30000);
+
+    expect(gridRowIds()).toEqual(ROW_IDS);
+  });
+
+  it("replaces them when a page read from before processing ended lands late", async () => {
+    // The first page read (request 0) takes 6s; processing ends before the
+    // poll's reads, and the grid refresh fired by the column config joins
+    // that still-pending read and gets the placeholders back.
+    server.isDone = (request) => request >= 2;
     server.delayMs = (request, kind) =>
-      kind === "page" && request === 1 ? 6000 : 50;
+      kind === "page" && request === 0 ? 6000 : 50;
     renderGrid();
 
     await advance(30000);
