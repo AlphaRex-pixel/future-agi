@@ -16,6 +16,7 @@ from simulate.services.hosted_harness import HostedHarnessError
 from tfc.ee_gating import is_oss
 
 _ACTIONS = frozenset({"harness_authoring", "text_call", "voice_call"})
+_VOICE_CONNECTORS = frozenset({"livekit", "vapi", "retell"})
 _REPORT_KEY = "usage_reports"
 _AUTHORING_REPORT_KEY = "authoring_usage_reports"
 _NON_BILLABLE_FAILURE_DOMAINS = frozenset(
@@ -89,7 +90,7 @@ def require_harness_run_usage(organization_id: str, payload: dict) -> None:
     connector = str(agent.get("connector") or "").lower()
     if modality == "text" or connector == "retell_chat":
         actions = ("text_call",)
-    elif modality == "voice" or connector in {"livekit", "vapi", "retell"}:
+    elif modality == "voice" or connector in _VOICE_CONNECTORS:
         actions = ("voice_call",)
     else:
         # ``auto`` can resolve to either lane only after the authored contract is available.
@@ -97,6 +98,22 @@ def require_harness_run_usage(organization_id: str, payload: dict) -> None:
         actions = ()
     for action in actions:
         _require_harness_action(organization_id, action)
+
+
+def require_harness_source_call_usage(
+    organization_id: str, payload: dict, detected_connectors
+) -> None:
+    """Check the voice rail for an ``auto`` source whose scan found a voice provider."""
+
+    agent = payload.get("agent") or {}
+    config = agent.get("config") or {}
+    metadata = payload.get("metadata") or {}
+    modality = str(metadata.get("modality") or config.get("modality") or "").lower()
+    connector = str(agent.get("connector") or "").lower()
+    if connector != "auto" or modality in {"text", "voice"}:
+        return
+    if _VOICE_CONNECTORS & set(detected_connectors):
+        _require_harness_action(organization_id, "voice_call")
 
 
 def record_harness_usage(attempt: HostedHarnessAttempt, report: dict) -> dict:
