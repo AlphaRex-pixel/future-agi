@@ -181,6 +181,10 @@ def test_sixty_second_read_profile_leaves_query_and_background_headroom():
             "FILTER_SELECTOR_QUERY_TIMEOUT_MS": "10000",
             "FILTER_SELECTOR_MAX_OPT_IN_QUERY_TIMEOUT_MS": "20000",
             "FILTER_SELECTOR_MAX_BUILDER_QUERY_TIMEOUT_MS": "30000",
+            "CLICKHOUSE_APPLICATION_READ_MAX_MEMORY_BYTES": str(64 * 1024**3),
+            "DASHBOARD_TRACE_READ_MAX_MEMORY_BYTES": str(64 * 1024**3),
+            "OBSERVABILITY_LIST_MAX_MEMORY_BYTES": str(64 * 1024**3),
+            "PROPERTY_CATALOG_READ_MAX_MEMORY_BYTES": str(12 * 1024**3),
         },
     )
 
@@ -194,7 +198,13 @@ def test_sixty_second_read_profile_leaves_query_and_background_headroom():
         < values["TRACE_LIST_PAGE_WALL_MS"]
         < values["GRAPH_BACKGROUND_WALL_MS"]
     )
-    assert values["OBSERVABILITY_LIST_MAX_MEMORY_BYTES"] == 36 * 1024**3
+    for name in (
+        "CLICKHOUSE_APPLICATION_READ_MAX_MEMORY_BYTES",
+        "DASHBOARD_TRACE_READ_MAX_MEMORY_BYTES",
+        "OBSERVABILITY_LIST_MAX_MEMORY_BYTES",
+    ):
+        assert values[name] == 64 * 1024**3
+    assert values["PROPERTY_CATALOG_READ_MAX_MEMORY_BYTES"] == 12 * 1024**3
 
 
 @pytest.mark.parametrize(

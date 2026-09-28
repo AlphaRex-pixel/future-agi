@@ -21,11 +21,12 @@ def test_reader_accepts_sixty_second_timeouts_without_removing_memory_guards():
         SimpleNamespace(
             PROPERTY_CATALOG_QUERY_WALL_MS=60_000,
             PROPERTY_CATALOG_READ_TRANSPORT_TIMEOUT_SECONDS=60.0,
+            PROPERTY_CATALOG_READ_MAX_MEMORY_BYTES=12 * 1024**3,
         )
     )
     assert limits.query_wall_ms == 60_000
     assert limits.read_transport_timeout_seconds == 60.0
-    assert limits.clickhouse_read_settings["max_memory_usage"] > 0
+    assert limits.clickhouse_read_settings["max_memory_usage"] == 12 * 1024**3
     assert limits.clickhouse_read_settings["read_overflow_mode"] == "throw"
 
 
