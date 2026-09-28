@@ -244,6 +244,9 @@ test(
       expect(narrowed.result.window_end).toBe(details.result.window_end);
     });
 
+    // The alerts list, pinned off utils/axios.js (endpoints.project.getMonitorList).
+    const MONITOR_LIST_PATH = '/tracer/user-alerts/list_monitors/';
+
     // Open the sheet from whatever page we are on. Only the first call pays for
     // a full document load; the later ones come back through history, because
     // each reload re-runs the auth bootstrap and this flow visits the sheet four
@@ -257,7 +260,23 @@ test(
           await expect(page).toHaveURL(/\/dashboard\/alerts/, { timeout: UI_READY });
         }
       }
+      // The unfiltered list already shows the monitor (it may be the tenant's
+      // only one), so its name being visible says nothing about the search. The
+      // search fires 300 ms after typing and swaps the grid's rows for a
+      // loading state, and a click landing in that swap is lost. Wait for the
+      // searched list to arrive before looking for the row.
+      const searched = page.waitForResponse(
+        (r) => {
+          const url = new URL(r.url());
+          return (
+            url.pathname === MONITOR_LIST_PATH &&
+            url.searchParams.get('search_text') === monitorName
+          );
+        },
+        { timeout: UI_READY },
+      );
       await page.getByPlaceholder('Search').first().fill(monitorName);
+      await (await searched).finished();
       await expect(page.getByText(monitorName).first()).toBeVisible({
         timeout: UI_READY,
       });
