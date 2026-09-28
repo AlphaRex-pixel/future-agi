@@ -119,6 +119,15 @@ def test_standalone_app_service_contract() -> None:
         assert value == f"${{FI_APP_TEMPORAL_MAX_CONCURRENT_{knob}:-8}}"
     assert env["FUTURE_AGI_TELEMETRY_BUFFER_DIR"].endswith(":-/data/telemetry}")
     assert app["pids_limit"] > 0
+    # The boot summary's URLs and the SPA's API URL (bin/start) follow the
+    # host ports also when they are set in the shell rather than in .env.
+    assert env["FRONTEND_PORT"] == "${FRONTEND_PORT:-3000}"
+    assert env["BACKEND_PORT"] == "${BACKEND_PORT:-8000}"
+    # ClickHouse runs two threads a query here, so list pages get 15 s
+    # instead of 5 s before they come back partial.
+    for page in ("SPAN", "TRACE", "SESSION"):
+        wall = f"{page}_LIST_PAGE_WALL_MS"
+        assert env[wall] == f"${{{wall}:-15000}}"
 
 
 def test_every_redis_client_of_the_app_uses_the_password() -> None:
@@ -304,6 +313,8 @@ def test_the_gateway_loads_keys_from_the_app_and_sends_it_request_logs() -> None
     assert app["AGENTCC_CONTROL_PLANE_URL"] == "http://127.0.0.1:8000"
     assert app["AGENTCC_CONTROL_PLANE_TOKEN"] == app["AGENTCC_ADMIN_TOKEN"]
     assert app["AGENTCC_SYNC_ON_STARTUP"] == "true"
+    # And every minute, so a gateway that started before the app catches up.
+    assert app["AGENTCC_SYNC_INTERVAL"] == "${AGENTCC_SYNC_INTERVAL:-60s}"
     assert app["AGENTCC_WEBHOOK_SECRET"] == "${AGENTCC_WEBHOOK_SECRET:-}"
     # It loads the keys once the API is up, not during a long bootstrap.
     assert _programs()["gateway"]["command"].startswith(
@@ -318,6 +329,7 @@ def test_the_gateway_loads_keys_from_the_app_and_sends_it_request_logs() -> None
     assert gateway["AGENTCC_CONTROL_PLANE_URL"] == "http://backend"
     assert gateway["AGENTCC_CONTROL_PLANE_TOKEN"] == backend["AGENTCC_ADMIN_TOKEN"]
     assert gateway["AGENTCC_SYNC_ON_STARTUP"] == "true"
+    assert gateway["AGENTCC_SYNC_INTERVAL"] == app["AGENTCC_SYNC_INTERVAL"]
     assert gateway["AGENTCC_WEBHOOK_SECRET"] == backend["AGENTCC_WEBHOOK_SECRET"]
 
     # Org providers on private networks stay refused unless the operator
