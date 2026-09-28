@@ -71,3 +71,9 @@ class APICallStatusChoices(models.TextChoices):
     @classmethod
     def get_choices(cls):
         return [(tag.value, tag.name.replace("_", " ").title()) for tag in cls]
+
+
+# The error code a dataset limit check reports when it could not run, and the
+# tfc/utils/error_codes.py key of the retry message shown for it. Open code
+# (the dataset-create views) reads it; ee.usage produces it.
+DATASET_LIMIT_CHECK_FAILED = "DATASET_LIMIT_CHECK_FAILED"

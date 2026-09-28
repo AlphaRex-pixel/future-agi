@@ -13,6 +13,7 @@ from model_hub.views.utils.dataset_limit import (
     DatasetLimitCheckFailed,
     dataset_limit_check_failed_response,
 )
+from tfc.constants.api_calls import DATASET_LIMIT_CHECK_FAILED
 from tfc.utils.base_viewset import BaseModelViewSetMixinWithUserOrg
 from tfc.utils.error_codes import get_error_message
 from tfc.utils.general_methods import GeneralMethods
@@ -28,10 +29,7 @@ from tracer.tasks import CHUNK_SIZE, process_spans_chunk_task
 logger = structlog.get_logger(__name__)
 
 try:
-    from ee.usage.utils.usage_entries import (
-        DATASET_LIMIT_CHECK_FAILED,
-        check_if_dataset_creation_is_allowed,
-    )
+    from ee.usage.utils.usage_entries import check_if_dataset_creation_is_allowed
 except ImportError:
     check_if_dataset_creation_is_allowed = None
 

@@ -28,6 +28,7 @@ from accounts.services.aws_marketplace_metering import (
 )
 from agentic_eval.core.utils.functions import detect_input_type
 from ee.usage.deployment import DeploymentMode
+from tfc.constants.api_calls import DATASET_LIMIT_CHECK_FAILED
 
 logger = structlog.get_logger(__name__)
 from model_hub.utils import call_websocket
@@ -70,9 +71,6 @@ TRACES_LIMIT_REACHED_MESSAGE = "Traces limit reached. \
       Please delete existing traces or upgrade to a higher tier to \
       avail more traces."
 
-# detail["error_code"] of a dataset limit check that could not run (also the
-# tfc/utils/error_codes.py key of its message).
-DATASET_LIMIT_CHECK_FAILED = "DATASET_LIMIT_CHECK_FAILED"
 
 
 EVALUATOR_CALLS = [
