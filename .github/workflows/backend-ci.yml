@@ -50,6 +50,7 @@ jobs:
               - '.env.example'
               - 'docs/configuration.md'
               - 'frontend/docker-entrypoint.sh'
+              - 'scripts/env_reference.py'
             executor_base:
               - 'futureagi/code-executor/Dockerfile.base'
               - 'futureagi/code-executor/requirements.sandbox.txt'

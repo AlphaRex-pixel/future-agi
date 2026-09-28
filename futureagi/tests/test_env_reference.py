@@ -10,6 +10,7 @@ Files are parsed, never run: no Docker, no services, no database.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 from collections import Counter
@@ -21,20 +22,18 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-DOCS = ROOT / "docs" / "configuration.md"
+SCRIPT = ROOT / "scripts" / "env_reference.py"
 ENV_EXAMPLE = ROOT / ".env.example"
 INSTALLER = ROOT / "bin" / "install"
 BACKEND_CI = ROOT / ".github" / "workflows" / "backend-ci.yml"
 
-# The compose files a user runs. Every other root-level docker-compose*.yml is
-# picked up too, so a new one cannot slip past the reference.
-REQUIRED_COMPOSE_FILES = (
-    "docker-compose.yml",
-    "docker-compose.distributed.yml",
-    "docker-compose.dev.yml",
-    "docker-compose.distributed.dev.yml",
-    "deploy/docker-compose.production.yml",
-)
+# The compose files and the ${VAR} and docs-table parsers are the ones
+# scripts/env_reference.py reports with, so the test and the script agree.
+_spec = importlib.util.spec_from_file_location("env_reference", SCRIPT)
+env_reference = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(env_reference)
+DOCS = env_reference.DOCS
+COMPOSE_FILES = tuple(env_reference.COMPOSE_FILES.values())
 
 # Read by Docker Compose itself rather than by anything in this repository.
 COMPOSE_BUILTINS = frozenset(
@@ -75,8 +74,6 @@ SKIPPED_DIRS = frozenset(
 KEY = r"[A-Z][A-Z0-9_]*"
 ASSIGNED = re.compile(rf"^({KEY})=(.*)$")
 COMMENTED = re.compile(rf"^#\s?({KEY})=")
-BACKTICKED_KEY = re.compile(rf"`({KEY})`")
-INTERPOLATION = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
 
 
 # --------------------------------------------------------------------------
@@ -84,57 +81,13 @@ INTERPOLATION = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
 # --------------------------------------------------------------------------
 
 
-class _ComposeLoader(yaml.SafeLoader):
-    """SafeLoader that also accepts Compose's merge tags (!override, !reset)."""
-
-
-def _any_tag(loader: yaml.SafeLoader, _suffix: str, node: yaml.Node):
-    if isinstance(node, yaml.ScalarNode):
-        return loader.construct_scalar(node)
-    if isinstance(node, yaml.SequenceNode):
-        return loader.construct_sequence(node)
-    return loader.construct_mapping(node)
-
-
-_ComposeLoader.add_multi_constructor("!", _any_tag)
-
-
-def _compose_files() -> list[Path]:
-    found = {ROOT / name for name in REQUIRED_COMPOSE_FILES}
-    found.update(ROOT.glob("docker-compose*.yml"))
-    return sorted(found)
-
-
-def _strings(node) -> list[str]:
-    if isinstance(node, str):
-        return [node]
-    if isinstance(node, dict):
-        return [
-            s for key, value in node.items() for s in (*_strings(key), *_strings(value))
-        ]
-    if isinstance(node, list):
-        return [s for item in node for s in _strings(item)]
-    return []
-
-
-def _interpolated(text: str) -> set[str]:
-    """Variables Compose substitutes in one string. ``$$`` is a literal ``$``
-    (a shell variable inside a command), so it never names a Compose variable."""
-    return set(INTERPOLATION.findall(text.replace("$$", "")))
-
-
 @lru_cache(maxsize=1)
-def compose_variables() -> dict[str, set[str]]:
-    """Every variable a compose file interpolates -> the files that do.
-
-    Parsed as YAML, so ``${VAR}`` in comments does not count."""
-    variables: dict[str, set[str]] = {}
-    for path in _compose_files():
-        document = yaml.load(path.read_text(encoding="utf-8"), Loader=_ComposeLoader)
-        for text in _strings(document):
-            for name in _interpolated(text):
-                variables.setdefault(name, set()).add(str(path.relative_to(ROOT)))
-    return variables
+def compose_variables() -> dict[str, list[str]]:
+    """Every variable a compose file interpolates -> the files that do."""
+    return {
+        name: sorted(env_reference.COMPOSE_FILES[label] for label in files)
+        for name, files in env_reference.inventory().items()
+    }
 
 
 @lru_cache(maxsize=1)
@@ -153,25 +106,6 @@ def env_example() -> tuple[list[tuple[str, str]], list[str]]:
 def env_example_keys() -> set[str]:
     assigned, commented = env_example()
     return {key for key, _ in assigned} | set(commented)
-
-
-def _table_rows(markdown: str) -> list[list[str]]:
-    rows = []
-    for line in markdown.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("|") or set(stripped) <= {"|", "-", " ", ":"}:
-            continue
-        rows.append([cell.strip() for cell in stripped.strip("|").split("|")])
-    return rows
-
-
-def _row_keys(markdown: str) -> set[str]:
-    """Keys named in the first cell of a table row: the rows that document them."""
-    return {
-        key
-        for cells in _table_rows(markdown)
-        for key in BACKTICKED_KEY.findall(cells[0])
-    }
 
 
 def _section(markdown: str, heading_prefix: str) -> str:
@@ -197,7 +131,7 @@ def docs_text() -> str:
 
 @lru_cache(maxsize=1)
 def documented_keys() -> set[str]:
-    return _row_keys(docs_text())
+    return env_reference.documented()
 
 
 def _walk(root: Path, suffix: str):
@@ -252,9 +186,16 @@ def installer_generated_keys() -> set[str]:
 # --------------------------------------------------------------------------
 
 
-def test_the_compose_files_parse_and_interpolate_something() -> None:
-    for name in REQUIRED_COMPOSE_FILES:
-        assert (ROOT / name).is_file(), f"{name} is missing"
+def test_the_compose_files_are_listed_and_interpolate_something() -> None:
+    listed = {ROOT / name for name in COMPOSE_FILES}
+    for path in sorted(listed):
+        assert path.is_file(), f"{path.relative_to(ROOT)} is missing"
+    unlisted = sorted(
+        path.name for path in ROOT.glob("docker-compose*.yml") if path not in listed
+    )
+    assert not unlisted, (
+        f"add these to COMPOSE_FILES in scripts/env_reference.py: {unlisted}"
+    )
     variables = compose_variables()
     # A parser that silently found nothing would make every check below pass.
     assert {"SECRET_KEY", "PG_PASSWORD", "FRONTEND_PORT", "VITE_HOST_API"} <= set(
@@ -266,7 +207,7 @@ def test_the_compose_files_parse_and_interpolate_something() -> None:
 
 def test_every_compose_variable_is_documented() -> None:
     missing = {
-        name: sorted(files)
+        name: files
         for name, files in compose_variables().items()
         if name not in documented_keys()
     }
@@ -294,7 +235,9 @@ def test_env_example_carries_no_key_that_nothing_reads() -> None:
 
 
 def test_legacy_allowlist_is_current_and_documented_as_legacy() -> None:
-    legacy_rows = _row_keys(_section(docs_text(), "Legacy and retired keys"))
+    legacy_rows = env_reference.row_keys(
+        _section(docs_text(), "Legacy and retired keys")
+    )
     for key, reason in LEGACY_ENV_EXAMPLE_KEYS.items():
         assert reason.strip(), f"{key} needs a reason in LEGACY_ENV_EXAMPLE_KEYS"
         assert key in env_example_keys(), (
@@ -329,7 +272,9 @@ def test_installer_generated_secrets_ship_empty_and_documented_in_section_one() 
     generated = installer_generated_keys()
     assert {"SECRET_KEY", "PG_PASSWORD", "INTEGRATION_ENCRYPTION_KEY"} <= generated
     values = dict(env_example()[0])
-    section_one = _row_keys(_section(docs_text(), "1. Generated by the installer"))
+    section_one = env_reference.row_keys(
+        _section(docs_text(), "1. Generated by the installer")
+    )
     for key in sorted(generated):
         assert key in values, (
             f"{key} is generated by bin/install but not listed in .env.example"
@@ -344,7 +289,7 @@ def test_installer_generated_secrets_ship_empty_and_documented_in_section_one() 
 
 
 def test_internal_keys_are_not_offered_in_env_example() -> None:
-    internal = _row_keys(_section(docs_text(), "5. Internal"))
+    internal = env_reference.row_keys(_section(docs_text(), "5. Internal"))
     offered = sorted(env_example_keys() & internal)
     assert not offered, (
         f".env.example offers keys the compose files override, so setting them does nothing: {offered}"
@@ -372,15 +317,16 @@ def test_env_example_never_turns_on_a_risky_opt_in(key: str, why: str) -> None:
 
 
 def test_backend_ci_runs_when_a_file_read_here_changes() -> None:
-    """A PR that edits only docs/configuration.md, .env.example or bin/dev
-    (which test_log_stream.py runs) still runs these tests. The Go sources are
+    """A PR that edits only docs/configuration.md, .env.example,
+    scripts/env_reference.py or bin/dev (which test_log_stream.py runs) still
+    runs these tests. The Go sources are
     left out: their own CI covers them, and every push to dev runs this suite."""
     workflow = yaml.safe_load(BACKEND_CI.read_text(encoding="utf-8"))
     steps = workflow["jobs"]["changes"]["steps"]
     filters = next(step for step in steps if step.get("id") == "filter")["with"]
     patterns = yaml.safe_load(filters["filters"])["backend"]
-    names = [*REQUIRED_COMPOSE_FILES, *WORD_READER_FILES]
-    names += [str(path.relative_to(ROOT)) for path in (DOCS, ENV_EXAMPLE)]
+    names = [*COMPOSE_FILES, *WORD_READER_FILES]
+    names += [str(path.relative_to(ROOT)) for path in (DOCS, ENV_EXAMPLE, SCRIPT)]
     names += [
         str(path.relative_to(ROOT))
         for directory in WORD_READER_DIRS

@@ -22,6 +22,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs" / "configuration.md"
+# Every root-level docker-compose*.yml belongs here:
+# futureagi/tests/test_env_reference.py reads the compose files through this
+# list and fails on one that is missing from it.
 COMPOSE_FILES = {
     "S": "docker-compose.yml",
     "D": "docker-compose.distributed.yml",
@@ -117,13 +120,18 @@ def inventory() -> dict[str, dict[str, set[str]]]:
     return found
 
 
-def documented() -> set[str]:
+def row_keys(markdown: str) -> set[str]:
+    """Keys named in the first cell of a table row: the rows that document them."""
     keys = set()
-    for line in DOCS.read_text(encoding="utf-8").splitlines():
+    for line in markdown.splitlines():
         if line.startswith("|"):
             first_cell = line.strip().strip("|").split("|")[0]
             keys.update(DOC_KEY.findall(first_cell))
     return keys
+
+
+def documented() -> set[str]:
+    return row_keys(DOCS.read_text(encoding="utf-8"))
 
 
 def main() -> int:
