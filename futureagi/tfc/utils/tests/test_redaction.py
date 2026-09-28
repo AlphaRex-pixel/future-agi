@@ -13,6 +13,9 @@ from tfc.utils.redaction import redact_url_credentials
             "connected to redis://:a@redis:6379/2 and postgres://u:b@db/x",
             "connected to redis://:***@redis:6379/2 and postgres://u:***@db/x",
         ),
+        # An unencoded "@" in the password: parsers split on the last "@".
+        ("redis://:p@ss@futureagi-redis:6379/2", "redis://:***@futureagi-redis:6379/2"),
+        ("redis://default:p@ss:w@rd@host:6379/0", "redis://default:***@host:6379/0"),
     ],
 )
 def test_masks_the_password(raw, expected):

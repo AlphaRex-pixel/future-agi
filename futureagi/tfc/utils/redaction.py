@@ -2,10 +2,11 @@
 
 import re
 
-# scheme://user:password@ -- RFC 3986 userinfo cannot hold an unencoded
-# "/", "?", "#" or "@", so the match stops before the host, path or query.
+# scheme://user:password@ -- the password runs to the last "@" before the
+# path, query or fragment. RFC 3986 forbids a raw "@" there, but redis-py,
+# urllib, kombu and Go accept one and split on the last "@", so do the same.
 _URL_PASSWORD = re.compile(
-    r"(?P<head>[A-Za-z][A-Za-z0-9+.\-]*://[^:/?#@\s]*):[^/?#@\s]*@"
+    r"(?P<head>[A-Za-z][A-Za-z0-9+.\-]*://[^:/?#@\s]*):[^/?#\s]*@"
 )
 
 
