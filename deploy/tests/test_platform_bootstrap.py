@@ -1134,13 +1134,10 @@ class ChangeDataCaptureTest(StackTest):
         self.assertEqual(caught.exception.name, "psycopg")
         self.assertEqual(self.stack.cdc_calls, [])
 
-    @unittest.expectedFailure
     def test_an_image_without_the_outbox_installer_skips_cdc(self):
-        """KNOWN BUG: `from tracer.services.clickhouse import oss_outbox_cdc`
-        raises ImportError ("cannot import name"), not ModuleNotFoundError,
-        when the module file is absent, so the skip branch never runs and the
-        boot fails. Remove expectedFailure once change_data_capture catches it
-        (e.g. `import tracer.services.clickhouse.oss_outbox_cdc as ...`)."""
+        """The module file is really absent (not a sys.modules stub): the
+        import must raise ModuleNotFoundError naming it, not a plain
+        ImportError ("cannot import name"), for the skip branch to run."""
         self.remove_outbox_module()
 
         bootstrap.change_data_capture()

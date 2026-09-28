@@ -756,15 +756,6 @@ def test_the_job_retries_search_attributes_until_temporal_serves(
     assert "cdc" not in recorded_steps
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ImportError,
-    reason=(
-        "KNOWN BUG: with oss_outbox_cdc.py absent, `from tracer.services.clickhouse "
-        "import oss_outbox_cdc` raises ImportError ('cannot import name'), not "
-        "ModuleNotFoundError, so the skip branch never runs and the Job fails"
-    ),
-)
 def test_an_image_without_the_outbox_installer_skips_change_data_capture(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
