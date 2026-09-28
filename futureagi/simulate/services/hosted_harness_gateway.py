@@ -182,7 +182,9 @@ def _claude_code_use_vertex(gateway_ready: bool) -> str:
     return str(os.environ.get("CLAUDE_CODE_USE_VERTEX") or "1")
 
 
-_BACKGROUND_SOUNDS = Path(__file__).resolve().parents[1] / "data" / "background_sounds.json"
+_BACKGROUND_SOUNDS = (
+    Path(__file__).resolve().parents[1] / "data" / "background_sounds.json"
+)
 
 
 def _background_noise_catalogue() -> str:
@@ -297,6 +299,11 @@ def _platform_simulator_material() -> tuple[dict[str, str], bytes | None]:
         "SIMULATOR_LLM_PROVIDER": provider,
         "SIMULATOR_LLM_MODEL": model,
     }
+    # Unset keeps ALK's per-model least deliberation; set it to go lower where a model allows
+    # (e.g. "minimal" on gemini-3.5-flash-lite, which gemini-3.7-flash refuses).
+    thinking = str(os.environ.get("SIMULATOR_LLM_THINKING") or "").strip()
+    if thinking:
+        values["SIMULATOR_LLM_THINKING"] = thinking
     if agentcc_ready:
         values["ALK_CLAUDE_GATEWAY_URL"] = agentcc_url.rstrip("/")
         values["ALK_CLAUDE_GATEWAY_API_KEY"] = agentcc_key
@@ -1299,7 +1306,9 @@ def _resolved_egress_domains(
         except ValueError:
             clips = []
         for clip in clips if isinstance(clips, list) else []:
-            clip_host = _hostname_from_url(clip.get("url")) if isinstance(clip, dict) else None
+            clip_host = (
+                _hostname_from_url(clip.get("url")) if isinstance(clip, dict) else None
+            )
             if clip_host:
                 values.append(clip_host)
     # Observe, when the guest is given credentials for it. Derived rather than requested, because a
@@ -4515,7 +4524,8 @@ def authoring_stage_outputs(
                 "kind": "stores",
                 "title": "Seeded world state",
                 "summary": f"{tables} tables · {rows} rows",
-                "data": stores,            }
+                "data": stores,
+            }
         )
     if isinstance(coverage, dict):
         placed = coverage.get("placed")
@@ -4704,7 +4714,9 @@ def push_scenarios_into_live_sandbox(job: HostedHarnessJob, suite: list[dict]) -
             "/work/authoring/scenarios.json",
         )
     except Exception:  # noqa: BLE001 - the archive is still the durable record
-        logger.exception("could not deliver edited suite to the live guest job=%s", job.id)
+        logger.exception(
+            "could not deliver edited suite to the live guest job=%s", job.id
+        )
         return False
     return True
 
@@ -4731,15 +4743,18 @@ def rewrite_authoring_scenarios(job: HostedHarnessJob, suite: list[dict]) -> str
     edited = {str(one.get("name") or ""): one for one in suite}
     keys = {str(one.get("scenario_key") or one.get("name") or "") for one in suite}
     out = io.BytesIO()
-    with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as source, tarfile.open(
-        fileobj=out, mode="w:gz"
-    ) as target:
+    with (
+        tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as source,
+        tarfile.open(fileobj=out, mode="w:gz") as target,
+    ):
         for member in source.getmembers():
             path = Path(member.name)
             in_scenarios = "scenarios" in path.parts
-            folder = path.parts[path.parts.index("scenarios") + 1] if in_scenarios and len(
-                path.parts
-            ) > path.parts.index("scenarios") + 1 else ""
+            folder = (
+                path.parts[path.parts.index("scenarios") + 1]
+                if in_scenarios and len(path.parts) > path.parts.index("scenarios") + 1
+                else ""
+            )
             if folder and folder not in keys:
                 continue
             handle = source.extractfile(member) if member.isfile() else None
@@ -4749,7 +4764,9 @@ def rewrite_authoring_scenarios(job: HostedHarnessJob, suite: list[dict]) -> str
             payload = handle.read()
             if path.name == "scenario.json" and folder:
                 document = json.loads(payload.decode("utf-8"))
-                replacement = edited.get(str(document.get("name") or "")) or edited.get(folder)
+                replacement = edited.get(str(document.get("name") or "")) or edited.get(
+                    folder
+                )
                 if replacement is not None:
                     document.update(
                         {
