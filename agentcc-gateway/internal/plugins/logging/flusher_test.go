@@ -403,19 +403,22 @@ func TestLogFlusherDeliver_DoesNotEncodeAfterTheDeadline(t *testing.T) {
 	}
 }
 
-// Close sends a backlog larger than maxBuffer in batches of maxBuffer, and
-// stops at the first batch it cannot deliver: that batch and the ones after
-// it are undelivered, not the whole backlog.
+// Close sends a backlog larger than maxBuffer in batches of maxBuffer. A batch
+// whose sends keep failing stops it: that batch and the ones after it are
+// undelivered, not the whole backlog. A batch the webhook refuses with a
+// client error is undelivered, but the batches after it are still sent.
 func TestLogFlusherClose_SendsTheBacklogInBatches(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
 		answerFirst     int
+		answerRest      int
 		wantDelivered   []string
 		wantRequests    int
 		wantUndelivered int64
 	}{
-		{"when the second batch fails", http.StatusOK, []string{"req-1", "req-2"}, 1 + finalFlushAttempts, 2},
-		{"when the first batch fails", http.StatusServiceUnavailable, nil, finalFlushAttempts, 4},
+		{"when the second batch fails", http.StatusOK, http.StatusServiceUnavailable, []string{"req-1", "req-2"}, 1 + finalFlushAttempts, 2},
+		{"when the first batch fails", http.StatusServiceUnavailable, http.StatusServiceUnavailable, nil, finalFlushAttempts, 4},
+		{"when the first batch is refused", http.StatusBadRequest, http.StatusOK, []string{"req-3", "req-4"}, 2, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			shortRetryWait(t)
@@ -425,7 +428,7 @@ func TestLogFlusherClose_SendsTheBacklogInBatches(t *testing.T) {
 				if n == 1 {
 					return tc.answerFirst
 				}
-				return http.StatusServiceUnavailable
+				return tc.answerRest
 			})
 			const maxBuffer = 2
 			f := NewLogFlusher(wh.URL, "secret", time.Hour, maxBuffer)

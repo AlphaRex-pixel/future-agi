@@ -346,15 +346,27 @@ func (f *LogFlusher) Close(ctx context.Context) {
 
 // deliver sends records in batches of at most maxBuffer, so one failed send
 // does not lose the whole backlog: up to twice maxBuffer buffered records, plus
-// as many from a flush that gave its batch back. It stops at the first batch it
-// cannot deliver and returns how many records it did not deliver, and why.
+// as many from a flush that gave its batch back. A batch the webhook refuses
+// with a client error is not delivered, but the batches after it are still
+// sent, as a flush would. Any other failure stops it: the batches after would
+// meet it too. It returns how many records it did not deliver, and why.
 func (f *LogFlusher) deliver(ctx context.Context, records []TraceRecord) (int, error) {
+	var undelivered int
+	var lastErr error
 	for start := 0; start < len(records); start += f.maxBuffer {
-		if err := f.deliverBatch(ctx, records[start:min(start+f.maxBuffer, len(records))]); err != nil {
-			return len(records) - start, err
+		batch := records[start:min(start+f.maxBuffer, len(records))]
+		err := f.deliverBatch(ctx, batch)
+		if err == nil {
+			continue
 		}
+		var status statusError
+		if !errors.As(err, &status) || retryable(int(status), nil) {
+			return undelivered + len(records) - start, err
+		}
+		undelivered += len(batch)
+		lastErr = err
 	}
-	return 0, nil
+	return undelivered, lastErr
 }
 
 // deliverBatch sends one batch, trying again after a failed send or a server
@@ -380,7 +392,7 @@ func (f *LogFlusher) deliverBatch(ctx context.Context, records []TraceRecord) er
 		}
 		err = postErr
 		if err == nil {
-			err = fmt.Errorf("webhook returned status %d", status)
+			err = statusError(status)
 		}
 		if !retryable(status, postErr) || attempt >= finalFlushAttempts {
 			return err
@@ -391,6 +403,13 @@ func (f *LogFlusher) deliverBatch(ctx context.Context, records []TraceRecord) er
 			return err
 		}
 	}
+}
+
+// statusError is the error for a send the webhook answered with this status.
+type statusError int
+
+func (e statusError) Error() string {
+	return fmt.Sprintf("webhook returned status %d", int(e))
 }
 
 // retryable reports whether a send that returned status and err may succeed
