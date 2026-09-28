@@ -1244,3 +1244,20 @@ def test_execute_clamps_the_requested_timeout(executor, monkeypatch, timeout, ex
     executor.ExecuteResource().on_post(Request, Response)
     assert seen == [expected]
     assert Response.media["status"] == "success"
+
+
+def test_a_javascript_eval_without_node_says_how_to_run_it(
+    executor, monkeypatch
+) -> None:
+    """The platform image ships no Node.js; the `sandbox` profile's nsjail
+    executor has it (futureagi/code-executor/Dockerfile.base)."""
+    monkeypatch.setattr(executor, "NODE_PATH", None)
+
+    result = executor._execute_javascript("function evaluate() {}", {}, 5)
+
+    assert result["status"] == "error"
+    assert "COMPOSE_PROFILES=sandbox" in result["data"]
+    base = (ROOT / "futureagi" / "code-executor" / "Dockerfile.base").read_text(
+        encoding="utf-8"
+    )
+    assert "nodejs" in base

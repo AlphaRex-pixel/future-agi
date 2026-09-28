@@ -44,6 +44,14 @@ NODE_PATH = shutil.which("node")
 
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), "config")
 
+# Standalone's built-in sandbox (the platform image) ships no Node.js; its
+# nsjail executor, the `sandbox` compose profile, does.
+NO_NODE_MESSAGE = (
+    "JavaScript evals need Node.js, which this sandbox does not have. In "
+    "Standalone, set COMPOSE_PROFILES=sandbox in .env and run "
+    "docker compose up -d: the nsjail sandbox it adds runs them."
+)
+
 DEFAULT_TIMEOUT = 30
 MAX_TIMEOUT = 60
 MB = 1024 * 1024
@@ -257,7 +265,7 @@ def _execute_python_fallback(code: str, input_data: dict, timeout: int) -> dict:
 def _execute_javascript(code: str, input_data: dict, timeout: int) -> dict:
     """Execute JavaScript code in nsjail (or fallback subprocess)."""
     if not NODE_PATH:
-        return {"status": "error", "data": "Node.js not available"}
+        return {"status": "error", "data": NO_NODE_MESSAGE}
 
     script = _build_js_script(code, input_data)
     if not NSJAIL_AVAILABLE:

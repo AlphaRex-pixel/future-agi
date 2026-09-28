@@ -33,6 +33,7 @@ from tfc.views.setup_checks import (
     EXPERIMENT,
     FAILED,
     HELM,
+    LIMITED,
     LIVE,
     PASSED,
     SKIPPED,
@@ -565,6 +566,40 @@ class TestCodeExecutorProbe:
         monkeypatch.setenv("CODE_EXECUTOR_URL", _closed_port_url())
 
         assert _safe(_code_executor_up) is False
+
+    def test_an_executor_without_node_is_limited(self, monkeypatch, health_server):
+        """The in-container executor answers ``"node": null``."""
+        monkeypatch.setenv("CODE_EXECUTOR_URL", health_server)
+        with patch.object(
+            setup_checks.requests.Response,
+            "json",
+            return_value={"status": "ok", "nsjail": False, "node": None},
+        ):
+            assert _safe(_code_executor_up) == LIMITED
+        with patch.object(
+            setup_checks.requests.Response,
+            "json",
+            return_value={"status": "ok", "node": "/usr/bin/node"},
+        ):
+            assert _safe(_code_executor_up) is True
+
+    @pytest.mark.parametrize("mode", [LIVE, EXPERIMENT])
+    def test_limited_passes_and_says_how_to_run_javascript(self, api_client, mode):
+        results = all_up()
+        results["code_executor"] = LIMITED
+
+        standalone = get_checks(
+            api_client, mode=mode, probe_results=results, setup=STANDALONE
+        )
+        distributed = get_checks(api_client, mode=mode, probe_results=results)
+
+        check = by_id(standalone, "code_executor")
+        assert check["status"] == PASSED
+        assert "JavaScript" in check["detail"]
+        assert "COMPOSE_PROFILES=sandbox" in check["detail"]
+        assert check["fix"] == ""
+        assert standalone["status"] == "ok"
+        assert "Node.js" in by_id(distributed, "code_executor")["detail"]
 
 
 @pytest.mark.integration

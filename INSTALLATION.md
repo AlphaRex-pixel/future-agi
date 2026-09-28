@@ -279,7 +279,7 @@ application code.
 | Postgres → ClickHouse sync | In-process outbox | PeerDB | In-process outbox |
 | Observed-attribute suggestions in filters, widgets and tasks | On: the collector writes them directly | On: through Kafka | On: the collector writes them directly |
 | Model serving | Optional (`ml` profile) | Always on | Optional (`serving.enabled`) |
-| Code-eval sandbox | In-app, unprivileged; nsjail with the optional `sandbox` profile. See [Code evals and the sandbox](#code-evals-and-the-sandbox) | nsjail `code-executor` (privileged) | Off by default: custom code evals are refused until you enable the privileged sandbox |
+| Code-eval sandbox | In-app, unprivileged, Python only; nsjail, Python and JavaScript, with the optional `sandbox` profile. See [Code evals and the sandbox](#code-evals-and-the-sandbox) | nsjail `code-executor` (privileged) | Off by default: custom code evals are refused until you enable the privileged sandbox |
 | Scaling | One machine | Per service, on one machine | Per service, with autoscaling |
 | Use it for | Laptops, evaluation, a team on one VM | High volume on one large host; the [production overlay](deploy/README.md) | Production on Kubernetes |
 
@@ -318,15 +318,18 @@ COMPOSE_PROFILES=ml,sandbox
   and give the container the GPU in a `docker-compose.override.yml`
   (`deploy.resources.reservations.devices`).
 - **`sandbox`** adds the privileged nsjail `code-executor`, and the app then
-  sends custom code evals to it instead of its built-in sandbox. Set it in
+  sends custom code evals to it instead of its built-in sandbox. It is what
+  runs JavaScript code evals: the built-in sandbox runs Python only. Set it in
   `.env`, not only with `--profile` on the command line: the app reads
   `COMPOSE_PROFILES` from `.env` to make that switch.
 
 #### Code evals and the sandbox
 
 Custom code evals run user-written Python or JavaScript. In Standalone without
-the `sandbox` profile, they run inside the `app` container as an unprivileged
-user: with an empty environment; CPU-time, memory, process, file-size and
+the `sandbox` profile, JavaScript evals do not run: the `app` image has no
+Node.js, so each one fails with an error that names the `sandbox` profile, and
+the setup screen's **Code execution sandbox** row says so. Python evals run
+inside the `app` container as an unprivileged user: with an empty environment; CPU-time, memory, process, file-size and
 open-file limits; a private temporary directory that is deleted afterwards;
 and the whole process group killed when the run ends or times out. That user
 cannot read `/data` (object storage, Temporal's database) or the mounted
@@ -1356,6 +1359,19 @@ Cloud Run, some Kubernetes policies). Either run on a platform that allows
 privileged containers (EC2, GKE with privileged enabled, bare metal) or turn
 off code evaluation features. Standalone without the `sandbox` profile does
 not need privileged containers.
+
+### JavaScript code evals fail with `JavaScript evals need Node.js`
+
+Standalone's built-in sandbox runs Python code evals only. Add the nsjail
+sandbox, which runs both (it needs privileged containers):
+
+```bash
+echo "COMPOSE_PROFILES=sandbox" >> .env   # or add sandbox to an existing COMPOSE_PROFILES line
+docker compose up -d
+```
+
+The app then sends every code eval to it. See
+[Code evals and the sandbox](#code-evals-and-the-sandbox).
 
 ### Code evals fail with `Code executor unavailable`
 

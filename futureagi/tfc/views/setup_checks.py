@@ -117,6 +117,10 @@ SKIPPED = "skipped"
 # check's ``absent`` block.
 ABSENT = "absent"
 
+# Probe verdict for a service that is up but lacks part of what it serves; it
+# passes, with the check's ``limited`` detail.
+LIMITED = "limited"
+
 LIVE = "live"
 EXPERIMENT = "experiment"
 PROBE_TIMEOUT_SECONDS = 3
@@ -268,12 +272,22 @@ def _code_executor_up() -> bool:
     """The standalone install runs the executor inside the app container, so
     ``CODE_EXECUTOR_URL`` points at loopback there; the distributed install and the
     ``sandbox`` profile run it as the ``code-executor`` container. Both serve
-    the same ``/health``."""
+    the same ``/health``, whose ``node`` is null where JavaScript evals cannot
+    run (the in-container one): LIMITED."""
     base = os.environ.get("CODE_EXECUTOR_URL", "http://code-executor:8060")
     if not base.strip():
         # Not deployed: the Helm chart with codeExecutor.enabled=false.
         return ABSENT
-    return _http_ok(f"{base.rstrip('/')}/health")
+    response = requests.get(f"{base.rstrip('/')}/health", timeout=PROBE_TIMEOUT_SECONDS)
+    if response.status_code != 200:
+        return False
+    try:
+        health = response.json()
+    except ValueError:
+        return True
+    if isinstance(health, dict) and "node" in health and not health["node"]:
+        return LIMITED
+    return True
 
 
 def _resolves(host: str) -> bool:
@@ -677,6 +691,20 @@ CHECKS = (
             ),
         },
         "docs_url": _PREFLIGHT_DOCS + "code-execution-sandbox-failed",
+        # Up without Node.js: Standalone's built-in sandbox.
+        "limited": {
+            "detail": {
+                STANDALONE: (
+                    "Python code evals run here. JavaScript ones need the nsjail "
+                    "sandbox: set COMPOSE_PROFILES=sandbox in .env and run "
+                    "docker compose up -d"
+                ),
+                DISTRIBUTED: (
+                    "Python code evals run here. JavaScript ones will not: this "
+                    "sandbox has no Node.js"
+                ),
+            },
+        },
         # Not deployed (empty CODE_EXECUTOR_URL): custom code evals are off or
         # run in the workers (CODE_EXECUTOR_LOCAL_FALLBACK); never blocking.
         "absent": {
@@ -742,12 +770,12 @@ CHECKS = (
 def _safe(probe):
     """Fail closed. A probe that raises means the service is not usable, which is
     exactly what a down service looks like — never a 500 for the whole screen.
-    ``ABSENT`` passes through; anything else is up or down."""
+    ``ABSENT`` and ``LIMITED`` pass through; anything else is up or down."""
     try:
         result = probe()
     except Exception:
         return False
-    return ABSENT if result == ABSENT else bool(result)
+    return result if result in (ABSENT, LIMITED) else bool(result)
 
 
 def _run_probes(request_host=None) -> dict:
@@ -807,13 +835,19 @@ def _build_checks(mode: str, probe_results: dict, setup: str = DISTRIBUTED) -> l
             continue
         # A check with no ``absent`` block cannot be optional: ABSENT is down.
         up = result != ABSENT and bool(result)
+        # Up, but short of something: it passes and says what is missing.
+        limited = check.get("limited") if result == LIMITED else None
+        if limited is not None:
+            detail = _for_setup(limited["detail"], setup)
+        else:
+            detail = "" if up else check.get("down_detail", "")
         checks.append(
             {
                 "id": check["id"],
                 "label": check["label"],
                 "status": PASSED if up else overlay["on_down"],
                 "required": bool(overlay["required"]),
-                "detail": "" if up else check.get("down_detail", ""),
+                "detail": detail,
                 # Only a down check needs a remedy; a passing row would render an
                 # instruction for a problem the operator does not have.
                 "fix": "" if up else _for_setup(check.get("fix"), setup),
