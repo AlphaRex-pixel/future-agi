@@ -213,6 +213,27 @@ tags with any dev stack you are running, and its `--reload` watcher restarts the
 Attach mode covers the hot-reload need without any of that. In CI none of this applies: the workflow
 builds `:e2e-ci` images from the PR's own code.
 
+### The Standalone stack (`E2E_STACK=standalone`)
+
+With `E2E_STACK=standalone`, every `bin/e2e` subcommand targets the Standalone setup instead:
+`docker-compose.yml` (one `app` container that runs the API, the workers, the gateway, the collector
+and the UI, next to Postgres and ClickHouse) plus `e2e/stack/docker-compose.standalone-e2e.yml`,
+with `e2e/stack/standalone-e2e.env`, as Compose project `futureagi-e2e-standalone`. The harness
+ports are the same, so run only one of the two stacks at a time. Its images are built from this
+checkout, tagged with that env file's `FUTURE_AGI_VERSION` (`e2esa`):
+
+```bash
+bin/e2e build standalone             # slim backend, frontend, fi-collector, agentcc-gateway, then futureagi/standalone
+E2E_STACK=standalone bin/e2e up
+E2E_STACK=standalone bin/e2e test
+E2E_STACK=standalone bin/e2e down -v
+```
+
+`bin/e2e build standalone-app` is the last step on its own: it assembles `futureagi/standalone`
+from the four component images already built with that tag. The managed-mock inspection
+(`lib/managed-mock.ts`) checks the Standalone stack against its own spec
+(`lib/managed-mock-standalone.ts`). The Distributed-only background attestation is skipped there.
+
 ### The live observed-catalog backfill harness (`harness/catalog-backfill.spec.ts`)
 
 `lib/catalog-lifecycle.ts` drives the real `fi-observed-catalog-backfill` binary against a running

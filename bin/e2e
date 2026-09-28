@@ -25,11 +25,14 @@ if [[ "${E2E_STACK:-distributed}" == standalone ]]; then
   SERVICES=(app postgres clickhouse mock-llm)
 fi
 
+BUILD_TARGETS="backend|frontend|collector|all|standalone|standalone-app"
+
 backend_port() { grep '^BACKEND_PORT=' "$ENV_FILE" | cut -d= -f2; }
 ch_port() { grep '^CH_HTTP_PORT=' "$ENV_FILE" | cut -d= -f2; }
 # As Compose resolves it: exported in the shell, else from the env file.
 ch_password() { printf '%s' "${CH_PASSWORD:-$(grep '^CH_PASSWORD=' "$ENV_FILE" | cut -d= -f2)}"; }
 frontend_port() { grep '^FRONTEND_PORT=' "$ENV_FILE" | cut -d= -f2; }
+standalone_tag() { grep '^FUTURE_AGI_VERSION=' "$ROOT/e2e/stack/standalone-e2e.env" | cut -d= -f2; }
 
 wait_ready() {
   # Measured cold boot 2026-08-25: first-run migrations take ~6.5 min before
@@ -69,7 +72,30 @@ build_target() {
                echo "built. run with: E2E_FI_COLLECTOR_VERSION=e2e-local bin/e2e up" ;;
     all)       build_target backend; build_target frontend; build_target collector
                echo "run with: FUTURE_AGI_VERSION=e2e-local FRONTEND_VERSION=e2e-local E2E_FI_COLLECTOR_VERSION=e2e-local bin/e2e up" ;;
-    *) echo "usage: bin/e2e build backend|frontend|collector|all"; exit 2 ;;
+    # The images e2e/stack/standalone-e2e.env runs, tagged with its
+    # FUTURE_AGI_VERSION: the slim backend, frontend, fi-collector and
+    # agentcc-gateway, then deploy/standalone/Dockerfile on top of them, as
+    # ./bin/install --from-source builds them. `standalone-app` is the last step
+    # alone, over component images already built with that tag (CI builds them
+    # with its layer cache).
+    standalone)
+      local tag; tag=$(standalone_tag)
+      docker build -t "futureagi/future-agi:$tag" -f "$ROOT/futureagi/Dockerfile.oss" \
+        --build-arg IMAGE_VARIANT=slim "$ROOT/futureagi"
+      docker build -t "futureagi/frontend:$tag" "$ROOT/frontend"
+      docker build -t "futureagi/fi-collector:$tag" "$ROOT/fi-collector"
+      docker build -t "futureagi/agentcc-gateway:$tag" "$ROOT/agentcc-gateway"
+      build_target standalone-app ;;
+    standalone-app)
+      local tag; tag=$(standalone_tag)
+      docker build -t "futureagi/standalone:$tag" -f "$ROOT/deploy/standalone/Dockerfile" \
+        --build-arg "BACKEND_IMAGE=futureagi/future-agi:$tag" \
+        --build-arg "FRONTEND_IMAGE=futureagi/frontend:$tag" \
+        --build-arg "FI_COLLECTOR_IMAGE=futureagi/fi-collector:$tag" \
+        --build-arg "AGENTCC_GATEWAY_IMAGE=futureagi/agentcc-gateway:$tag" \
+        "$ROOT/deploy/standalone"
+      echo "built futureagi/standalone:$tag. run with: E2E_STACK=standalone bin/e2e up" ;;
+    *) echo "usage: bin/e2e build $BUILD_TARGETS"; exit 2 ;;
   esac
 }
 
@@ -79,7 +105,7 @@ case "$cmd" in
   # force-recreate/retry loop: failed or uncertain setup must be inspected.
   up)      "${COMPOSE[@]}" up -d --wait --wait-timeout 1200 "${SERVICES[@]}"; wait_ready ;;
   down)    "${COMPOSE[@]}" down "$@" ;;
-  build)   build_target "${1:?usage: bin/e2e build backend|frontend|collector|all}" ;;
+  build)   build_target "${1:?usage: bin/e2e build $BUILD_TARGETS}" ;;
   test)    (cd "$ROOT/e2e" && yarn playwright test "$@") ;;
   ui)      (cd "$ROOT/e2e" && yarn playwright test --ui "$@") ;;
   report)  (cd "$ROOT/e2e" && yarn playwright show-report) ;;
