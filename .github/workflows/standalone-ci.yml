@@ -478,7 +478,7 @@ jobs:
           echo "::add-mask::$secret_key"
           pass "API key pair issued"
 
-          smoke_send_trace "$SMOKE_PROJECT" "$api_key" "$secret_key" || fail "OTLP/HTTP ingest on :4318"
+          why=$(smoke_send_trace "$SMOKE_PROJECT" "$api_key" "$secret_key" 2>&1) || fail "$why"
           pass "OTLP/HTTP trace accepted by fi-collector on :4318"
 
           eventually 180 smoke_trace_readable "$token" "$SMOKE_PROJECT" \
