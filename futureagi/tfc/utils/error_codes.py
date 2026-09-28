@@ -95,9 +95,11 @@ err_dict = {
     ],
     "SCORE_PROJECT_MISMATCH": [
         "This queue item belongs to another project's copy of this source. "
-        "Annotate it from that project.",
+        "Annotate it from that project."
+    ],
+    "SCORE_PROJECT_MISMATCH_EXISTING_SCORE": [
         "A score on this queue item belongs to another project's copy of "
-        "this source. Annotate it from that project.",
+        "this source. Annotate it from that project."
     ],
     "FILTER_VALUE_INVENTORY_TOO_BROAD": [
         "Too many values to browse exactly. Enter a more specific search."

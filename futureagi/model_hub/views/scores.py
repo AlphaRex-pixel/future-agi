@@ -125,7 +125,7 @@ def _score_project_conflict(
         return None
     item_project_id = queue_item.project_id or queue_item.queue.project_id
     if item_project_id and str(item_project_id) != str(tracer_project_id):
-        return get_error_message("SCORE_PROJECT_MISMATCH", 0)
+        return get_error_message("SCORE_PROJECT_MISMATCH")
     moved = (
         Score.no_workspace_objects.filter(
             **source_lookup,
@@ -139,7 +139,7 @@ def _score_project_conflict(
         .exists()
     )
     if moved:
-        return get_error_message("SCORE_PROJECT_MISMATCH", 1)
+        return get_error_message("SCORE_PROJECT_MISMATCH_EXISTING_SCORE")
     return None
 
 
