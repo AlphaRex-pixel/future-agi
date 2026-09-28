@@ -6,18 +6,21 @@ import {
   QueryClient,
   QueryClientProvider,
 } from "@tanstack/react-query";
+import { act, waitFor } from "@testing-library/react";
 import {
   asRequestError,
   useFetchProviderModels,
+  useGatewayConfig,
   useUpdateProvider,
 } from "./useGatewayConfig";
 
-const { post } = vi.hoisted(() => ({ post: vi.fn() }));
+const { post, get } = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn() }));
 
 vi.mock("src/utils/axios", () => ({
-  default: { post, get: vi.fn() },
+  default: { post, get },
   endpoints: {
     gateway: {
+      config: (id) => `/gateway/${id}/config`,
       updateProvider: (id) => `/gateway/${id}/provider/update`,
       providerCredentials: { fetchModels: "/gateway/provider/models" },
     },
@@ -71,6 +74,59 @@ describe("useUpdateProvider", () => {
     await save();
 
     expect(post.mock.calls[0][2]).toEqual({ timeout: 30000 });
+  });
+
+  it("finishes only once the provider config has been re-read", async () => {
+    const providersWithPrefix = (prefix) => ({
+      data: { result: { providers: { openai: { api_path_prefix: prefix } } } },
+    });
+    get.mockReset();
+    get.mockResolvedValueOnce(providersWithPrefix("/openai/v1"));
+    post.mockResolvedValue({ data: { result: { action: "updated" } } });
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const clientWrapper = ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(
+      () => ({ config: useGatewayConfig("gw-1"), update: useUpdateProvider() }),
+      { wrapper: clientWrapper },
+    );
+    await waitFor(() => expect(result.current.config.data).toBeTruthy());
+
+    // The re-read answers after the save does, as it would over the network.
+    get.mockImplementationOnce(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve(providersWithPrefix("")), 20),
+        ),
+    );
+    let prefixSeenOnSuccess;
+    await act(async () => {
+      await new Promise((resolve) =>
+        result.current.update.mutate(
+          {
+            gatewayId: "gw-1",
+            name: "openai",
+            config: { api_path_prefix: "" },
+          },
+          {
+            // Where AddProviderDialog closes; Edit reads the cache after this.
+            onSuccess: () => {
+              prefixSeenOnSuccess = client.getQueryData([
+                "agentcc-gateway-config",
+                "gw-1",
+              ]).providers.openai.api_path_prefix;
+              resolve();
+            },
+          },
+        ),
+      );
+    });
+
+    expect(prefixSeenOnSuccess).toBe("");
   });
 });
 

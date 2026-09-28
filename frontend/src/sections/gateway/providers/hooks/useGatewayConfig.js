@@ -80,8 +80,13 @@ export function useUpdateProvider() {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["agentcc-gateway-config"] });
       queryClient.invalidateQueries({ queryKey: ["agentcc-provider-health"] });
+      // Returned so the mutation (and the dialog's close) waits for the
+      // re-read: otherwise Edit, clicked straight after Save, opens on the
+      // cached config from before the save.
+      return queryClient.invalidateQueries({
+        queryKey: ["agentcc-gateway-config"],
+      });
     },
   });
 }
