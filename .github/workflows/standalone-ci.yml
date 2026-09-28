@@ -53,6 +53,7 @@ on:
       - "fi-collector/Dockerfile"
       - "agentcc-gateway/Dockerfile"
       - "scripts/image_size_budget.*"
+      - "scripts/reclaim-runner-disk.sh"
       - ".github/workflows/standalone-ci.yml"
   workflow_dispatch:
 
@@ -107,6 +108,7 @@ jobs:
               - 'fi-collector/Dockerfile'
               - 'agentcc-gateway/Dockerfile'
               - 'scripts/image_size_budget.*'
+              - 'scripts/reclaim-runner-disk.sh'
               - '.github/workflows/standalone-ci.yml'
             arm64:
               - 'deploy/standalone/**'
@@ -190,16 +192,7 @@ jobs:
         # for the build cache, the local registry and the running stack.
         # Before setup-buildx, whose builder container lives under the root.
         if: matrix.arch == 'amd64'
-        run: |
-          df -h / /mnt
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
-          sudo systemctl stop docker docker.socket
-          sudo mv /var/lib/docker /mnt/docker
-          sudo ln -s /mnt/docker /var/lib/docker
-          sudo systemctl start docker
-          timeout 60 bash -c 'until docker info >/dev/null 2>&1; do sleep 2; done'
-          df -h / /mnt
+        run: scripts/reclaim-runner-disk.sh
 
       - name: Start the local registry
         # Published on every address family: `localhost` resolves to ::1

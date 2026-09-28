@@ -58,6 +58,7 @@ jobs:
               - 'bin/install*'
               - 'bin/lib/**'
               - 'bin/uninstall'
+              - 'scripts/reclaim-runner-disk.sh'
               - '.github/workflows/e2e-ci.yml'
       - id: always
         if: github.event_name != 'pull_request'
@@ -98,19 +99,7 @@ jobs:
         # / is the small volume and the backend image alone unpacks ~15GB of
         # CUDA/nvidia libs, so docker moves to /mnt (~65GB free). Must run
         # before setup-buildx creates its builder container under the old root.
-        run: |
-          df -h / /mnt
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
-          # Unguarded on purpose: a half-applied move leaves docker broken, so
-          # every step below must fail the job rather than be tolerated.
-          sudo systemctl stop docker docker.socket
-          sudo mv /var/lib/docker /mnt/docker
-          sudo ln -s /mnt/docker /var/lib/docker
-          sudo systemctl start docker
-          timeout 60 bash -c 'until docker info >/dev/null 2>&1; do sleep 2; done'
-          docker info --format 'docker root: {{.DockerRootDir}}'
-          df -h / /mnt
+        run: scripts/reclaim-runner-disk.sh
 
       - uses: docker/setup-buildx-action@v3
 
