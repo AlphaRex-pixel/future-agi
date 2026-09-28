@@ -126,8 +126,8 @@ telemetry field without documenting it fails a test.
 
 `deploy/tests/test_image_standards.py` checks every Dockerfile's conventions
 and the release workflows (both backend variants, the size budgets); CI runs it
-in `fi-collector-ci.yml`. Its two workflow tests need PyYAML and are skipped
-without it. To check a built backend image's contents,
+in `images-ci.yml`, with `test_image_size_budget.py`. Its workflow tests need
+PyYAML and are skipped without it. To check a built backend image's contents,
 `scripts/verify-image-contents.sh` takes `OSS_VARIANT=standard|slim` (a tag
 ending in `-slim` means slim). Standalone builds by `./bin/install --from-source`
 and `./bin/dev` are slim, so pass `OSS_VARIANT=slim` for them.
@@ -249,7 +249,8 @@ CI covers frontend, sharded backend pytest, Go collector tests/builds, deploymen
 | `frontend-deploy-*.yaml`           | manual or on main                                                                | Environment-specific deploys (EU, GCP, prod, dev CDN)                                              |
 | `frontend-auto-approve-hotfix.yml` | hotfix PRs                                                                       | Auto-approval routing for verified hotfix branches                                                 |
 | `backend-ci.yml`                  | Backend/deployment PR changes, pushes to `dev`/`main`, merge queue               | Sharded pytest using the standard test dependency stack                                          |
-| `fi-collector-ci.yml`             | Collector/deployment PR changes (and Dockerfiles), pushes to `dev`/`main`, merge queue, manual | Go race tests/builds, real observation integration, Compose/bootstrap contracts, image conventions (`test_image_standards.py`) and installer syntax |
+| `fi-collector-ci.yml`             | Collector/deployment PR changes, pushes to `dev`/`main`, merge queue, manual | Go race tests/builds, real observation integration, Compose/bootstrap contracts and installer syntax |
+| `images-ci.yml`                   | PR changes and pushes on `dev`/`main` to Dockerfiles, image scripts, the build and release workflows or `docs/images.md`; merge queue, manual | Image conventions (`test_image_standards.py`) and size budgets (`test_image_size_budget.py`), no image built |
 | `e2e-ci.yml`                       | PRs into and pushes on `dev`/`main`, merge queue                                 | Builds the changed images from PR code, boots the `futureagi-e2e` stack, runs the Playwright flows |
 | `standalone-ci.yml`                | PRs into and pushes on `dev`/`main` that touch the Standalone setup or the backend | Builds the five Standalone images, the backend as its slim variant (amd64; arm64 when dependencies or Dockerfiles change), checks their size budgets, runs `./bin/install` and smoke-tests the Standalone stack |
 | `helm-ci.yml`                      | PRs into and pushes on `dev`/`main` that touch `deploy/helm/**`, the bootstrap command or the release-please files | `hack/check.sh` (lint, template, kubeconform, rendered invariants, values docs and schema); fails when the chart's `version` or `appVersion` drifts from the release manifest; then installs the chart on kind with bundled datastores and runs `hack/kind-smoke.sh`, including an in-place upgrade and a rollback |

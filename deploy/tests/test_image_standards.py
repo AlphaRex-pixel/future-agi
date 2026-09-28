@@ -5,6 +5,7 @@ the build workflows that feed the labels."""
 from __future__ import annotations
 
 import contextlib
+import fnmatch
 import functools
 import http.server
 import importlib.util
@@ -1458,6 +1459,36 @@ class Workflows(unittest.TestCase):
         for workflow in WORKFLOWS.glob("*.y*ml"):
             with self.subTest(workflow=workflow.name):
                 self.assertNotIn("build-image.yml", workflow.read_text("utf-8"))
+
+    @unittest.skipUnless(HAVE_YAML, "PyYAML unavailable")
+    def test_images_ci_runs_these_tests_on_the_files_they_read(self):
+        import yaml
+
+        workflow = yaml.safe_load(
+            (WORKFLOWS / "images-ci.yml").read_text(encoding="utf-8")
+        )
+        runs = "\n".join(
+            step.get("run", "") for step in workflow["jobs"]["conventions"]["steps"]
+        )
+        for module in ("test_image_standards.py", "test_image_size_budget.py"):
+            self.assertIn(f"-p '{module}'", runs)
+        self.assertIn("PyYAML", runs)
+        triggers = workflow[True]  # YAML 1.1 reads the `on` key as true
+        paths = triggers["pull_request"]["paths"]
+        self.assertEqual(triggers["push"]["paths"], paths)
+        for path in (
+            "frontend/Dockerfile",
+            "frontend/security-headers.conf",
+            "deploy/standalone/bin/verify-binaries",
+            "scripts/code-executor-base-pin.sh",
+            "futureagi/requirements.txt",
+            "docs/images.md",
+            ".github/workflows/release-images.yml",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(any(fnmatch.fnmatch(path, glob) for glob in paths))
+        collector = (WORKFLOWS / "fi-collector-ci.yml").read_text(encoding="utf-8")
+        self.assertNotIn("test_image_", collector)
 
     def test_standalone_ci_builds_every_image_with_the_label_args(self):
         ci = (WORKFLOWS / "standalone-ci.yml").read_text(encoding="utf-8")
