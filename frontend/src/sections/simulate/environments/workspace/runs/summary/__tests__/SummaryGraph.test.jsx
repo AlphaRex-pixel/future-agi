@@ -113,7 +113,9 @@ describe("SummaryGraph", () => {
       { id: "a", name: "A", color: "#16A34A", data: [40, null, 80] },
       { id: "b", name: "B", color: "#7857FC", data: [60, null, null] },
     ];
-    render(<SummaryGraph categories={["Run 1", "Run 2", "Run 3"]} series={gappy} />);
+    render(
+      <SummaryGraph categories={["Run 1", "Run 2", "Run 3"]} series={gappy} />,
+    );
     const { mouseMove } = lastProps().options.chart.events;
     const el = document.createElement("div");
     el.innerHTML = "<svg></svg>";
@@ -127,4 +129,20 @@ describe("SummaryGraph", () => {
     expect(el.classList.contains("summary-run-unscored")).toBe(false);
   });
 
+  it("reads the run from a touch drag too, rather than hiding the tooltip for it", () => {
+    render(
+      <SummaryGraph
+        categories={["Run 1", "Run 2", "Run 3"]}
+        series={SERIES.map((s) => ({ ...s, data: [...s.data, 50] }))}
+      />,
+    );
+    const { mouseMove } = lastProps().options.chart.events;
+    const el = document.createElement("div");
+    el.innerHTML = "<svg></svg>";
+    const ctx = { el, w: { globals: { gridWidth: 200, translateX: 20 } } };
+
+    mouseMove({ touches: [{ clientX: 115 }] }, ctx);
+
+    expect(el.classList.contains("summary-run-unscored")).toBe(false);
+  });
 });

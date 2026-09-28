@@ -164,8 +164,11 @@ export default function SummaryGraph({
                 const { gridWidth, translateX } = ctx.w.globals;
                 const svg = ctx.el.querySelector("svg");
                 if (!svg || categories.length < 2) return;
+                // Apex routes touch drags through here too; a TouchEvent has no clientX.
+                const clientX = event.touches?.[0]?.clientX ?? event.clientX;
+                if (!Number.isFinite(clientX)) return;
                 const x =
-                  event.clientX - svg.getBoundingClientRect().left - translateX;
+                  clientX - svg.getBoundingClientRect().left - translateX;
                 const step = gridWidth / (categories.length - 1);
                 const run = Math.min(
                   categories.length - 1,
