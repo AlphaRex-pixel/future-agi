@@ -138,7 +138,7 @@ def test_platform_simulator_defaults_to_claude_authoring_and_gemini_caller(
     values, credential_bytes = _platform_simulator_material()
 
     assert values["SIMULATOR_LLM_PROVIDER"] == "vertex"
-    assert values["SIMULATOR_LLM_MODEL"] == "gemini-3.7-flash"
+    assert values["SIMULATOR_LLM_MODEL"] == "gemini-3.8-flash"
     assert values["ALK_HARNESS"] == "claude"
     assert values["ALK_HARNESS_MODEL"] == "claude-sonnet-4-6"
     assert credential_bytes is None
