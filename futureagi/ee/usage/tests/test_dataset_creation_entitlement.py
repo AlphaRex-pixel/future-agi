@@ -192,10 +192,11 @@ def test_reached_limit_keeps_limit_response_and_upgrade_alert(
 
 
 @pytest.mark.django_db
-def test_entitlement_error_on_cloud_refuses_sdk_file_upload(
+def test_entitlement_error_on_cloud_lets_sdk_file_upload_through(
     auth_client, organization, dataset_add_usage_rows, monkeypatch
 ):
-    """SDK uploads skip a reached limit, but an unverified one is refused too."""
+    """SDK uploads are not held to the dataset limit, so an unverifiable one
+    does not stop them either (as before the check failed closed)."""
     from ee.usage.utils.usage_entries import log_and_deduct_cost_for_resource_request
 
     class _RowAddAllowed:
@@ -242,8 +243,7 @@ def test_entitlement_error_on_cloud_refuses_sdk_file_upload(
             format="multipart",
         )
 
-    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-    assert response.json()["code"] == "dataset_limit_check_failed"
-    assert not Dataset.no_workspace_objects.filter(
+    assert response.status_code == status.HTTP_200_OK, response.content
+    assert Dataset.no_workspace_objects.filter(
         name="Unverified SDK Dataset", organization=organization
     ).exists()

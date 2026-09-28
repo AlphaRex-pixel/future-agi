@@ -1559,10 +1559,14 @@ def log_and_deduct_cost_for_resource_request(
                     logger.error(f"Unhandled api_call_type: {api_call_type}")
                     return None
 
-            # The limit was never verified: refuse without recording a
-            # resource-limit hit or sending the upgrade alert.
             if detail.get("error_code") == DATASET_LIMIT_CHECK_FAILED:
-                return None
+                if not sdk_source:
+                    # The limit was never verified: refuse without recording a
+                    # resource-limit hit or sending the upgrade alert.
+                    return None
+                # SDK uploads are not held to the dataset limit, so a limit
+                # that could not be verified does not stop them either.
+                request_status, detail = True, {}
 
             is_billing_api_call = check_if_api_call_is_billing_api_call(
                 api_call_type, config
