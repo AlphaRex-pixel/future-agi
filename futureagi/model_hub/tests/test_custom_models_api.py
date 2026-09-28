@@ -713,6 +713,47 @@ class TestCustomModelsCreateView(CustomModelsAPITestCase):
             CustomAIModel.objects.filter(user_model_id="my-custom-model").exists()
         )
 
+    @patch("model_hub.utils.utils.requests.post")
+    def test_create_custom_provider_full_url_404_names_the_model(self, mock_post):
+        """A 404 from the full URL also points at the model name.
+
+        OpenAI-compatible servers answer 404 for an unknown model too, so the
+        message must not blame only the URL. It never repeats the body.
+        """
+        api_base = "http://mock-llm:8080/v1/chat/completions"
+        not_found = requests.Response()
+        not_found.status_code = 404
+        not_found.reason = ""  # the server sent no reason phrase
+        not_found._content = b"internal-body-marker"
+        not_found.url = api_base
+        mock_post.return_value = not_found
+
+        data = {
+            "model_provider": "custom",
+            "model_name": "my-custom-model",
+            "input_token_cost": 0,
+            "output_token_cost": 0,
+            "config_json": {
+                "headers": {"x_api_key": "custom-key"},
+                "api_base": api_base,
+                "custom_provider": True,
+            },
+        }
+
+        response = self.client.post(
+            f"{BASE_URL}/custom_models/create/", data, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        message = response.data["message"]
+        self.assertIn("answered 404 Not Found.", message)
+        self.assertIn("full chat-completions URL", message)
+        self.assertIn("my-custom-model", message)
+        self.assertNotIn("internal-body-marker", message)
+        self.assertFalse(
+            CustomAIModel.objects.filter(user_model_id="my-custom-model").exists()
+        )
+
     @patch("model_hub.views.custom_model.validate_model_working")
     def test_create_sagemaker_model_success(self, mock_validate):
         """Test creating a SageMaker model."""
