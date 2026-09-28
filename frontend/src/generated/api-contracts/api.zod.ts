@@ -4136,52 +4136,45 @@ export const AgentccAnalyticsModelComparisonResponse = zod.object({
 /**
  * KPI cards with trend comparison.
  */
+
 export const AgentccAnalyticsOverviewQueryParams = zod.object({
-  page: zod
-    .number()
-    .optional()
-    .describe("A page number within the paginated result set."),
-  limit: zod
-    .number()
-    .optional()
-    .describe("Number of results to return per page."),
+  start: zod.string().datetime({ offset: true }).optional(),
+  end: zod.string().datetime({ offset: true }).optional(),
+  granularity: zod.string().min(1).optional(),
+  api_key_id: zod.string().uuid().optional(),
 });
 
-export const AgentccAnalyticsOverviewResponse = zod.object({
-  count: zod.number(),
-  next: zod.string().url().optional(),
-  previous: zod.string().url().optional(),
-  results: zod.array(
-    zod.object({
-      id: zod.string().uuid().optional(),
-      request_id: zod.string().min(1).optional(),
-      model: zod.string().min(1).optional(),
-      provider: zod.string().min(1).optional(),
-      resolved_model: zod.string().min(1).optional(),
-      latency_ms: zod.number().optional(),
-      started_at: zod.string().datetime({ offset: true }).optional(),
-      input_tokens: zod.number().optional(),
-      output_tokens: zod.number().optional(),
-      total_tokens: zod.number().optional(),
-      cost: zod.string().optional(),
-      status_code: zod.number().optional(),
-      is_stream: zod.boolean().optional(),
-      is_error: zod.boolean().optional(),
-      error_message: zod.string().min(1).optional(),
-      cache_hit: zod.boolean().optional(),
-      fallback_used: zod.boolean().optional(),
-      guardrail_triggered: zod.boolean().optional(),
-      api_key_id: zod.string().min(1).optional(),
-      user_id: zod.string().min(1).optional(),
-      session_id: zod.string().min(1).optional(),
-      routing_strategy: zod.string().min(1).optional(),
-      metadata: zod.object({}).passthrough().optional(),
-      organization: zod.string().uuid().optional(),
-      workspace: zod.string().uuid().optional(),
-      created_at: zod.string().datetime({ offset: true }).optional(),
-    }),
-  ),
+export const AgentccAnalyticsOverviewResponseItem = zod.object({
+  id: zod.string().uuid().optional(),
+  request_id: zod.string().min(1).optional(),
+  model: zod.string().min(1).optional(),
+  provider: zod.string().min(1).optional(),
+  resolved_model: zod.string().min(1).optional(),
+  latency_ms: zod.number().optional(),
+  started_at: zod.string().datetime({ offset: true }).optional(),
+  input_tokens: zod.number().optional(),
+  output_tokens: zod.number().optional(),
+  total_tokens: zod.number().optional(),
+  cost: zod.string().optional(),
+  status_code: zod.number().optional(),
+  is_stream: zod.boolean().optional(),
+  is_error: zod.boolean().optional(),
+  error_message: zod.string().min(1).optional(),
+  cache_hit: zod.boolean().optional(),
+  fallback_used: zod.boolean().optional(),
+  guardrail_triggered: zod.boolean().optional(),
+  api_key_id: zod.string().min(1).optional(),
+  user_id: zod.string().min(1).optional(),
+  session_id: zod.string().min(1).optional(),
+  routing_strategy: zod.string().min(1).optional(),
+  metadata: zod.object({}).passthrough().optional(),
+  organization: zod.string().uuid().optional(),
+  workspace: zod.string().uuid().optional(),
+  created_at: zod.string().datetime({ offset: true }).optional(),
 });
+export const AgentccAnalyticsOverviewResponse = zod.array(
+  AgentccAnalyticsOverviewResponseItem,
+);
 
 /**
  * Time-bucketed usage data for charts.
@@ -5236,6 +5229,7 @@ export const AgentccGatewaysConfigResponse = zod.object({
           .describe(
             "Gateway protocol adapter name. This intentionally remains a string because self-hosted/custom providers may register adapters outside the built-in openai/anthropic/gemini/google set.",
           ),
+        api_path_prefix: zod.string().optional(),
         models: zod.array(zod.object({}).passthrough()),
         is_active: zod.boolean(),
         default_timeout: zod.number(),
@@ -7413,14 +7407,45 @@ export const AgentccProviderCredentialsRotateBody = zod.object({
 });
 
 export const AgentccRequestLogsListQueryParams = zod.object({
-  page: zod
-    .number()
+  page: zod.number().min(1).optional(),
+  limit: zod.number().min(1).optional(),
+  user_id: zod.string().optional(),
+  session_id: zod.string().optional(),
+  api_key_id: zod.string().uuid().optional(),
+  request_id: zod.string().optional(),
+  model: zod
+    .string()
+    .min(1)
     .optional()
-    .describe("A page number within the paginated result set."),
-  limit: zod
-    .number()
+    .describe("Comma-separated model names."),
+  provider: zod
+    .string()
+    .min(1)
     .optional()
-    .describe("Number of results to return per page."),
+    .describe("Comma-separated provider names."),
+  status_code: zod
+    .string()
+    .min(1)
+    .optional()
+    .describe("Comma-separated HTTP status codes."),
+  min_status_code: zod.number().optional(),
+  max_status_code: zod.number().optional(),
+  is_error: zod.boolean().optional(),
+  cache_hit: zod.boolean().optional(),
+  fallback_used: zod.boolean().optional(),
+  guardrail_triggered: zod.boolean().optional(),
+  is_stream: zod.boolean().optional(),
+  started_after: zod.string().datetime({ offset: true }).optional(),
+  started_before: zod.string().datetime({ offset: true }).optional(),
+  min_latency: zod.number().optional(),
+  max_latency: zod.number().optional(),
+  min_cost: zod.number().optional(),
+  max_cost: zod.number().optional(),
+  min_tokens: zod.number().optional(),
+  max_tokens: zod.number().optional(),
+  q: zod.string().optional(),
+  search: zod.string().optional(),
+  ordering: zod.string().min(1).optional(),
 });
 
 export const AgentccRequestLogsListResponse = zod.object({
@@ -9481,13 +9506,15 @@ export const ApiSetupChecksListResponse = zod.object({
  * GET /api/traces/span-attribute-detail/?project_id=<uuid>&key=<attr_key>
  * @summary Serve the last complete exact attribute snapshot and refresh out of band.
  */
-export const apiTracesSpanAttributeDetailListQueryKeyMax = 512;
-
 export const apiTracesSpanAttributeDetailListQueryRefreshDefault = false;
 
 export const ApiTracesSpanAttributeDetailListQueryParams = zod.object({
   project_id: zod.string().uuid(),
-  key: zod.string().min(1).max(apiTracesSpanAttributeDetailListQueryKeyMax),
+  key: zod
+    .string()
+    .describe(
+      "Nonempty exact attribute key, at most 4096 UTF-8 bytes. Whitespace, controls and case are preserved.",
+    ),
   refresh: zod
     .boolean()
     .default(apiTracesSpanAttributeDetailListQueryRefreshDefault),
@@ -9582,8 +9609,6 @@ GET /api/traces/span-attribute-keys/?project_id=<uuid>&page_size=10
  */
 export const apiTracesSpanAttributeKeysListQueryWorkspaceScopeDefault = false;
 export const apiTracesSpanAttributeKeysListQueryDiscoveryModeDefault = `filter`;
-export const apiTracesSpanAttributeKeysListQueryQMax = 512;
-
 export const apiTracesSpanAttributeKeysListQueryPageSizeMax = 50;
 
 export const apiTracesSpanAttributeKeysListQueryCursorMax = 8192;
@@ -9601,9 +9626,10 @@ export const ApiTracesSpanAttributeKeysListQueryParams = zod.object({
     ),
   q: zod
     .string()
-    .min(1)
-    .max(apiTracesSpanAttributeKeysListQueryQMax)
-    .optional(),
+    .optional()
+    .describe(
+      "Nonempty exact attribute key, at most 4096 UTF-8 bytes. Whitespace, controls and case are preserved.",
+    ),
   page_size: zod
     .number()
     .min(1)
@@ -9674,15 +9700,17 @@ with optional prefix search filtering.
 GET /api/traces/span-attribute-values/?project_id=<uuid>&key=<attr_key>[&q=<search>][&limit=50]
  * @summary Get top values for a specific span attribute key.
  */
-export const apiTracesSpanAttributeValuesListQueryKeyMax = 512;
-
 export const apiTracesSpanAttributeValuesListQueryQMax = 512;
 
 export const apiTracesSpanAttributeValuesListQueryLimitMax = 500;
 
 export const ApiTracesSpanAttributeValuesListQueryParams = zod.object({
   project_id: zod.string().uuid(),
-  key: zod.string().min(1).max(apiTracesSpanAttributeValuesListQueryKeyMax),
+  key: zod
+    .string()
+    .describe(
+      "Nonempty exact attribute key, at most 4096 UTF-8 bytes. Whitespace, controls and case are preserved.",
+    ),
   q: zod.string().max(apiTracesSpanAttributeValuesListQueryQMax).optional(),
   limit: zod
     .number()
@@ -11895,8 +11923,7 @@ export const McpInternalToolsListResponse = zod.object({
             }),
           )
           .optional(),
-        returns: zod.object({}).passthrough().optional(),
-        metadata: zod.object({}).passthrough().optional(),
+        input_schema: zod.object({}).passthrough().optional(),
       }),
     ),
     total: zod.number(),
@@ -17796,15 +17823,13 @@ export const ModelHubCustomModelsUpdateMetricCreateResponse = zod.object({
 /**
  * List all dataset optimization runs with table config for dynamic columns.
  */
+
 export const ModelHubDatasetOptimizationListQueryParams = zod.object({
-  page: zod
-    .number()
-    .optional()
-    .describe("A page number within the paginated result set."),
-  limit: zod
-    .number()
-    .optional()
-    .describe("Number of results to return per page."),
+  dataset_id: zod.string().uuid().optional(),
+  column_id: zod.string().uuid().optional(),
+  develop_id: zod.string().uuid().optional(),
+  page: zod.number().min(1).optional(),
+  limit: zod.number().min(1).optional(),
 });
 
 export const ModelHubDatasetOptimizationListResponse = zod.object({
@@ -19699,13 +19724,16 @@ export const ModelHubDevelopsCreateDatasetManuallyCreateResponse = zod.object({
   }),
 });
 
+export const modelHubDevelopsCreateEmptyDatasetCreateBodyModelTypeDefault = `GenerativeLLM`;
 export const modelHubDevelopsCreateEmptyDatasetCreateBodyIsSdkDefault = false;
 export const modelHubDevelopsCreateEmptyDatasetCreateBodyRowMin = 0;
 export const modelHubDevelopsCreateEmptyDatasetCreateBodyRowMax = 10;
 
 export const ModelHubDevelopsCreateEmptyDatasetCreateBody = zod.object({
   new_dataset_name: zod.string().min(1),
-  model_type: zod.string().optional(),
+  model_type: zod
+    .string()
+    .default(modelHubDevelopsCreateEmptyDatasetCreateBodyModelTypeDefault),
   is_sdk: zod
     .boolean()
     .default(modelHubDevelopsCreateEmptyDatasetCreateBodyIsSdkDefault),
@@ -20561,8 +20589,26 @@ export const ModelHubDevelopsAddRowsCreateParams = zod.object({
   dataset_id: zod.string(),
 });
 
+export const modelHubDevelopsAddRowsCreateBodyRowsItemCellsDefault = [];
+
 export const ModelHubDevelopsAddRowsCreateBody = zod.object({
-  rows: zod.array(zod.object({}).passthrough()),
+  rows: zod.array(
+    zod.object({
+      id: zod.string().uuid().optional(),
+      cells: zod
+        .array(
+          zod.object({
+            column_name: zod.string().min(1),
+            value: zod
+              .object({})
+              .passthrough()
+              .optional()
+              .describe("Any valid JSON value."),
+          }),
+        )
+        .default(modelHubDevelopsAddRowsCreateBodyRowsItemCellsDefault),
+    }),
+  ),
 });
 
 export const ModelHubDevelopsAddRowsCreateResponse = zod.object({
@@ -21121,6 +21167,21 @@ export const ModelHubDevelopsGetEvalsListListParams = zod.object({
   dataset_id: zod.string(),
 });
 
+export const ModelHubDevelopsGetEvalsListListQueryParams = zod.object({
+  eval_type: zod
+    .string()
+    .optional()
+    .describe(
+      "Use user to list evaluations attached to this dataset, including their runnable IDs.",
+    ),
+  search_text: zod.string().optional(),
+  eval_categories: zod.string().optional(),
+  eval_tags: zod.array(zod.string().min(1)).optional(),
+  use_cases: zod.array(zod.string().min(1)).optional(),
+  experiment_id: zod.string().uuid().optional(),
+  order: zod.string().optional(),
+});
+
 export const ModelHubDevelopsGetEvalsListListResponse = zod.object({
   status: zod.boolean(),
   result: zod.object({
@@ -21568,15 +21629,21 @@ EvalTemplate) all route to DATABASE_FOR_EVAL_GROUP_LIST when
 "feature:eval_group_list" is opted in. No query semantics change.
  * @summary List all eval groups for the user's organization.
  */
+export const modelHubEvalGroupsListQueryPageNumberDefault = 0;
+export const modelHubEvalGroupsListQueryPageNumberMin = 0;
+
+export const modelHubEvalGroupsListQueryPageSizeDefault = 10;
+
 export const ModelHubEvalGroupsListQueryParams = zod.object({
-  page: zod
+  name: zod.string().optional(),
+  page_number: zod
     .number()
-    .optional()
-    .describe("A page number within the paginated result set."),
-  limit: zod
+    .min(modelHubEvalGroupsListQueryPageNumberMin)
+    .default(modelHubEvalGroupsListQueryPageNumberDefault),
+  page_size: zod
     .number()
-    .optional()
-    .describe("Number of results to return per page."),
+    .min(1)
+    .default(modelHubEvalGroupsListQueryPageSizeDefault),
 });
 
 export const modelHubEvalGroupsListResponseResultsItemNameMax = 255;
@@ -21644,6 +21711,10 @@ export const ModelHubEvalGroupsEditEvalListBody = zod.object({
  */
 export const ModelHubEvalGroupsReadParams = zod.object({
   id: zod.string(),
+});
+
+export const ModelHubEvalGroupsReadQueryParams = zod.object({
+  name: zod.string().optional(),
 });
 
 export const modelHubEvalGroupsReadResponseNameMax = 255;
@@ -28272,6 +28343,7 @@ export const ModelHubPromptTemplatesListQueryParams = zod.object({
     .number()
     .optional()
     .describe("Number of results to return per page."),
+  modality: zod.array(zod.string().min(1)).optional(),
 });
 
 export const modelHubPromptTemplatesListResponseResultsItemNameMax = 2000;
@@ -28545,7 +28617,8 @@ export const ModelHubPromptTemplatesPartialUpdateBody = zod.object({
   name: zod
     .string()
     .min(1)
-    .max(modelHubPromptTemplatesPartialUpdateBodyNameMax),
+    .max(modelHubPromptTemplatesPartialUpdateBodyNameMax)
+    .optional(),
   description: zod.string().optional(),
   variable_names: zod.object({}).passthrough().optional(),
   prompt_folder: zod.string().uuid().optional(),
@@ -28559,7 +28632,8 @@ export const ModelHubPromptTemplatesPartialUpdateResponse = zod.object({
   name: zod
     .string()
     .min(1)
-    .max(modelHubPromptTemplatesPartialUpdateResponseNameMax),
+    .max(modelHubPromptTemplatesPartialUpdateResponseNameMax)
+    .optional(),
   description: zod.string().optional(),
   variable_names: zod.object({}).passthrough().optional(),
   organization: zod.string().uuid().optional(),
@@ -28758,20 +28832,49 @@ export const ModelHubPromptTemplatesGetRunStatusParams = zod.object({
     .describe("A UUID string identifying this prompt template."),
 });
 
-export const modelHubPromptTemplatesGetRunStatusResponseNameMax = 2000;
+export const ModelHubPromptTemplatesGetRunStatusQueryParams = zod.object({
+  template_version: zod.string().optional(),
+});
+
+export const modelHubPromptTemplatesGetRunStatusResponseResultExecutionsResultTemplateVersionMax = 50;
 
 export const ModelHubPromptTemplatesGetRunStatusResponse = zod.object({
-  id: zod.string().uuid().optional(),
-  name: zod
-    .string()
-    .min(1)
-    .max(modelHubPromptTemplatesGetRunStatusResponseNameMax),
-  description: zod.string().optional(),
-  variable_names: zod.object({}).passthrough().optional(),
-  organization: zod.string().uuid().optional(),
-  prompt_folder: zod.string().uuid().optional(),
-  placeholders: zod.object({}).passthrough().optional(),
-  created_by: zod.string().uuid().optional(),
+  status: zod.boolean(),
+  result: zod.object({
+    status: zod.string().min(1),
+    error_message: zod.string(),
+    executions_result: zod.object({
+      id: zod.string().uuid().optional(),
+      template_version: zod
+        .string()
+        .min(1)
+        .max(
+          modelHubPromptTemplatesGetRunStatusResponseResultExecutionsResultTemplateVersionMax,
+        ),
+      output: zod.object({}).passthrough().optional(),
+      prompt_config_snapshot: zod
+        .object({})
+        .passthrough()
+        .optional()
+        .describe(
+          "\nGet prompt_config_snapshot with backward compatibility for modelDetail.\nIf modelDetail is missing from configuration, generate it from the model name.\n",
+        ),
+      template_name: zod.string().min(1).optional(),
+      original_template: zod.string().uuid().optional(),
+      metadata: zod.object({}).passthrough().optional(),
+      variable_names: zod.object({}).passthrough().optional(),
+      evaluation_results: zod.object({}).passthrough().optional(),
+      evaluation_configs: zod.object({}).passthrough().optional(),
+      created_at: zod.string().datetime({ offset: true }).optional(),
+      is_default: zod.boolean().optional(),
+      commit_message: zod.string().optional(),
+      updated_at: zod.string().datetime({ offset: true }).optional(),
+      is_draft: zod.boolean().optional(),
+      labels: zod.object({}).passthrough().optional(),
+      placeholders: zod.object({}).passthrough().optional(),
+      prompt_base_template: zod.string().uuid().optional(),
+    }),
+  }),
 });
 
 /**
@@ -28835,14 +28938,96 @@ export const ModelHubPromptTemplatesRunTemplateParams = zod.object({
     .describe("A UUID string identifying this prompt template."),
 });
 
-export const modelHubPromptTemplatesRunTemplateBodyNameMax = 2000;
+export const modelHubPromptTemplatesRunTemplateBodyRunIndexMin = 0;
 
 export const ModelHubPromptTemplatesRunTemplateBody = zod.object({
-  name: zod.string().min(1).max(modelHubPromptTemplatesRunTemplateBodyNameMax),
-  description: zod.string().optional(),
-  variable_names: zod.object({}).passthrough().optional(),
-  prompt_folder: zod.string().uuid().optional(),
-  placeholders: zod.object({}).passthrough().optional(),
+  name: zod.string().min(1).optional(),
+  version: zod.string().min(1).optional(),
+  prompt_config: zod
+    .array(
+      zod.object({
+        messages: zod
+          .array(
+            zod
+              .object({
+                role: zod.string().min(1),
+                content: zod
+                  .union([zod.string(), zod.array(zod.unknown())])
+                  .describe(
+                    "Plain text string or array of content-part objects.",
+                  ),
+                name: zod.string().min(1).optional(),
+                tool_calls: zod
+                  .object({})
+                  .passthrough()
+                  .optional()
+                  .describe("Any valid JSON value."),
+                tool_call_id: zod.string().min(1).optional(),
+                id: zod.string().min(1).optional(),
+              })
+              .passthrough(),
+          )
+          .optional(),
+        configuration: zod
+          .object({
+            tool_choice: zod.string().optional(),
+            template_format: zod.string().optional(),
+            tools: zod
+              .array(
+                zod.object({}).passthrough().describe("Any valid JSON value."),
+              )
+              .optional(),
+            output_format: zod.string().optional(),
+            model_type: zod.string().optional(),
+            model_detail: zod
+              .object({})
+              .passthrough()
+              .optional()
+              .describe("Any valid JSON value."),
+            voice_id: zod.string().optional(),
+            temperature: zod.number().optional(),
+            max_tokens: zod.number().optional(),
+            top_p: zod.number().optional(),
+            frequency_penalty: zod.number().optional(),
+            presence_penalty: zod.number().optional(),
+            response_format: zod
+              .union([zod.string(), zod.object({}).passthrough()])
+              .optional()
+              .describe("String or JSON object."),
+            model: zod
+              .union([zod.string(), zod.object({}).passthrough()])
+              .optional()
+              .describe("String or JSON object."),
+          })
+          .optional(),
+      }),
+    )
+    .optional(),
+  variable_names: zod
+    .record(
+      zod.string(),
+      zod.object({}).passthrough().describe("Any valid JSON value."),
+    )
+    .optional(),
+  placeholders: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe("Any valid JSON value."),
+  evaluation_configs: zod
+    .array(zod.object({}).passthrough().describe("Any valid JSON value."))
+    .optional(),
+  source: zod.string().min(1).optional(),
+  is_run: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe("Any valid JSON value."),
+  is_sdk: zod.boolean().optional(),
+  run_index: zod
+    .number()
+    .min(modelHubPromptTemplatesRunTemplateBodyRunIndexMin)
+    .optional(),
 });
 
 /**
@@ -28959,6 +29144,11 @@ export const ModelHubPromptTemplatesVersionsParams = zod.object({
     .string()
     .uuid()
     .describe("A UUID string identifying this prompt template."),
+});
+
+export const ModelHubPromptTemplatesVersionsQueryParams = zod.object({
+  page: zod.number().min(1).optional(),
+  limit: zod.number().min(1).optional(),
 });
 
 export const modelHubPromptTemplatesVersionsResponseNameMax = 2000;
@@ -30118,7 +30308,8 @@ export const ModelHubTestEvaluationCreateBody = zod.object({
   variable_keys: zod
     .object({})
     .passthrough()
-    .default(modelHubTestEvaluationCreateBodyVariableKeysDefault),
+    .default(modelHubTestEvaluationCreateBodyVariableKeysDefault)
+    .describe("Any valid JSON value."),
   run_prompt_column: zod
     .boolean()
     .default(modelHubTestEvaluationCreateBodyRunPromptColumnDefault),
@@ -34935,11 +35126,21 @@ export const SimulateApiCallExecutionsListResponse = zod.array(
 );
 
 /**
- * Validates the v1.6 request contract and delegates execution to the backend
-selected by ``settings.HARNESS_PROVIDER`` (``daytona`` default, or
-``sandbox``). See ``simulate.services.harness_provider``.
+ * Validates the v1.6 request contract and delegates execution to the public backend selected by
+``settings.HARNESS_PROVIDER`` (``hosted`` or ``sandbox``). The hosted backend independently
+selects its managed sandbox runtime.
  * @summary Provider-neutral control plane for hosted ALK harness jobs.
  */
+
+export const simulateApiHarnessJobsListResponseConversationEventWatermarkMin = 0;
+
+export const simulateApiHarnessJobsListResponseConsumptionTextSimTokensMin = 0;
+
+export const simulateApiHarnessJobsListResponseConsumptionVoiceSimMinutesMin = 0;
+
+export const simulateApiHarnessJobsListResponseConsumptionAiCreditsMin = 0;
+
+export const simulateApiHarnessJobsListResponseConsumptionSandboxSecondsMin = 0;
 
 export const SimulateApiHarnessJobsListResponseItem = zod.object({
   job: zod.object({
@@ -35012,15 +35213,86 @@ export const SimulateApiHarnessJobsListResponseItem = zod.object({
         .optional(),
     })
     .optional(),
+  conversation: zod
+    .object({
+      conversation_id: zod.string().uuid(),
+      job_id: zod.string().uuid(),
+      state: zod.string().min(1),
+      stage: zod.string().min(1),
+      active_invocation_id: zod.string().min(1),
+      blocking_input: zod.object({}).passthrough(),
+      messages: zod.array(
+        zod.object({
+          message_id: zod.string().uuid(),
+          sequence: zod.number().min(1),
+          role: zod.enum(["user", "assistant", "system"]),
+          kind: zod.enum(["message", "question", "confirmation", "status"]),
+          state: zod.enum([
+            "queued",
+            "delivered",
+            "streaming",
+            "completed",
+            "failed",
+          ]),
+          stage: zod.string(),
+          content: zod.string(),
+          payload: zod.object({}).passthrough(),
+          invocation_id: zod.string().min(1).optional(),
+          function_call_id: zod.string().min(1).optional(),
+          reply_to: zod.string().uuid().optional(),
+          created_at: zod.string().datetime({ offset: true }),
+        }),
+      ),
+      events: zod.array(
+        zod.object({
+          event_id: zod.string().min(1),
+          sequence: zod.number().min(1),
+          kind: zod.string().min(1),
+          message_id: zod.string().uuid().optional(),
+          stage: zod.string(),
+          invocation_id: zod.string().min(1).optional(),
+          function_call_id: zod.string().min(1).optional(),
+          payload: zod.object({}).passthrough(),
+          emitted_at: zod.string().datetime({ offset: true }),
+        }),
+      ),
+      event_watermark: zod
+        .number()
+        .min(simulateApiHarnessJobsListResponseConversationEventWatermarkMin),
+      runtime: zod.object({
+        state: zod.string().min(1),
+        warm_until: zod.string().datetime({ offset: true }),
+        degraded: zod.boolean(),
+        available: zod.boolean(),
+      }),
+    })
+    .optional(),
+  consumption: zod
+    .object({
+      text_sim_tokens: zod
+        .number()
+        .min(simulateApiHarnessJobsListResponseConsumptionTextSimTokensMin),
+      voice_sim_minutes: zod
+        .number()
+        .min(simulateApiHarnessJobsListResponseConsumptionVoiceSimMinutesMin),
+      ai_credits: zod
+        .number()
+        .min(simulateApiHarnessJobsListResponseConsumptionAiCreditsMin),
+      sandbox_seconds: zod
+        .number()
+        .min(simulateApiHarnessJobsListResponseConsumptionSandboxSecondsMin),
+    })
+    .optional(),
+  usage_limit: zod.object({}).passthrough().optional(),
 });
 export const SimulateApiHarnessJobsListResponse = zod.array(
   SimulateApiHarnessJobsListResponseItem,
 );
 
 /**
- * Validates the v1.6 request contract and delegates execution to the backend
-selected by ``settings.HARNESS_PROVIDER`` (``daytona`` default, or
-``sandbox``). See ``simulate.services.harness_provider``.
+ * Validates the v1.6 request contract and delegates execution to the public backend selected by
+``settings.HARNESS_PROVIDER`` (``hosted`` or ``sandbox``). The hosted backend independently
+selects its managed sandbox runtime.
  * @summary Provider-neutral control plane for hosted ALK harness jobs.
  */
 export const simulateApiHarnessJobsCreateBodySchemaVersionDefault = `futureagi.harness-job.v1`;
@@ -35326,9 +35598,9 @@ export const SimulateApiHarnessJobsCreateBody = zod.object({
 });
 
 /**
- * Validates the v1.6 request contract and delegates execution to the backend
-selected by ``settings.HARNESS_PROVIDER`` (``daytona`` default, or
-``sandbox``). See ``simulate.services.harness_provider``.
+ * Validates the v1.6 request contract and delegates execution to the public backend selected by
+``settings.HARNESS_PROVIDER`` (``hosted`` or ``sandbox``). The hosted backend independently
+selects its managed sandbox runtime.
  * @summary Provider-neutral control plane for hosted ALK harness jobs.
  */
 export const simulateApiHarnessJobsPreflightBodySchemaVersionDefault = `futureagi.harness-job.v1`;
@@ -35655,9 +35927,9 @@ export const SimulateApiHarnessJobsPreflightBody = zod.object({
 });
 
 /**
- * Validates the v1.6 request contract and delegates execution to the backend
-selected by ``settings.HARNESS_PROVIDER`` (``daytona`` default, or
-``sandbox``). See ``simulate.services.harness_provider``.
+ * Validates the v1.6 request contract and delegates execution to the public backend selected by
+``settings.HARNESS_PROVIDER`` (``hosted`` or ``sandbox``). The hosted backend independently
+selects its managed sandbox runtime.
  * @summary Provider-neutral control plane for hosted ALK harness jobs.
  */
 export const SimulateApiHarnessJobsSecretFileUploadBody = zod.object({
@@ -35685,9 +35957,9 @@ export const SimulateApiHarnessJobsSecretValuesBody = zod.object({
 });
 
 /**
- * Validates the v1.6 request contract and delegates execution to the backend
-selected by ``settings.HARNESS_PROVIDER`` (``daytona`` default, or
-``sandbox``). See ``simulate.services.harness_provider``.
+ * Validates the v1.6 request contract and delegates execution to the public backend selected by
+``settings.HARNESS_PROVIDER`` (``hosted`` or ``sandbox``). The hosted backend independently
+selects its managed sandbox runtime.
  * @summary Provider-neutral control plane for hosted ALK harness jobs.
  */
 export const SimulateApiHarnessJobsSourceUploadBody = zod.object({
@@ -35699,14 +35971,24 @@ export const SimulateApiHarnessJobsSourceUploadBody = zod.object({
 });
 
 /**
- * Validates the v1.6 request contract and delegates execution to the backend
-selected by ``settings.HARNESS_PROVIDER`` (``daytona`` default, or
-``sandbox``). See ``simulate.services.harness_provider``.
+ * Validates the v1.6 request contract and delegates execution to the public backend selected by
+``settings.HARNESS_PROVIDER`` (``hosted`` or ``sandbox``). The hosted backend independently
+selects its managed sandbox runtime.
  * @summary Provider-neutral control plane for hosted ALK harness jobs.
  */
 export const SimulateApiHarnessJobsReadParams = zod.object({
   id: zod.string(),
 });
+
+export const simulateApiHarnessJobsReadResponseConversationEventWatermarkMin = 0;
+
+export const simulateApiHarnessJobsReadResponseConsumptionTextSimTokensMin = 0;
+
+export const simulateApiHarnessJobsReadResponseConsumptionVoiceSimMinutesMin = 0;
+
+export const simulateApiHarnessJobsReadResponseConsumptionAiCreditsMin = 0;
+
+export const simulateApiHarnessJobsReadResponseConsumptionSandboxSecondsMin = 0;
 
 export const SimulateApiHarnessJobsReadResponse = zod.object({
   job: zod.object({
@@ -35779,12 +36061,83 @@ export const SimulateApiHarnessJobsReadResponse = zod.object({
         .optional(),
     })
     .optional(),
+  conversation: zod
+    .object({
+      conversation_id: zod.string().uuid(),
+      job_id: zod.string().uuid(),
+      state: zod.string().min(1),
+      stage: zod.string().min(1),
+      active_invocation_id: zod.string().min(1),
+      blocking_input: zod.object({}).passthrough(),
+      messages: zod.array(
+        zod.object({
+          message_id: zod.string().uuid(),
+          sequence: zod.number().min(1),
+          role: zod.enum(["user", "assistant", "system"]),
+          kind: zod.enum(["message", "question", "confirmation", "status"]),
+          state: zod.enum([
+            "queued",
+            "delivered",
+            "streaming",
+            "completed",
+            "failed",
+          ]),
+          stage: zod.string(),
+          content: zod.string(),
+          payload: zod.object({}).passthrough(),
+          invocation_id: zod.string().min(1).optional(),
+          function_call_id: zod.string().min(1).optional(),
+          reply_to: zod.string().uuid().optional(),
+          created_at: zod.string().datetime({ offset: true }),
+        }),
+      ),
+      events: zod.array(
+        zod.object({
+          event_id: zod.string().min(1),
+          sequence: zod.number().min(1),
+          kind: zod.string().min(1),
+          message_id: zod.string().uuid().optional(),
+          stage: zod.string(),
+          invocation_id: zod.string().min(1).optional(),
+          function_call_id: zod.string().min(1).optional(),
+          payload: zod.object({}).passthrough(),
+          emitted_at: zod.string().datetime({ offset: true }),
+        }),
+      ),
+      event_watermark: zod
+        .number()
+        .min(simulateApiHarnessJobsReadResponseConversationEventWatermarkMin),
+      runtime: zod.object({
+        state: zod.string().min(1),
+        warm_until: zod.string().datetime({ offset: true }),
+        degraded: zod.boolean(),
+        available: zod.boolean(),
+      }),
+    })
+    .optional(),
+  consumption: zod
+    .object({
+      text_sim_tokens: zod
+        .number()
+        .min(simulateApiHarnessJobsReadResponseConsumptionTextSimTokensMin),
+      voice_sim_minutes: zod
+        .number()
+        .min(simulateApiHarnessJobsReadResponseConsumptionVoiceSimMinutesMin),
+      ai_credits: zod
+        .number()
+        .min(simulateApiHarnessJobsReadResponseConsumptionAiCreditsMin),
+      sandbox_seconds: zod
+        .number()
+        .min(simulateApiHarnessJobsReadResponseConsumptionSandboxSecondsMin),
+    })
+    .optional(),
+  usage_limit: zod.object({}).passthrough().optional(),
 });
 
 /**
- * Validates the v1.6 request contract and delegates execution to the backend
-selected by ``settings.HARNESS_PROVIDER`` (``daytona`` default, or
-``sandbox``). See ``simulate.services.harness_provider``.
+ * Validates the v1.6 request contract and delegates execution to the public backend selected by
+``settings.HARNESS_PROVIDER`` (``hosted`` or ``sandbox``). The hosted backend independently
+selects its managed sandbox runtime.
  * @summary Provider-neutral control plane for hosted ALK harness jobs.
  */
 export const SimulateApiHarnessJobsAdjustParams = zod.object({
@@ -35811,9 +36164,9 @@ export const SimulateApiHarnessJobsAdjustBody = zod.object({
 });
 
 /**
- * Validates the v1.6 request contract and delegates execution to the backend
-selected by ``settings.HARNESS_PROVIDER`` (``daytona`` default, or
-``sandbox``). See ``simulate.services.harness_provider``.
+ * Validates the v1.6 request contract and delegates execution to the public backend selected by
+``settings.HARNESS_PROVIDER`` (``hosted`` or ``sandbox``). The hosted backend independently
+selects its managed sandbox runtime.
  * @summary Provider-neutral control plane for hosted ALK harness jobs.
  */
 export const SimulateApiHarnessJobsCancelParams = zod.object({
@@ -35827,6 +36180,16 @@ export const SimulateApiHarnessJobsCancelBody = zod.object({
     .enum(["user_canceled", "ttl_exceeded"])
     .default(simulateApiHarnessJobsCancelBodyReasonDefault),
 });
+
+export const simulateApiHarnessJobsCancelResponseConversationEventWatermarkMin = 0;
+
+export const simulateApiHarnessJobsCancelResponseConsumptionTextSimTokensMin = 0;
+
+export const simulateApiHarnessJobsCancelResponseConsumptionVoiceSimMinutesMin = 0;
+
+export const simulateApiHarnessJobsCancelResponseConsumptionAiCreditsMin = 0;
+
+export const simulateApiHarnessJobsCancelResponseConsumptionSandboxSecondsMin = 0;
 
 export const SimulateApiHarnessJobsCancelResponse = zod.object({
   job: zod.object({
@@ -35899,12 +36262,134 @@ export const SimulateApiHarnessJobsCancelResponse = zod.object({
         .optional(),
     })
     .optional(),
+  conversation: zod
+    .object({
+      conversation_id: zod.string().uuid(),
+      job_id: zod.string().uuid(),
+      state: zod.string().min(1),
+      stage: zod.string().min(1),
+      active_invocation_id: zod.string().min(1),
+      blocking_input: zod.object({}).passthrough(),
+      messages: zod.array(
+        zod.object({
+          message_id: zod.string().uuid(),
+          sequence: zod.number().min(1),
+          role: zod.enum(["user", "assistant", "system"]),
+          kind: zod.enum(["message", "question", "confirmation", "status"]),
+          state: zod.enum([
+            "queued",
+            "delivered",
+            "streaming",
+            "completed",
+            "failed",
+          ]),
+          stage: zod.string(),
+          content: zod.string(),
+          payload: zod.object({}).passthrough(),
+          invocation_id: zod.string().min(1).optional(),
+          function_call_id: zod.string().min(1).optional(),
+          reply_to: zod.string().uuid().optional(),
+          created_at: zod.string().datetime({ offset: true }),
+        }),
+      ),
+      events: zod.array(
+        zod.object({
+          event_id: zod.string().min(1),
+          sequence: zod.number().min(1),
+          kind: zod.string().min(1),
+          message_id: zod.string().uuid().optional(),
+          stage: zod.string(),
+          invocation_id: zod.string().min(1).optional(),
+          function_call_id: zod.string().min(1).optional(),
+          payload: zod.object({}).passthrough(),
+          emitted_at: zod.string().datetime({ offset: true }),
+        }),
+      ),
+      event_watermark: zod
+        .number()
+        .min(simulateApiHarnessJobsCancelResponseConversationEventWatermarkMin),
+      runtime: zod.object({
+        state: zod.string().min(1),
+        warm_until: zod.string().datetime({ offset: true }),
+        degraded: zod.boolean(),
+        available: zod.boolean(),
+      }),
+    })
+    .optional(),
+  consumption: zod
+    .object({
+      text_sim_tokens: zod
+        .number()
+        .min(simulateApiHarnessJobsCancelResponseConsumptionTextSimTokensMin),
+      voice_sim_minutes: zod
+        .number()
+        .min(simulateApiHarnessJobsCancelResponseConsumptionVoiceSimMinutesMin),
+      ai_credits: zod
+        .number()
+        .min(simulateApiHarnessJobsCancelResponseConsumptionAiCreditsMin),
+      sandbox_seconds: zod
+        .number()
+        .min(simulateApiHarnessJobsCancelResponseConsumptionSandboxSecondsMin),
+    })
+    .optional(),
+  usage_limit: zod.object({}).passthrough().optional(),
 });
 
 /**
- * Validates the v1.6 request contract and delegates execution to the backend
-selected by ``settings.HARNESS_PROVIDER`` (``daytona`` default, or
-``sandbox``). See ``simulate.services.harness_provider``.
+ * Validates the v1.6 request contract and delegates execution to the public backend selected by
+``settings.HARNESS_PROVIDER`` (``hosted`` or ``sandbox``). The hosted backend independently
+selects its managed sandbox runtime.
+ * @summary Provider-neutral control plane for hosted ALK harness jobs.
+ */
+export const SimulateApiHarnessJobsConversationConversationMessageParams =
+  zod.object({
+    id: zod.string(),
+  });
+
+export const simulateApiHarnessJobsConversationConversationMessageBodyContentMax = 20000;
+
+export const simulateApiHarnessJobsConversationConversationMessageBodyClientRequestIdRegExp =
+  new RegExp("^[A-Za-z0-9_-]{1,128}$");
+export const simulateApiHarnessJobsConversationConversationMessageBodyKindDefault = `user_message`;
+export const simulateApiHarnessJobsConversationConversationMessageBodyPayloadDefault =
+  {};
+
+export const SimulateApiHarnessJobsConversationConversationMessageBody =
+  zod.object({
+    content: zod
+      .string()
+      .min(1)
+      .max(simulateApiHarnessJobsConversationConversationMessageBodyContentMax),
+    client_request_id: zod
+      .string()
+      .min(1)
+      .regex(
+        simulateApiHarnessJobsConversationConversationMessageBodyClientRequestIdRegExp,
+      ),
+    kind: zod
+      .enum([
+        "user_message",
+        "user_response",
+        "approval",
+        "interrupt",
+        "cancel_operation",
+      ])
+      .default(
+        simulateApiHarnessJobsConversationConversationMessageBodyKindDefault,
+      ),
+    reply_to: zod.string().uuid().optional(),
+    payload: zod
+      .object({})
+      .passthrough()
+      .default(
+        simulateApiHarnessJobsConversationConversationMessageBodyPayloadDefault,
+      ),
+  });
+
+/**
+ * Validates the v1.6 request contract and delegates execution to the public backend selected by
+``settings.HARNESS_PROVIDER`` (``hosted`` or ``sandbox``). The hosted backend independently
+selects its managed sandbox runtime.
  * @summary Provider-neutral control plane for hosted ALK harness jobs.
  */
 export const SimulateApiHarnessJobsExtendParams = zod.object({
@@ -36075,7 +36560,7 @@ export const SimulateApiHarnessAttemptsEventsResponse = zod.object({
 /**
  * The attempt capability authenticates the trusted ALK guest. Customer processes never
 receive that bearer and therefore cannot expose arbitrary sandbox ports themselves.
- * @summary Mint a short-lived, no-header Daytona URL for one guest-selected HTTP port.
+ * @summary Mint a short-lived, no-header URL for one guest-selected HTTP port.
  */
 export const SimulateApiHarnessAttemptsIngressParams = zod.object({
   id: zod.string(),
@@ -36325,6 +36810,388 @@ export const SimulateApiHarnessAttemptsScenariosResponse = zod.object({
       }),
     ),
   }),
+});
+
+export const SimulateApiHarnessAttemptsUsageParams = zod.object({
+  id: zod.string(),
+});
+
+export const simulateApiHarnessAttemptsUsageBodyRecordsItemScenarioKeyMax = 255;
+
+export const simulateApiHarnessAttemptsUsageBodyRecordsItemAmountMin = 0;
+
+export const simulateApiHarnessAttemptsUsageBodyRecordsItemOutcomeDefault = `completed`;
+
+export const SimulateApiHarnessAttemptsUsageBody = zod.object({
+  operation: zod.enum(["check", "report"]),
+  action: zod.enum(["text_call", "voice_call"]).optional(),
+  schema_version: zod.enum(["futureagi.harness-usage.v1"]).optional(),
+  records: zod
+    .array(
+      zod.object({
+        id: zod.string().uuid(),
+        action: zod.enum(["text_call", "voice_call"]),
+        scenario_key: zod
+          .string()
+          .min(1)
+          .max(simulateApiHarnessAttemptsUsageBodyRecordsItemScenarioKeyMax),
+        amount: zod
+          .number()
+          .min(simulateApiHarnessAttemptsUsageBodyRecordsItemAmountMin),
+        occurred_at: zod.string().datetime({ offset: true }),
+        funding: zod.enum(["platform", "customer"]),
+        outcome: zod
+          .enum(["completed", "failed"])
+          .default(
+            simulateApiHarnessAttemptsUsageBodyRecordsItemOutcomeDefault,
+          ),
+        failure_domain: zod
+          .enum([
+            "agent",
+            "simulator",
+            "environment",
+            "connectivity",
+            "infrastructure",
+            "grading",
+            "artifact",
+            "platform_sync",
+          ])
+          .optional(),
+      }),
+    )
+    .optional(),
+});
+
+export const SimulateApiHarnessAttemptsUsageResponse = zod.object({
+  allowed: zod.boolean().optional(),
+  accepted: zod.boolean().optional(),
+  reason: zod.string().optional(),
+  error_code: zod.string().optional(),
+  dimension: zod.string().optional(),
+  current_usage: zod.number().optional(),
+  limit: zod.number().optional(),
+  upgrade_cta: zod.object({}).passthrough().optional(),
+});
+
+export const SimulateApiHarnessConversationsAdjustParams = zod.object({
+  id: zod.string(),
+});
+
+export const simulateApiHarnessConversationsAdjustBodyInstructionMax = 2000;
+
+export const simulateApiHarnessConversationsAdjustBodyClientRequestIdMax = 128;
+
+export const SimulateApiHarnessConversationsAdjustBody = zod.object({
+  instruction: zod
+    .string()
+    .min(1)
+    .max(simulateApiHarnessConversationsAdjustBodyInstructionMax),
+  client_request_id: zod
+    .string()
+    .min(1)
+    .max(simulateApiHarnessConversationsAdjustBodyClientRequestIdMax)
+    .optional(),
+});
+
+export const SimulateApiHarnessConversationsAdjustResponse = zod.object({
+  adjustment_id: zod.string().uuid(),
+  client_request_id: zod.string().min(1).optional(),
+  instruction: zod.string().min(1),
+  target_stage: zod.string().min(1),
+  scenario_delta: zod.number(),
+  status: zod.string().min(1),
+  created_at: zod.string().datetime({ offset: true }),
+});
+
+export const SimulateApiHarnessConversationsCommandsParams = zod.object({
+  id: zod.string(),
+});
+
+export const simulateApiHarnessConversationsCommandsQueryAfterDefault = 0;
+export const simulateApiHarnessConversationsCommandsQueryAfterMin = 0;
+
+export const SimulateApiHarnessConversationsCommandsQueryParams = zod.object({
+  after: zod
+    .number()
+    .min(simulateApiHarnessConversationsCommandsQueryAfterMin)
+    .default(simulateApiHarnessConversationsCommandsQueryAfterDefault),
+});
+
+export const SimulateApiHarnessConversationsEventsParams = zod.object({
+  id: zod.string(),
+});
+
+export const simulateApiHarnessConversationsEventsBodyAcknowledgedThroughMin = 0;
+
+export const simulateApiHarnessConversationsEventsBodyEventsItemEventIdRegExp =
+  new RegExp("^[A-Za-z0-9_-]{1,128}$");
+
+export const simulateApiHarnessConversationsEventsBodyEventsItemStageMax = 32;
+
+export const simulateApiHarnessConversationsEventsBodyEventsItemInvocationIdMax = 255;
+
+export const simulateApiHarnessConversationsEventsBodyEventsItemFunctionCallIdMax = 255;
+
+export const simulateApiHarnessConversationsEventsBodyEventsItemDigestRegExp =
+  new RegExp("^sha256:[0-9a-f]{64}$");
+
+export const SimulateApiHarnessConversationsEventsBody = zod.object({
+  schema_version: zod.enum(["futureagi.harness-conversation-event.v1"]),
+  acknowledged_through: zod
+    .number()
+    .min(simulateApiHarnessConversationsEventsBodyAcknowledgedThroughMin),
+  events: zod.array(
+    zod.object({
+      schema_version: zod.enum(["futureagi.harness-conversation-event.v1"]),
+      event_id: zod
+        .string()
+        .min(1)
+        .regex(
+          simulateApiHarnessConversationsEventsBodyEventsItemEventIdRegExp,
+        ),
+      conversation_id: zod.string().uuid(),
+      sequence: zod.number().min(1),
+      kind: zod.enum([
+        "turn_started",
+        "assistant_delta",
+        "assistant_message",
+        "stage_changed",
+        "authoring_activity",
+        "tool_started",
+        "tool_result",
+        "question_requested",
+        "confirmation_requested",
+        "turn_interrupted",
+        "turn_completed",
+        "checkpoint_committed",
+        "capability_changed",
+      ]),
+      message_id: zod.string().uuid().optional(),
+      stage: zod
+        .string()
+        .max(simulateApiHarnessConversationsEventsBodyEventsItemStageMax)
+        .optional(),
+      invocation_id: zod
+        .string()
+        .min(1)
+        .max(simulateApiHarnessConversationsEventsBodyEventsItemInvocationIdMax)
+        .optional(),
+      function_call_id: zod
+        .string()
+        .min(1)
+        .max(
+          simulateApiHarnessConversationsEventsBodyEventsItemFunctionCallIdMax,
+        )
+        .optional(),
+      emitted_at: zod.string().datetime({ offset: true }),
+      payload: zod.object({}).passthrough(),
+      digest: zod
+        .string()
+        .min(1)
+        .regex(simulateApiHarnessConversationsEventsBodyEventsItemDigestRegExp),
+    }),
+  ),
+});
+
+export const simulateApiHarnessConversationsEventsResponseAckedThroughSequenceMin = 0;
+
+export const SimulateApiHarnessConversationsEventsResponse = zod.object({
+  acked_through_sequence: zod
+    .number()
+    .min(simulateApiHarnessConversationsEventsResponseAckedThroughSequenceMin),
+});
+
+export const SimulateApiHarnessConversationsRerunParams = zod.object({
+  id: zod.string(),
+});
+
+export const SimulateApiHarnessConversationsRerunBody = zod
+  .object({})
+  .passthrough();
+
+export const SimulateApiHarnessConversationsRunStatusParams = zod.object({
+  id: zod.string(),
+});
+
+export const simulateApiHarnessConversationsRunStatusResponseCompletedScenariosMin = 0;
+
+export const simulateApiHarnessConversationsRunStatusResponseFailedScenariosMin = 0;
+
+export const simulateApiHarnessConversationsRunStatusResponseTotalScenariosMin = 0;
+
+export const SimulateApiHarnessConversationsRunStatusResponse = zod.object({
+  job_id: zod.string().uuid(),
+  state: zod.string().min(1),
+  stage: zod.string().min(1),
+  completed_scenarios: zod
+    .number()
+    .min(simulateApiHarnessConversationsRunStatusResponseCompletedScenariosMin),
+  failed_scenarios: zod
+    .number()
+    .min(simulateApiHarnessConversationsRunStatusResponseFailedScenariosMin),
+  total_scenarios: zod
+    .number()
+    .min(simulateApiHarnessConversationsRunStatusResponseTotalScenariosMin),
+  receipts: zod.object({}).passthrough(),
+});
+
+export const SimulateApiHarnessConversationsSessionStoreParams = zod.object({
+  id: zod.string(),
+});
+
+export const simulateApiHarnessConversationsSessionStoreQueryProjectKeyMax = 255;
+
+export const simulateApiHarnessConversationsSessionStoreQuerySessionIdMax = 255;
+
+export const simulateApiHarnessConversationsSessionStoreQuerySubpathDefault = ``;
+export const simulateApiHarnessConversationsSessionStoreQuerySubpathMax = 512;
+
+export const SimulateApiHarnessConversationsSessionStoreQueryParams =
+  zod.object({
+    project_key: zod
+      .string()
+      .min(1)
+      .max(simulateApiHarnessConversationsSessionStoreQueryProjectKeyMax),
+    session_id: zod
+      .string()
+      .min(1)
+      .max(simulateApiHarnessConversationsSessionStoreQuerySessionIdMax),
+    subpath: zod
+      .string()
+      .max(simulateApiHarnessConversationsSessionStoreQuerySubpathMax)
+      .default(simulateApiHarnessConversationsSessionStoreQuerySubpathDefault),
+  });
+
+export const SimulateApiHarnessConversationsSessionStoreAppendSessionStoreParams =
+  zod.object({
+    id: zod.string(),
+  });
+
+export const simulateApiHarnessConversationsSessionStoreAppendSessionStoreBodyProjectKeyMax = 255;
+
+export const simulateApiHarnessConversationsSessionStoreAppendSessionStoreBodySessionIdMax = 255;
+
+export const simulateApiHarnessConversationsSessionStoreAppendSessionStoreBodySubpathDefault = ``;
+export const simulateApiHarnessConversationsSessionStoreAppendSessionStoreBodySubpathMax = 512;
+
+export const simulateApiHarnessConversationsSessionStoreAppendSessionStoreBodyEntriesMax = 500;
+
+export const SimulateApiHarnessConversationsSessionStoreAppendSessionStoreBody =
+  zod.object({
+    project_key: zod
+      .string()
+      .min(1)
+      .max(
+        simulateApiHarnessConversationsSessionStoreAppendSessionStoreBodyProjectKeyMax,
+      ),
+    session_id: zod
+      .string()
+      .min(1)
+      .max(
+        simulateApiHarnessConversationsSessionStoreAppendSessionStoreBodySessionIdMax,
+      ),
+    subpath: zod
+      .string()
+      .max(
+        simulateApiHarnessConversationsSessionStoreAppendSessionStoreBodySubpathMax,
+      )
+      .default(
+        simulateApiHarnessConversationsSessionStoreAppendSessionStoreBodySubpathDefault,
+      ),
+    entries: zod
+      .array(zod.object({}).passthrough())
+      .min(1)
+      .max(
+        simulateApiHarnessConversationsSessionStoreAppendSessionStoreBodyEntriesMax,
+      ),
+  });
+
+export const simulateApiHarnessConversationsSessionStoreAppendSessionStoreResponseAppendedMin = 0;
+
+export const SimulateApiHarnessConversationsSessionStoreAppendSessionStoreResponse =
+  zod.object({
+    appended: zod
+      .number()
+      .min(
+        simulateApiHarnessConversationsSessionStoreAppendSessionStoreResponseAppendedMin,
+      ),
+  });
+
+export const SimulateApiHarnessConversationsWorkspaceParams = zod.object({
+  id: zod.string(),
+});
+
+export const simulateApiHarnessConversationsWorkspaceResponseDigestRegExp =
+  new RegExp("^sha256:[0-9a-f]{64}$");
+export const simulateApiHarnessConversationsWorkspaceResponseSizeMin = 0;
+
+export const SimulateApiHarnessConversationsWorkspaceResponse = zod.object({
+  digest: zod
+    .string()
+    .min(1)
+    .regex(simulateApiHarnessConversationsWorkspaceResponseDigestRegExp),
+  size: zod
+    .number()
+    .min(simulateApiHarnessConversationsWorkspaceResponseSizeMin),
+});
+
+/**
+ * Relay a signed callback URL to the active sandbox without exposing provider headers.
+ */
+export const SimulateApiHarnessIngressReadParams = zod.object({
+  token: zod.string(),
+  target_path: zod.string(),
+});
+
+/**
+ * Relay a signed callback URL to the active sandbox without exposing provider headers.
+ */
+export const SimulateApiHarnessIngressCreateParams = zod.object({
+  token: zod.string(),
+  target_path: zod.string(),
+});
+
+export const SimulateApiHarnessIngressCreateBody = zod.object({
+  payload: zod.object({}).passthrough().optional(),
+});
+
+export const SimulateApiHarnessIngressCreateResponse = zod.instanceof(File);
+
+/**
+ * Relay a signed callback URL to the active sandbox without exposing provider headers.
+ */
+export const SimulateApiHarnessIngressUpdateParams = zod.object({
+  token: zod.string(),
+  target_path: zod.string(),
+});
+
+export const SimulateApiHarnessIngressUpdateBody = zod.object({
+  payload: zod.object({}).passthrough().optional(),
+});
+
+export const SimulateApiHarnessIngressUpdateResponse = zod.instanceof(File);
+
+/**
+ * Relay a signed callback URL to the active sandbox without exposing provider headers.
+ */
+export const SimulateApiHarnessIngressPartialUpdateParams = zod.object({
+  token: zod.string(),
+  target_path: zod.string(),
+});
+
+export const SimulateApiHarnessIngressPartialUpdateBody = zod.object({
+  payload: zod.object({}).passthrough().optional(),
+});
+
+export const SimulateApiHarnessIngressPartialUpdateResponse =
+  zod.instanceof(File);
+
+/**
+ * Relay a signed callback URL to the active sandbox without exposing provider headers.
+ */
+export const SimulateApiHarnessIngressDeleteParams = zod.object({
+  token: zod.string(),
+  target_path: zod.string(),
 });
 
 /**
@@ -38308,6 +39175,15 @@ Query Parameters:
 - limit: number of items per page (default: 10)
 - page: page number (default: 1)
  */
+export const simulateApiTestExecutionsListQuerySearchDefault = ``;
+export const simulateApiTestExecutionsListQueryStatusDefault = ``;
+
+export const SimulateApiTestExecutionsListQueryParams = zod.object({
+  search: zod.string().default(simulateApiTestExecutionsListQuerySearchDefault),
+  status: zod.string().default(simulateApiTestExecutionsListQueryStatusDefault),
+  page: zod.number().min(1).optional(),
+  limit: zod.number().min(1).optional(),
+});
 
 export const simulateApiTestExecutionsListResponseTotalScenariosMin =
   -2147483648;
@@ -44924,228 +45800,198 @@ export const TracerCustomEvalConfigDeleteParams = zod.object({
   id: zod.string(),
 });
 
-export const TracerDashboardListQueryParams = zod.object({
-  page: zod
-    .number()
-    .optional()
-    .describe("A page number within the paginated result set."),
-  limit: zod
-    .number()
-    .optional()
-    .describe("Number of results to return per page."),
-});
+export const tracerDashboardListResponseNameMax = 255;
 
-export const tracerDashboardListResponseResultsItemNameMax = 255;
+export const tracerDashboardListResponseCreatedByEmailMax = 254;
 
-export const tracerDashboardListResponseResultsItemCreatedByEmailMax = 254;
+export const tracerDashboardListResponseCreatedByNameMax = 255;
 
-export const tracerDashboardListResponseResultsItemCreatedByNameMax = 255;
+export const tracerDashboardListResponseCreatedByOrganizationNameMax = 255;
 
-export const tracerDashboardListResponseResultsItemCreatedByOrganizationNameMax = 255;
+export const tracerDashboardListResponseCreatedByOrganizationDisplayNameMax = 255;
 
-export const tracerDashboardListResponseResultsItemCreatedByOrganizationDisplayNameMax = 255;
+export const tracerDashboardListResponseCreatedByOrganizationRegionMax = 16;
 
-export const tracerDashboardListResponseResultsItemCreatedByOrganizationRegionMax = 16;
+export const tracerDashboardListResponseCreatedByOrganizationRequire2faGracePeriodDaysMin = 0;
+export const tracerDashboardListResponseCreatedByOrganizationRequire2faGracePeriodDaysMax = 32767;
 
-export const tracerDashboardListResponseResultsItemCreatedByOrganizationRequire2faGracePeriodDaysMin = 0;
-export const tracerDashboardListResponseResultsItemCreatedByOrganizationRequire2faGracePeriodDaysMax = 32767;
+export const tracerDashboardListResponseCreatedByRoleMax = 255;
 
-export const tracerDashboardListResponseResultsItemCreatedByRoleMax = 255;
+export const tracerDashboardListResponseUpdatedByEmailMax = 254;
 
-export const tracerDashboardListResponseResultsItemUpdatedByEmailMax = 254;
+export const tracerDashboardListResponseUpdatedByNameMax = 255;
 
-export const tracerDashboardListResponseResultsItemUpdatedByNameMax = 255;
+export const tracerDashboardListResponseUpdatedByOrganizationNameMax = 255;
 
-export const tracerDashboardListResponseResultsItemUpdatedByOrganizationNameMax = 255;
+export const tracerDashboardListResponseUpdatedByOrganizationDisplayNameMax = 255;
 
-export const tracerDashboardListResponseResultsItemUpdatedByOrganizationDisplayNameMax = 255;
+export const tracerDashboardListResponseUpdatedByOrganizationRegionMax = 16;
 
-export const tracerDashboardListResponseResultsItemUpdatedByOrganizationRegionMax = 16;
+export const tracerDashboardListResponseUpdatedByOrganizationRequire2faGracePeriodDaysMin = 0;
+export const tracerDashboardListResponseUpdatedByOrganizationRequire2faGracePeriodDaysMax = 32767;
 
-export const tracerDashboardListResponseResultsItemUpdatedByOrganizationRequire2faGracePeriodDaysMin = 0;
-export const tracerDashboardListResponseResultsItemUpdatedByOrganizationRequire2faGracePeriodDaysMax = 32767;
+export const tracerDashboardListResponseUpdatedByRoleMax = 255;
 
-export const tracerDashboardListResponseResultsItemUpdatedByRoleMax = 255;
-
-export const TracerDashboardListResponse = zod.object({
-  count: zod.number(),
-  next: zod.string().url().optional(),
-  previous: zod.string().url().optional(),
-  results: zod.array(
-    zod.object({
+export const TracerDashboardListResponseItem = zod.object({
+  id: zod.string().uuid().optional(),
+  name: zod.string().min(1).max(tracerDashboardListResponseNameMax),
+  description: zod.string().optional(),
+  workspace: zod.string().uuid().optional(),
+  created_by: zod
+    .object({
       id: zod.string().uuid().optional(),
+      email: zod
+        .string()
+        .email()
+        .min(1)
+        .max(tracerDashboardListResponseCreatedByEmailMax),
       name: zod
         .string()
         .min(1)
-        .max(tracerDashboardListResponseResultsItemNameMax),
-      description: zod.string().optional(),
-      workspace: zod.string().uuid().optional(),
-      created_by: zod
-        .object({
-          id: zod.string().uuid().optional(),
-          email: zod
-            .string()
-            .email()
-            .min(1)
-            .max(tracerDashboardListResponseResultsItemCreatedByEmailMax),
-          name: zod
-            .string()
-            .min(1)
-            .max(tracerDashboardListResponseResultsItemCreatedByNameMax),
-          organization_role: zod
-            .enum([
-              "Owner",
-              "Admin",
-              "Member",
-              "Viewer",
-              "workspace_admin",
-              "workspace_member",
-              "workspace_viewer",
-            ])
-            .optional(),
-          organization: zod
-            .object({
-              id: zod.string().uuid().optional(),
-              created_at: zod.string().datetime({ offset: true }).optional(),
-              name: zod
-                .string()
-                .min(1)
-                .max(
-                  tracerDashboardListResponseResultsItemCreatedByOrganizationNameMax,
-                ),
-              display_name: zod
-                .string()
-                .max(
-                  tracerDashboardListResponseResultsItemCreatedByOrganizationDisplayNameMax,
-                )
-                .optional(),
-              is_new: zod.boolean().optional(),
-              ws_enabled: zod.boolean().optional(),
-              region: zod
-                .string()
-                .min(1)
-                .max(
-                  tracerDashboardListResponseResultsItemCreatedByOrganizationRegionMax,
-                )
-                .optional(),
-              require_2fa: zod.boolean().optional(),
-              require_2fa_grace_period_days: zod
-                .number()
-                .min(
-                  tracerDashboardListResponseResultsItemCreatedByOrganizationRequire2faGracePeriodDaysMin,
-                )
-                .max(
-                  tracerDashboardListResponseResultsItemCreatedByOrganizationRequire2faGracePeriodDaysMax,
-                )
-                .optional(),
-              require_2fa_enforced_at: zod
-                .string()
-                .datetime({ offset: true })
-                .optional(),
-            })
-            .optional(),
-          created_at: zod.string().datetime({ offset: true }).optional(),
-          status: zod.string().optional(),
-          role: zod
-            .string()
-            .max(tracerDashboardListResponseResultsItemCreatedByRoleMax)
-            .optional()
-            .describe(
-              "User's job role (e.g., Data Scientist, ML Engineer, or custom role)",
-            ),
-          goals: zod
-            .object({})
-            .passthrough()
-            .optional()
-            .describe("List of user's goals for using the platform"),
-        })
+        .max(tracerDashboardListResponseCreatedByNameMax),
+      organization_role: zod
+        .enum([
+          "Owner",
+          "Admin",
+          "Member",
+          "Viewer",
+          "workspace_admin",
+          "workspace_member",
+          "workspace_viewer",
+        ])
         .optional(),
-      updated_by: zod
+      organization: zod
         .object({
           id: zod.string().uuid().optional(),
-          email: zod
-            .string()
-            .email()
-            .min(1)
-            .max(tracerDashboardListResponseResultsItemUpdatedByEmailMax),
+          created_at: zod.string().datetime({ offset: true }).optional(),
           name: zod
             .string()
             .min(1)
-            .max(tracerDashboardListResponseResultsItemUpdatedByNameMax),
-          organization_role: zod
-            .enum([
-              "Owner",
-              "Admin",
-              "Member",
-              "Viewer",
-              "workspace_admin",
-              "workspace_member",
-              "workspace_viewer",
-            ])
-            .optional(),
-          organization: zod
-            .object({
-              id: zod.string().uuid().optional(),
-              created_at: zod.string().datetime({ offset: true }).optional(),
-              name: zod
-                .string()
-                .min(1)
-                .max(
-                  tracerDashboardListResponseResultsItemUpdatedByOrganizationNameMax,
-                ),
-              display_name: zod
-                .string()
-                .max(
-                  tracerDashboardListResponseResultsItemUpdatedByOrganizationDisplayNameMax,
-                )
-                .optional(),
-              is_new: zod.boolean().optional(),
-              ws_enabled: zod.boolean().optional(),
-              region: zod
-                .string()
-                .min(1)
-                .max(
-                  tracerDashboardListResponseResultsItemUpdatedByOrganizationRegionMax,
-                )
-                .optional(),
-              require_2fa: zod.boolean().optional(),
-              require_2fa_grace_period_days: zod
-                .number()
-                .min(
-                  tracerDashboardListResponseResultsItemUpdatedByOrganizationRequire2faGracePeriodDaysMin,
-                )
-                .max(
-                  tracerDashboardListResponseResultsItemUpdatedByOrganizationRequire2faGracePeriodDaysMax,
-                )
-                .optional(),
-              require_2fa_enforced_at: zod
-                .string()
-                .datetime({ offset: true })
-                .optional(),
-            })
-            .optional(),
-          created_at: zod.string().datetime({ offset: true }).optional(),
-          status: zod.string().optional(),
-          role: zod
+            .max(tracerDashboardListResponseCreatedByOrganizationNameMax),
+          display_name: zod
             .string()
-            .max(tracerDashboardListResponseResultsItemUpdatedByRoleMax)
-            .optional()
-            .describe(
-              "User's job role (e.g., Data Scientist, ML Engineer, or custom role)",
-            ),
-          goals: zod
-            .object({})
-            .passthrough()
-            .optional()
-            .describe("List of user's goals for using the platform"),
+            .max(tracerDashboardListResponseCreatedByOrganizationDisplayNameMax)
+            .optional(),
+          is_new: zod.boolean().optional(),
+          ws_enabled: zod.boolean().optional(),
+          region: zod
+            .string()
+            .min(1)
+            .max(tracerDashboardListResponseCreatedByOrganizationRegionMax)
+            .optional(),
+          require_2fa: zod.boolean().optional(),
+          require_2fa_grace_period_days: zod
+            .number()
+            .min(
+              tracerDashboardListResponseCreatedByOrganizationRequire2faGracePeriodDaysMin,
+            )
+            .max(
+              tracerDashboardListResponseCreatedByOrganizationRequire2faGracePeriodDaysMax,
+            )
+            .optional(),
+          require_2fa_enforced_at: zod
+            .string()
+            .datetime({ offset: true })
+            .optional(),
         })
         .optional(),
       created_at: zod.string().datetime({ offset: true }).optional(),
-      updated_at: zod.string().datetime({ offset: true }).optional(),
-      widget_count: zod.string().optional(),
-    }),
-  ),
+      status: zod.string().optional(),
+      role: zod
+        .string()
+        .max(tracerDashboardListResponseCreatedByRoleMax)
+        .optional()
+        .describe(
+          "User's job role (e.g., Data Scientist, ML Engineer, or custom role)",
+        ),
+      goals: zod
+        .object({})
+        .passthrough()
+        .optional()
+        .describe("List of user's goals for using the platform"),
+    })
+    .optional(),
+  updated_by: zod
+    .object({
+      id: zod.string().uuid().optional(),
+      email: zod
+        .string()
+        .email()
+        .min(1)
+        .max(tracerDashboardListResponseUpdatedByEmailMax),
+      name: zod
+        .string()
+        .min(1)
+        .max(tracerDashboardListResponseUpdatedByNameMax),
+      organization_role: zod
+        .enum([
+          "Owner",
+          "Admin",
+          "Member",
+          "Viewer",
+          "workspace_admin",
+          "workspace_member",
+          "workspace_viewer",
+        ])
+        .optional(),
+      organization: zod
+        .object({
+          id: zod.string().uuid().optional(),
+          created_at: zod.string().datetime({ offset: true }).optional(),
+          name: zod
+            .string()
+            .min(1)
+            .max(tracerDashboardListResponseUpdatedByOrganizationNameMax),
+          display_name: zod
+            .string()
+            .max(tracerDashboardListResponseUpdatedByOrganizationDisplayNameMax)
+            .optional(),
+          is_new: zod.boolean().optional(),
+          ws_enabled: zod.boolean().optional(),
+          region: zod
+            .string()
+            .min(1)
+            .max(tracerDashboardListResponseUpdatedByOrganizationRegionMax)
+            .optional(),
+          require_2fa: zod.boolean().optional(),
+          require_2fa_grace_period_days: zod
+            .number()
+            .min(
+              tracerDashboardListResponseUpdatedByOrganizationRequire2faGracePeriodDaysMin,
+            )
+            .max(
+              tracerDashboardListResponseUpdatedByOrganizationRequire2faGracePeriodDaysMax,
+            )
+            .optional(),
+          require_2fa_enforced_at: zod
+            .string()
+            .datetime({ offset: true })
+            .optional(),
+        })
+        .optional(),
+      created_at: zod.string().datetime({ offset: true }).optional(),
+      status: zod.string().optional(),
+      role: zod
+        .string()
+        .max(tracerDashboardListResponseUpdatedByRoleMax)
+        .optional()
+        .describe(
+          "User's job role (e.g., Data Scientist, ML Engineer, or custom role)",
+        ),
+      goals: zod
+        .object({})
+        .passthrough()
+        .optional()
+        .describe("List of user's goals for using the platform"),
+    })
+    .optional(),
+  created_at: zod.string().datetime({ offset: true }).optional(),
+  updated_at: zod.string().datetime({ offset: true }).optional(),
+  widget_count: zod.string().optional(),
 });
+export const TracerDashboardListResponse = zod.array(
+  TracerDashboardListResponseItem,
+);
 
 export const tracerDashboardCreateBodyNameMax = 255;
 
@@ -45157,7 +46003,7 @@ export const TracerDashboardCreateBody = zod.object({
 /**
  * Return distinct values for a given metric/attribute, for filter value picker.
  */
-export const tracerDashboardFilterValuesQueryPropertyIdMax = 1024;
+export const tracerDashboardFilterValuesQueryPropertyIdMax = 4113;
 
 export const tracerDashboardFilterValuesQuerySourceDefault = `traces`;
 export const tracerDashboardFilterValuesQueryProjectIdsDefault = ``;
@@ -45166,7 +46012,7 @@ export const tracerDashboardFilterValuesQuerySearchMax = 512;
 
 export const tracerDashboardFilterValuesQueryPageSizeMax = 50;
 
-export const tracerDashboardFilterValuesQueryCursorMax = 16384;
+export const tracerDashboardFilterValuesQueryCursorMax = 262144;
 
 export const TracerDashboardFilterValuesQueryParams = zod.object({
   property_id: zod
@@ -45239,6 +46085,7 @@ export const TracerDashboardFilterValuesResponse = zod.object({
     .boolean()
     .default(tracerDashboardFilterValuesResponseStatusDefault),
   result: zod.object({
+    query_exact: zod.boolean().optional(),
     values: zod.array(
       zod.object({
         value: jsonValueSchema.describe("Any valid JSON value."),
@@ -45251,8 +46098,15 @@ export const TracerDashboardFilterValuesResponse = zod.object({
         description: zod.string().min(1).optional(),
       }),
     ),
-    query_complete: zod.boolean().optional(),
-    query_status: zod.enum(["complete", "sampled", "degraded"]).optional(),
+    query_complete: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether this page read completed, not whether all source history is indexed.",
+      ),
+    query_status: zod
+      .enum(["complete", "sampled", "degraded", "partial"])
+      .optional(),
     query_error_code: zod
       .enum(["sample_limit", "read_budget_exceeded", "query_failed"])
       .optional(),
@@ -45288,15 +46142,95 @@ export const TracerDashboardFilterValuesResponse = zod.object({
         tracerDashboardFilterValuesResponseResultActivationFingerprintRegExp,
       )
       .optional(),
-    query_provenance: zod.enum(["activated_property_catalog"]).optional(),
+    query_provenance: zod
+      .enum(["activated_property_catalog", "current_property_catalog"])
+      .optional(),
   }),
 });
 
 /**
- * Backward compat: if ``workflow`` param is provided, return only
-that source's metrics in the old grouped format.
- * @summary Return all available metrics across traces and datasets.
+ * Return distinct values for a given metric/attribute, for filter value picker.
  */
+export const tracerDashboardFilterValuesCreateBodyPropertyIdMax = 4113;
+
+export const tracerDashboardFilterValuesCreateBodySourceDefault = `traces`;
+export const tracerDashboardFilterValuesCreateBodyProjectIdsDefault = ``;
+export const tracerDashboardFilterValuesCreateBodySearchDefault = ``;
+export const tracerDashboardFilterValuesCreateBodySearchMax = 512;
+
+export const tracerDashboardFilterValuesCreateBodyPageSizeMax = 50;
+
+export const tracerDashboardFilterValuesCreateBodyCursorMax = 262144;
+
+export const TracerDashboardFilterValuesCreateBody = zod.object({
+  property_id: zod
+    .string()
+    .min(1)
+    .max(tracerDashboardFilterValuesCreateBodyPropertyIdMax)
+    .optional()
+    .describe(
+      "Stable namespaced property identity returned by the metrics catalog. Legacy metric_name/metric_type remain accepted during migration.",
+    ),
+  metric_name: zod.string().min(1).optional(),
+  metric_type: zod
+    .enum([
+      "system_metric",
+      "eval_metric",
+      "annotation_metric",
+      "custom_attribute",
+      "custom_column",
+    ])
+    .optional(),
+  source: zod
+    .enum([
+      "traces",
+      "spans",
+      "sessions",
+      "users",
+      "voice_calls",
+      "prompts",
+      "datasets",
+      "dataset_column",
+      "simulation",
+      "both",
+      "all",
+    ])
+    .default(tracerDashboardFilterValuesCreateBodySourceDefault),
+  project_ids: zod
+    .string()
+    .default(tracerDashboardFilterValuesCreateBodyProjectIdsDefault),
+  dataset_id: zod.string().uuid().optional(),
+  search: zod
+    .string()
+    .max(tracerDashboardFilterValuesCreateBodySearchMax)
+    .default(tracerDashboardFilterValuesCreateBodySearchDefault),
+  page_size: zod
+    .number()
+    .min(1)
+    .max(tracerDashboardFilterValuesCreateBodyPageSizeMax)
+    .optional(),
+  cursor: zod
+    .string()
+    .min(1)
+    .max(tracerDashboardFilterValuesCreateBodyCursorMax)
+    .optional(),
+  attribute_type: zod
+    .enum(["string", "number", "boolean", "array", "map", "json"])
+    .optional(),
+});
+
+export const tracerDashboardFilterValuesCreateResponseStatusDefault = true;
+
+export const tracerDashboardFilterValuesCreateResponseResultQueryCountMin = 0;
+
+export const tracerDashboardFilterValuesCreateResponseResultCatalogEpochMax = 65535;
+
+export const tracerDashboardFilterValuesCreateResponseResultActivationFingerprintRegExp =
+  new RegExp("^[0-9a-f]{64}$");
+
+export const TracerDashboardFilterValuesCreateResponse =
+  TracerDashboardFilterValuesResponse;
+
 export const tracerDashboardMetricsQueryProjectIdsDefault = [];
 export const tracerDashboardMetricsQueryPerEvalConfigDefault = false;
 export const tracerDashboardMetricsQueryExcludeCustomAttributesDefault = false;
@@ -45309,7 +46243,7 @@ export const tracerDashboardMetricsQuerySourceDefault = ``;
 export const tracerDashboardMetricsQueryPageSizeMax = 200;
 
 export const tracerDashboardMetricsQueryCursorModeDefault = false;
-export const tracerDashboardMetricsQueryCursorMax = 16384;
+export const tracerDashboardMetricsQueryCursorMax = 262144;
 
 export const TracerDashboardMetricsQueryParams = zod.object({
   workflow: zod.enum(["observability", "dataset", "simulation"]).optional(),
@@ -45377,7 +46311,7 @@ export const tracerDashboardMetricsResponseResultCategoryCountsMinOne = 0;
 
 export const tracerDashboardMetricsResponseResultPageSizeMax = 200;
 
-export const tracerDashboardMetricsResponseResultNextCursorMax = 16384;
+export const tracerDashboardMetricsResponseResultNextCursorMax = 262144;
 
 export const tracerDashboardMetricsResponseResultCatalogEpochMax = 65535;
 
@@ -45461,22 +46395,116 @@ export const TracerDashboardMetricsResponse = zod.object({
       .min(1)
       .regex(tracerDashboardMetricsResponseResultActivationFingerprintRegExp)
       .optional(),
-    query_complete: zod.boolean().optional(),
+    query_complete: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether this page read completed, not whether all source history is indexed.",
+      ),
     query_exact: zod.boolean().optional(),
-    query_status: zod.enum(["complete"]).optional(),
-    query_provenance: zod.enum(["activated_property_catalog"]).optional(),
+    query_status: zod.enum(["complete", "partial"]).optional(),
+    query_provenance: zod
+      .enum(["activated_property_catalog", "current_property_catalog"])
+      .optional(),
   }),
 });
 
 /**
- * Each metric carries a ``source`` field ("traces" or "datasets").
-Metrics are partitioned by source and dispatched to the appropriate
-query builder.  Results are merged into a single response.
-
-Each metric is validated against the canonical query contract before
-it reaches any query builder.
- * @summary Execute a widget query and return chart data.
+ * Backward compat: if ``workflow`` param is provided, return only
+that source's metrics in the old grouped format.
+ * @summary Return all available metrics across traces and datasets.
  */
+export const tracerDashboardMetricsCreateBodyProjectIdsDefault = ``;
+export const tracerDashboardMetricsCreateBodyPerEvalConfigDefault = false;
+export const tracerDashboardMetricsCreateBodyExcludeCustomAttributesDefault =
+  false;
+export const tracerDashboardMetricsCreateBodySearchDefault = ``;
+export const tracerDashboardMetricsCreateBodySearchMax = 256;
+
+export const tracerDashboardMetricsCreateBodyCategoryDefault = ``;
+export const tracerDashboardMetricsCreateBodyRoleDefault = ``;
+export const tracerDashboardMetricsCreateBodySourceDefault = ``;
+export const tracerDashboardMetricsCreateBodyPageSizeMax = 200;
+
+export const tracerDashboardMetricsCreateBodyCursorModeDefault = false;
+export const tracerDashboardMetricsCreateBodyCursorMax = 262144;
+
+export const TracerDashboardMetricsCreateBody = zod.object({
+  workflow: zod.enum(["observability", "dataset", "simulation"]).optional(),
+  project_ids: zod
+    .string()
+    .default(tracerDashboardMetricsCreateBodyProjectIdsDefault),
+  agent_definition_id: zod.string().uuid().optional(),
+  per_eval_config: zod
+    .boolean()
+    .default(tracerDashboardMetricsCreateBodyPerEvalConfigDefault),
+  exclude_custom_attributes: zod
+    .boolean()
+    .default(tracerDashboardMetricsCreateBodyExcludeCustomAttributesDefault),
+  search: zod
+    .string()
+    .max(tracerDashboardMetricsCreateBodySearchMax)
+    .default(tracerDashboardMetricsCreateBodySearchDefault),
+  category: zod
+    .enum([
+      "system_metric",
+      "eval_metric",
+      "annotation_metric",
+      "custom_attribute",
+      "custom_column",
+    ])
+    .default(tracerDashboardMetricsCreateBodyCategoryDefault),
+  role: zod
+    .enum(["metric", "dimension"])
+    .default(tracerDashboardMetricsCreateBodyRoleDefault),
+  source: zod
+    .enum([
+      "traces",
+      "spans",
+      "sessions",
+      "users",
+      "voice_calls",
+      "prompts",
+      "datasets",
+      "simulation",
+      "both",
+      "all",
+    ])
+    .default(tracerDashboardMetricsCreateBodySourceDefault),
+  page: zod.number().min(1).optional(),
+  page_size: zod
+    .number()
+    .min(1)
+    .max(tracerDashboardMetricsCreateBodyPageSizeMax)
+    .optional(),
+  cursor_mode: zod
+    .boolean()
+    .default(tracerDashboardMetricsCreateBodyCursorModeDefault),
+  cursor: zod
+    .string()
+    .min(1)
+    .max(tracerDashboardMetricsCreateBodyCursorMax)
+    .optional(),
+});
+
+export const tracerDashboardMetricsCreateResponseStatusDefault = true;
+
+export const tracerDashboardMetricsCreateResponseResultTotalMin = 0;
+
+export const tracerDashboardMetricsCreateResponseResultCategoryCountsMinOne = 0;
+
+export const tracerDashboardMetricsCreateResponseResultPageSizeMax = 200;
+
+export const tracerDashboardMetricsCreateResponseResultNextCursorMax = 262144;
+
+export const tracerDashboardMetricsCreateResponseResultCatalogEpochMax = 65535;
+
+export const tracerDashboardMetricsCreateResponseResultActivationFingerprintRegExp =
+  new RegExp("^[0-9a-f]{64}$");
+
+export const TracerDashboardMetricsCreateResponse =
+  TracerDashboardMetricsResponse;
+
 export const tracerDashboardQueryQueryRefreshDefault = false;
 
 export const TracerDashboardQueryQueryParams = zod.object({
@@ -45768,6 +46796,7 @@ export const TracerDashboardQueryBody = zod.object({
 });
 
 export const tracerDashboardQueryResponseStatusDefault = true;
+export const tracerDashboardQueryResponseResultMetricsItemSeriesTotalMin = 0;
 
 export const tracerDashboardQueryResponseResultQueryCountMin = 0;
 export const tracerDashboardQueryResponseResultQueryCountMax = 256;
@@ -45819,6 +46848,11 @@ export const TracerDashboardQueryResponse = zod.object({
             ),
           }),
         ),
+        series_total: zod
+          .number()
+          .min(tracerDashboardQueryResponseResultMetricsItemSeriesTotalMin)
+          .optional(),
+        series_truncated: zod.boolean().optional(),
         query_complete: zod.boolean().optional(),
         query_sampled: zod.boolean().optional(),
         query_status: zod.enum(["complete", "degraded"]).optional(),
@@ -45907,240 +46941,210 @@ export const TracerDashboardQueryResponse = zod.object({
 /**
  * Return simulation agents with their observability project links.
  */
-export const TracerDashboardSimulationAgentsQueryParams = zod.object({
-  page: zod
-    .number()
-    .optional()
-    .describe("A page number within the paginated result set."),
-  limit: zod
-    .number()
-    .optional()
-    .describe("Number of results to return per page."),
-});
+export const tracerDashboardSimulationAgentsResponseNameMax = 255;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemNameMax = 255;
+export const tracerDashboardSimulationAgentsResponseCreatedByEmailMax = 254;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemCreatedByEmailMax = 254;
+export const tracerDashboardSimulationAgentsResponseCreatedByNameMax = 255;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemCreatedByNameMax = 255;
+export const tracerDashboardSimulationAgentsResponseCreatedByOrganizationNameMax = 255;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemCreatedByOrganizationNameMax = 255;
+export const tracerDashboardSimulationAgentsResponseCreatedByOrganizationDisplayNameMax = 255;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemCreatedByOrganizationDisplayNameMax = 255;
+export const tracerDashboardSimulationAgentsResponseCreatedByOrganizationRegionMax = 16;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemCreatedByOrganizationRegionMax = 16;
+export const tracerDashboardSimulationAgentsResponseCreatedByOrganizationRequire2faGracePeriodDaysMin = 0;
+export const tracerDashboardSimulationAgentsResponseCreatedByOrganizationRequire2faGracePeriodDaysMax = 32767;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemCreatedByOrganizationRequire2faGracePeriodDaysMin = 0;
-export const tracerDashboardSimulationAgentsResponseResultsItemCreatedByOrganizationRequire2faGracePeriodDaysMax = 32767;
+export const tracerDashboardSimulationAgentsResponseCreatedByRoleMax = 255;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemCreatedByRoleMax = 255;
+export const tracerDashboardSimulationAgentsResponseUpdatedByEmailMax = 254;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemUpdatedByEmailMax = 254;
+export const tracerDashboardSimulationAgentsResponseUpdatedByNameMax = 255;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemUpdatedByNameMax = 255;
+export const tracerDashboardSimulationAgentsResponseUpdatedByOrganizationNameMax = 255;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemUpdatedByOrganizationNameMax = 255;
+export const tracerDashboardSimulationAgentsResponseUpdatedByOrganizationDisplayNameMax = 255;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemUpdatedByOrganizationDisplayNameMax = 255;
+export const tracerDashboardSimulationAgentsResponseUpdatedByOrganizationRegionMax = 16;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemUpdatedByOrganizationRegionMax = 16;
+export const tracerDashboardSimulationAgentsResponseUpdatedByOrganizationRequire2faGracePeriodDaysMin = 0;
+export const tracerDashboardSimulationAgentsResponseUpdatedByOrganizationRequire2faGracePeriodDaysMax = 32767;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemUpdatedByOrganizationRequire2faGracePeriodDaysMin = 0;
-export const tracerDashboardSimulationAgentsResponseResultsItemUpdatedByOrganizationRequire2faGracePeriodDaysMax = 32767;
+export const tracerDashboardSimulationAgentsResponseUpdatedByRoleMax = 255;
 
-export const tracerDashboardSimulationAgentsResponseResultsItemUpdatedByRoleMax = 255;
-
-export const TracerDashboardSimulationAgentsResponse = zod.object({
-  count: zod.number(),
-  next: zod.string().url().optional(),
-  previous: zod.string().url().optional(),
-  results: zod.array(
-    zod.object({
+export const TracerDashboardSimulationAgentsResponseItem = zod.object({
+  id: zod.string().uuid().optional(),
+  name: zod.string().min(1).max(tracerDashboardSimulationAgentsResponseNameMax),
+  description: zod.string().optional(),
+  workspace: zod.string().uuid().optional(),
+  created_by: zod
+    .object({
       id: zod.string().uuid().optional(),
+      email: zod
+        .string()
+        .email()
+        .min(1)
+        .max(tracerDashboardSimulationAgentsResponseCreatedByEmailMax),
       name: zod
         .string()
         .min(1)
-        .max(tracerDashboardSimulationAgentsResponseResultsItemNameMax),
-      description: zod.string().optional(),
-      workspace: zod.string().uuid().optional(),
-      created_by: zod
-        .object({
-          id: zod.string().uuid().optional(),
-          email: zod
-            .string()
-            .email()
-            .min(1)
-            .max(
-              tracerDashboardSimulationAgentsResponseResultsItemCreatedByEmailMax,
-            ),
-          name: zod
-            .string()
-            .min(1)
-            .max(
-              tracerDashboardSimulationAgentsResponseResultsItemCreatedByNameMax,
-            ),
-          organization_role: zod
-            .enum([
-              "Owner",
-              "Admin",
-              "Member",
-              "Viewer",
-              "workspace_admin",
-              "workspace_member",
-              "workspace_viewer",
-            ])
-            .optional(),
-          organization: zod
-            .object({
-              id: zod.string().uuid().optional(),
-              created_at: zod.string().datetime({ offset: true }).optional(),
-              name: zod
-                .string()
-                .min(1)
-                .max(
-                  tracerDashboardSimulationAgentsResponseResultsItemCreatedByOrganizationNameMax,
-                ),
-              display_name: zod
-                .string()
-                .max(
-                  tracerDashboardSimulationAgentsResponseResultsItemCreatedByOrganizationDisplayNameMax,
-                )
-                .optional(),
-              is_new: zod.boolean().optional(),
-              ws_enabled: zod.boolean().optional(),
-              region: zod
-                .string()
-                .min(1)
-                .max(
-                  tracerDashboardSimulationAgentsResponseResultsItemCreatedByOrganizationRegionMax,
-                )
-                .optional(),
-              require_2fa: zod.boolean().optional(),
-              require_2fa_grace_period_days: zod
-                .number()
-                .min(
-                  tracerDashboardSimulationAgentsResponseResultsItemCreatedByOrganizationRequire2faGracePeriodDaysMin,
-                )
-                .max(
-                  tracerDashboardSimulationAgentsResponseResultsItemCreatedByOrganizationRequire2faGracePeriodDaysMax,
-                )
-                .optional(),
-              require_2fa_enforced_at: zod
-                .string()
-                .datetime({ offset: true })
-                .optional(),
-            })
-            .optional(),
-          created_at: zod.string().datetime({ offset: true }).optional(),
-          status: zod.string().optional(),
-          role: zod
-            .string()
-            .max(
-              tracerDashboardSimulationAgentsResponseResultsItemCreatedByRoleMax,
-            )
-            .optional()
-            .describe(
-              "User's job role (e.g., Data Scientist, ML Engineer, or custom role)",
-            ),
-          goals: zod
-            .object({})
-            .passthrough()
-            .optional()
-            .describe("List of user's goals for using the platform"),
-        })
+        .max(tracerDashboardSimulationAgentsResponseCreatedByNameMax),
+      organization_role: zod
+        .enum([
+          "Owner",
+          "Admin",
+          "Member",
+          "Viewer",
+          "workspace_admin",
+          "workspace_member",
+          "workspace_viewer",
+        ])
         .optional(),
-      updated_by: zod
+      organization: zod
         .object({
           id: zod.string().uuid().optional(),
-          email: zod
-            .string()
-            .email()
-            .min(1)
-            .max(
-              tracerDashboardSimulationAgentsResponseResultsItemUpdatedByEmailMax,
-            ),
+          created_at: zod.string().datetime({ offset: true }).optional(),
           name: zod
             .string()
             .min(1)
             .max(
-              tracerDashboardSimulationAgentsResponseResultsItemUpdatedByNameMax,
+              tracerDashboardSimulationAgentsResponseCreatedByOrganizationNameMax,
             ),
-          organization_role: zod
-            .enum([
-              "Owner",
-              "Admin",
-              "Member",
-              "Viewer",
-              "workspace_admin",
-              "workspace_member",
-              "workspace_viewer",
-            ])
-            .optional(),
-          organization: zod
-            .object({
-              id: zod.string().uuid().optional(),
-              created_at: zod.string().datetime({ offset: true }).optional(),
-              name: zod
-                .string()
-                .min(1)
-                .max(
-                  tracerDashboardSimulationAgentsResponseResultsItemUpdatedByOrganizationNameMax,
-                ),
-              display_name: zod
-                .string()
-                .max(
-                  tracerDashboardSimulationAgentsResponseResultsItemUpdatedByOrganizationDisplayNameMax,
-                )
-                .optional(),
-              is_new: zod.boolean().optional(),
-              ws_enabled: zod.boolean().optional(),
-              region: zod
-                .string()
-                .min(1)
-                .max(
-                  tracerDashboardSimulationAgentsResponseResultsItemUpdatedByOrganizationRegionMax,
-                )
-                .optional(),
-              require_2fa: zod.boolean().optional(),
-              require_2fa_grace_period_days: zod
-                .number()
-                .min(
-                  tracerDashboardSimulationAgentsResponseResultsItemUpdatedByOrganizationRequire2faGracePeriodDaysMin,
-                )
-                .max(
-                  tracerDashboardSimulationAgentsResponseResultsItemUpdatedByOrganizationRequire2faGracePeriodDaysMax,
-                )
-                .optional(),
-              require_2fa_enforced_at: zod
-                .string()
-                .datetime({ offset: true })
-                .optional(),
-            })
-            .optional(),
-          created_at: zod.string().datetime({ offset: true }).optional(),
-          status: zod.string().optional(),
-          role: zod
+          display_name: zod
             .string()
             .max(
-              tracerDashboardSimulationAgentsResponseResultsItemUpdatedByRoleMax,
+              tracerDashboardSimulationAgentsResponseCreatedByOrganizationDisplayNameMax,
             )
-            .optional()
-            .describe(
-              "User's job role (e.g., Data Scientist, ML Engineer, or custom role)",
-            ),
-          goals: zod
-            .object({})
-            .passthrough()
-            .optional()
-            .describe("List of user's goals for using the platform"),
+            .optional(),
+          is_new: zod.boolean().optional(),
+          ws_enabled: zod.boolean().optional(),
+          region: zod
+            .string()
+            .min(1)
+            .max(
+              tracerDashboardSimulationAgentsResponseCreatedByOrganizationRegionMax,
+            )
+            .optional(),
+          require_2fa: zod.boolean().optional(),
+          require_2fa_grace_period_days: zod
+            .number()
+            .min(
+              tracerDashboardSimulationAgentsResponseCreatedByOrganizationRequire2faGracePeriodDaysMin,
+            )
+            .max(
+              tracerDashboardSimulationAgentsResponseCreatedByOrganizationRequire2faGracePeriodDaysMax,
+            )
+            .optional(),
+          require_2fa_enforced_at: zod
+            .string()
+            .datetime({ offset: true })
+            .optional(),
         })
         .optional(),
       created_at: zod.string().datetime({ offset: true }).optional(),
-      updated_at: zod.string().datetime({ offset: true }).optional(),
-      widget_count: zod.string().optional(),
-    }),
-  ),
+      status: zod.string().optional(),
+      role: zod
+        .string()
+        .max(tracerDashboardSimulationAgentsResponseCreatedByRoleMax)
+        .optional()
+        .describe(
+          "User's job role (e.g., Data Scientist, ML Engineer, or custom role)",
+        ),
+      goals: zod
+        .object({})
+        .passthrough()
+        .optional()
+        .describe("List of user's goals for using the platform"),
+    })
+    .optional(),
+  updated_by: zod
+    .object({
+      id: zod.string().uuid().optional(),
+      email: zod
+        .string()
+        .email()
+        .min(1)
+        .max(tracerDashboardSimulationAgentsResponseUpdatedByEmailMax),
+      name: zod
+        .string()
+        .min(1)
+        .max(tracerDashboardSimulationAgentsResponseUpdatedByNameMax),
+      organization_role: zod
+        .enum([
+          "Owner",
+          "Admin",
+          "Member",
+          "Viewer",
+          "workspace_admin",
+          "workspace_member",
+          "workspace_viewer",
+        ])
+        .optional(),
+      organization: zod
+        .object({
+          id: zod.string().uuid().optional(),
+          created_at: zod.string().datetime({ offset: true }).optional(),
+          name: zod
+            .string()
+            .min(1)
+            .max(
+              tracerDashboardSimulationAgentsResponseUpdatedByOrganizationNameMax,
+            ),
+          display_name: zod
+            .string()
+            .max(
+              tracerDashboardSimulationAgentsResponseUpdatedByOrganizationDisplayNameMax,
+            )
+            .optional(),
+          is_new: zod.boolean().optional(),
+          ws_enabled: zod.boolean().optional(),
+          region: zod
+            .string()
+            .min(1)
+            .max(
+              tracerDashboardSimulationAgentsResponseUpdatedByOrganizationRegionMax,
+            )
+            .optional(),
+          require_2fa: zod.boolean().optional(),
+          require_2fa_grace_period_days: zod
+            .number()
+            .min(
+              tracerDashboardSimulationAgentsResponseUpdatedByOrganizationRequire2faGracePeriodDaysMin,
+            )
+            .max(
+              tracerDashboardSimulationAgentsResponseUpdatedByOrganizationRequire2faGracePeriodDaysMax,
+            )
+            .optional(),
+          require_2fa_enforced_at: zod
+            .string()
+            .datetime({ offset: true })
+            .optional(),
+        })
+        .optional(),
+      created_at: zod.string().datetime({ offset: true }).optional(),
+      status: zod.string().optional(),
+      role: zod
+        .string()
+        .max(tracerDashboardSimulationAgentsResponseUpdatedByRoleMax)
+        .optional()
+        .describe(
+          "User's job role (e.g., Data Scientist, ML Engineer, or custom role)",
+        ),
+      goals: zod
+        .object({})
+        .passthrough()
+        .optional()
+        .describe("List of user's goals for using the platform"),
+    })
+    .optional(),
+  created_at: zod.string().datetime({ offset: true }).optional(),
+  updated_at: zod.string().datetime({ offset: true }).optional(),
+  widget_count: zod.string().optional(),
 });
+export const TracerDashboardSimulationAgentsResponse = zod.array(
+  TracerDashboardSimulationAgentsResponseItem,
+);
 
 export const TracerDashboardWidgetsListParams = zod.object({
   dashboard_pk: zod.string(),
@@ -46199,8 +47203,20 @@ export const TracerDashboardWidgetsListResponse = zod.object({
         .min(tracerDashboardWidgetsListResponseResultsItemHeightMin)
         .max(tracerDashboardWidgetsListResponseResultsItemHeightMax)
         .optional(),
-      query_config: zod.object({}).passthrough().optional(),
-      chart_config: zod.object({}).passthrough().optional(),
+      query_config: zod
+        .object({})
+        .passthrough()
+        .optional()
+        .describe(
+          "Saved query in the same shape as the dashboard query request: time_range and metrics are required once any metric is set, with optional workflow, project_ids, granularity, filters, and breakdowns.",
+        ),
+      chart_config: zod
+        .object({})
+        .passthrough()
+        .optional()
+        .describe(
+          "Chart presentation. chart_type must be one of line, stacked_line, column, stacked_column, bar, stacked_bar, pie, table, or metric.",
+        ),
       created_by: zod.string().uuid().optional(),
       created_at: zod.string().datetime({ offset: true }).optional(),
       updated_at: zod.string().datetime({ offset: true }).optional(),
@@ -46245,8 +47261,20 @@ export const TracerDashboardWidgetsCreateBody = zod.object({
     .min(tracerDashboardWidgetsCreateBodyHeightMin)
     .max(tracerDashboardWidgetsCreateBodyHeightMax)
     .optional(),
-  query_config: zod.object({}).passthrough().optional(),
-  chart_config: zod.object({}).passthrough().optional(),
+  query_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Saved query in the same shape as the dashboard query request: time_range and metrics are required once any metric is set, with optional workflow, project_ids, granularity, filters, and breakdowns.",
+    ),
+  chart_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Chart presentation. chart_type must be one of line, stacked_line, column, stacked_column, bar, stacked_bar, pie, table, or metric.",
+    ),
 });
 
 /**
@@ -46599,6 +47627,7 @@ export const TracerDashboardWidgetsPreviewQueryBody = zod.object({
 });
 
 export const tracerDashboardWidgetsPreviewQueryResponseStatusDefault = true;
+export const tracerDashboardWidgetsPreviewQueryResponseResultMetricsItemSeriesTotalMin = 0;
 
 export const tracerDashboardWidgetsPreviewQueryResponseResultQueryCountMin = 0;
 export const tracerDashboardWidgetsPreviewQueryResponseResultQueryCountMax = 256;
@@ -46652,6 +47681,13 @@ export const TracerDashboardWidgetsPreviewQueryResponse = zod.object({
             ),
           }),
         ),
+        series_total: zod
+          .number()
+          .min(
+            tracerDashboardWidgetsPreviewQueryResponseResultMetricsItemSeriesTotalMin,
+          )
+          .optional(),
+        series_truncated: zod.boolean().optional(),
         query_complete: zod.boolean().optional(),
         query_sampled: zod.boolean().optional(),
         query_status: zod.enum(["complete", "degraded"]).optional(),
@@ -46781,8 +47817,20 @@ export const TracerDashboardWidgetsReorderBody = zod.object({
     .min(tracerDashboardWidgetsReorderBodyHeightMin)
     .max(tracerDashboardWidgetsReorderBodyHeightMax)
     .optional(),
-  query_config: zod.object({}).passthrough().optional(),
-  chart_config: zod.object({}).passthrough().optional(),
+  query_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Saved query in the same shape as the dashboard query request: time_range and metrics are required once any metric is set, with optional workflow, project_ids, granularity, filters, and breakdowns.",
+    ),
+  chart_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Chart presentation. chart_type must be one of line, stacked_line, column, stacked_column, bar, stacked_bar, pie, table, or metric.",
+    ),
 });
 
 export const TracerDashboardWidgetsReadParams = zod.object({
@@ -46824,8 +47872,20 @@ export const TracerDashboardWidgetsReadResponse = zod.object({
     .min(tracerDashboardWidgetsReadResponseHeightMin)
     .max(tracerDashboardWidgetsReadResponseHeightMax)
     .optional(),
-  query_config: zod.object({}).passthrough().optional(),
-  chart_config: zod.object({}).passthrough().optional(),
+  query_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Saved query in the same shape as the dashboard query request: time_range and metrics are required once any metric is set, with optional workflow, project_ids, granularity, filters, and breakdowns.",
+    ),
+  chart_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Chart presentation. chart_type must be one of line, stacked_line, column, stacked_column, bar, stacked_bar, pie, table, or metric.",
+    ),
   created_by: zod.string().uuid().optional(),
   created_at: zod.string().datetime({ offset: true }).optional(),
   updated_at: zod.string().datetime({ offset: true }).optional(),
@@ -46869,8 +47929,20 @@ export const TracerDashboardWidgetsUpdateBody = zod.object({
     .min(tracerDashboardWidgetsUpdateBodyHeightMin)
     .max(tracerDashboardWidgetsUpdateBodyHeightMax)
     .optional(),
-  query_config: zod.object({}).passthrough().optional(),
-  chart_config: zod.object({}).passthrough().optional(),
+  query_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Saved query in the same shape as the dashboard query request: time_range and metrics are required once any metric is set, with optional workflow, project_ids, granularity, filters, and breakdowns.",
+    ),
+  chart_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Chart presentation. chart_type must be one of line, stacked_line, column, stacked_column, bar, stacked_bar, pie, table, or metric.",
+    ),
 });
 
 export const tracerDashboardWidgetsUpdateResponseNameMax = 255;
@@ -46907,8 +47979,20 @@ export const TracerDashboardWidgetsUpdateResponse = zod.object({
     .min(tracerDashboardWidgetsUpdateResponseHeightMin)
     .max(tracerDashboardWidgetsUpdateResponseHeightMax)
     .optional(),
-  query_config: zod.object({}).passthrough().optional(),
-  chart_config: zod.object({}).passthrough().optional(),
+  query_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Saved query in the same shape as the dashboard query request: time_range and metrics are required once any metric is set, with optional workflow, project_ids, granularity, filters, and breakdowns.",
+    ),
+  chart_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Chart presentation. chart_type must be one of line, stacked_line, column, stacked_column, bar, stacked_bar, pie, table, or metric.",
+    ),
   created_by: zod.string().uuid().optional(),
   created_at: zod.string().datetime({ offset: true }).optional(),
   updated_at: zod.string().datetime({ offset: true }).optional(),
@@ -46952,8 +48036,20 @@ export const TracerDashboardWidgetsPartialUpdateBody = zod.object({
     .min(tracerDashboardWidgetsPartialUpdateBodyHeightMin)
     .max(tracerDashboardWidgetsPartialUpdateBodyHeightMax)
     .optional(),
-  query_config: zod.object({}).passthrough().optional(),
-  chart_config: zod.object({}).passthrough().optional(),
+  query_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Saved query in the same shape as the dashboard query request: time_range and metrics are required once any metric is set, with optional workflow, project_ids, granularity, filters, and breakdowns.",
+    ),
+  chart_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Chart presentation. chart_type must be one of line, stacked_line, column, stacked_column, bar, stacked_bar, pie, table, or metric.",
+    ),
 });
 
 export const tracerDashboardWidgetsPartialUpdateResponseNameMax = 255;
@@ -46991,8 +48087,20 @@ export const TracerDashboardWidgetsPartialUpdateResponse = zod.object({
     .min(tracerDashboardWidgetsPartialUpdateResponseHeightMin)
     .max(tracerDashboardWidgetsPartialUpdateResponseHeightMax)
     .optional(),
-  query_config: zod.object({}).passthrough().optional(),
-  chart_config: zod.object({}).passthrough().optional(),
+  query_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Saved query in the same shape as the dashboard query request: time_range and metrics are required once any metric is set, with optional workflow, project_ids, granularity, filters, and breakdowns.",
+    ),
+  chart_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Chart presentation. chart_type must be one of line, stacked_line, column, stacked_column, bar, stacked_bar, pie, table, or metric.",
+    ),
   created_by: zod.string().uuid().optional(),
   created_at: zod.string().datetime({ offset: true }).optional(),
   updated_at: zod.string().datetime({ offset: true }).optional(),
@@ -47044,8 +48152,20 @@ export const TracerDashboardWidgetsDuplicateWidgetBody = zod.object({
     .min(tracerDashboardWidgetsDuplicateWidgetBodyHeightMin)
     .max(tracerDashboardWidgetsDuplicateWidgetBodyHeightMax)
     .optional(),
-  query_config: zod.object({}).passthrough().optional(),
-  chart_config: zod.object({}).passthrough().optional(),
+  query_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Saved query in the same shape as the dashboard query request: time_range and metrics are required once any metric is set, with optional workflow, project_ids, granularity, filters, and breakdowns.",
+    ),
+  chart_config: zod
+    .object({})
+    .passthrough()
+    .optional()
+    .describe(
+      "Chart presentation. chart_type must be one of line, stacked_line, column, stacked_column, bar, stacked_bar, pie, table, or metric.",
+    ),
 });
 
 /**
@@ -47076,6 +48196,7 @@ export const TracerDashboardWidgetsExecuteQueryBody = zod.object({
 });
 
 export const tracerDashboardWidgetsExecuteQueryResponseStatusDefault = true;
+export const tracerDashboardWidgetsExecuteQueryResponseResultMetricsItemSeriesTotalMin = 0;
 
 export const tracerDashboardWidgetsExecuteQueryResponseResultQueryCountMin = 0;
 export const tracerDashboardWidgetsExecuteQueryResponseResultQueryCountMax = 256;
@@ -47129,6 +48250,13 @@ export const TracerDashboardWidgetsExecuteQueryResponse = zod.object({
             ),
           }),
         ),
+        series_total: zod
+          .number()
+          .min(
+            tracerDashboardWidgetsExecuteQueryResponseResultMetricsItemSeriesTotalMin,
+          )
+          .optional(),
+        series_truncated: zod.boolean().optional(),
         query_complete: zod.boolean().optional(),
         query_sampled: zod.boolean().optional(),
         query_status: zod.enum(["complete", "degraded"]).optional(),
@@ -53512,7 +54640,6 @@ export const TracerObservationSpanCreateOtelSpanBody = zod.object({
  */
 
 export const tracerObservationSpanGetEvalAttributesListQueryRowTypeDefault = `spans`;
-export const tracerObservationSpanGetEvalAttributesListQueryQMax = 512;
 
 export const TracerObservationSpanGetEvalAttributesListQueryParams = zod.object(
   {
@@ -53530,9 +54657,10 @@ export const TracerObservationSpanGetEvalAttributesListQueryParams = zod.object(
       .default(tracerObservationSpanGetEvalAttributesListQueryRowTypeDefault),
     q: zod
       .string()
-      .min(1)
-      .max(tracerObservationSpanGetEvalAttributesListQueryQMax)
-      .optional(),
+      .optional()
+      .describe(
+        "Nonempty exact attribute key, at most 4096 UTF-8 bytes. Whitespace, controls and case are preserved.",
+      ),
   },
 );
 
@@ -54145,7 +55273,6 @@ export const TracerObservationSpanGetObservationSpanFieldsResponse = zod.object(
  */
 
 export const tracerObservationSpanGetSpanAttributesListQueryRowTypeDefault = `spans`;
-export const tracerObservationSpanGetSpanAttributesListQueryQMax = 512;
 
 export const TracerObservationSpanGetSpanAttributesListQueryParams = zod.object(
   {
@@ -54163,9 +55290,10 @@ export const TracerObservationSpanGetSpanAttributesListQueryParams = zod.object(
       .default(tracerObservationSpanGetSpanAttributesListQueryRowTypeDefault),
     q: zod
       .string()
-      .min(1)
-      .max(tracerObservationSpanGetSpanAttributesListQueryQMax)
-      .optional(),
+      .optional()
+      .describe(
+        "Nonempty exact attribute key, at most 4096 UTF-8 bytes. Whitespace, controls and case are preserved.",
+      ),
   },
 );
 
@@ -54471,6 +55599,8 @@ export const TracerObservationSpanListSpansResponse = zod.object({
           tracerObservationSpanListSpansResponseResultMetadataQueryAppliedFilterCountMin,
         )
         .optional(),
+      query_exact: zod.boolean().optional(),
+      ordering_exact: zod.boolean().optional(),
     }),
     table: zod.array(
       zod.record(
@@ -54557,14 +55687,6 @@ export const tracerObservationSpanListSpansObserveQueryCursorModeDefault =
   false;
 
 export const TracerObservationSpanListSpansObserveQueryParams = zod.object({
-  page: zod
-    .number()
-    .optional()
-    .describe("A page number within the paginated result set."),
-  limit: zod
-    .number()
-    .optional()
-    .describe("Number of results to return per page."),
   project_id: zod.string().uuid().optional(),
   user_id: zod.string().optional(),
   filters: zod
@@ -54689,6 +55811,8 @@ export const TracerObservationSpanListSpansObserveResponse = zod.object({
           tracerObservationSpanListSpansObserveResponseResultMetadataQueryAppliedFilterCountMin,
         )
         .optional(),
+      query_exact: zod.boolean().optional(),
+      ordering_exact: zod.boolean().optional(),
     }),
     table: zod.array(
       zod.record(
@@ -56214,15 +57338,28 @@ export const TracerProjectVersionDeleteParams = zod.object({
 /**
  * Get a paginated list of all projects for the organization.
  */
+export const tracerProjectListQueryFiltersDefault = `[]`;
+export const tracerProjectListQuerySortByDefault = `created_at`;
+export const tracerProjectListQuerySortDirectionDefault = `desc`;
+export const tracerProjectListQueryPageNumberDefault = 0;
+export const tracerProjectListQueryPageNumberMin = 0;
+
+export const tracerProjectListQueryPageSizeDefault = 20;
+
 export const TracerProjectListQueryParams = zod.object({
-  page: zod
+  name: zod.string().optional(),
+  project_type: zod.string().optional(),
+  tags: zod.string().optional(),
+  filters: zod.string().default(tracerProjectListQueryFiltersDefault),
+  sort_by: zod.string().default(tracerProjectListQuerySortByDefault),
+  sort_direction: zod
+    .enum(["asc", "desc"])
+    .default(tracerProjectListQuerySortDirectionDefault),
+  page_number: zod
     .number()
-    .optional()
-    .describe("A page number within the paginated result set."),
-  limit: zod
-    .number()
-    .optional()
-    .describe("Number of results to return per page."),
+    .min(tracerProjectListQueryPageNumberMin)
+    .default(tracerProjectListQueryPageNumberDefault),
+  page_size: zod.number().min(1).default(tracerProjectListQueryPageSizeDefault),
 });
 
 export const tracerProjectListResponseResultsItemNameMax = 255;
@@ -59230,14 +60367,6 @@ export const tracerTraceSessionListSessionsQueryCursorMax = 4096;
 export const tracerTraceSessionListSessionsQueryCursorModeDefault = false;
 
 export const TracerTraceSessionListSessionsQueryParams = zod.object({
-  page: zod
-    .number()
-    .optional()
-    .describe("A page number within the paginated result set."),
-  limit: zod
-    .number()
-    .optional()
-    .describe("Number of results to return per page."),
   project_id: zod.string().uuid().optional(),
   user_id: zod.string().optional(),
   bookmarked: zod.boolean().optional(),
@@ -59347,8 +60476,8 @@ export const TracerTraceSessionListSessionsResponse = zod.object({
         )
         .optional(),
       query_exact: zod.boolean().optional(),
-      query_provenance: zod.enum(["spans_per_session_candidate"]).optional(),
       ordering_exact: zod.boolean().optional(),
+      query_provenance: zod.enum(["spans_per_session_candidate"]).optional(),
     }),
     table: zod.array(
       zod
@@ -60584,6 +61713,8 @@ export const TracerTraceListTracesResponse = zod.object({
           tracerTraceListTracesResponseResultMetadataQueryAppliedFilterCountMin,
         )
         .optional(),
+      query_exact: zod.boolean().optional(),
+      ordering_exact: zod.boolean().optional(),
     }),
     table: zod.array(
       zod.record(
@@ -60674,14 +61805,6 @@ export const tracerTraceListTracesOfSessionQueryCursorMax = 4096;
 export const tracerTraceListTracesOfSessionQueryCursorModeDefault = false;
 
 export const TracerTraceListTracesOfSessionQueryParams = zod.object({
-  page: zod
-    .number()
-    .optional()
-    .describe("A page number within the paginated result set."),
-  limit: zod
-    .number()
-    .optional()
-    .describe("Number of results to return per page."),
   project_id: zod.string().uuid().optional(),
   project_version_id: zod.string().uuid().optional(),
   session_id: zod.string().uuid().optional(),
@@ -60792,6 +61915,8 @@ export const TracerTraceListTracesOfSessionResponse = zod.object({
           tracerTraceListTracesOfSessionResponseResultMetadataQueryAppliedFilterCountMin,
         )
         .optional(),
+      query_exact: zod.boolean().optional(),
+      ordering_exact: zod.boolean().optional(),
     }),
     table: zod.array(
       zod.record(
@@ -60972,6 +62097,8 @@ export const tracerTraceListVoiceCallsResponseTotalPagesMin = 0;
 export const tracerTraceListVoiceCallsResponseNextCursorFingerprintRegExp =
   new RegExp("^[0-9a-f]{64}$");
 
+export const tracerTraceListVoiceCallsResponseQueryCountMin = 0;
+
 export const tracerTraceListVoiceCallsResponseQueryAppliedFilterSha256RegExp =
   new RegExp("^[0-9a-f]{64}$");
 export const tracerTraceListVoiceCallsResponseQueryAppliedFilterCountMin = 0;
@@ -61016,7 +62143,13 @@ export const TracerTraceListVoiceCallsResponse = zod.object({
     .nullish(),
   query_complete: zod.boolean(),
   query_status: zod.enum(["complete", "degraded"]),
+  query_exact: zod.boolean().optional(),
+  ordering_exact: zod.boolean().optional(),
   query_error_code: zod.string().min(1).optional(),
+  query_count: zod
+    .number()
+    .min(tracerTraceListVoiceCallsResponseQueryCountMin)
+    .optional(),
   query_applied_filter_version: zod
     .enum(["canonical-json-sha256-v1"])
     .optional(),
@@ -61106,6 +62239,8 @@ export const tracerTraceListVoiceCallsCreateResponseTotalPagesMin = 0;
 
 export const tracerTraceListVoiceCallsCreateResponseNextCursorFingerprintRegExp =
   new RegExp("^[0-9a-f]{64}$");
+
+export const tracerTraceListVoiceCallsCreateResponseQueryCountMin = 0;
 
 export const tracerTraceListVoiceCallsCreateResponseQueryAppliedFilterSha256RegExp =
   new RegExp("^[0-9a-f]{64}$");
@@ -63488,9 +64623,14 @@ export const TracerUsersListResponse = zod.object({
     query_status: zod.enum(["complete", "degraded"]).optional(),
     query_exact: zod.boolean().optional(),
     query_provenance: zod
-      .enum(["span_user_rollup_end_users_candidate", "physical_latest_users"])
+      .enum([
+        "span_user_rollup_end_users_candidate",
+        "physical_latest_users",
+        "matching_activity_walk",
+      ])
       .optional(),
     ordering_exact: zod.boolean().optional(),
+    ordering: zod.enum(["latest_matching_activity"]).optional(),
     approximate_fields: zod.array(zod.enum(["num_sessions"])).optional(),
   }),
 });
