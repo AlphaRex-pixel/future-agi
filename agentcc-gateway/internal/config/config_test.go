@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"os"
 	"path/filepath"
@@ -337,31 +338,31 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 }
 
+// The values are shared with the backend's test, which reads the same
+// variable: an unparseable one keeps the safe default in both.
 func TestLoadFromEnv_AllowPrivateProviderURLs(t *testing.T) {
-	for _, tt := range []struct {
-		env  string
-		want bool
-	}{
-		{"", false},
-		{"true", true},
-		{"1", true},
-		{"false", false},
-		{"yes-please", false}, // unparseable keeps the safe default
-		// Parsed like the backend parses it, so the two never disagree.
-		{" true", true},
-		{"TRUE\n", true},
-		{"tRuE", true},
-		{"t", true},
-		{" 0 ", false},
-	} {
-		t.Run(tt.env, func(t *testing.T) {
-			t.Setenv(EnvAllowPrivateProviderURLs, tt.env)
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "api_contracts", "gateway", "provider-url-policy.json"))
+	if err != nil {
+		t.Fatalf("reading the shared URL policy cases: %v", err)
+	}
+	var policy struct {
+		OptInEnv []struct {
+			Value   string `json:"value"`
+			Allowed bool   `json:"allowed"`
+		} `json:"opt_in_env"`
+	}
+	if err := json.Unmarshal(raw, &policy); err != nil {
+		t.Fatalf("parsing the shared URL policy cases: %v", err)
+	}
+	for _, tt := range policy.OptInEnv {
+		t.Run(tt.Value, func(t *testing.T) {
+			t.Setenv(EnvAllowPrivateProviderURLs, tt.Value)
 			cfg, err := Load("")
 			if err != nil {
 				t.Fatalf("Load error: %v", err)
 			}
-			if cfg.OrgProviders.AllowPrivateURLs != tt.want {
-				t.Errorf("AllowPrivateURLs = %v, want %v", cfg.OrgProviders.AllowPrivateURLs, tt.want)
+			if cfg.OrgProviders.AllowPrivateURLs != tt.Allowed {
+				t.Errorf("AllowPrivateURLs = %v, want %v", cfg.OrgProviders.AllowPrivateURLs, tt.Allowed)
 			}
 		})
 	}

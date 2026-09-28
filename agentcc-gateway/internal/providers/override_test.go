@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -357,70 +359,37 @@ func TestResolveOrgConfig_TenantSettingsWin(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestValidateBaseURL(t *testing.T) {
-	stubLookupIP(t, map[string][]string{
-		"api.openai.com":       {"104.18.6.192"},
-		"mock-llm":             {"172.20.0.5"},
-		"host.docker.internal": {"192.168.65.254"},
-		"ollama.lan":           {"10.0.0.12"},
-		"tailnet-box":          {"100.101.102.103"},
-		"ula-box":              {"fd12:3456::1"},
-		"localhost":            {"127.0.0.1", "::1"},
-		"split-horizon":        {"104.18.6.192", "10.0.0.12"},
-		"rebind-to-metadata":   {"169.254.169.254"},
-		"empty-answer":         {},
-	})
+	// The cases are shared with the backend's test of the same policy.
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "api_contracts", "gateway", "provider-url-policy.json"))
+	if err != nil {
+		t.Fatalf("reading the shared URL policy cases: %v", err)
+	}
+	type urlCase struct {
+		URL   string `json:"url"`
+		Class string `json:"class"`
+	}
+	var policy struct {
+		DNS  map[string][]string `json:"dns"`
+		URLs []urlCase           `json:"urls"`
+	}
+	if err := json.Unmarshal(raw, &policy); err != nil {
+		t.Fatalf("parsing the shared URL policy cases: %v", err)
+	}
+	// Cases for the gateway alone: an empty base_url means the provider's
+	// default endpoint, and a resolver can answer with no addresses, which
+	// the backend's getaddrinfo cannot.
+	policy.DNS["empty-answer"] = nil
+	policy.URLs = append(policy.URLs, urlCase{"", "public"}, urlCase{"http://empty-answer", "unresolvable"})
+	stubLookupIP(t, policy.DNS)
 
 	const pass = -1
-	tests := []struct {
-		url          string
-		denied       BaseURLRejection // or pass
-		allowPrivate BaseURLRejection // with the opt-in; or pass
-	}{
-		{"https://api.openai.com", pass, pass},
-		{"http://8.8.8.8:8080", pass, pass},
-		{"", pass, pass},
-
-		// Private/LAN: refused by default, allowed with the opt-in.
-		{"http://mock-llm:8080", BaseURLPrivate, pass},
-		{"http://host.docker.internal:11434", BaseURLPrivate, pass},
-		{"http://ollama.lan:11434", BaseURLPrivate, pass},
-		{"http://10.1.2.3", BaseURLPrivate, pass},
-		{"http://172.31.255.254", BaseURLPrivate, pass},
-		{"http://192.168.1.10:8000", BaseURLPrivate, pass},
-		{"http://100.64.0.1", BaseURLPrivate, pass},
-		{"http://tailnet-box", BaseURLPrivate, pass},
-		{"http://[fd12:3456::1]:8000", BaseURLPrivate, pass},
-		{"http://ula-box", BaseURLPrivate, pass},
-		{"http://split-horizon", BaseURLPrivate, pass},
-
-		// Loopback: never.
-		{"http://127.0.0.1:8080", BaseURLLoopback, BaseURLLoopback},
-		{"http://127.9.9.9", BaseURLLoopback, BaseURLLoopback},
-		{"http://[::1]:8080", BaseURLLoopback, BaseURLLoopback},
-		{"http://localhost:11434", BaseURLLoopback, BaseURLLoopback},
-		{"http://[::ffff:127.0.0.1]", BaseURLLoopback, BaseURLLoopback},
-
-		// Link-local, metadata, unspecified, multicast: never.
-		{"http://169.254.169.254/latest/meta-data", BaseURLForbidden, BaseURLForbidden},
-		{"http://169.254.170.2", BaseURLForbidden, BaseURLForbidden},
-		{"http://[::ffff:169.254.169.254]", BaseURLForbidden, BaseURLForbidden},
-		{"http://[fe80::1]", BaseURLForbidden, BaseURLForbidden},
-		{"http://metadata.google.internal/computeMetadata/v1", BaseURLForbidden, BaseURLForbidden},
-		{"http://METADATA.google.internal.", BaseURLForbidden, BaseURLForbidden},
-		{"http://metadata", BaseURLForbidden, BaseURLForbidden},
-		{"http://rebind-to-metadata", BaseURLForbidden, BaseURLForbidden},
-		{"http://100.100.100.200", BaseURLForbidden, BaseURLForbidden},
-		{"http://[fd00:ec2::254]", BaseURLForbidden, BaseURLForbidden},
-		{"http://168.63.129.16", BaseURLForbidden, BaseURLForbidden},
-		{"http://0.0.0.0:8080", BaseURLForbidden, BaseURLForbidden},
-		{"http://[::]:8080", BaseURLForbidden, BaseURLForbidden},
-		{"http://224.0.0.1", BaseURLForbidden, BaseURLForbidden},
-
-		// Not usable at all.
-		{"ftp://files.example.com", BaseURLInvalid, BaseURLInvalid},
-		{"http://", BaseURLInvalid, BaseURLInvalid},
-		{"http://no-such-host.invalid", BaseURLUnresolvable, BaseURLUnresolvable},
-		{"http://empty-answer", BaseURLUnresolvable, BaseURLUnresolvable},
+	reasons := map[string]BaseURLRejection{
+		"public":       pass,
+		"private":      BaseURLPrivate,
+		"loopback":     BaseURLLoopback,
+		"forbidden":    BaseURLForbidden,
+		"invalid":      BaseURLInvalid,
+		"unresolvable": BaseURLUnresolvable,
 	}
 
 	check := func(t *testing.T, url string, allowPrivate bool, want BaseURLRejection) {
@@ -441,10 +410,17 @@ func TestValidateBaseURL(t *testing.T) {
 			t.Errorf("validateBaseURL(%q, allowPrivate=%v) reason = %d (%v), want %d", url, allowPrivate, urlErr.Reason, err, want)
 		}
 	}
-	for _, tt := range tests {
-		t.Run(tt.url, func(t *testing.T) {
-			check(t, tt.url, false, tt.denied)
-			check(t, tt.url, true, tt.allowPrivate)
+	for _, tt := range policy.URLs {
+		want, ok := reasons[tt.Class]
+		if !ok {
+			t.Fatalf("%s: unknown class %q", tt.URL, tt.Class)
+		}
+		t.Run(tt.URL, func(t *testing.T) {
+			check(t, tt.URL, false, want)
+			if want == BaseURLPrivate {
+				want = pass
+			}
+			check(t, tt.URL, true, want)
 		})
 	}
 }
