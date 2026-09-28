@@ -541,6 +541,11 @@ catalog, boots the stack with `bin/e2e up`, runs `bin/e2e test`, and always uplo
 HTML report (7-day retention); on failure it dumps `bin/e2e ps` and the last 200 log lines. The
 `E2E Tests Pass` gate fails closed unless every dependency succeeded or was legitimately skipped.
 
+The same job runs the suite against the Standalone stack as a nightly schedule and on demand, never
+per PR: run the workflow by hand with `stack: standalone`. That leg builds the four component
+images with the layer cache, assembles the app image with `bin/e2e build standalone-app`, and
+boots with `E2E_STACK=standalone`.
+
 **Wall time in CI has not been measured yet** — the job has never run on a real PR. Record it on the
 first run and put the number here; the hard timeout is 90 minutes and the boot budgets above are the
 laptop-measured ones.
