@@ -203,17 +203,16 @@ jobs:
             grep -qE "^$key: .*# x-release-please-version$" "$chart_file" ||
               error "the $key line must end with # x-release-please-version"
           done
+          # hack/package.sh (the Package step) checks appVersion is v<version>.
           version=$(sed -nE 's/^version: *"?([^" #]+)"?.*/\1/p' "$chart_file")
-          app=$(sed -nE 's/^appVersion: *"?([^" #]+)"?.*/\1/p' "$chart_file")
           release=$(jq -r '."."' .release-please-manifest.json)
-          [ "$app" = "v$version" ] || error "appVersion $app must be v$version (the chart's version)"
           if [ "$BRANCH" = main ]; then
             [ "$version" = "$release" ] ||
               error "version $version must be the platform release $release: set version: $release and appVersion: \"v$release\""
           elif [ "$(printf '%s\n%s\n' "$version" "$release" | sort -V | head -n1)" != "$release" ]; then
             error "version $version is older than the platform release $release"
           fi
-          [ "$failed" = 0 ] && echo "chart $version (appVersion $app), platform release $release on $BRANCH"
+          [ "$failed" = 0 ] && echo "chart $version, platform release $release on $BRANCH"
           exit "$failed"
 
       - name: Artifact Hub changelog from release notes

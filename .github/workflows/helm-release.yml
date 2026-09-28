@@ -6,13 +6,14 @@
 # that tag (Actions > helm-release > Run workflow, "Use workflow from" the tag
 # vX.Y.Z, version vX.Y.Z): the signing identity is this file at that tag.
 #
-#   package  checks out the tag, asserts Chart.yaml (version X.Y.Z, appVersion
-#            vX.Y.Z), and hack/package.sh stamps the digest of every Future
-#            AGI image at that tag and the Artifact Hub annotations into
-#            futureagi-X.Y.Z.tgz. hack/check.sh then runs against the package
-#            itself (helm lint --strict, every value set including examples/,
-#            kubeconform, rendered invariants) on Helm 4 and Helm 3, and
-#            hack/list-images.sh writes the images lock and Hauler manifest.
+#   package  checks out the tag, and hack/package.sh --version asserts
+#            Chart.yaml (version X.Y.Z, appVersion vX.Y.Z), then stamps the
+#            digest of every Future AGI image at that tag and the Artifact Hub
+#            annotations into futureagi-X.Y.Z.tgz. hack/check.sh then runs
+#            against the package itself (helm lint --strict, every value set
+#            including examples/, kubeconform, rendered invariants) on Helm 4
+#            and Helm 3, and hack/list-images.sh writes the images lock and
+#            Hauler manifest.
 #   smoke    installs the .tgz on kind with the published images, in a
 #            restricted Pod Security namespace, with hack/kind-smoke.sh
 #            (CHART=<the .tgz> PUBLISHED=1: install, helm test, upgrade,
@@ -131,18 +132,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Chart.yaml is this release
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          chart_file=deploy/helm/futureagi/Chart.yaml
-          chart_version=$(sed -nE 's/^version: *"?([^" #]+)"?.*/\1/p' "$chart_file")
-          app_version=$(sed -nE 's/^appVersion: *"?([^" #]+)"?.*/\1/p' "$chart_file")
-          [ "$chart_version" = "${VERSION#v}" ] || { echo "::error file=$chart_file::version $chart_version, expected ${VERSION#v} (release-please moves it)"; exit 1; }
-          [ "$app_version" = "$VERSION" ] || { echo "::error file=$chart_file::appVersion $app_version, expected $VERSION"; exit 1; }
-          echo "chart $chart_version, appVersion $app_version"
 
       - name: Install Helm 4, Helm 3 and kubeconform
         run: |
