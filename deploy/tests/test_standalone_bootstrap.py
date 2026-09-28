@@ -364,6 +364,9 @@ class FakeStack:
             "clickhouse_connect": package(
                 "clickhouse_connect", get_client=self.get_client
             ),
+            "structlog": package(
+                "structlog", get_logger=lambda *args, **kwargs: mock.Mock()
+            ),
             # Its real subpackages, bootstrap_install among them, import
             # from the source tree; the ones listed here are fakes.
             "tfc": package("tfc", __path__=[str(BACKEND / "tfc")]),

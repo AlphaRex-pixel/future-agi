@@ -247,9 +247,20 @@ def public_url(url_var: str, port_var: str, default_port: int) -> str:
     )
 
 
+def telemetry_config():
+    """tfc.deployment_telemetry.config: the version and telemetry rules the
+    backend follows. It needs no Django, so the summary can show them first."""
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    from tfc.deployment_telemetry import config
+
+    return config
+
+
 def version() -> str:
-    value = (os.environ.get("FUTURE_AGI_VERSION") or "").strip()
-    if value and value != "unknown":
+    """The version telemetry reports: FUTURE_AGI_VERSION, else the image's."""
+    value = telemetry_config().get_version()
+    if value != "unknown":
         return f"version {value}"
     return "version not pinned (FUTURE_AGI_VERSION)"
 
@@ -290,19 +301,20 @@ def email_summary() -> str:
 
 
 def telemetry_summary() -> str:
-    """Mirrors tfc.deployment_telemetry and docs/configuration.md (Telemetry:
-    what this install sends to Future AGI)."""
-    if (os.environ.get("FUTURE_AGI_TELEMETRY_DISABLED") or "").strip().lower() in TRUE:
+    """When and where tfc.deployment_telemetry sends, by its own rules; what
+    it sends is docs/configuration.md's (Telemetry: what this install sends
+    to Future AGI)."""
+    config = telemetry_config()
+    if config.telemetry_is_disabled():
         return (
             "off: one registration ping (instance id, version, deployment type, "
             "timestamp) only"
         )
-    url = os.environ.get("FUTURE_AGI_TELEMETRY_URL") or "https://api.futureagi.com"
-    host = url.split("://", 1)[-1].split("/", 1)[0]
-    hours = os.environ.get("FUTURE_AGI_TELEMETRY_INTERVAL_HOURS") or "6"
+    host = config.get_telemetry_url().split("://", 1)[-1].split("/", 1)[0]
     return (
-        f"on: owner, admin and staff emails once, then usage counts every {hours} h, never "
-        f"content, to {host}. FUTURE_AGI_TELEMETRY_DISABLED=true turns it off"
+        "on: owner, admin and staff emails once, then usage counts every "
+        f"{config.get_telemetry_interval_hours()} h, never content, to {host}. "
+        "FUTURE_AGI_TELEMETRY_DISABLED=true turns it off"
     )
 
 

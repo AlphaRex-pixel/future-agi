@@ -15,8 +15,10 @@ import json
 import os
 import re
 import socket
+import sys
 import tempfile
 import threading
+import types
 import unittest
 import urllib.error
 import urllib.request
@@ -25,6 +27,7 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
+BACKEND = ROOT / "futureagi"
 STANDALONE = ROOT / "deploy" / "standalone"
 
 _spec = importlib.util.spec_from_file_location(
@@ -44,6 +47,14 @@ SECRETS = {
 }
 
 
+def fake_structlog() -> types.ModuleType:
+    """What tfc.deployment_telemetry.config logs through; the backend's
+    dependencies are not installed here."""
+    module = types.ModuleType("structlog")
+    module.get_logger = lambda *args, **kwargs: mock.Mock()
+    return module
+
+
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -51,20 +62,25 @@ def free_port() -> int:
 
 
 class RunDir(unittest.TestCase):
-    """Points the module's /run/futureagi paths at a temporary directory."""
+    """Points the module's /run/futureagi paths at a temporary directory, and
+    its backend at the source tree."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         run = Path(self._tmp.name) / "futureagi"
-        for name, value in (
-            ("RUN_DIR", run),
-            ("STATUS_FILE", run / "status.json"),
-            ("UI_READY", run / "ready"),
-            ("SUMMARY_SHOWN", run / "summary-shown"),
-            ("VERTEX_KEY", Path(self._tmp.name) / "vertex.json"),
+        for patcher in (
+            mock.patch.object(bootstrap, "RUN_DIR", run),
+            mock.patch.object(bootstrap, "STATUS_FILE", run / "status.json"),
+            mock.patch.object(bootstrap, "UI_READY", run / "ready"),
+            mock.patch.object(bootstrap, "SUMMARY_SHOWN", run / "summary-shown"),
+            mock.patch.object(
+                bootstrap, "VERTEX_KEY", Path(self._tmp.name) / "vertex.json"
+            ),
+            mock.patch.object(bootstrap, "PROJECT_ROOT", BACKEND),
+            mock.patch.object(sys, "path", list(sys.path)),
+            mock.patch.dict(sys.modules, {"structlog": fake_structlog()}),
         ):
-            patcher = mock.patch.object(bootstrap, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
         self.run_dir = run
@@ -118,6 +134,13 @@ class BootSummaryTest(RunDir):
     def test_an_unset_version_says_so(self):
         self.assertIn("version not pinned", self.summary(FUTURE_AGI_VERSION="unknown"))
 
+    def test_the_version_is_the_one_telemetry_reports(self):
+        # FUTURE_AGI_VERSION=unknown (the compose default) and the image's own.
+        self.assertIn(
+            "· version v1.42.0",
+            self.summary(FUTURE_AGI_VERSION="unknown", SERVICE_VERSION="v1.42.0"),
+        )
+
     def test_lists_llm_providers_by_name_only(self):
         text = self.summary(**SECRETS)
 
@@ -162,7 +185,25 @@ class BootSummaryTest(RunDir):
         )
 
     def test_telemetry(self):
-        self.assertTrue(self.row("Telemetry").startswith("on"))
+        self.assertEqual(
+            self.row("Telemetry"),
+            "on: owner, admin and staff emails once, then usage counts every 6 h, "
+            "never content, to api.futureagi.com. FUTURE_AGI_TELEMETRY_DISABLED=true "
+            "turns it off",
+        )
+        # The sender's own rules: an interval it does not accept falls back to 6.
+        for hours, shown in (("12", "12 h"), ("5", "6 h"), ("often", "6 h")):
+            self.assertIn(
+                f"every {shown},",
+                self.row("Telemetry", FUTURE_AGI_TELEMETRY_INTERVAL_HOURS=hours),
+                hours,
+            )
+        self.assertIn(
+            "to t.example.com:8443.",
+            self.row(
+                "Telemetry", FUTURE_AGI_TELEMETRY_URL="https://t.example.com:8443/in/"
+            ),
+        )
         # What the opt-out still sends, as docs/telemetry.md lists it.
         self.assertEqual(
             self.row("Telemetry", FUTURE_AGI_TELEMETRY_DISABLED="true"),
