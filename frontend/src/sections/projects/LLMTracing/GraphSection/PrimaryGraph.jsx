@@ -42,17 +42,11 @@ import {
   PROPERTY_CATALOG_REQUEST_TIMEOUT_MS,
   usePropertyCatalog,
 } from "src/hooks/useDashboards";
-import {
-  format,
-  startOfToday,
-  startOfTomorrow,
-  startOfYesterday,
-  sub,
-} from "date-fns";
+import { format } from "date-fns";
 import _ from "lodash";
 import GraphSkeleton from "./GraphSkeleton";
 import CustomDateRangePicker from "src/components/custom-datepicker/DatePicker";
-import { formatDate } from "src/utils/report-utils";
+import { observePresetDateFilter } from "../../timeWindowPresets";
 import { toBackendFilters } from "../common";
 import { combineGraphFilters } from "./graphFilterUtils";
 import {
@@ -401,47 +395,9 @@ const PrimaryGraph = ({
         setCustomDateOpen(true);
         return;
       }
-      let filter = null;
-      switch (option) {
-        case "Today":
-          filter = [formatDate(startOfToday()), formatDate(startOfTomorrow())];
-          break;
-        case "Yesterday":
-          filter = [formatDate(startOfYesterday()), formatDate(startOfToday())];
-          break;
-        case "7D":
-          filter = [
-            formatDate(sub(new Date(), { days: 7 })),
-            formatDate(startOfTomorrow()),
-          ];
-          break;
-        case "30D":
-          filter = [
-            formatDate(sub(new Date(), { days: 30 })),
-            formatDate(startOfTomorrow()),
-          ];
-          break;
-        case "3M":
-          filter = [
-            formatDate(sub(new Date(), { months: 3 })),
-            formatDate(startOfTomorrow()),
-          ];
-          break;
-        case "6M":
-          filter = [
-            formatDate(sub(new Date(), { months: 6 })),
-            formatDate(startOfTomorrow()),
-          ];
-          break;
-        case "12M":
-          filter = [
-            formatDate(sub(new Date(), { months: 12 })),
-            formatDate(startOfTomorrow()),
-          ];
-          break;
-        default:
-          break;
-      }
+      // One shared window per preset: hour-floored start, next-midnight end,
+      // identical to the default load (see observePresetDateFilter).
+      const filter = observePresetDateFilter(option);
       if (filter)
         setDateFilter((prev) => ({
           ...prev,
@@ -717,6 +673,10 @@ const PrimaryGraph = ({
     },
     enabled: !!effectiveObserveId && !!metricDef.id,
     staleTime: Infinity,
+    // Rolling presets now keep one window for an hour, so an in-app revisit
+    // has the same key. Ask the server anyway: it serves the cached exact
+    // snapshot at once and says whether a newer read of it is under way.
+    refetchOnMount: "always",
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchInterval: (query) => {
