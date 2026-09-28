@@ -1087,10 +1087,19 @@ const DevelopDataV2 = ({ datasetId, viewOptions }) => {
 
   useEffect(() => {
     if (wasProcessingData.current && !averageMetaData?.isProcessingData) {
+      // The cached pages were read while processing (the filter box's
+      // observer refetches them on every poll), and getRows serves any
+      // page that is not invalidated, so mark them stale before reloading.
+      queryClient.invalidateQueries({ queryKey: ["dataset-detail", dataset] });
       gridApiRef.current?.api?.refreshServerSide();
     }
     wasProcessingData.current = Boolean(averageMetaData?.isProcessingData);
-  }, [averageMetaData?.isProcessingData, refetchTableData]);
+  }, [
+    averageMetaData?.isProcessingData,
+    refetchTableData,
+    queryClient,
+    dataset,
+  ]);
 
   const onColumnChanged = useCallback(
     (params) => {

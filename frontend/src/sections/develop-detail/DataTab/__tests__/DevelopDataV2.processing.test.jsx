@@ -208,11 +208,11 @@ describe("DevelopDataV2 while an uploaded file is processing", () => {
     expect(gridRowIds()).toEqual(ROW_IDS);
   });
 
-  it("replaces them when processing ends between a poll's page and column reads", async () => {
-    // As in the failed e2e run: the poll's page reads still see the upload
-    // processing and its column-config read sees it done. The filter box's
-    // refetch left that processing page in the cache as fresh, and the grid
-    // refresh fired by the column config served it again.
+  it("replaces them at the flip when processing ends between a poll's page and column reads", async () => {
+    // As in the failed e2e run: the first poll's (5s) page reads still see
+    // the upload processing and its column-config read sees it done. The
+    // filter box's refetch left that processing page in the cache as fresh;
+    // the grid refresh fired by the column config must not serve it.
     let columnReads = 0;
     server.isDone = (_request, kind) => {
       if (kind === "columns") columnReads += 1;
@@ -222,8 +222,10 @@ describe("DevelopDataV2 while an uploaded file is processing", () => {
     await advance(1000);
     expect(gridRowIds()).toEqual(PLACEHOLDER_IDS);
 
-    await advance(30000);
+    await advance(8000);
 
+    // Still before the next poll (10s), which would otherwise recover it.
+    expect(columnReads).toBe(2);
     expect(gridRowIds()).toEqual(ROW_IDS);
   });
 
