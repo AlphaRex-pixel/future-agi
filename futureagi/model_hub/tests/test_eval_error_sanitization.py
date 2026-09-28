@@ -19,6 +19,7 @@ from model_hub.selectors.eval_usage import (
     EvalUsageReadCompleteness,
     EvalUsageReadError,
     EvalUsageReadErrorCode,
+    eval_usage_snapshot_is_stale,
 )
 from model_hub.serializers.contracts import EvalUsageQuerySerializer
 from model_hub.views import separate_evals
@@ -408,6 +409,28 @@ def test_eval_usage_keeps_a_snapshot_no_run_has_changed_since(
 
     assert not _public_poll_refresh_flag(
         auth_client, template, monkeypatch, completed_at
+    )
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "snapshot",
+    [None, {}, {"query_completed_at": None}, {"query_completed_at": "not-a-time"}],
+)
+def test_eval_usage_snapshot_without_a_completion_time_is_not_stale(
+    organization, workspace, snapshot
+):
+    """A cold read, or a payload with no readable completion time, is never
+    refreshed on the strength of newer runs alone."""
+
+    template = _usage_template(organization, workspace)
+    _usage_row(template, organization, workspace)
+
+    assert not eval_usage_snapshot_is_stale(
+        organization=organization,
+        template_id=template.id,
+        cache_identity={"template_id": str(template.id)},
+        snapshot=snapshot,
     )
 
 

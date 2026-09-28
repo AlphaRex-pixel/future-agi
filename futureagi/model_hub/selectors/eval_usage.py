@@ -6,7 +6,10 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
+from uuid import UUID
+
+from django.utils import timezone
 
 from tracer.services.clickhouse.application_read_policy import (
     application_read_context,
@@ -20,6 +23,15 @@ from tracer.services.clickhouse.read_budget import (
 from tracer.services.clickhouse.trace_project_scope import (
     latest_live_trace_projects_sql,
 )
+from tracer.services.exact_aggregation_cache import exact_refresh_state
+
+try:
+    from ee.usage.models.usage import APICallLog
+except ImportError:
+    APICallLog = None
+
+if TYPE_CHECKING:
+    from accounts.models.organization import Organization
 
 READ_TIMEOUT_MS = 9_500
 MAX_PAGE_SIZE = 100
@@ -812,6 +824,72 @@ def read_eval_usage(
         raise_typed("eval_usage", exc)
 
 
+# How far before a snapshot a usage row can have been created and still change
+# afterwards: a row stays PROCESSING until its eval run settles, and the eval
+# activities cap one run at an hour (``time_limit=3600``).
+_EVAL_USAGE_IN_FLIGHT_WINDOW = timedelta(hours=1)
+
+# A snapshot younger than this is served without an automatic refresh. The
+# browser polls until a refresh publishes; on a template that runs every few
+# seconds a newer run already exists by then, so without a minimum age every
+# poll would start another exact read. The frontend's longest configurable
+# poll delay (60 s) plus one request (30 s) lands inside this window.
+_EVAL_USAGE_AUTO_REFRESH_MIN_AGE = timedelta(minutes=2)
+
+# Rows written up to this long before a snapshot published also count as newer:
+# the snapshot's time is its publish time, not when ClickHouse was read, and
+# ClickHouse reads a CDC copy that lags Postgres by seconds. Must not exceed
+# the minimum age, or a quiet template would refresh on every visit.
+_EVAL_USAGE_LATE_ROW_MARGIN = _EVAL_USAGE_AUTO_REFRESH_MIN_AGE
+
+
+def eval_usage_snapshot_is_stale(
+    *,
+    organization: Organization,
+    template_id: UUID | str,
+    cache_identity: dict[str, Any],
+    snapshot: dict[str, Any] | None,
+) -> bool:
+    """Whether a public request should refresh ``snapshot`` in the background.
+
+    Exact snapshots are served until refreshed and are keyed by period, not by
+    data, so without this a period's first-visit snapshot kept serving for the
+    whole cache TTL while newer runs existed. A snapshot is stale when a usage
+    row for ``template_id`` was written after it (a newer run, or an in-flight
+    run that settled after it) and all of these hold:
+
+    - it is at least ``_EVAL_USAGE_AUTO_REFRESH_MIN_AGE`` old, so the polls that
+      follow a refresh settle on the new snapshot instead of chaining reads;
+    - no refresh is running or has just failed. A failed refresh never
+      publishes, so its snapshot stays old; retrying it waits for the user's
+      Refresh instead of resubmitting a failing read on every poll.
+
+    The row scan stays on the ``(organization, source_id, -created_at)`` index.
+    A read that takes longer than ``_EVAL_USAGE_LATE_ROW_MARGIN`` can still miss
+    rows that landed as it started; the next run or a Refresh picks them up.
+    """
+    completed_at = (snapshot or {}).get("query_completed_at")
+    if not isinstance(completed_at, str):
+        return False
+    try:
+        completed_at = datetime.fromisoformat(completed_at)
+    except ValueError:
+        return False
+    if completed_at.tzinfo is None:
+        completed_at = completed_at.replace(tzinfo=UTC)
+    if timezone.now() - completed_at < _EVAL_USAGE_AUTO_REFRESH_MIN_AGE:
+        return False
+    if exact_refresh_state("eval-usage", cache_identity) is not None:
+        return False
+    written_after = completed_at - _EVAL_USAGE_LATE_ROW_MARGIN
+    return APICallLog.objects.filter(
+        organization=organization,
+        source_id=str(template_id),
+        created_at__gte=written_after - _EVAL_USAGE_IN_FLIGHT_WINDOW,
+        updated_at__gt=written_after,
+    ).exists()
+
+
 __all__ = [
     "EvalUsageChartBucket",
     "EvalUsageLog",
@@ -819,5 +897,6 @@ __all__ = [
     "EvalUsageReadCompleteness",
     "EvalUsageReadError",
     "EvalUsageReadErrorCode",
+    "eval_usage_snapshot_is_stale",
     "read_eval_usage",
 ]
