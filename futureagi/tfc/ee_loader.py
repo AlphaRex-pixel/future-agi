@@ -9,11 +9,15 @@ def has_ee(module: str) -> bool:
         return False
 
 
+# Where the Temporal worker loads Future AGI Cloud's usage hooks from, the
+# legacy EE location last (tfc/temporal/common/registry.py). They ship the
+# UsageConsumerWorkflow, the consumer of the usage:events Redis stream.
+USAGE_TEMPORAL_MODULES = ("ee.cloud.temporal", "ee.usage.temporal")
+
+
 def usage_event_consumer_available() -> bool:
-    """Whether this code ships the consumer of the usage:events Redis stream:
-    Future AGI Cloud's UsageConsumerWorkflow, which the Temporal worker loads
-    from the same modules (tfc/temporal/common/registry.py)."""
-    return has_ee("ee.cloud.temporal") or has_ee("ee.usage.temporal")
+    """Whether this code ships the consumer of the usage:events Redis stream."""
+    return any(has_ee(module) for module in USAGE_TEMPORAL_MODULES)
 
 
 def _is_oss_mode() -> bool:

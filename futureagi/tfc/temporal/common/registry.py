@@ -9,6 +9,8 @@ to avoid sandbox validation issues.
 from collections.abc import Callable
 from importlib import import_module
 
+from tfc.ee_loader import USAGE_TEMPORAL_MODULES
+
 # =============================================================================
 # Registry Storage
 # =============================================================================
@@ -129,7 +131,7 @@ def register_for_queues(
 
 def _load_usage_temporal_registry(name: str) -> Callable[[], list] | None:
     """Load cloud usage Temporal hooks, with legacy EE compatibility."""
-    for module_name in ("ee.cloud.temporal", "ee.usage.temporal"):
+    for module_name in USAGE_TEMPORAL_MODULES:
         try:
             temporal_module = import_module(module_name)
         except ModuleNotFoundError as exc:
