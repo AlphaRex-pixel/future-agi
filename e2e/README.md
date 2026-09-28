@@ -549,9 +549,10 @@ the run it repeats. The Standalone leg builds the four component images with the
 assembles the app image with `bin/e2e build standalone-app`, and boots with `E2E_STACK=standalone`.
 The `upgrade` job in `.github/workflows/standalone-ci.yml` runs weekly and on demand. It installs
 v1.41.1 with its own `./bin/install` and sends a trace. Then it re-runs `./bin/install` at the head
-commit and checks three things: the install stays on the Distributed setup
-(`COMPOSE_FILE=docker-compose.distributed.yml` in `.env`), the first account still signs in, and the
-trace is still there.
+commit and checks four things: the install stays on the Distributed setup
+(`COMPOSE_FILE=docker-compose.distributed.yml` in `.env`), its backend, worker, frontend and gateway
+run the head commit's `:local` images, the first account still signs in, and the trace is still
+there.
 
 **Wall time in CI has not been measured yet** — the job has never run on a real PR. Record it on the
 first run and put the number here; the hard timeout is 90 minutes and the boot budgets above are the

@@ -36,7 +36,8 @@
 # docker-compose.yml was the Distributed stack, installed with its own
 # ./bin/install and sent a trace, then ./bin/install re-run at this commit.
 # The install must stay Distributed (COMPOSE_FILE=docker-compose.distributed.yml
-# in .env), and its account must still sign in and read the trace.
+# in .env) and run this commit's images, and its account must still sign in
+# and read the trace.
 name: Standalone install CI
 
 on:
@@ -60,6 +61,7 @@ on:
       - "agentcc-gateway/Dockerfile"
       - "scripts/image_size_budget.*"
       - "scripts/install-smoke.sh"
+      - "scripts/test_install_smoke.py"
       - "scripts/reclaim-runner-disk.sh"
       - ".github/workflows/standalone-ci.yml"
   workflow_dispatch:
@@ -119,6 +121,7 @@ jobs:
               - 'agentcc-gateway/Dockerfile'
               - 'scripts/image_size_budget.*'
               - 'scripts/install-smoke.sh'
+              - 'scripts/test_install_smoke.py'
               - 'scripts/reclaim-runner-disk.sh'
               - '.github/workflows/standalone-ci.yml'
             arm64:
@@ -149,8 +152,9 @@ jobs:
           fi
 
   # The Standalone first boot (deploy/standalone/bin/bootstrap.py and its
-  # starting page) and the production overlay's checks, with fakes for the
-  # backend and the datastores: standard library only, seconds to run.
+  # starting page), the production overlay's checks and the install smoke
+  # checks, with fakes for the backend, the datastores and docker: standard
+  # library only, seconds to run.
   standalone-unit:
     name: standalone bootstrap unit tests
     needs: changes
@@ -162,10 +166,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: deploy/tests (standalone bootstrap, first run, production setup)
+      - name: deploy/tests (standalone bootstrap, first run, production setup) and install-smoke.sh
         run: |
           python -m unittest discover -s deploy/tests -p 'test_standalone_*.py' -v
           python -m unittest discover -s deploy/tests -p 'test_production_setup.py' -v
+          python -m unittest discover -s scripts -p 'test_install_smoke.py' -v
 
   standalone-install:
     name: standalone install (${{ matrix.arch }})
@@ -585,6 +590,8 @@ jobs:
 
       # This commit's Distributed images, tagged `local` as --from-source tags
       # them, from the layer caches e2e-ci.yml and the release builds keep.
+      # Not fi-collector: ./bin/install builds it (`up --build`, its build:
+      # section in docker-compose.distributed.yml).
       - name: Build backend image
         uses: docker/build-push-action@v5
         with:
@@ -604,15 +611,6 @@ jobs:
           load: true
           tags: futureagi/frontend:local
           cache-from: type=registry,ref=${{ env.CACHE_REPO }}:frontend
-
-      - name: Build fi-collector image
-        uses: docker/build-push-action@v5
-        with:
-          context: fi-collector
-          file: fi-collector/Dockerfile
-          load: true
-          tags: futureagi/fi-collector:local
-          cache-from: type=registry,ref=${{ env.CACHE_REPO }}:fi-collector
 
       - name: Build agentcc-gateway image
         uses: docker/build-push-action@v5
@@ -637,7 +635,7 @@ jobs:
           AGENTCC_GATEWAY_VERSION: local
         run: ./bin/install -y
 
-      - name: The install stayed Distributed, with its account and trace
+      - name: The install stayed Distributed, on this commit's images, with its account and trace
         timeout-minutes: 10
         run: |
           set -euo pipefail
@@ -646,6 +644,10 @@ jobs:
           grep -qx 'COMPOSE_FILE=docker-compose.distributed.yml' .env \
             || fail ".env records $(grep '^COMPOSE_FILE=' .env || echo 'no COMPOSE_FILE'), not COMPOSE_FILE=docker-compose.distributed.yml"
           echo "PASS  .env records COMPOSE_FILE=docker-compose.distributed.yml"
+          # Containers left from v1.41.1 would pass every other check here.
+          # fi-collector is `local` in both releases, so its tag proves nothing.
+          why=$(smoke_services_run_tag local backend worker frontend agentcc-gateway 2>&1) || fail "$why"
+          echo "PASS  backend, worker, frontend and agentcc-gateway run this commit's :local images"
           token=$(smoke_sign_in) || fail "the account v1.41.1 created no longer signs in"
           echo "PASS  sign-in with the account v1.41.1 created"
           eventually 180 smoke_trace_readable "$token" "$SMOKE_PROJECT" \

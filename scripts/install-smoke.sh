@@ -83,3 +83,25 @@ smoke_trace_readable() {
     > "$RUNNER_TEMP/spans.json" || return 1
   grep -q '"llm.call"' "$RUNNER_TEMP/spans.json" && grep -q 'Paris' "$RUNNER_TEMP/spans.json"
 }
+
+# tag, service...: every running container of each service (docker compose ps
+# in the install's directory) was created from an image with that tag. Names
+# the first one that was not on stderr.
+smoke_services_run_tag() {
+  local tag=$1 service ids id image
+  shift
+  for service in "$@"; do
+    ids=$(docker compose ps -q "$service") || return 1
+    if [ -z "$ids" ]; then
+      echo "$service has no running container" >&2
+      return 1
+    fi
+    for id in $ids; do
+      image=$(docker inspect --format '{{.Config.Image}}' "$id") || return 1
+      if [ "${image##*:}" != "$tag" ]; then
+        echo "$service runs $image, not :$tag" >&2
+        return 1
+      fi
+    done
+  done
+}
