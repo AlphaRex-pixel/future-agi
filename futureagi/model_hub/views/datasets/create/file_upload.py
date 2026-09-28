@@ -44,6 +44,7 @@ from model_hub.views.utils.dataset_limit import dataset_add_refusal
 from tfc.settings.settings import UPLOAD_BUCKET_NAME
 from tfc.temporal import temporal_activity
 from tfc.utils.api_contracts import validated_request
+from tfc.utils.api_serializers import DatasetLimitCheckFailedErrorSerializer
 from tfc.utils.error_codes import get_error_message
 from tfc.utils.general_methods import GeneralMethods
 from tfc.utils.storage import (
@@ -985,6 +986,7 @@ class CreateDatasetFromLocalFileView(CreateAPIView):
         responses={
             200: LocalFileDatasetCreateStartedResponseSerializer,
             **MODEL_HUB_ERROR_RESPONSES,
+            503: DatasetLimitCheckFailedErrorSerializer,
         },
         reject_unknown_fields=True,
     )

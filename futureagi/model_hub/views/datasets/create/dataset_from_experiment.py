@@ -28,6 +28,7 @@ from model_hub.views.utils.utils import get_recommendations, update_column_id
 from model_hub.validators.dataset_validators import validate_dataset_name_unique
 from tfc.middleware.workspace_context import get_current_workspace
 from tfc.utils.api_contracts import validated_request
+from tfc.utils.api_serializers import DatasetLimitCheckFailedErrorSerializer
 from tfc.utils.error_codes import get_error_message
 from tfc.utils.general_methods import GeneralMethods
 from tfc.utils.parse_errors import parse_serialized_errors
@@ -106,6 +107,7 @@ class CreateDatasetFromExpView(APIView):
         responses={
             200: DevelopDatasetMessageResponseSerializer,
             **MODEL_HUB_ERROR_RESPONSES,
+            503: DatasetLimitCheckFailedErrorSerializer,
         },
         reject_unknown_fields=True,
     )

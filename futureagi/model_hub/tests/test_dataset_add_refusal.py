@@ -7,6 +7,7 @@ from rest_framework import status
 
 from model_hub.views.utils.dataset_limit import dataset_add_refusal
 from tfc.constants.api_calls import APICallStatusChoices
+from tfc.utils.api_serializers import DatasetLimitCheckFailedErrorSerializer
 from tfc.utils.error_codes import get_error_message
 
 
@@ -21,6 +22,9 @@ def test_unverified_limit_asks_to_retry():
     # The frontend shows this typed code's message whatever the status.
     assert response.data["code"] == "dataset_limit_check_failed"
     assert response.data["message"] == get_error_message("DATASET_LIMIT_CHECK_FAILED")
+    # The body is the 503 the dataset-create endpoints declare.
+    declared = DatasetLimitCheckFailedErrorSerializer(data=response.data)
+    assert declared.is_valid(), declared.errors
 
 
 @pytest.mark.parametrize("sdk_source", [False, True])

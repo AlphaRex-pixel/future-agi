@@ -350,6 +350,7 @@ import type {
   DatasetEvalStatsResponseApi,
   DatasetExplanationSummaryResponseApi,
   DatasetJsonSchemaResponseApi,
+  DatasetLimitCheckFailedErrorApi,
   DatasetListResponseApi,
   DatasetMultipleStaticColumnsRequestApi,
   DatasetNamesResponseApi,
@@ -32658,9 +32659,14 @@ export type modelHubDatasetsDuplicateCreateResponse500 = {
   status: 500;
 };
 
+export type modelHubDatasetsDuplicateCreateResponse503 = {
+  data: DatasetLimitCheckFailedErrorApi;
+  status: 503;
+};
+
 export type modelHubDatasetsDuplicateCreateResponseDefault = {
   data: ManagementAPIErrorResponseApi;
-  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500>;
+  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500 | 503>;
 };
 
 export type modelHubDatasetsDuplicateCreateResponseSuccess =
@@ -32673,6 +32679,7 @@ export type modelHubDatasetsDuplicateCreateResponseError = (
   | modelHubDatasetsDuplicateCreateResponse404
   | modelHubDatasetsDuplicateCreateResponse409
   | modelHubDatasetsDuplicateCreateResponse500
+  | modelHubDatasetsDuplicateCreateResponse503
   | modelHubDatasetsDuplicateCreateResponseDefault
 ) & {
   headers: Headers;
@@ -33033,9 +33040,14 @@ export type modelHubDevelopsAddAsNewCreateResponse500 = {
   status: 500;
 };
 
+export type modelHubDevelopsAddAsNewCreateResponse503 = {
+  data: DatasetLimitCheckFailedErrorApi;
+  status: 503;
+};
+
 export type modelHubDevelopsAddAsNewCreateResponseDefault = {
   data: ManagementAPIErrorResponseApi;
-  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500>;
+  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500 | 503>;
 };
 
 export type modelHubDevelopsAddAsNewCreateResponseSuccess =
@@ -33048,6 +33060,7 @@ export type modelHubDevelopsAddAsNewCreateResponseError = (
   | modelHubDevelopsAddAsNewCreateResponse404
   | modelHubDevelopsAddAsNewCreateResponse409
   | modelHubDevelopsAddAsNewCreateResponse500
+  | modelHubDevelopsAddAsNewCreateResponse503
   | modelHubDevelopsAddAsNewCreateResponseDefault
 ) & {
   headers: Headers;
@@ -33325,9 +33338,14 @@ export type modelHubDevelopsCloneDatasetCreateResponse500 = {
   status: 500;
 };
 
+export type modelHubDevelopsCloneDatasetCreateResponse503 = {
+  data: DatasetLimitCheckFailedErrorApi;
+  status: 503;
+};
+
 export type modelHubDevelopsCloneDatasetCreateResponseDefault = {
   data: ManagementAPIErrorResponseApi;
-  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500>;
+  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500 | 503>;
 };
 
 export type modelHubDevelopsCloneDatasetCreateResponseSuccess =
@@ -33340,6 +33358,7 @@ export type modelHubDevelopsCloneDatasetCreateResponseError = (
   | modelHubDevelopsCloneDatasetCreateResponse404
   | modelHubDevelopsCloneDatasetCreateResponse409
   | modelHubDevelopsCloneDatasetCreateResponse500
+  | modelHubDevelopsCloneDatasetCreateResponse503
   | modelHubDevelopsCloneDatasetCreateResponseDefault
 ) & {
   headers: Headers;
@@ -33399,10 +33418,15 @@ export type modelHubDevelopsCreateDatasetFromHuggingfaceCreateResponse500 = {
   status: 500;
 };
 
+export type modelHubDevelopsCreateDatasetFromHuggingfaceCreateResponse503 = {
+  data: DatasetLimitCheckFailedErrorApi;
+  status: 503;
+};
+
 export type modelHubDevelopsCreateDatasetFromHuggingfaceCreateResponseDefault =
   {
     data: ManagementAPIErrorResponseApi;
-    status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500>;
+    status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500 | 503>;
   };
 
 export type modelHubDevelopsCreateDatasetFromHuggingfaceCreateResponseSuccess =
@@ -33415,6 +33439,7 @@ export type modelHubDevelopsCreateDatasetFromHuggingfaceCreateResponseError = (
   | modelHubDevelopsCreateDatasetFromHuggingfaceCreateResponse404
   | modelHubDevelopsCreateDatasetFromHuggingfaceCreateResponse409
   | modelHubDevelopsCreateDatasetFromHuggingfaceCreateResponse500
+  | modelHubDevelopsCreateDatasetFromHuggingfaceCreateResponse503
   | modelHubDevelopsCreateDatasetFromHuggingfaceCreateResponseDefault
 ) & {
   headers: Headers;
@@ -33473,9 +33498,14 @@ export type modelHubDevelopsCreateDatasetFromLocalFileCreateResponse500 = {
   status: 500;
 };
 
+export type modelHubDevelopsCreateDatasetFromLocalFileCreateResponse503 = {
+  data: DatasetLimitCheckFailedErrorApi;
+  status: 503;
+};
+
 export type modelHubDevelopsCreateDatasetFromLocalFileCreateResponseDefault = {
   data: ManagementAPIErrorResponseApi;
-  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500>;
+  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500 | 503>;
 };
 
 export type modelHubDevelopsCreateDatasetFromLocalFileCreateResponseSuccess =
@@ -33488,6 +33518,7 @@ export type modelHubDevelopsCreateDatasetFromLocalFileCreateResponseError = (
   | modelHubDevelopsCreateDatasetFromLocalFileCreateResponse404
   | modelHubDevelopsCreateDatasetFromLocalFileCreateResponse409
   | modelHubDevelopsCreateDatasetFromLocalFileCreateResponse500
+  | modelHubDevelopsCreateDatasetFromLocalFileCreateResponse503
   | modelHubDevelopsCreateDatasetFromLocalFileCreateResponseDefault
 ) & {
   headers: Headers;
@@ -33546,9 +33577,14 @@ export type modelHubDevelopsCreateDatasetManuallyCreateResponse500 = {
   status: 500;
 };
 
+export type modelHubDevelopsCreateDatasetManuallyCreateResponse503 = {
+  data: DatasetLimitCheckFailedErrorApi;
+  status: 503;
+};
+
 export type modelHubDevelopsCreateDatasetManuallyCreateResponseDefault = {
   data: ManagementAPIErrorResponseApi;
-  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500>;
+  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500 | 503>;
 };
 
 export type modelHubDevelopsCreateDatasetManuallyCreateResponseSuccess =
@@ -33561,6 +33597,7 @@ export type modelHubDevelopsCreateDatasetManuallyCreateResponseError = (
   | modelHubDevelopsCreateDatasetManuallyCreateResponse404
   | modelHubDevelopsCreateDatasetManuallyCreateResponse409
   | modelHubDevelopsCreateDatasetManuallyCreateResponse500
+  | modelHubDevelopsCreateDatasetManuallyCreateResponse503
   | modelHubDevelopsCreateDatasetManuallyCreateResponseDefault
 ) & {
   headers: Headers;
@@ -33619,9 +33656,14 @@ export type modelHubDevelopsCreateEmptyDatasetCreateResponse500 = {
   status: 500;
 };
 
+export type modelHubDevelopsCreateEmptyDatasetCreateResponse503 = {
+  data: DatasetLimitCheckFailedErrorApi;
+  status: 503;
+};
+
 export type modelHubDevelopsCreateEmptyDatasetCreateResponseDefault = {
   data: ManagementAPIErrorResponseApi;
-  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500>;
+  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500 | 503>;
 };
 
 export type modelHubDevelopsCreateEmptyDatasetCreateResponseSuccess =
@@ -33634,6 +33676,7 @@ export type modelHubDevelopsCreateEmptyDatasetCreateResponseError = (
   | modelHubDevelopsCreateEmptyDatasetCreateResponse404
   | modelHubDevelopsCreateEmptyDatasetCreateResponse409
   | modelHubDevelopsCreateEmptyDatasetCreateResponse500
+  | modelHubDevelopsCreateEmptyDatasetCreateResponse503
   | modelHubDevelopsCreateEmptyDatasetCreateResponseDefault
 ) & {
   headers: Headers;
@@ -33692,9 +33735,14 @@ export type modelHubDevelopsCreateSyntheticDatasetCreateResponse500 = {
   status: 500;
 };
 
+export type modelHubDevelopsCreateSyntheticDatasetCreateResponse503 = {
+  data: DatasetLimitCheckFailedErrorApi;
+  status: 503;
+};
+
 export type modelHubDevelopsCreateSyntheticDatasetCreateResponseDefault = {
   data: ManagementAPIErrorResponseApi;
-  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500>;
+  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500 | 503>;
 };
 
 export type modelHubDevelopsCreateSyntheticDatasetCreateResponseSuccess =
@@ -33707,6 +33755,7 @@ export type modelHubDevelopsCreateSyntheticDatasetCreateResponseError = (
   | modelHubDevelopsCreateSyntheticDatasetCreateResponse404
   | modelHubDevelopsCreateSyntheticDatasetCreateResponse409
   | modelHubDevelopsCreateSyntheticDatasetCreateResponse500
+  | modelHubDevelopsCreateSyntheticDatasetCreateResponse503
   | modelHubDevelopsCreateSyntheticDatasetCreateResponseDefault
 ) & {
   headers: Headers;
@@ -37000,9 +37049,14 @@ export type modelHubDevelopsCreateDatasetCreateResponse500 = {
   status: 500;
 };
 
+export type modelHubDevelopsCreateDatasetCreateResponse503 = {
+  data: DatasetLimitCheckFailedErrorApi;
+  status: 503;
+};
+
 export type modelHubDevelopsCreateDatasetCreateResponseDefault = {
   data: ManagementAPIErrorResponseApi;
-  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500>;
+  status: Exclude<HTTPStatusCodes, 200 | 400 | 403 | 404 | 409 | 500 | 503>;
 };
 
 export type modelHubDevelopsCreateDatasetCreateResponseSuccess =
@@ -37015,6 +37069,7 @@ export type modelHubDevelopsCreateDatasetCreateResponseError = (
   | modelHubDevelopsCreateDatasetCreateResponse404
   | modelHubDevelopsCreateDatasetCreateResponse409
   | modelHubDevelopsCreateDatasetCreateResponse500
+  | modelHubDevelopsCreateDatasetCreateResponse503
   | modelHubDevelopsCreateDatasetCreateResponseDefault
 ) & {
   headers: Headers;
@@ -68123,19 +68178,26 @@ export type tracerDatasetAddToNewDatasetResponse201 = {
   status: 201;
 };
 
+export type tracerDatasetAddToNewDatasetResponse503 = {
+  data: DatasetLimitCheckFailedErrorApi;
+  status: 503;
+};
+
 export type tracerDatasetAddToNewDatasetResponseDefault = {
   data: ManagementAPIErrorResponseApi;
-  status: Exclude<HTTPStatusCodes, 201>;
+  status: Exclude<HTTPStatusCodes, 201 | 503>;
 };
 
 export type tracerDatasetAddToNewDatasetResponseSuccess =
   tracerDatasetAddToNewDatasetResponse201 & {
     headers: Headers;
   };
-export type tracerDatasetAddToNewDatasetResponseError =
-  tracerDatasetAddToNewDatasetResponseDefault & {
-    headers: Headers;
-  };
+export type tracerDatasetAddToNewDatasetResponseError = (
+  | tracerDatasetAddToNewDatasetResponse503
+  | tracerDatasetAddToNewDatasetResponseDefault
+) & {
+  headers: Headers;
+};
 
 export type tracerDatasetAddToNewDatasetResponse =
   | tracerDatasetAddToNewDatasetResponseSuccess

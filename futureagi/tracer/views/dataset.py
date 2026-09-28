@@ -2,6 +2,7 @@ import uuid
 
 import structlog
 from django.db.models import Q
+from drf_yasg.utils import swagger_auto_schema
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -16,6 +17,7 @@ from model_hub.views.utils.dataset_limit import (
     dataset_limit_reached_response,
 )
 from tfc.utils.api_errors import ApiErrorCode
+from tfc.utils.api_serializers import DatasetLimitCheckFailedErrorSerializer
 from tfc.utils.base_viewset import BaseModelViewSetMixinWithUserOrg
 from tfc.utils.error_codes import get_error_message
 from tfc.utils.general_methods import GeneralMethods
@@ -56,6 +58,7 @@ class DatasetView(BaseModelViewSetMixinWithUserOrg, ModelViewSet):
 
         return queryset
 
+    @swagger_auto_schema(responses={503: DatasetLimitCheckFailedErrorSerializer})
     @action(detail=False, methods=["post"])
     def add_to_new_dataset(self, request, *args, **kwargs):
         try:

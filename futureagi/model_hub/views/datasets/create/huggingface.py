@@ -43,6 +43,7 @@ from model_hub.views.utils.hugginface import (
 from model_hub.views.utils.utils import get_recommendations
 from tfc.settings.settings import HUGGINGFACE_API_TOKEN
 from tfc.utils.api_contracts import validated_request
+from tfc.utils.api_serializers import DatasetLimitCheckFailedErrorSerializer
 from tfc.utils.error_codes import get_error_message
 from tfc.utils.general_methods import GeneralMethods
 from tfc.utils.parse_errors import parse_serialized_errors
@@ -157,6 +158,7 @@ class CreateDatasetFromHuggingFaceView(CreateAPIView):
         responses={
             200: DatasetCreateStartedResponseSerializer,
             **MODEL_HUB_ERROR_RESPONSES,
+            503: DatasetLimitCheckFailedErrorSerializer,
         },
         reject_unknown_fields=True,
     )

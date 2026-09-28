@@ -308,6 +308,7 @@ from tfc.settings.settings import BASE_URL, HUGGINGFACE_API_TOKEN
 from tfc.telemetry import wrap_for_thread
 from tfc.temporal import temporal_activity
 from tfc.utils.api_contracts import validated_request
+from tfc.utils.api_serializers import DatasetLimitCheckFailedErrorSerializer
 from tfc.utils.error_codes import get_error_message
 from tfc.utils.functions import (
     calculate_column_average,
@@ -1019,7 +1020,11 @@ class CloneDatasetView(APIView):
 
     @validated_request(
         request_serializer=CloneDatasetRequestSerializer,
-        responses={200: DatasetCopyResponseSerializer, **MODEL_HUB_ERROR_RESPONSES},
+        responses={
+            200: DatasetCopyResponseSerializer,
+            **MODEL_HUB_ERROR_RESPONSES,
+            503: DatasetLimitCheckFailedErrorSerializer,
+        },
     )
     def post(self, request, dataset_id, *args, **kwargs):
         try:
@@ -1189,7 +1194,11 @@ class AddAsNewDataset(APIView):
 
     @validated_request(
         request_serializer=AddAsNewDatasetRequestSerializer,
-        responses={200: DatasetCopyResponseSerializer, **MODEL_HUB_ERROR_RESPONSES},
+        responses={
+            200: DatasetCopyResponseSerializer,
+            **MODEL_HUB_ERROR_RESPONSES,
+            503: DatasetLimitCheckFailedErrorSerializer,
+        },
     )
     def post(self, request, *args, **kwargs):
         try:
@@ -5299,6 +5308,7 @@ class ManuallyCreateDatasetView(APIView):
         responses={
             200: ManualDatasetCreateResponseSerializer,
             **MODEL_HUB_ERROR_RESPONSES,
+            503: DatasetLimitCheckFailedErrorSerializer,
         },
     )
     def post(self, request, *args, **kwargs):
@@ -12758,6 +12768,7 @@ class DuplicateDatasetView(APIView):
         responses={
             200: DuplicateDatasetResponseSerializer,
             **MODEL_HUB_ERROR_RESPONSES,
+            503: DatasetLimitCheckFailedErrorSerializer,
         },
     )
     def post(self, request, dataset_id, *args, **kwargs):
