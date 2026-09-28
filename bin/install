@@ -405,7 +405,7 @@ compose_file_setting=$(env_value COMPOSE_FILE "")
 # COMPOSE_FILE with its docker-compose.yml entry swapped for
 # docker-compose.distributed.yml, other entries (overrides) kept. Prints nothing
 # when the setting lists no docker-compose.yml.
-swap_to_full_compose() {
+swap_to_distributed_compose() {
   local entry out="" found=0 IFS=':'
   for entry in $1; do
     if [[ "${entry##*/}" == docker-compose.yml ]]; then
@@ -423,36 +423,36 @@ PROJECT_SERVICES=$(docker ps -a --filter "label=com.docker.compose.project=${pro
 project_has_service() { grep -qx -- "$1" <<<"$PROJECT_SERVICES"; }
 
 # What marks this project as a distributed install, if anything does.
-full_signal=""
+distributed_signal=""
 for vol in "${DISTRIBUTED_ONLY_VOLUME_SUFFIXES[@]}"; do
   if docker volume inspect "${project_name}_${vol}" >/dev/null 2>&1; then
-    full_signal="volume ${project_name}_${vol}"
+    distributed_signal="volume ${project_name}_${vol}"
     break
   fi
 done
-if [[ -z "$full_signal" ]]; then
+if [[ -z "$distributed_signal" ]]; then
   for svc in "${DISTRIBUTED_ONLY_SERVICES[@]}"; do
     if project_has_service "$svc"; then
-      full_signal="its ${svc} container"
+      distributed_signal="its ${svc} container"
       break
     fi
   done
 fi
-default_app_container=0
-if project_has_service app; then default_app_container=1; fi
-default_app_volume=0
-if docker volume inspect "${project_name}_app-data" >/dev/null 2>&1; then default_app_volume=1; fi
+standalone_app_container=0
+if project_has_service app; then standalone_app_container=1; fi
+standalone_app_volume=0
+if docker volume inspect "${project_name}_app-data" >/dev/null 2>&1; then standalone_app_volume=1; fi
 
 if (( DISTRIBUTED == 0 )) && [[ "$compose_file_setting" == *docker-compose.distributed.yml* ]]; then
   DISTRIBUTED=1
-elif (( DISTRIBUTED == 0 )) && [[ -n "$full_signal" ]]; then
+elif (( DISTRIBUTED == 0 )) && [[ -n "$distributed_signal" ]]; then
   # Installs made before the default became the single-app stack ran the
   # distributed stack from docker-compose.yml. Keep them there.
   DISTRIBUTED=1
   DISTRIBUTED_DETECTED=1
 fi
 
-refuse_default_to_full() {
+refuse_standalone_to_distributed() {
   local hint=""
   if (( DISTRIBUTED_REQUESTED == 0 )); then
     hint=" If you did not ask for the distributed stack, delete the COMPOSE_FILE line from .env and re-run ./bin/install."
@@ -470,33 +470,33 @@ record_mode() {
     new_compose_setting=""
   fi
 }
-full_setting=""
+distributed_setting=""
 if (( DISTRIBUTED == 1 )); then
-  full_setting="$compose_file_setting"
+  distributed_setting="$compose_file_setting"
   if [[ -z "$compose_file_setting" ]]; then
-    full_setting=docker-compose.distributed.yml
+    distributed_setting=docker-compose.distributed.yml
     # An explicit COMPOSE_FILE switches off Compose's automatic loading of
     # docker-compose.override.yml, so carry an existing override along.
-    if [[ -f docker-compose.override.yml ]]; then full_setting+=":docker-compose.override.yml"; fi
-    new_compose_setting="$full_setting"
+    if [[ -f docker-compose.override.yml ]]; then distributed_setting+=":docker-compose.override.yml"; fi
+    new_compose_setting="$distributed_setting"
   elif [[ "$compose_file_setting" != *docker-compose.distributed.yml* ]]; then
-    full_setting=$(swap_to_full_compose "$compose_file_setting")
-    if [[ -z "$full_setting" ]]; then
+    distributed_setting=$(swap_to_distributed_compose "$compose_file_setting")
+    if [[ -z "$distributed_setting" ]]; then
       die "COMPOSE_FILE=${compose_file_setting} in .env lists no docker-compose.yml, so the installer cannot point it at the distributed stack. Add docker-compose.distributed.yml to it yourself, then re-run ./bin/install."
     fi
-    new_compose_setting="$full_setting"
+    new_compose_setting="$distributed_setting"
   fi
 fi
 
 # A wipe removes this project's containers and volumes first, so there is
 # nothing left to strand.
 if (( DISTRIBUTED == 1 && WIPE_VOLS == 0 )); then
-  if (( default_app_container == 1 )) && [[ -n "$full_signal" ]]; then
+  if (( standalone_app_container == 1 )) && [[ -n "$distributed_signal" ]]; then
     # The data is a distributed install's: keep plain `docker compose` on it.
     record_mode
-    die "Project ${project_name} holds a distributed install (${full_signal}) and also a Standalone app container. That happens when a plain \`docker compose up -d\` starts the new docker-compose.yml against an older distributed install. Your data is in the distributed stack's volumes, and .env now records COMPOSE_FILE=${full_setting}. Remove the stray container, then re-run ./bin/install: docker compose -f docker-compose.yml -p ${project_name} rm -sf app"
-  elif (( default_app_container == 1 || default_app_volume == 1 )) && [[ -z "$full_signal" ]]; then
-    refuse_default_to_full
+    die "Project ${project_name} holds a distributed install (${distributed_signal}) and also a Standalone app container. That happens when a plain \`docker compose up -d\` starts the new docker-compose.yml against an older distributed install. Your data is in the distributed stack's volumes, and .env now records COMPOSE_FILE=${distributed_setting}. Remove the stray container, then re-run ./bin/install: docker compose -f docker-compose.yml -p ${project_name} rm -sf app"
+  elif (( standalone_app_container == 1 || standalone_app_volume == 1 )) && [[ -z "$distributed_signal" ]]; then
+    refuse_standalone_to_distributed
   fi
 fi
 
@@ -505,19 +505,19 @@ if (( DISTRIBUTED == 1 )); then
   APP_SVC=backend
   # An existing distributed install is recorded at once, so that a plain
   # `docker compose up -d` can no longer start the default file against it.
-  if [[ -n "$full_signal" ]]; then record_mode; fi
+  if [[ -n "$distributed_signal" ]]; then record_mode; fi
   if (( DISTRIBUTED_DETECTED == 1 )); then
-    warn "Existing distributed install detected (${full_signal}); staying on the distributed stack."
-    warn "  Recorded COMPOSE_FILE=${full_setting} in .env, so plain \`docker compose\` commands use it too."
+    warn "Existing distributed install detected (${distributed_signal}); staying on the distributed stack."
+    warn "  Recorded COMPOSE_FILE=${distributed_setting} in .env, so plain \`docker compose\` commands use it too."
     warn "  Moving an existing install to the standalone stack is not supported: see INSTALLATION.md › Switching between Standalone and Distributed."
     if (( WIPE_VOLS == 1 )); then
       warn "  --wipe-volumes resets it as a distributed stack. For the standalone install instead, stop here, run ./bin/uninstall --wipe-data, delete the COMPOSE_FILE line from .env and run ./bin/install."
     fi
   fi
-  if (( default_app_volume == 1 && WIPE_VOLS == 0 )); then
+  if (( standalone_app_volume == 1 && WIPE_VOLS == 0 )); then
     warn "Volume ${project_name}_app-data belongs to a standalone install; the distributed stack does not use it."
   fi
-  ok "Mode: Distributed (COMPOSE_FILE=${full_setting})"
+  ok "Mode: Distributed (COMPOSE_FILE=${distributed_setting})"
 else
   COMPOSE_PATH=docker-compose.yml
   APP_SVC=app

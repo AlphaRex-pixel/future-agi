@@ -22,8 +22,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 STANDALONE = ROOT / "deploy" / "standalone"
-DEFAULT_COMPOSE = ROOT / "docker-compose.yml"
-FULL_COMPOSE = ROOT / "docker-compose.distributed.yml"
+STANDALONE_COMPOSE = ROOT / "docker-compose.yml"
+DISTRIBUTED_COMPOSE = ROOT / "docker-compose.distributed.yml"
 CODE_EXECUTOR = ROOT / "futureagi" / "code-executor" / "server.py"
 SECRETS_DIR = "/etc/futureagi/secrets"
 
@@ -47,8 +47,8 @@ def _programs() -> dict[str, dict[str, str]]:
     }
 
 
-def test_default_compose_is_three_containers_plus_two_profiles() -> None:
-    services = _compose(DEFAULT_COMPOSE)["services"]
+def test_standalone_compose_is_three_containers_plus_two_profiles() -> None:
+    services = _compose(STANDALONE_COMPOSE)["services"]
     assert set(services) == {
         "app",
         "postgres",
@@ -64,11 +64,11 @@ def test_default_compose_is_three_containers_plus_two_profiles() -> None:
     # Datastores stay on the compose network.
     assert "ports" not in services["postgres"]
     assert "ports" not in services["clickhouse"]
-    assert "rabbitmq" not in DEFAULT_COMPOSE.read_text(encoding="utf-8").lower()
+    assert "rabbitmq" not in STANDALONE_COMPOSE.read_text(encoding="utf-8").lower()
 
 
-def test_default_app_service_contract() -> None:
-    app = _compose(DEFAULT_COMPOSE)["services"]["app"]
+def test_standalone_app_service_contract() -> None:
+    app = _compose(STANDALONE_COMPOSE)["services"]["app"]
     env = app["environment"]
     # A published image only: a failed pull must never turn into a source build.
     assert app["image"] == "futureagi/standalone:${FUTURE_AGI_VERSION:-latest}"
@@ -122,7 +122,7 @@ def test_default_app_service_contract() -> None:
 
 
 def test_every_redis_client_of_the_app_uses_the_password() -> None:
-    env = _compose(DEFAULT_COMPOSE)["services"]["app"]["environment"]
+    env = _compose(STANDALONE_COMPOSE)["services"]["app"]["environment"]
     password = "${REDIS_PASSWORD:-local-dev-only-redis-password}"
     assert env["REDIS_PASSWORD"] == password
     urls = {key: value for key, value in env.items() if key.endswith("REDIS_URL")}
@@ -142,7 +142,7 @@ def test_every_redis_client_of_the_app_uses_the_password() -> None:
 
 
 def test_secrets_are_mounted_where_eval_code_cannot_read_them() -> None:
-    app = _compose(DEFAULT_COMPOSE)["services"]["app"]
+    app = _compose(STANDALONE_COMPOSE)["services"]["app"]
     targets = {
         re.sub(r":(ro|rw)$", "", volume).rsplit(":", 1)[1] for volume in app["volumes"]
     }
@@ -167,11 +167,11 @@ def _image_healthcheck() -> str:
     return dockerfile.split("\nHEALTHCHECK ", 1)[1].split("\nENTRYPOINT ", 1)[0]
 
 
-def test_default_app_healthcheck_covers_the_in_container_services() -> None:
+def test_standalone_app_healthcheck_covers_the_in_container_services() -> None:
     test = _image_healthcheck()
     # HTTP_PROXY from .env must never see the loopback probes.
     assert "u.ProxyHandler({})" in test
-    healthcheck = _compose(DEFAULT_COMPOSE)["services"]["app"]["healthcheck"]
+    healthcheck = _compose(STANDALONE_COMPOSE)["services"]["app"]["healthcheck"]
     assert "test" not in healthcheck
     for option, value in (
         ("interval", "15s"),
@@ -189,7 +189,7 @@ def test_default_app_healthcheck_covers_the_in_container_services() -> None:
         "http://127.0.0.1:9005/minio/health/live",
     ):
         assert url in test
-    env = _compose(DEFAULT_COMPOSE)["services"]["app"]["environment"]
+    env = _compose(STANDALONE_COMPOSE)["services"]["app"]["environment"]
     assert env["FI_ADMIN_ADDR"] == "127.0.0.1:9464"
 
 
@@ -197,7 +197,7 @@ def test_installers_wait_as_long_as_docker_calls_the_app_starting() -> None:
     """A slow host's first boot outlasted a 900s start_period (migrations
     alone took 2260s), and `docker compose up --wait` then failed on an app
     that finished fine. The installers give up no earlier than Docker does."""
-    start_period = _compose(DEFAULT_COMPOSE)["services"]["app"]["healthcheck"][
+    start_period = _compose(STANDALONE_COMPOSE)["services"]["app"]["healthcheck"][
         "start_period"
     ]
     seconds = int(start_period.removesuffix("s"))
@@ -209,15 +209,15 @@ def test_installers_wait_as_long_as_docker_calls_the_app_starting() -> None:
 
 
 def test_postgres_has_room_for_the_api_and_the_worker() -> None:
-    command = _compose(DEFAULT_COMPOSE)["services"]["postgres"]["command"]
+    command = _compose(STANDALONE_COMPOSE)["services"]["postgres"]["command"]
     assert "max_connections=200" in command
     # granian's --backpressure counts connections (keep-alive, websockets),
     # not requests: a low value would stall browsers, so it is not used.
     assert "--backpressure" not in _programs()["api"]["command"]
 
 
-def test_default_compose_bind_mounts_exist() -> None:
-    services = _compose(DEFAULT_COMPOSE)["services"]
+def test_standalone_compose_bind_mounts_exist() -> None:
+    services = _compose(STANDALONE_COMPOSE)["services"]
     for name, service in services.items():
         for volume in service.get("volumes", []):
             source = volume.split(":", 1)[0]
@@ -226,20 +226,20 @@ def test_default_compose_bind_mounts_exist() -> None:
     assert (ROOT / "agentcc-gateway" / "config.example.yaml").exists()
 
 
-def test_default_and_full_postgres_share_one_image() -> None:
+def test_standalone_and_distributed_postgres_share_one_image() -> None:
     # Volumes move between the two files; glibc and musl builds sort text
     # differently and would corrupt each other's indexes.
-    default = _compose(DEFAULT_COMPOSE)["services"]["postgres"]
-    full = _compose(FULL_COMPOSE)["services"]["postgres"]
-    assert default["image"] == full["image"]
+    standalone = _compose(STANDALONE_COMPOSE)["services"]["postgres"]
+    distributed = _compose(DISTRIBUTED_COMPOSE)["services"]["postgres"]
+    assert standalone["image"] == distributed["image"]
     # A distributed install's PeerDB slots must not stop Postgres from starting.
-    assert "wal_level=logical" in default["command"]
-    assert "max_replication_slots" in default["command"]
+    assert "wal_level=logical" in standalone["command"]
+    assert "max_replication_slots" in standalone["command"]
 
 
-def test_full_compose_has_no_rabbitmq_and_uses_redis_channels() -> None:
-    config = _compose(FULL_COMPOSE)
-    assert "rabbitmq" not in FULL_COMPOSE.read_text(encoding="utf-8").lower()
+def test_distributed_compose_has_no_rabbitmq_and_uses_redis_channels() -> None:
+    config = _compose(DISTRIBUTED_COMPOSE)
+    assert "rabbitmq" not in DISTRIBUTED_COMPOSE.read_text(encoding="utf-8").lower()
     assert "rabbitmq-data" not in config["volumes"]
     for name, service in config["services"].items():
         assert "rabbitmq" not in (service.get("depends_on") or {}), name
@@ -255,7 +255,7 @@ def test_full_compose_has_no_rabbitmq_and_uses_redis_channels() -> None:
     )
     assert env["MODEL_SERVING_URL"] == "${MODEL_SERVING_URL:-http://serving:8080}"
     assert "SERVING_URL" not in env
-    text = FULL_COMPOSE.read_text(encoding="utf-8")
+    text = DISTRIBUTED_COMPOSE.read_text(encoding="utf-8")
     assert text.count("<<: *backend-env") + text.count("<<: *catalog-bootstrap-env") > 5
 
 
@@ -300,7 +300,7 @@ def test_supervisor_runs_the_contracted_processes() -> None:
 def test_the_gateway_loads_keys_from_the_app_and_sends_it_request_logs() -> None:
     """Without the control plane the gateway forgets keys made in the UI when
     it restarts, and its request logs and analytics stay empty."""
-    app = _compose(DEFAULT_COMPOSE)["services"]["app"]["environment"]
+    app = _compose(STANDALONE_COMPOSE)["services"]["app"]["environment"]
     assert app["AGENTCC_CONTROL_PLANE_URL"] == "http://127.0.0.1:8000"
     assert app["AGENTCC_CONTROL_PLANE_TOKEN"] == app["AGENTCC_ADMIN_TOKEN"]
     assert app["AGENTCC_SYNC_ON_STARTUP"] == "true"
@@ -310,11 +310,11 @@ def test_the_gateway_loads_keys_from_the_app_and_sends_it_request_logs() -> None
         "/opt/futureagi/bin/after-bootstrap agentcc-gateway "
     )
 
-    full = _compose(FULL_COMPOSE)
-    gateway = full["services"]["agentcc-gateway"]["environment"]
-    backend = full["x-backend-env"]
+    distributed = _compose(DISTRIBUTED_COMPOSE)
+    gateway = distributed["services"]["agentcc-gateway"]["environment"]
+    backend = distributed["x-backend-env"]
     # The backend's granian listens on :80.
-    assert "${BACKEND_PORT:-8000}:80" in full["services"]["backend"]["ports"]
+    assert "${BACKEND_PORT:-8000}:80" in distributed["services"]["backend"]["ports"]
     assert gateway["AGENTCC_CONTROL_PLANE_URL"] == "http://backend"
     assert gateway["AGENTCC_CONTROL_PLANE_TOKEN"] == backend["AGENTCC_ADMIN_TOKEN"]
     assert gateway["AGENTCC_SYNC_ON_STARTUP"] == "true"
@@ -656,8 +656,8 @@ def test_app_urls_have_working_defaults_in_both_setups() -> None:
         "${FI_COLLECTOR_OTLP_HTTP_PORT:-4318}}"
     )
     envs = [
-        _compose(DEFAULT_COMPOSE)["services"]["app"]["environment"],
-        _compose(FULL_COMPOSE)["x-backend-env"],
+        _compose(STANDALONE_COMPOSE)["services"]["app"]["environment"],
+        _compose(DISTRIBUTED_COMPOSE)["x-backend-env"],
     ]
     for env in envs:
         assert env["APP_URL"] == "${APP_URL:-localhost:${FRONTEND_PORT:-3000}}"
@@ -670,7 +670,7 @@ def test_app_urls_have_working_defaults_in_both_setups() -> None:
 def test_every_distributed_backend_probes_the_collector_on_the_network() -> None:
     """env_file hands .env's FI_COLLECTOR_OTLP_PORT, the host port the
     installer moves when 4317 is taken, to every service that loads it."""
-    services = _compose(FULL_COMPOSE)["services"]
+    services = _compose(DISTRIBUTED_COMPOSE)["services"]
     backends = [
         name
         for name, service in services.items()
@@ -686,7 +686,9 @@ def test_every_distributed_backend_probes_the_collector_on_the_network() -> None
 def test_the_ui_calls_the_api_on_backend_port_by_default() -> None:
     default = "${VITE_HOST_API:-http://localhost:${BACKEND_PORT:-8000}}"
     assert (
-        _compose(FULL_COMPOSE)["services"]["frontend"]["environment"]["VITE_HOST_API"]
+        _compose(DISTRIBUTED_COMPOSE)["services"]["frontend"]["environment"][
+            "VITE_HOST_API"
+        ]
         == default
     )
     for overlay in ("docker-compose.dev.yml", "docker-compose.distributed.dev.yml"):

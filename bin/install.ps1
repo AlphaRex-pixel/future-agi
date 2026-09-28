@@ -314,9 +314,9 @@ $persistentVolumeSuffixes = @(
 )
 # Volumes and services only the distributed stack has. rabbitmq-data and a rabbitmq
 # container come from releases before Redis carried live updates.
-$fullOnlyVolumeSuffixes = @('minio-data', 'redis-data', 'rabbitmq-data', 'peerdb-catalog-data',
+$distributedOnlyVolumeSuffixes = @('minio-data', 'redis-data', 'rabbitmq-data', 'peerdb-catalog-data',
                             'peerdb-minio-data', 'property-catalog-kafka-data', 'fi-collector-data')
-$fullOnlyServices = @('backend', 'worker', 'frontend', 'minio', 'redis', 'rabbitmq', 'temporal',
+$distributedOnlyServices = @('backend', 'worker', 'frontend', 'minio', 'redis', 'rabbitmq', 'temporal',
                       'fi-collector', 'agentcc-gateway', 'peerdb-server')
 $existingVolumes = @()
 foreach ($suffix in $persistentVolumeSuffixes) {
@@ -342,7 +342,7 @@ if (-not $WipeVolumes -and $existingVolumes.Count -gt 0 -and ((Test-Placeholder 
 # carry over. A refused switch leaves .env unchanged.
 $composeFileSetting = Get-EnvValue 'COMPOSE_FILE'
 $IsDistributed = [bool]$Distributed
-$FullDetected = $false
+$DistributedDetected = $false
 
 # Services of this project's containers, running or not. '{{.Labels}}' keeps
 # double quotes off the command line (PowerShell 5.1 drops them).
@@ -352,27 +352,27 @@ foreach ($labels in @(Invoke-Probe { docker ps -a --filter "label=com.docker.com
 }
 
 # What marks this project as a distributed install, if anything does.
-$fullSignal = ''
-foreach ($suffix in $fullOnlyVolumeSuffixes) {
+$distributedSignal = ''
+foreach ($suffix in $distributedOnlyVolumeSuffixes) {
   Invoke-Probe { docker volume inspect "${projectName}_${suffix}" } | Out-Null
-  if ($LASTEXITCODE -eq 0) { $fullSignal = "volume ${projectName}_${suffix}"; break }
+  if ($LASTEXITCODE -eq 0) { $distributedSignal = "volume ${projectName}_${suffix}"; break }
 }
-if (-not $fullSignal) {
-  foreach ($svc in $fullOnlyServices) {
-    if ($projectServices -contains $svc) { $fullSignal = "its $svc container"; break }
+if (-not $distributedSignal) {
+  foreach ($svc in $distributedOnlyServices) {
+    if ($projectServices -contains $svc) { $distributedSignal = "its $svc container"; break }
   }
 }
-$defaultAppContainer = $projectServices -contains 'app'
+$standaloneAppContainer = $projectServices -contains 'app'
 Invoke-Probe { docker volume inspect "${projectName}_app-data" } | Out-Null
-$defaultAppVolume = ($LASTEXITCODE -eq 0)
+$standaloneAppVolume = ($LASTEXITCODE -eq 0)
 
 if (-not $IsDistributed -and $composeFileSetting -like '*docker-compose.distributed.yml*') {
   $IsDistributed = $true
-} elseif (-not $IsDistributed -and $fullSignal) {
+} elseif (-not $IsDistributed -and $distributedSignal) {
   # Installs made before the default became the single-app stack ran the
   # distributed stack from docker-compose.yml. Keep them there.
   $IsDistributed = $true
-  $FullDetected = $true
+  $DistributedDetected = $true
 }
 
 # COMPOSE_FILE for the distributed stack is written by Save-Mode: at once for an
@@ -385,16 +385,16 @@ function Save-Mode {
     $script:newComposeSetting = ''
   }
 }
-$fullSetting = ''
+$distributedSetting = ''
 if ($IsDistributed) {
-  $fullSetting = $composeFileSetting
+  $distributedSetting = $composeFileSetting
   if (-not $composeFileSetting) {
-    $fullSetting = 'docker-compose.distributed.yml'
+    $distributedSetting = 'docker-compose.distributed.yml'
     # An explicit COMPOSE_FILE switches off Compose's automatic loading of
     # docker-compose.override.yml, so carry an existing override along.
     # Compose on Windows separates COMPOSE_FILE entries with ';'.
-    if (Test-Path 'docker-compose.override.yml') { $fullSetting += ';docker-compose.override.yml' }
-    $newComposeSetting = $fullSetting
+    if (Test-Path 'docker-compose.override.yml') { $distributedSetting += ';docker-compose.override.yml' }
+    $newComposeSetting = $distributedSetting
   } elseif ($composeFileSetting -notlike '*docker-compose.distributed.yml*') {
     # Swap the docker-compose.yml entry for the Distributed file; keep the others.
     $found = $false
@@ -409,19 +409,19 @@ if ($IsDistributed) {
     if (-not $found) {
       Die "COMPOSE_FILE=$composeFileSetting in .env lists no docker-compose.yml, so the installer cannot point it at the distributed stack. Add docker-compose.distributed.yml to it yourself, then re-run .\bin\install.ps1."
     }
-    $fullSetting = $entries -join ';'
-    $newComposeSetting = $fullSetting
+    $distributedSetting = $entries -join ';'
+    $newComposeSetting = $distributedSetting
   }
 }
 
 # A wipe removes this project's containers and volumes first, so there is
 # nothing left to strand.
 if ($IsDistributed -and -not $wipe) {
-  if ($defaultAppContainer -and $fullSignal) {
+  if ($standaloneAppContainer -and $distributedSignal) {
     # The data is a distributed install's: keep plain `docker compose` on it.
     Save-Mode
-    Die "Project $projectName holds a distributed install ($fullSignal) and also a Standalone app container. That happens when a plain 'docker compose up -d' starts the new docker-compose.yml against an older distributed install. Your data is in the distributed stack's volumes, and .env now records COMPOSE_FILE=$fullSetting. Remove the stray container, then re-run .\bin\install.ps1: docker compose -f docker-compose.yml -p $projectName rm -sf app"
-  } elseif (($defaultAppContainer -or $defaultAppVolume) -and -not $fullSignal) {
+    Die "Project $projectName holds a distributed install ($distributedSignal) and also a Standalone app container. That happens when a plain 'docker compose up -d' starts the new docker-compose.yml against an older distributed install. Your data is in the distributed stack's volumes, and .env now records COMPOSE_FILE=$distributedSetting. Remove the stray container, then re-run .\bin\install.ps1: docker compose -f docker-compose.yml -p $projectName rm -sf app"
+  } elseif (($standaloneAppContainer -or $standaloneAppVolume) -and -not $distributedSignal) {
     $hint = ''
     if (-not $Distributed) { $hint = ' If you did not ask for the distributed stack, delete the COMPOSE_FILE line from .env and re-run .\bin\install.ps1.' }
     Die "Project $projectName already holds a standalone install. Moving an existing install to the distributed stack is not supported: its data would not carry over. Back up first (INSTALLATION.md > Backups), then re-run with -Distributed -WipeVolumes, which deletes this install's data. To run the distributed stack next to this install, use a second checkout with another COMPOSE_PROJECT_NAME.$hint"
@@ -433,16 +433,16 @@ if ($IsDistributed) {
   $AppService = 'backend'
   # An existing distributed install is recorded at once, so that a plain
   # `docker compose up -d` can no longer start the default file against it.
-  if ($fullSignal) { Save-Mode }
-  if ($FullDetected) {
-    Warn "Existing distributed install detected ($fullSignal); staying on the distributed stack."
-    Warn "  Recorded COMPOSE_FILE=$fullSetting in .env, so plain 'docker compose' commands use it too."
+  if ($distributedSignal) { Save-Mode }
+  if ($DistributedDetected) {
+    Warn "Existing distributed install detected ($distributedSignal); staying on the distributed stack."
+    Warn "  Recorded COMPOSE_FILE=$distributedSetting in .env, so plain 'docker compose' commands use it too."
     Warn "  Moving an existing install to the standalone stack is not supported: see INSTALLATION.md > Switching between Standalone and Distributed."
   }
-  if ($defaultAppVolume -and -not $wipe) {
+  if ($standaloneAppVolume -and -not $wipe) {
     Warn "Volume ${projectName}_app-data belongs to a standalone install; the distributed stack does not use it."
   }
-  Ok "Mode: Distributed (COMPOSE_FILE=$fullSetting)"
+  Ok "Mode: Distributed (COMPOSE_FILE=$distributedSetting)"
 } else {
   $ComposePath = 'docker-compose.yml'
   $AppService = 'app'

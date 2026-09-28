@@ -850,7 +850,7 @@ def _lines(path: Path) -> list[str]:
     return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
 
-def test_default_install_runs_the_single_app_stack_without_recording_a_mode(
+def test_a_standalone_install_runs_the_single_app_stack_without_recording_a_mode(
     tmp_path: Path,
 ) -> None:
     admin = {
@@ -882,7 +882,7 @@ def test_default_install_runs_the_single_app_stack_without_recording_a_mode(
     assert "Existing-data catalog backfill" not in stdout
 
 
-def test_full_is_recorded_in_env_and_later_runs_stay_on_the_full_stack(
+def test_distributed_is_recorded_in_env_and_later_runs_stay_on_it(
     tmp_path: Path,
 ) -> None:
     script, environment, state = _installer_sandbox(tmp_path, CI="1")
@@ -917,7 +917,7 @@ def test_full_is_recorded_in_env_and_later_runs_stay_on_the_full_stack(
         {"FAGI_STUB_SERVICES": "postgres worker"},
     ],
 )
-def test_an_existing_full_stack_install_is_never_moved_to_the_default_silently(
+def test_an_existing_distributed_install_is_never_moved_to_standalone_silently(
     tmp_path: Path, signal: dict[str, str]
 ) -> None:
     script, environment, _ = _installer_sandbox(tmp_path, CI="1", **signal)
@@ -933,7 +933,7 @@ def test_an_existing_full_stack_install_is_never_moved_to_the_default_silently(
     )
 
 
-def test_a_legacy_compose_file_setting_is_pointed_at_the_full_stack(
+def test_a_legacy_compose_file_setting_is_pointed_at_the_distributed_stack(
     tmp_path: Path,
 ) -> None:
     script, environment, _ = _installer_sandbox(
@@ -957,7 +957,7 @@ def test_a_legacy_compose_file_setting_is_pointed_at_the_full_stack(
     )
 
 
-def test_wipe_volumes_resets_an_older_full_install_as_a_full_stack(
+def test_wipe_volumes_resets_an_older_distributed_install_as_distributed(
     tmp_path: Path,
 ) -> None:
     script, environment, state = _installer_sandbox(
@@ -981,16 +981,16 @@ def test_wipe_volumes_resets_an_older_full_install_as_a_full_stack(
 
 
 @pytest.mark.parametrize(
-    "default_install",
+    "standalone_install",
     [
         {"FAGI_STUB_APP_CONTAINER": "1"},
         {"FAGI_STUB_VOLUMES": "futureagi_app-data futureagi_postgres-data"},
     ],
 )
-def test_full_refuses_to_move_an_existing_default_install(
-    tmp_path: Path, default_install: dict[str, str]
+def test_distributed_refuses_to_move_an_existing_standalone_install(
+    tmp_path: Path, standalone_install: dict[str, str]
 ) -> None:
-    script, environment, _ = _installer_sandbox(tmp_path, CI="1", **default_install)
+    script, environment, _ = _installer_sandbox(tmp_path, CI="1", **standalone_install)
     repo = script.parents[1]
 
     # --force does not reach past it: the data would be stranded.
@@ -1026,7 +1026,9 @@ def test_a_mode_recorded_by_mistake_names_the_line_to_delete(tmp_path: Path) -> 
     assert "delete the COMPOSE_FILE line from .env" in stderr
 
 
-def test_full_with_wipe_volumes_replaces_a_default_install(tmp_path: Path) -> None:
+def test_distributed_with_wipe_volumes_replaces_a_standalone_install(
+    tmp_path: Path,
+) -> None:
     script, environment, state = _installer_sandbox(
         tmp_path,
         CI="1",
@@ -1048,7 +1050,7 @@ def test_full_with_wipe_volumes_replaces_a_default_install(tmp_path: Path) -> No
     ]
 
 
-def test_a_stray_default_app_next_to_an_older_full_install_is_named(
+def test_a_stray_standalone_app_next_to_an_older_distributed_install_is_named(
     tmp_path: Path,
 ) -> None:
     script, environment, _ = _installer_sandbox(
@@ -1222,7 +1224,7 @@ def test_from_source_builds_every_image_in_order_and_never_pulls_them(
     assert _lines(state / "pull.argv") == ["pull", "clickhouse", "postgres"]
 
 
-def test_full_from_source_tags_the_full_stacks_own_images_local(tmp_path: Path) -> None:
+def test_distributed_from_source_tags_its_own_images_local(tmp_path: Path) -> None:
     script, environment, state = _installer_sandbox(tmp_path, CI="1")
 
     code, _, stderr = _run_installer(
@@ -1346,7 +1348,7 @@ def test_an_undersized_docker_vm_fails_preflight_with_the_fix(
         assert _env_values(repo)["COMPOSE_FILE"] == "docker-compose.distributed.yml"
 
 
-def test_the_full_stack_on_an_8_gb_docker_vm_only_warns(tmp_path: Path) -> None:
+def test_distributed_on_an_8_gb_docker_vm_only_warns(tmp_path: Path) -> None:
     script, environment, _ = _installer_sandbox(
         tmp_path, CI="1", FAGI_STUB_VM="7960 4 x86_64", FAGI_STUB_IMAGE_ARCH="amd64"
     )
@@ -1359,7 +1361,7 @@ def test_the_full_stack_on_an_8_gb_docker_vm_only_warns(tmp_path: Path) -> None:
     assert "Docker has 7960 MB of memory; 12 GB is recommended" in stderr
 
 
-def test_an_existing_full_install_is_never_blocked_by_the_memory_check(
+def test_an_existing_distributed_install_is_never_blocked_by_the_memory_check(
     tmp_path: Path,
 ) -> None:
     script, environment, _ = _installer_sandbox(
@@ -1765,7 +1767,7 @@ def test_an_emulated_app_image_is_called_out_before_start(tmp_path: Path) -> Non
     assert "--from-source builds native images" in stderr
 
 
-def test_default_readiness_waits_on_the_ui_and_fails_fast_on_a_crash_loop(
+def test_standalone_readiness_waits_on_the_ui_and_fails_fast_on_a_crash_loop(
     tmp_path: Path,
 ) -> None:
     script, environment, _ = _installer_sandbox(
