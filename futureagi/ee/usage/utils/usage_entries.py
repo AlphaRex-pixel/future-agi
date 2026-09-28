@@ -70,10 +70,6 @@ TRACES_LIMIT_REACHED_MESSAGE = "Traces limit reached. \
       Please delete existing traces or upgrade to a higher tier to \
       avail more traces."
 
-DATASET_LIMIT_CHECK_FAILED_MESSAGE = (
-    "Could not verify your plan's dataset limit. Please try again in a moment."
-)
-
 
 EVALUATOR_CALLS = [
     APICallTypeChoices.TURING_LARGE_EVALUATOR.value,
@@ -1559,6 +1555,11 @@ def log_and_deduct_cost_for_resource_request(
                     logger.error(f"Unhandled api_call_type: {api_call_type}")
                     return None
 
+            # The limit was never verified: refuse without recording a
+            # resource-limit hit or sending the upgrade alert.
+            if detail.get("error_code") == "DATASET_LIMIT_CHECK_FAILED":
+                return None
+
             is_billing_api_call = check_if_api_call_is_billing_api_call(
                 api_call_type, config
             )
@@ -2193,18 +2194,15 @@ def check_if_dataset_creation_is_allowed(organization, config=None):
             }
             return False, detail
         return True, {}
-    except Exception as e:
-        logger.exception(f"Error checking if dataset creation is allowed: {str(e)}")
+    except Exception:
+        logger.exception(
+            "dataset_limit_check_failed", organization_id=str(organization.id)
+        )
         # Self-hosted has no dataset count limit (Entitlements.can_create
         # allows off-cloud); on cloud the quota is billing, so fail closed.
         if not DeploymentMode.is_cloud():
             return True, {}
-        detail = {
-            "resource_name": ResourceTypeChoices.DATASET.value,
-            "limit": 0,
-            "reason": DATASET_LIMIT_CHECK_FAILED_MESSAGE,
-        }
-        return False, detail
+        return False, {"error_code": "DATASET_LIMIT_CHECK_FAILED"}
 
 
 def check_if_row_limit_reached(organization, row_count):

@@ -18,6 +18,7 @@ from model_hub.models.choices import (
     SourceChoices,
 )
 from model_hub.models.develop_dataset import Column, Dataset
+from tfc.utils.error_codes import get_error_message
 from tracer.models.observation_span import ObservationSpan
 from tracer.models.project import Project
 from tracer.models.trace import Trace
@@ -708,7 +709,7 @@ class TestAddToNewDatasetAPI:
 
     @pytest.mark.parametrize(
         ("is_cloud", "expected_status"),
-        [(True, status.HTTP_400_BAD_REQUEST), (False, status.HTTP_200_OK)],
+        [(True, status.HTTP_503_SERVICE_UNAVAILABLE), (False, status.HTTP_200_OK)],
     )
     @patch("tracer.views.dataset.process_spans_chunk_task")
     def test_entitlement_error_refuses_creation_on_cloud_only(
@@ -722,7 +723,7 @@ class TestAddToNewDatasetAPI:
         is_cloud,
         expected_status,
     ):
-        """An erroring dataset entitlement check refuses on cloud like a limit."""
+        """An erroring dataset entitlement check refuses on cloud with a retry."""
         mock_task.delay.return_value = None
         ch_seed(observe_spans)
 
@@ -747,6 +748,10 @@ class TestAddToNewDatasetAPI:
             )
 
         assert response.status_code == expected_status
+        if is_cloud:
+            assert response.json()["message"] == get_error_message(
+                "DATASET_LIMIT_CHECK_FAILED"
+            )
         assert (
             Dataset.no_workspace_objects.filter(
                 name="Unverified Dataset", organization=organization

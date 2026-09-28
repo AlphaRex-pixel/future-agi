@@ -36,6 +36,7 @@ from model_hub.utils.utils import (
     get_data_type_huggingface,
     load_hf_dataset_with_retries,
 )
+from model_hub.views.utils.dataset_limit import dataset_add_refusal
 from model_hub.views.utils.hugginface import (
     get_huggingface_dataset_info,
     process_huggingface_dataset,
@@ -264,14 +265,9 @@ class CreateDatasetFromHuggingFaceView(CreateAPIView):
                             api_call_type=APICallTypeChoices.DATASET_ADD.value,
                             workspace=request.workspace,
                         )
-                        if (
-                            call_log_row_entry is None
-                            or call_log_row_entry.status
-                            == APICallStatusChoices.RESOURCE_LIMIT.value
-                        ):
-                            return self._gm.too_many_requests(
-                                get_error_message("DATASET_CREATE_LIMIT_REACHED")
-                            )
+                        refusal = dataset_add_refusal(call_log_row_entry)
+                        if refusal is not None:
+                            return refusal
                         call_log_row_entry.status = APICallStatusChoices.SUCCESS.value
                         call_log_row_entry.save()
 

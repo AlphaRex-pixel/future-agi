@@ -9,6 +9,10 @@ from rest_framework.viewsets import ModelViewSet
 
 from model_hub.models.choices import DatasetSourceChoices, ModelTypes, SourceChoices
 from model_hub.models.develop_dataset import Column, Dataset
+from model_hub.views.utils.dataset_limit import (
+    DatasetLimitCheckFailed,
+    dataset_limit_check_failed_response,
+)
 from tfc.utils.base_viewset import BaseModelViewSetMixinWithUserOrg
 from tfc.utils.error_codes import get_error_message
 from tfc.utils.general_methods import GeneralMethods
@@ -122,6 +126,9 @@ class DatasetView(BaseModelViewSetMixinWithUserOrg, ModelViewSet):
                     "message": "Dataset creation started. Data is being processed in background.",
                 }
             )
+
+        except DatasetLimitCheckFailed:
+            return dataset_limit_check_failed_response()
 
         except (ValidationError, ValueError) as e:
             logger.exception(f"Error in creating dataset observe:  {str(e)}")
@@ -431,7 +438,9 @@ def create_new_dataset(new_dataset_name, organization, workspace, user_id):
         raise ValueError(get_error_message("DATASET_EXIST_IN_ORG"))
 
     if check_if_dataset_creation_is_allowed is not None:
-        allowed, _ = check_if_dataset_creation_is_allowed(organization)
+        allowed, detail = check_if_dataset_creation_is_allowed(organization)
+        if detail.get("error_code") == "DATASET_LIMIT_CHECK_FAILED":
+            raise DatasetLimitCheckFailed
         if not allowed:
             raise ValueError(get_error_message("DATASET_CREATE_LIMIT_REACHED"))
 

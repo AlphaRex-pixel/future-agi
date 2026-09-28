@@ -290,6 +290,7 @@ from model_hub.utils.synthetic_task_manager import SyntheticTaskManager
 from model_hub.utils.utils import contains_sql, get_diff
 from model_hub.views.eval_runner import EvaluationRunner
 from model_hub.views.run_prompt import PROVIDERS_WITH_JSON
+from model_hub.views.utils.dataset_limit import dataset_add_refusal
 from model_hub.views.utils.evals import process_eval_for_single_row
 from model_hub.views.utils.utils import (
     get_recommendations,
@@ -1034,14 +1035,9 @@ class CloneDatasetView(APIView):
                     api_call_type=APICallTypeChoices.DATASET_ADD.value,
                     workspace=request.workspace,
                 )
-                if (
-                    call_log_row_entry is None
-                    or call_log_row_entry.status
-                    == APICallStatusChoices.RESOURCE_LIMIT.value
-                ):
-                    return self._gm.too_many_requests(
-                        get_error_message("DATASET_CREATE_LIMIT_REACHED")
-                    )
+                refusal = dataset_add_refusal(call_log_row_entry)
+                if refusal is not None:
+                    return refusal
                 call_log_row_entry.status = APICallStatusChoices.SUCCESS.value
                 call_log_row_entry.save()
             new_dataset_name = request.data.get(
@@ -1270,14 +1266,9 @@ class AddAsNewDataset(APIView):
                     api_call_type=APICallTypeChoices.DATASET_ADD.value,
                     workspace=request.workspace,
                 )
-                if (
-                    call_log_row_entry is None
-                    or call_log_row_entry.status
-                    == APICallStatusChoices.RESOURCE_LIMIT.value
-                ):
-                    return self._gm.too_many_requests(
-                        get_error_message("DATASET_CREATE_LIMIT_REACHED")
-                    )
+                refusal = dataset_add_refusal(call_log_row_entry)
+                if refusal is not None:
+                    return refusal
                 call_log_row_entry.status = APICallStatusChoices.SUCCESS.value
                 call_log_row_entry.save()
 
@@ -5352,14 +5343,9 @@ class ManuallyCreateDatasetView(APIView):
                     api_call_type=APICallTypeChoices.DATASET_ADD.value,
                     workspace=request.workspace,
                 )
-                if (
-                    call_log_row_entry is None
-                    or call_log_row_entry.status
-                    == APICallStatusChoices.RESOURCE_LIMIT.value
-                ):
-                    return self._gm.too_many_requests(
-                        get_error_message("DATASET_CREATE_LIMIT_REACHED")
-                    )
+                refusal = dataset_add_refusal(call_log_row_entry)
+                if refusal is not None:
+                    return refusal
                 call_log_row_entry.status = APICallStatusChoices.SUCCESS.value
                 call_log_row_entry.save()
 
@@ -12815,14 +12801,9 @@ class DuplicateDatasetView(APIView):
                     api_call_type=APICallTypeChoices.DATASET_ADD.value,
                     workspace=request.workspace,
                 )
-                if (
-                    call_log_row_entry is None
-                    or call_log_row_entry.status
-                    == APICallStatusChoices.RESOURCE_LIMIT.value
-                ):
-                    return self._gm.too_many_requests(
-                        get_error_message("DATASET_CREATE_LIMIT_REACHED")
-                    )
+                refusal = dataset_add_refusal(call_log_row_entry)
+                if refusal is not None:
+                    return refusal
                 call_log_row_entry.status = APICallStatusChoices.SUCCESS.value
                 call_log_row_entry.save()
 

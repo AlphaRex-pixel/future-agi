@@ -24,6 +24,7 @@ from model_hub.serializers.develop_dataset_contracts import (
 )
 from model_hub.serializers.develop_dataset import DatasetSerializer
 from model_hub.views.eval_runner import EvaluationRunner
+from model_hub.views.utils.dataset_limit import dataset_add_refusal
 from model_hub.views.utils.utils import get_recommendations, update_column_id
 from model_hub.validators.dataset_validators import validate_dataset_name_unique
 from tfc.middleware.workspace_context import get_current_workspace
@@ -155,14 +156,9 @@ class CreateDatasetFromExpView(APIView):
                     api_call_type=APICallTypeChoices.DATASET_ADD.value,
                     workspace=getattr(request, "workspace", None),
                 )
-                if (
-                    call_log_row_entry is None
-                    or call_log_row_entry.status
-                    == APICallStatusChoices.RESOURCE_LIMIT.value
-                ):
-                    return self._gm.too_many_requests(
-                        get_error_message("DATASET_CREATE_LIMIT_REACHED")
-                    )
+                refusal = dataset_add_refusal(call_log_row_entry)
+                if refusal is not None:
+                    return refusal
                 call_log_row_entry.status = APICallStatusChoices.SUCCESS.value
                 call_log_row_entry.save()
 

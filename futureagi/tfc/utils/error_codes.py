@@ -90,6 +90,9 @@ err_dict = {
     "DATASET_CREATE_LIMIT_REACHED": [
         "Dataset creation limit has been reached for your plan."
     ],
+    "DATASET_LIMIT_CHECK_FAILED": [
+        "Could not verify your plan's dataset limit. Please try again in a moment."
+    ],
     "DATASET_NAME_MISSING": ["Dataset name is required for Hugging Face datasets."],
     "DATASET_EXIST_IN_ORG": [
         "A dataset with this name already exists in your organization."

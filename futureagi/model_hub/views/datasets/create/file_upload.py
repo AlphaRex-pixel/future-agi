@@ -40,6 +40,7 @@ from model_hub.serializers.develop_dataset_contracts import (
     LocalFileDatasetCreateStartedResponseSerializer,
 )
 from model_hub.utils.file_reader import FileProcessor
+from model_hub.views.utils.dataset_limit import dataset_add_refusal
 from tfc.settings.settings import UPLOAD_BUCKET_NAME
 from tfc.temporal import temporal_activity
 from tfc.utils.api_contracts import validated_request
@@ -1034,15 +1035,12 @@ class CreateDatasetFromLocalFileView(CreateAPIView):
                     sdk_source=True if source == DatasetSourceChoices.SDK.value else False,
                     workspace=request.workspace,
                 )
-                if (
-                    call_log_row_entry is None
-                    or call_log_row_entry.status
-                    == APICallStatusChoices.RESOURCE_LIMIT.value
-                    and source != DatasetSourceChoices.SDK.value
-                ):
-                    return self._gm.too_many_requests(
-                        get_error_message("DATASET_CREATE_LIMIT_REACHED")
-                    )
+                refusal = dataset_add_refusal(
+                    call_log_row_entry,
+                    sdk_source=source == DatasetSourceChoices.SDK.value,
+                )
+                if refusal is not None:
+                    return refusal
                 call_log_row_entry.status = APICallStatusChoices.SUCCESS.value
                 call_log_row_entry.save()
 
