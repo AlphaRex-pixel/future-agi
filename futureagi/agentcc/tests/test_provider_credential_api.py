@@ -1,3 +1,5 @@
+import ipaddress
+import socket
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -669,3 +671,238 @@ class TestFetchModelsKeepsTheSavedKeyOnItsBaseURL:
             )
             assert response.status_code == 200, response.json()
             assert mock_fetch.call_args[0][2] == "sk-typed"
+
+
+@pytest.fixture
+def provider_dns():
+    """getaddrinfo stub: IP literals resolve to themselves, unknown names fail."""
+    answers = {
+        "mock-llm": ["172.20.0.5"],
+        "host.docker.internal": ["192.168.65.254"],
+        "api.openai.com": ["104.18.6.192"],
+    }
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        try:
+            addrs = [str(ipaddress.ip_address(host))]
+        except ValueError:
+            if host not in answers:
+                raise socket.gaierror(socket.EAI_NONAME, "no such host") from None
+            addrs = answers[host]
+        return [
+            (socket.AF_INET6 if ":" in a else socket.AF_INET, 1, 6, "", (a, 0))
+            for a in addrs
+        ]
+
+    with patch(
+        "agentcc.services.url_safety.socket.getaddrinfo", side_effect=fake_getaddrinfo
+    ) as stub:
+        yield stub
+
+
+@pytest.mark.integration
+@pytest.mark.api
+@pytest.mark.usefixtures("provider_dns")
+class TestProviderBaseURLIsCheckedOnSave:
+    """A base URL the gateway refuses is refused when the provider is saved,
+    rather than saved and then answered with an error on every request."""
+
+    OPT_IN = "AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS"
+
+    @pytest.fixture(autouse=True)
+    def _no_gateway_push(self):
+        with (
+            patch(
+                "agentcc.views.provider_credential.AgentccProviderCredentialViewSet._push_config_to_gateway",
+                return_value=True,
+            ),
+            patch("agentcc.views.gateway.push_org_config", return_value=True),
+        ):
+            yield
+
+    def _create(self, client, base_url, name="custom"):
+        return client.post(
+            "/agentcc/provider-credentials/",
+            {
+                "provider_name": name,
+                "credentials": {"api_key": "sk-local"},
+                "base_url": base_url,
+                "api_format": "openai",
+            },
+            format="json",
+        )
+
+    def _update_provider(self, client, base_url, name="custom", **config):
+        return client.post(
+            "/agentcc/gateways/default/update-provider/",
+            {
+                "name": name,
+                "config": {
+                    "api_key": "sk-local",
+                    "api_format": "openai",
+                    "models": ["mock-model"],
+                    "base_url": base_url,
+                    **config,
+                },
+            },
+            format="json",
+        )
+
+    def _saved(self, org, name="custom"):
+        return AgentccProviderCredential.no_workspace_objects.filter(
+            organization=org, provider_name=name, deleted=False
+        ).first()
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "http://mock-llm:8080",
+            "http://100.64.77.10:8080",  # RFC 6598 shared address space
+            "http://10.0.0.12:11434",
+            "http://host.docker.internal:11434",
+        ],
+    )
+    def test_gateway_ui_refuses_a_private_base_url_without_the_opt_in(
+        self, monkeypatch, secondary_org_context, secondary_org_client, base_url
+    ):
+        monkeypatch.delenv(self.OPT_IN, raising=False)
+        org_b, _ = secondary_org_context
+
+        response = self._update_provider(secondary_org_client, base_url)
+
+        assert response.status_code == 400, response.json()
+        assert f"{self.OPT_IN}=true" in response.json()["message"]
+        assert self._saved(org_b) is None
+
+    def test_gateway_ui_saves_a_private_base_url_with_the_opt_in(
+        self, monkeypatch, secondary_org_context, secondary_org_client
+    ):
+        monkeypatch.setenv(self.OPT_IN, "true")
+        org_b, _ = secondary_org_context
+
+        response = self._update_provider(secondary_org_client, "http://mock-llm:8080")
+
+        assert response.status_code == 200, response.json()
+        assert self._saved(org_b).base_url == "http://mock-llm:8080"
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "http://127.0.0.1:11434",
+            "http://169.254.169.254/latest",
+            "http://100.100.100.200",  # Alibaba metadata, inside 100.64.0.0/10
+        ],
+    )
+    def test_gateway_ui_refuses_loopback_and_metadata_even_with_the_opt_in(
+        self, monkeypatch, secondary_org_context, secondary_org_client, base_url
+    ):
+        monkeypatch.setenv(self.OPT_IN, "true")
+        org_b, _ = secondary_org_context
+
+        response = self._update_provider(secondary_org_client, base_url)
+
+        assert response.status_code == 400, response.json()
+        assert "never allowed" in response.json()["message"]
+        assert self._saved(org_b) is None
+
+    def test_gateway_ui_leaves_default_and_unresolvable_urls_to_the_gateway(
+        self, monkeypatch, secondary_org_context, secondary_org_client, provider_dns
+    ):
+        monkeypatch.delenv(self.OPT_IN, raising=False)
+        org_b, _ = secondary_org_context
+
+        # No base_url: the provider's default endpoint (config.yaml or built in).
+        response = self._update_provider(secondary_org_client, "", name="openai")
+        assert response.status_code == 200, response.json()
+        provider_dns.assert_not_called()
+
+        # Not resolvable from the backend: the gateway checks it on each request.
+        response = self._update_provider(
+            secondary_org_client, "https://llm.corp.invalid/v1", name="corp"
+        )
+        assert response.status_code == 200, response.json()
+        assert self._saved(org_b, "corp").base_url == "https://llm.corp.invalid/v1"
+
+    def test_gateway_ui_can_still_edit_a_provider_saved_before_the_check(
+        self, monkeypatch, secondary_org_context, secondary_org_client
+    ):
+        monkeypatch.delenv(self.OPT_IN, raising=False)
+        org_b, _ = secondary_org_context
+        AgentccProviderCredential.no_workspace_objects.create(
+            organization=org_b,
+            provider_name="custom",
+            display_name="Local vLLM",
+            encrypted_credentials=CredentialManager.encrypt({"api_key": "sk-local"}),
+            api_format="openai",
+            base_url="http://mock-llm:8080",
+        )
+
+        listed = secondary_org_client.get("/agentcc/provider-credentials/")
+        assert listed.status_code == 200, listed.json()
+
+        # The edit dialog sends the saved base URL back unchanged.
+        response = self._update_provider(
+            secondary_org_client, "http://mock-llm:8080/", models=["other-model"]
+        )
+        assert response.status_code == 200, response.json()
+        assert self._saved(org_b).models_list == ["other-model"]
+
+        # Pointing it at another private address is a new URL, and is checked.
+        response = self._update_provider(secondary_org_client, "http://10.0.0.12:8080")
+        assert response.status_code == 400, response.json()
+        assert f"{self.OPT_IN}=true" in response.json()["message"]
+        assert self._saved(org_b).base_url == "http://mock-llm:8080/"
+
+    def test_credential_api_refuses_a_private_base_url_without_the_opt_in(
+        self, monkeypatch, secondary_org_context, secondary_org_client
+    ):
+        monkeypatch.delenv(self.OPT_IN, raising=False)
+        org_b, _ = secondary_org_context
+
+        response = self._create(secondary_org_client, "http://100.64.77.10:8080")
+
+        assert response.status_code == 400, response.json()
+        assert f"{self.OPT_IN}=true" in response.json()["message"]
+        assert self._saved(org_b) is None
+
+        monkeypatch.setenv(self.OPT_IN, "true")
+        response = self._create(secondary_org_client, "http://100.64.77.10:8080")
+        assert response.status_code == 201, response.json()
+        assert self._saved(org_b).base_url == "http://100.64.77.10:8080"
+
+    def test_credential_api_checks_a_changed_base_url_only(
+        self, monkeypatch, secondary_org_context, secondary_org_client
+    ):
+        monkeypatch.delenv(self.OPT_IN, raising=False)
+        org_b, _ = secondary_org_context
+        cred = AgentccProviderCredential.no_workspace_objects.create(
+            organization=org_b,
+            provider_name="custom",
+            encrypted_credentials=CredentialManager.encrypt({"api_key": "sk-local"}),
+            api_format="openai",
+            base_url="http://10.0.0.12:8080",
+        )
+        url = f"/agentcc/provider-credentials/{cred.id}/"
+
+        response = secondary_org_client.patch(
+            url,
+            {"display_name": "Renamed", "base_url": "http://10.0.0.12:8080"},
+            format="json",
+        )
+        assert response.status_code == 200, response.json()
+
+        response = secondary_org_client.patch(
+            url, {"base_url": "http://100.64.77.10:8080"}, format="json"
+        )
+        assert response.status_code == 400, response.json()
+        assert f"{self.OPT_IN}=true" in response.json()["message"]
+        cred.refresh_from_db()
+        assert cred.base_url == "http://10.0.0.12:8080"
+        assert cred.display_name == "Renamed"
+
+        response = secondary_org_client.patch(
+            url, {"base_url": "https://api.openai.com/v1"}, format="json"
+        )
+        assert response.status_code == 200, response.json()
+        cred.refresh_from_db()
+        assert cred.base_url == "https://api.openai.com/v1"

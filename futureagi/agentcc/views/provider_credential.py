@@ -18,6 +18,7 @@ from agentcc.services.url_safety import (
     PROVIDER_PRIVATE_URL_ERROR,
     PROVIDER_URL_ERROR,
     build_ssrf_safe_session,
+    ensure_provider_base_url_allowed,
     ensure_public_http_url,
     private_provider_urls_allowed,
 )
@@ -110,6 +111,10 @@ class AgentccProviderCredentialViewSet(BaseModelViewSetMixinWithUserOrg, ModelVi
                     f"Provider '{data['provider_name']}' already has a credential. "
                     f"Use PATCH to update or rotate."
                 )
+            try:
+                ensure_provider_base_url_allowed(data.get("base_url", ""))
+            except ValueError as e:
+                return self._gm.bad_request(str(e))
 
             encrypted = CredentialManager.encrypt(data["credentials"])
 
@@ -144,6 +149,13 @@ class AgentccProviderCredentialViewSet(BaseModelViewSetMixinWithUserOrg, ModelVi
             serializer = AgentccProviderCredentialUpdateSerializer(data=request.data)
             if not serializer.is_valid():
                 return self._gm.bad_request(serializer.errors)
+            try:
+                ensure_provider_base_url_allowed(
+                    serializer.validated_data.get("base_url"),
+                    saved_base_url=instance.base_url,
+                )
+            except ValueError as e:
+                return self._gm.bad_request(str(e))
 
             safe_fields = {
                 "display_name",

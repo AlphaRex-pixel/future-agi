@@ -83,12 +83,14 @@ def _raise_if_unsafe_url(
     *,
     allow_private: bool = False,
     private_message: str | None = None,
+    allow_unresolvable: bool = False,
 ) -> None:
     """Raise unless every address ``url``'s host resolves to may be called.
 
     Loopback, link-local, metadata, multicast and unspecified addresses always
     raise ``message``. Private/LAN addresses raise ``private_message`` (or
-    ``message``) unless ``allow_private``.
+    ``message``) unless ``allow_private``. A host that does not resolve raises
+    ``message`` unless ``allow_unresolvable``.
     """
     parsed = urlparse(url)
     hostname = parsed.hostname
@@ -109,6 +111,8 @@ def _raise_if_unsafe_url(
             hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM
         )
     except socket.gaierror:
+        if allow_unresolvable:
+            return
         raise exception_cls(message) from None
 
     for _, _, _, _, sockaddr in resolved:
@@ -134,6 +138,35 @@ def ensure_public_http_url(
         ValueError,
         allow_private=allow_private,
         private_message=private_message,
+    )
+
+
+def ensure_provider_base_url_allowed(
+    base_url: str, *, saved_base_url: str | None = None
+) -> None:
+    """Raise ``ValueError`` if the gateway would refuse ``base_url``.
+
+    Checked when a provider is saved, on the terms model discovery and the
+    gateway use, so a provider whose every request would be refused is not
+    saved. Empty means the provider's default endpoint. A host that does not
+    resolve from here passes: the gateway checks it again on every request, and
+    saving should not depend on this container's DNS. An unchanged saved base
+    URL passes too, so rows saved earlier (or while the opt-in was on) can
+    still be edited.
+    """
+    if not base_url:
+        return
+    if not isinstance(base_url, str):
+        raise ValueError(PROVIDER_URL_ERROR)
+    if saved_base_url and base_url.rstrip("/") == saved_base_url.rstrip("/"):
+        return
+    _raise_if_unsafe_url(
+        base_url,
+        PROVIDER_URL_ERROR,
+        ValueError,
+        allow_private=private_provider_urls_allowed(),
+        private_message=PROVIDER_PRIVATE_URL_ERROR,
+        allow_unresolvable=True,
     )
 
 
