@@ -58,11 +58,12 @@ def _bound_by_name(run_test, name):
     """
     from simulate.services.harness_evals import selected_eval_configs
 
-    for config in selected_eval_configs(run_test):
-        if name in {
-            str(config.name or ""),
-            str(getattr(config.eval_template, "name", "") or ""),
-        }:
+    configs = selected_eval_configs(run_test)
+    for config in configs:
+        if name == str(config.name or ""):
+            return config
+    for config in configs:
+        if name == str(getattr(config.eval_template, "name", "") or ""):
             return config
     return None
 
@@ -319,14 +320,12 @@ class HarnessEnvironmentViewSet(viewsets.ViewSet):
         commits. The answer is the five counts, not the environment detail --
         the client refetches that itself.
 
-        The bind can return an eval config whose ``mapping`` is empty -- one
+        The bind can return an eval config whose ``mapping`` is empty: one
         of the harness's own result columns, bound by ingestion under the
-        same name, or a person's eval with no inputs mapped. Such a config is
-        not something this endpoint can grade with: it is refused 400 with
-        its own reason, distinct from the "does not produce" refusal, because
-        the run demonstrably CAN fill this eval's inputs -- the harness
-        already reports it natively. Checked right after the bind and before
-        anything is stamped.
+        same name, or a person's eval with no inputs mapped. Neither can be
+        graded, so it is refused 400 with its own reason, distinct from the
+        "does not produce" refusal, right after the bind and before anything
+        is stamped.
 
         The run is resolved *before* the eval is bound: a request naming a
         run that is not this environment's must leave nothing behind. A run
@@ -393,12 +392,10 @@ class HarnessEnvironmentViewSet(viewsets.ViewSet):
                     job.run_test, wanted, modality
                 )
                 if not eval_config.mapping:
-                    # The idempotent name match above can return one of the
-                    # harness's own result-column rows (empty ``mapping``)
-                    # instead of a selected eval -- not the same condition as
-                    # the "does not produce" refusal, since this run
-                    # demonstrably CAN fill the eval's inputs. It gets its
-                    # own reason before anything is stamped.
+                    # The bind above can return a row with an empty mapping
+                    # -- a harness result column, or a person's eval with no
+                    # inputs -- which has nothing to grade. It gets its own
+                    # reason before anything is stamped.
                     transaction.set_rollback(True)
                     return Response(
                         {

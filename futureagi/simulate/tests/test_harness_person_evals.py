@@ -229,6 +229,58 @@ def test_grade_by_the_template_name_of_a_renamed_person_eval(
     assert r.json()["queued"] == 1
 
 
+@pytest.mark.django_db
+def test_grade_by_a_configs_own_name_beats_an_earlier_configs_template_name(
+    env_client,
+    environment,
+    finished_run,
+    workspace,
+    dispatch,
+    django_capture_on_commit_callbacks,
+):
+    """A later config's own name must win the bind: an earlier config bound
+    from a template that merely happens to share that name must not shadow
+    it."""
+    from unittest.mock import patch
+
+    import simulate.services.harness_run_evals as harness_run_evals
+
+    shadow_name = UNOFFERED
+    first_template = _unoffered(name=shadow_name, required_keys=("output",))
+    second_template = _unoffered(name="person_custom_tpl", required_keys=("output",))
+    _old_add(
+        env_client,
+        environment,
+        workspace,
+        first_template,
+        name="renamed first",
+        mapping={"output": "call.transcript"},
+    )
+    _old_add(
+        env_client,
+        environment,
+        workspace,
+        second_template,
+        name=shadow_name,
+        mapping={"output": "call.transcript"},
+    )
+    _call(finished_run, metadata=_graded())
+    original = harness_run_evals.queue_eval_for_finished_calls
+    with patch.object(
+        harness_run_evals, "queue_eval_for_finished_calls", side_effect=original
+    ) as spy:
+        with django_capture_on_commit_callbacks(execute=True):
+            response = env_client.post(
+                f"{ENVIRONMENTS}/{environment.id}/runs/{finished_run.id}/evaluations/",
+                {"name": shadow_name},
+                format="json",
+                HTTP_X_WORKSPACE_ID=str(workspace.id),
+            )
+    assert response.status_code == 202, response.content
+    graded_config = spy.call_args.args[1]
+    assert graded_config.name == shadow_name
+
+
 def test_serializer_accepts_a_scenario_column_id_as_a_source():
     from simulate.serializers.harness_environment import (
         HarnessEnvironmentEvalInputSerializer,
@@ -279,3 +331,51 @@ def test_people_are_not_capped(env_client, environment, workspace):
     assert len(_detail_selected(env_client, environment, workspace)) == (
         MOST_SELECTED_EVALS + 2
     )
+
+
+@pytest.mark.django_db
+def test_a_dict_mapping_value_does_not_break_the_environment_detail(
+    env_client, environment, workspace
+):
+    template = _unoffered(required_keys=("output",))
+    added = _old_add(
+        env_client,
+        environment,
+        workspace,
+        template,
+        name="dict mapping",
+        mapping={"output": {"path": "call"}},
+    )
+    assert added.status_code == 201, added.content
+    (item,) = _detail_selected(env_client, environment, workspace)[0]["inputs"]
+    assert item["source"] == '{"path": "call"}'
+
+
+@pytest.mark.django_db
+def test_every_spelling_of_one_column_id_gets_its_name(
+    env_client, environment, workspace
+):
+    situation = _scenario_column(environment, "situation")
+    lower = _unoffered(required_keys=("output",))
+    upper = _unoffered(name="second_spelling", required_keys=("output",))
+    _old_add(
+        env_client,
+        environment,
+        workspace,
+        lower,
+        name="lower",
+        mapping={"output": str(situation.id)},
+    )
+    _old_add(
+        env_client,
+        environment,
+        workspace,
+        upper,
+        name="upper",
+        mapping={"output": str(situation.id).upper()},
+    )
+    labels = {
+        row["name"]: row["inputs"][0]["label"]
+        for row in _detail_selected(env_client, environment, workspace)
+    }
+    assert labels == {"lower": "situation", "upper": "situation"}
