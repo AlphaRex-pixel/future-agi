@@ -327,6 +327,33 @@ describe("RunTraceTable", () => {
     expect(screen.getByText("Showing 51–100 of 200")).toBeInTheDocument();
   });
 
+  it("opens a new page at the top of the table's own scroll box", async () => {
+    const user = userEvent.setup();
+    useRunCalls.mockImplementation((_executionId, opts = {}) => ({
+      tasks: TASKS,
+      columns: COLUMNS,
+      groups: groupsFor(TASKS, opts.groupBy),
+      facets: FACETS,
+      count: 200,
+      totalPages: 2,
+      isLoading: false,
+    }));
+    const scrollTo = vi.fn();
+    const original = Element.prototype.scrollTo;
+    Element.prototype.scrollTo = scrollTo;
+    try {
+      renderTable();
+      await user.click(screen.getByRole("button", { name: "Go to page 2" }));
+
+      expect(scrollTo).toHaveBeenCalledWith({ top: 0 });
+      // The box holding the table, not the card around it.
+      const scrolled = scrollTo.mock.contexts.at(-1);
+      expect(scrolled.querySelector(":scope > table")).not.toBeNull();
+    } finally {
+      Element.prototype.scrollTo = original;
+    }
+  });
+
   it("applies column picker choices to the rendered table", async () => {
     const user = userEvent.setup();
     renderTable();

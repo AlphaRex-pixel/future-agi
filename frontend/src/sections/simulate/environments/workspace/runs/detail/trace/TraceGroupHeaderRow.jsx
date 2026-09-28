@@ -11,7 +11,7 @@ import {
 import Iconify from "src/components/iconify";
 import { interpolateColorBasedOnScore } from "src/utils/utils";
 import { BUILD_TONES } from "../../../../buildEnvironment/buildTones";
-import { isBad } from "./traceTable.constants";
+import { HEAD_ROW_PX, isBad } from "./traceTable.constants";
 
 const DESC_KEYS = [
   "callDetails",
@@ -20,8 +20,13 @@ const DESC_KEYS = [
   "idealOutcome",
   "conversationBranch",
 ];
-const rowHover = (t) =>
-  alpha(t.palette.text.primary, t.palette.mode === "dark" ? 0.04 : 0.025);
+const rowHover = (t) => {
+  const tint = alpha(
+    t.palette.text.primary,
+    t.palette.mode === "dark" ? 0.04 : 0.025,
+  );
+  return `linear-gradient(${tint}, ${tint})`;
+};
 
 // The collapsible group header: chevron + label + count on the first descriptive
 // column, a per-column aggregate summary on the rest, and a heat-tinted mean
@@ -34,15 +39,21 @@ export default function TraceGroupHeaderRow({
   showEvals,
   evals,
 }) {
+  // Pinned under the head row while its group's calls scroll past; the next
+  // group's row slides over it. Opaque for that, so the hover tint layers over
+  // the paper instead of replacing it.
   const cellSx = {
-    bgcolor: "transparent",
+    position: "sticky",
+    top: HEAD_ROW_PX,
+    zIndex: 2,
+    bgcolor: "background.paper",
     borderBottom: "1px solid",
     borderColor: "divider",
     borderLeft: "none",
     cursor: "pointer",
     py: 1.25,
     px: 1.5,
-    ".MuiTableRow-root:hover &": { bgcolor: rowHover },
+    ".MuiTableRow-root:hover &": { backgroundImage: rowHover },
     "&:not(:first-of-type)": { borderLeft: "none" },
   };
   const numCellSx = { ...cellSx, textAlign: "left" };
@@ -192,7 +203,7 @@ export default function TraceGroupHeaderRow({
           return (
             <TableCell
               key={`eval-${e.id}`}
-              sx={{ ...numCellSx, p: 0, position: "relative" }}
+              sx={{ ...numCellSx, p: 0 }}
             >
               <Box
                 sx={{

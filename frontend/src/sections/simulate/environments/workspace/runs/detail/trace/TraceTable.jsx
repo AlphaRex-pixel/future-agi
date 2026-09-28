@@ -21,6 +21,8 @@ import { BUILD_TONES } from "../../../../buildEnvironment/buildTones";
 import {
   defaultTraceColumns,
   headCellSx,
+  HEAD_ROW_PX,
+  GROUP_ROW_PX,
   numCellSx,
   bodyCellSx,
   runOutcome,
@@ -31,10 +33,13 @@ import TraceGroupHeaderRow from "./TraceGroupHeaderRow";
 // The theme hides every border on a table's last row, which here is the head
 // row and the final call row. The column dividers are cell left borders, so put
 // those back, and the head's bottom line; the body's last bottom line stays
-// hidden so it doesn't double up with the container edge.
+// hidden so it doesn't double up with the container edge. Separate borders,
+// because collapsed ones stay behind when the head and group rows stick.
 const lastRowDividersSx = {
   minWidth: 1000,
   tableLayout: "auto",
+  borderCollapse: "separate",
+  borderSpacing: 0,
   [`& .${tableRowClasses.root}:last-of-type .${tableCellClasses.root}:not(:first-of-type)`]:
     { borderLeftColor: "divider" },
   [`& .${tableHeadClasses.root} .${tableCellClasses.root}`]: {
@@ -73,6 +78,7 @@ export default function TraceTable({
   onOpen,
   columns,
   activeCallId = null,
+  scrollRef,
 }) {
   const [collapsed, setCollapsed] = useState(null);
   const activeRowRef = useRef(null);
@@ -130,6 +136,8 @@ export default function TraceTable({
         sx={{
           cursor: "pointer",
           bgcolor: active ? "action.selected" : "transparent",
+          // Scrolled into view below the pinned head and group rows, not under.
+          scrollMarginTop: HEAD_ROW_PX + GROUP_ROW_PX,
         }}
       >
         {show("callDetails") && (
@@ -305,14 +313,17 @@ export default function TraceTable({
     );
   };
 
+  // The table scrolls both ways in its own box, below the "Collapse all" bar,
+  // so the head and group rows stick to it rather than to the page.
   return (
-    <Box>
+    <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
       {!rows && (
         <Stack
           direction="row"
           alignItems="center"
           spacing={1}
           sx={{
+            flexShrink: 0,
             px: 1.5,
             py: 1,
             borderBottom: "1px solid",
@@ -347,7 +358,7 @@ export default function TraceTable({
           </Typography>
         </Stack>
       )}
-      <Box sx={{ overflowX: "auto" }}>
+      <Box ref={scrollRef} sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <Table size="small" sx={lastRowDividersSx}>
           <TableHead>
             <TableRow>
@@ -434,4 +445,5 @@ TraceTable.propTypes = {
   onOpen: PropTypes.func,
   columns: PropTypes.instanceOf(Set),
   activeCallId: PropTypes.string,
+  scrollRef: PropTypes.oneOfType([PropTypes.func, PropTypes.object]),
 };

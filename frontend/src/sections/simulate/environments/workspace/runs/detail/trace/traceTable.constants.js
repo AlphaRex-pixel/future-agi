@@ -128,6 +128,11 @@ export const neutralCheckboxSx = {
   "&.MuiCheckbox-indeterminate": { color: "text.primary" },
 };
 
+// The head row stays pinned while the calls scroll and the group rows pin just
+// below it, so they need its height. Both measured in the browser.
+export const HEAD_ROW_PX = 44;
+export const GROUP_ROW_PX = 57;
+
 // Shared cell sx. A hairline left border between columns and a bottom divider per
 // row give the table its grid without a heavy outline.
 export const headCellSx = {
@@ -136,7 +141,10 @@ export const headCellSx = {
   color: "text.secondary",
   whiteSpace: "nowrap",
   bgcolor: "background.paper",
-  height: 44,
+  height: HEAD_ROW_PX,
+  position: "sticky",
+  top: 0,
+  zIndex: 3,
   py: 0,
   borderBottom: "1px solid",
   borderColor: "divider",

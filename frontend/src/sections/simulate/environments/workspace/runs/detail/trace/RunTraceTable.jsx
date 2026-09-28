@@ -71,8 +71,10 @@ export default function RunTraceTable({
   }, [filters, statusChip]);
 
   // A pager click opens the new page at its first row. Not on a drawer step:
-  // there the open call's row scrolls itself into view.
+  // there the open call's row scrolls itself into view. The table scrolls in
+  // its own box, so its head and group rows can stay pinned.
   const scrollRef = useRef(null);
+  const tableScrollRef = useRef(null);
   // The table box runs to the bottom of the window whatever the row count, so
   // the card never hugs a few rows. Measured, because the header above it
   // varies in height; re-measured on resize.
@@ -285,8 +287,9 @@ export default function RunTraceTable({
   return (
     <>
       <SectionCard title={title} action={action}>
-        {/* A fixed-height scroll box, like the Scenarios tab: the card keeps
-            its size whatever the row count, and the pager below never moves. */}
+        {/* A fixed-height box, like the Scenarios tab: the card keeps its size
+            whatever the row count, and the pager below never moves. The table
+            scrolls inside it, in its own box. */}
         <Box
           ref={scrollRef}
           sx={{
@@ -319,6 +322,7 @@ export default function RunTraceTable({
               evals={evals}
               onOpen={onOpenCall}
               activeCallId={activeCallId}
+              scrollRef={tableScrollRef}
             />
           )}
         </Box>
@@ -353,7 +357,7 @@ export default function RunTraceTable({
               page={page}
               onChange={(_, value) => {
                 setPage(value);
-                scrollRef.current?.scrollTo?.({ top: 0 });
+                tableScrollRef.current?.scrollTo?.({ top: 0 });
               }}
               siblingCount={1}
               boundaryCount={1}
