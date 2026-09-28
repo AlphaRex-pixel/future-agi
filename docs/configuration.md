@@ -418,6 +418,7 @@ Standalone publishes no Postgres, ClickHouse, Redis or Temporal port.
 | `FI_APP_TEMPORAL_MAX_CONCURRENT_WORKFLOW_TASKS` | `8` | S | Workflow-task slots per queue of the embedded worker. |
 | `GRANIAN_THREADS` | `2` | S D H | API server threads. |
 | `REDIS_MAXMEMORY` | `128mb` | S | Memory cap of the app container's Redis (cache and locks; nothing in it must survive a restart). At the cap it evicts the least recently used keys (`allkeys-lru`). |
+| `SPAN_LIST_PAGE_WALL_MS`, `TRACE_LIST_PAGE_WALL_MS`, `SESSION_LIST_PAGE_WALL_MS` | Standalone: `15000`; elsewhere `5000` | S D H | How long a span, trace or session list page may search before it answers with the rows found so far and a cursor for the rest (marked degraded). Standalone's ClickHouse runs two threads a query, so it waits longer. Between 100 and 60000. |
 | `FI_ADOPT_DISTRIBUTED_INSTALL_DATA` | unset | S | `true` makes Standalone take over a Postgres database created by Distributed. Uploads in the old MinIO volume and in-flight workflows are left behind. Moving an install between setups is otherwise refused. `FI_ADOPT_FULL_INSTALL_DATA`, its older name, still works. |
 
 ### Distributed sizing

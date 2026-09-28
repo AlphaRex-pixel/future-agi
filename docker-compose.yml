@@ -119,6 +119,17 @@ services:
       FI_COLLECTOR_PUBLIC_URL: ${FI_COLLECTOR_PUBLIC_URL:-http://localhost:${FI_COLLECTOR_OTLP_HTTP_PORT:-4318}}
       # The UI's host, without a scheme: invite and password-reset links.
       APP_URL: ${APP_URL:-localhost:${FRONTEND_PORT:-3000}}
+      # The host ports, for the boot summary's URLs and the SPA's API URL
+      # (bin/start), also when they are set in the shell rather than in .env.
+      FRONTEND_PORT: ${FRONTEND_PORT:-3000}
+      BACKEND_PORT: ${BACKEND_PORT:-8000}
+      # List pages publish the rows found within this wall plus a cursor
+      # ("degraded" when the walk stopped early). Standalone's ClickHouse runs
+      # two threads a query (clickhouse/users.d/zz-small-host.xml), so it gets
+      # longer than the 5 s default before a page comes back partial.
+      SPAN_LIST_PAGE_WALL_MS: ${SPAN_LIST_PAGE_WALL_MS:-15000}
+      TRACE_LIST_PAGE_WALL_MS: ${TRACE_LIST_PAGE_WALL_MS:-15000}
+      SESSION_LIST_PAGE_WALL_MS: ${SESSION_LIST_PAGE_WALL_MS:-15000}
       # S3_ENDPOINT_URL is the app's own view of object storage; MINIO_URL is
       # baked into URLs handed to the browser and must be reachable from it.
       STORAGE_BACKEND: ${STORAGE_BACKEND:-minio}
