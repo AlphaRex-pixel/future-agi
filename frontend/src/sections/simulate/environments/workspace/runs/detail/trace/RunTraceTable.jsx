@@ -125,6 +125,7 @@ export default function RunTraceTable({
     error,
   } = useRunCalls(executionId, listQuery);
 
+
   // The eval columns to render come from the data-driven column descriptors.
   const evals = useMemo(
     () =>
@@ -314,6 +315,7 @@ export default function RunTraceTable({
             <TraceTable
               columns={visibleColumns}
               groups={groups}
+              rows={groupBy ? null : tasks}
               evals={evals}
               onOpen={onOpenCall}
               activeCallId={activeCallId}

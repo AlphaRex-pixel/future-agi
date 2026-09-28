@@ -376,6 +376,7 @@ describe("RunTraceTable", () => {
       "Attack",
       "Task",
       "Status",
+      "No grouping",
     ]);
     await user.click(screen.getByRole("menuitem", { name: "Task" }));
 
@@ -383,6 +384,22 @@ describe("RunTraceTable", () => {
       "ex1",
       expect.objectContaining({ groupBy: "task" }),
     );
+  });
+
+  it("lists every call flat, without group rows, under No grouping", async () => {
+    const user = userEvent.setup();
+    renderTable();
+    await user.click(screen.getByRole("button", { name: /Group by/ }));
+    await user.click(screen.getByRole("menuitem", { name: "No grouping" }));
+
+    expect(useRunCalls).toHaveBeenLastCalledWith(
+      "ex1",
+      expect.objectContaining({ groupBy: "" }),
+    );
+    expect(screen.queryByText(/Expand all|Collapse all/)).toBeNull();
+    TASKS.forEach((task) => {
+      expect(screen.getAllByText(task.scenario).length).toBeGreaterThan(0);
+    });
   });
 
   it("has no AI filter box — it isn't wired for run calls", async () => {

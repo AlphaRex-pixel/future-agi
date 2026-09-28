@@ -111,6 +111,7 @@ export const GROUPINGS = [
   { id: "attack", label: "Attack", icon: "solar:shield-warning-linear" },
   { id: "task", label: "Task", icon: "solar:checklist-minimalistic-linear" },
   { id: "status", label: "Status", icon: "solar:check-circle-linear" },
+  { id: "", label: "No grouping", icon: "solar:list-linear" },
 ];
 
 export const STATUS_CHIPS = [

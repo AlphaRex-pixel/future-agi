@@ -195,7 +195,7 @@ export function runCallsQueryOptions(executionId, opts = {}) {
             page_size: limit,
             search,
             filters: JSON.stringify(filters),
-            group_by: groupBy,
+            ...(groupBy ? { group_by: groupBy } : {}),
           },
         })
         .then((response) => response.data),

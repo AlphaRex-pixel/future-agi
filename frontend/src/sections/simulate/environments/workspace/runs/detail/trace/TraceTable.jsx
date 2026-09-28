@@ -68,6 +68,7 @@ const clampSx = {
 
 export default function TraceTable({
   groups,
+  rows = null,
   evals,
   onOpen,
   columns,
@@ -306,44 +307,46 @@ export default function TraceTable({
 
   return (
     <Box>
-      <Stack
-        direction="row"
-        alignItems="center"
-        spacing={1}
-        sx={{
-          px: 1.5,
-          py: 1,
-          borderBottom: "1px solid",
-          borderColor: "divider",
-        }}
-      >
-        <Button
-          size="small"
-          variant="text"
-          onClick={toggleAllGroups}
-          startIcon={
-            <Iconify
-              icon={
-                allCollapsed
-                  ? "solar:alt-arrow-down-linear"
-                  : "solar:alt-arrow-right-linear"
-              }
-              width={14}
-            />
-          }
+      {!rows && (
+        <Stack
+          direction="row"
+          alignItems="center"
+          spacing={1}
           sx={{
-            typography: "s3",
-            fontWeight: "fontWeightSemiBold",
-            color: "text.secondary",
-            "&:hover": { bgcolor: "action.hover" },
+            px: 1.5,
+            py: 1,
+            borderBottom: "1px solid",
+            borderColor: "divider",
           }}
         >
-          {allCollapsed ? "Expand all" : "Collapse all"}
-        </Button>
-        <Typography sx={{ typography: "s3", color: "text.subtitle" }}>
-          {groups.length} {groups.length === 1 ? "group" : "groups"}
-        </Typography>
-      </Stack>
+          <Button
+            size="small"
+            variant="text"
+            onClick={toggleAllGroups}
+            startIcon={
+              <Iconify
+                icon={
+                  allCollapsed
+                    ? "solar:alt-arrow-down-linear"
+                    : "solar:alt-arrow-right-linear"
+                }
+                width={14}
+              />
+            }
+            sx={{
+              typography: "s3",
+              fontWeight: "fontWeightSemiBold",
+              color: "text.secondary",
+              "&:hover": { bgcolor: "action.hover" },
+            }}
+          >
+            {allCollapsed ? "Expand all" : "Collapse all"}
+          </Button>
+          <Typography sx={{ typography: "s3", color: "text.subtitle" }}>
+            {groups.length} {groups.length === 1 ? "group" : "groups"}
+          </Typography>
+        </Stack>
+      )}
       <Box sx={{ overflowX: "auto" }}>
         <Table size="small" sx={lastRowDividersSx}>
           <TableHead>
@@ -403,19 +406,21 @@ export default function TraceTable({
             </TableRow>
           </TableHead>
           <TableBody>
-            {groups.map((g) => (
-              <React.Fragment key={g.label}>
-                <TraceGroupHeaderRow
-                  group={g}
-                  collapsed={collapsedSet.has(g.label)}
-                  onToggle={() => toggleCollapsed(g.label)}
-                  show={show}
-                  showEvals={showEvals}
-                  evals={evals}
-                />
-                {!collapsedSet.has(g.label) && g.rows.map(renderRow)}
-              </React.Fragment>
-            ))}
+            {rows
+              ? rows.map(renderRow)
+              : groups.map((g) => (
+                  <React.Fragment key={g.label}>
+                    <TraceGroupHeaderRow
+                      group={g}
+                      collapsed={collapsedSet.has(g.label)}
+                      onToggle={() => toggleCollapsed(g.label)}
+                      show={show}
+                      showEvals={showEvals}
+                      evals={evals}
+                    />
+                    {!collapsedSet.has(g.label) && g.rows.map(renderRow)}
+                  </React.Fragment>
+                ))}
           </TableBody>
         </Table>
       </Box>
@@ -424,6 +429,7 @@ export default function TraceTable({
 }
 TraceTable.propTypes = {
   groups: PropTypes.array.isRequired,
+  rows: PropTypes.array,
   evals: PropTypes.array.isRequired,
   onOpen: PropTypes.func,
   columns: PropTypes.instanceOf(Set),
