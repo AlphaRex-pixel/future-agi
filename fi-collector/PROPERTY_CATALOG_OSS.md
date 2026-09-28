@@ -229,6 +229,10 @@ docker compose run --rm --no-deps \
   --page-size 64 --max-pages 100 --page-delay 100ms
 ```
 
+Every hour of the range takes at least one page, and a run stops after
+`--max-pages`. A preview keeps no checkpoint, so preview a range with no more
+hours than `--max-pages`, or raise it.
+
 To apply the reviewed scope, repeat with `--apply --checkpoint /backfill/progress.json`
 and mount an operator-owned writable directory at `/backfill`. The container
 runs as UID/GID 65532, so grant that identity access to the checkpoint directory.

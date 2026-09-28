@@ -404,6 +404,12 @@ func runSpans(ctx context.Context, cfg options, scopes scopeReader, publisher ob
 		}
 	}
 	if !progress.Complete {
+		if !cfg.apply {
+			// A preview keeps no checkpoint, so running it again starts over.
+			hours := int(lastHour(cfg.until).Sub(cfg.since.Truncate(time.Hour))/time.Hour) + 1
+			return fmt.Errorf("page budget reached (--max-pages %d); preview incomplete, and a preview keeps no checkpoint to resume: "+
+				"raise --max-pages (this range has %d hours, each at least one page) or narrow --since/--until", cfg.maxPages, hours)
+		}
 		return errors.New("page budget reached; scan incomplete, resume the same checkpoint")
 	}
 	return nil
@@ -421,6 +427,8 @@ Preview spans:
   fi-observed-catalog-backfill --project UUID --since RFC3339 --until RFC3339
 Apply/resume: add --apply --checkpoint /writable/progress.json
 Bounds: --page-size 64 --max-pages 100 --page-delay 100ms
+Every hour of the range takes at least one page. A preview keeps no checkpoint:
+raise --max-pages to the range's hours or narrow it.
 
 Preview a verified historical batch instead:
   --source legacy --project UUID --legacy-epoch N --legacy-revision N --legacy-build UUID
@@ -507,6 +515,9 @@ func runLegacy(ctx context.Context, cfg options, scopes scopeReader, publisher o
 		}
 	}
 	if !progress.Complete {
+		if !cfg.apply {
+			return fmt.Errorf("page budget reached (--max-pages %d); legacy preview incomplete, and a preview keeps no checkpoint to resume: raise --max-pages", cfg.maxPages)
+		}
 		return errors.New("page budget reached; legacy import incomplete, resume the same checkpoint")
 	}
 	return nil

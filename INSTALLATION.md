@@ -1459,21 +1459,38 @@ the `observed_catalog_repair_scope` events that follow.
 
 Index a project's older spans with `fi-observed-catalog-backfill`, which is in
 the `app` container (Standalone). Without `--apply` it only previews, writing
-nothing:
+nothing. Preview one day first:
 
 ```bash
 docker compose exec app sh -c 'FI_PG_DSN="$FI_PG_READ" \
   FI_OBSERVED_BACKFILL_CH_URL="$FI_CH_URL" FI_OBSERVED_BACKFILL_CH_DATABASE="$FI_CH_DATABASE" \
   FI_OBSERVED_BACKFILL_CH_USERNAME="$CH_USERNAME" FI_OBSERVED_BACKFILL_CH_PASSWORD="$CH_PASSWORD" \
   exec fi-observed-catalog-backfill "$@"' backfill \
-  --project <project UUID> --since 2026-01-01T00:00:00Z --until 2026-10-01T00:00:00Z
+  --project <project UUID> --since 2026-09-01T00:00:00Z --until 2026-09-02T00:00:00Z
 ```
 
-Then run it again with `--apply --checkpoint /data/collector/backfill-<project UUID>.json`
-added. Every hour of the range takes at least one page and a run stops after
-`--max-pages` (100): raise it, or repeat the same command until its last line
-says `"scan_complete": true`. Rerunning over a range already indexed is
-harmless. On Helm, run the same binary from the
+Every hour of the range takes at least one page, more for busy hours, and a
+run stops after `--max-pages` pages (100 by default). A preview keeps no
+progress, so a longer one needs `--max-pages` of at least the number of hours
+in its range (a 30-day month has 720), or a shorter range.
+
+To index, run it over the whole range you need with `--apply` and a
+checkpoint, which records its progress. This range has 6552 hours, so
+`--max-pages 7000` covers it unless some hours hold more than 64 spans:
+
+```bash
+docker compose exec app sh -c 'FI_PG_DSN="$FI_PG_READ" \
+  FI_OBSERVED_BACKFILL_CH_URL="$FI_CH_URL" FI_OBSERVED_BACKFILL_CH_DATABASE="$FI_CH_DATABASE" \
+  FI_OBSERVED_BACKFILL_CH_USERNAME="$CH_USERNAME" FI_OBSERVED_BACKFILL_CH_PASSWORD="$CH_PASSWORD" \
+  exec fi-observed-catalog-backfill "$@"' backfill \
+  --project <project UUID> --since 2026-01-01T00:00:00Z --until 2026-10-01T00:00:00Z \
+  --apply --checkpoint /data/collector/backfill-<project UUID>.json --max-pages 7000
+```
+
+If it stops with "page budget reached", run the exact same command again: it
+resumes from the checkpoint. Repeat until its last line says
+`"scan_complete": true`. Rerunning over a range already indexed is harmless.
+On Helm, run the same binary from the
 `futureagi/fi-collector` image with the collector's environment; see
 [fi-collector/PROPERTY_CATALOG_OSS.md](fi-collector/PROPERTY_CATALOG_OSS.md)
 for every option.
