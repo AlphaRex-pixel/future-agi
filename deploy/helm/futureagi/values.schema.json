@@ -2958,7 +2958,7 @@
           "properties": {
             "existingSecret": {
               "type": "string",
-              "description": "Existing Secret with the admin's email, name and password (8+ characters). Empty: create the first account yourself (install notes, step 3)."
+              "description": "Existing Secret with the admin's email, name and password (the sign-up rules: 8+ characters, not a common password, not all digits). Empty: create the first account yourself (install notes, step 3)."
             },
             "emailKey": {
               "type": "string",

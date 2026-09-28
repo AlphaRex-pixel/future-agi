@@ -1098,13 +1098,57 @@ def test_no_first_admin_without_an_email(signups) -> None:
 
 
 @pytest.mark.parametrize(
-    "overrides", [{"FAGI_ADMIN_NAME": ""}, {"FAGI_ADMIN_PASSWORD": "short"}]
+    ("overrides", "reason"),
+    [
+        ({"FAGI_ADMIN_NAME": ""}, "all required"),
+        ({"FAGI_ADMIN_PASSWORD": "short"}, "too short"),
+        # Long enough, but AUTH_PASSWORD_VALIDATORS reject them.
+        ({"FAGI_ADMIN_PASSWORD": "password"}, "too common"),
+        ({"FAGI_ADMIN_PASSWORD": "qwertyuiop"}, "too common"),
+        ({"FAGI_ADMIN_PASSWORD": "12345678"}, "entirely numeric"),
+    ],
 )
-def test_first_admin_needs_a_name_and_a_real_password(
-    monkeypatch, signups, overrides
+def test_first_admin_needs_a_name_and_a_password_the_validators_accept(
+    monkeypatch, signups, overrides, reason
 ) -> None:
     monkeypatch.setattr("django.contrib.auth.get_user_model", lambda: _Users())
 
-    with pytest.raises(command.BootstrapError, match="8 or more characters"):
+    with pytest.raises(command.BootstrapError, match=reason) as refused:
         command.first_admin(lambda line: None, env={**ADMIN_ENV, **overrides})
+    assert "bootstrap.admin.existingSecret" in str(refused.value)
     assert signups == []
+
+
+@pytest.mark.django_db
+def test_first_admin_signs_up_the_owner_once_against_the_real_user_model() -> None:
+    from accounts.models import User
+
+    env = {**ADMIN_ENV, "FAGI_ADMIN_PASSWORD": "Bootstrap-Passw0rd!"}
+    logs: list[str] = []
+
+    command.first_admin(logs.append, env=env)
+    command.first_admin(
+        logs.append, env={**env, "FAGI_ADMIN_PASSWORD": "Changed-Passw0rd!"}
+    )
+
+    owner = User.objects.get(email="owner@example.com")
+    assert owner.name == "Owner"
+    assert owner.organization_role == "Owner"
+    assert owner.is_active
+    assert owner.check_password("Bootstrap-Passw0rd!")
+    assert User.objects.filter(email__iexact="owner@example.com").count() == 1
+    assert logs == [
+        "first admin Owner@Example.com created",
+        "first admin Owner@Example.com already exists: left unchanged",
+    ]
+
+
+@pytest.mark.django_db
+def test_a_password_the_validators_reject_fails_the_job_with_guidance() -> None:
+    from accounts.models import User
+
+    with pytest.raises(command.BootstrapError, match="too common"):
+        command.first_admin(
+            lambda line: None, env={**ADMIN_ENV, "FAGI_ADMIN_PASSWORD": "password"}
+        )
+    assert not User.objects.filter(email__iexact="owner@example.com").exists()

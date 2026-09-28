@@ -409,18 +409,21 @@ def first_admin(log: Callable[[str], None], env=None) -> None:
     if get_user_model().objects.filter(email__iexact=email).exists():
         log(f"first admin {email} already exists: left unchanged")
         return
-    name = (env.get("FAGI_ADMIN_NAME") or "").strip()
-    password = env.get("FAGI_ADMIN_PASSWORD") or ""
-    if not name or len(password) < 8:
-        raise BootstrapError(
-            "the first admin needs a name and a password of 8 or more characters "
-            "(FAGI_ADMIN_NAME, FAGI_ADMIN_PASSWORD; Helm: bootstrap.admin.existingSecret)"
-        )
-    from accounts.utils import first_signup
+    from django.core.exceptions import ValidationError
 
-    first_signup(
-        {"email": email, "full_name": name, "password": password, "allow_email": True}
-    )
+    from accounts.utils import create_owner_account
+
+    try:
+        create_owner_account(
+            email,
+            (env.get("FAGI_ADMIN_NAME") or "").strip(),
+            env.get("FAGI_ADMIN_PASSWORD") or "",
+        )
+    except ValidationError as exc:
+        raise BootstrapError(
+            f"the first admin {email}: {' '.join(exc.messages)} Set FAGI_ADMIN_NAME "
+            "and FAGI_ADMIN_PASSWORD (Helm: bootstrap.admin.existingSecret)."
+        ) from None
     log(f"first admin {email} created")
 
 

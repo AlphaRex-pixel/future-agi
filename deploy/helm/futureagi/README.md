@@ -273,11 +273,12 @@ registry mirror. See [Enterprise](#enterprise).
 kubectl -n futureagi exec -it deploy/futureagi-backend -c backend -- python manage.py create_user
 # Scripted:
 kubectl -n futureagi exec deploy/futureagi-backend -c backend -- python manage.py create_user \
-  --email admin@example.com --name "Admin" --password '<8+ characters>'
+  --email admin@example.com --name "Admin" --password '<password>'
 ```
 
-Or let the bootstrap job create the first admin from a Secret
-(`bootstrap.admin.existingSecret`), which suits GitOps.
+The password must pass the sign-up rules: 8+ characters, not a common
+password, not all digits. Or let the bootstrap job create the first admin
+from a Secret (`bootstrap.admin.existingSecret`), which suits GitOps.
 
 Traces go to fi-collector over OpenTelemetry, with the API keys from the UI;
 [OTLP](#otlp) lists the endpoints. `helm test futureagi -n futureagi`
@@ -669,7 +670,8 @@ turns on the Enterprise features in the public `futureagi/future-agi` image.
   `<api>/saml2_auth/acs/` and its entity ID `https://<app host>`.
 - **First admin.** `bootstrap.admin.existingSecret` (keys `email`, `name`,
   `password`) makes the bootstrap job create the first account if it does
-  not exist, in place of the `kubectl exec ... create_user` step.
+  not exist, in place of the `kubectl exec ... create_user` step. A password
+  the sign-up rules reject fails the job, which says why.
 - **Corporate proxy.** `global.proxy.httpProxy`, `httpsProxy` and `noProxy`
   set `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` on every application pod.
   `NO_PROXY` always includes the cluster's names, the release's Services and
@@ -1478,7 +1480,7 @@ Bracketed names are the environment variables a key sets;
 | `bootstrap.podAnnotations` | `{}` | Pod annotations. |
 | `bootstrap.extraVolumes` | `[]` | Extra volumes, e.g. the CA of `postgres.external.sslMode=verify-full`. Empty: `backend.extraVolumes`. |
 | `bootstrap.extraVolumeMounts` | `[]` | Extra volume mounts. Empty: `backend.extraVolumeMounts`. |
-| `bootstrap.admin.existingSecret` | `""` | Existing Secret with the admin's email, name and password (8+ characters). Empty: create the first account yourself (install notes, step 3). |
+| `bootstrap.admin.existingSecret` | `""` | Existing Secret with the admin's email, name and password (the sign-up rules: 8+ characters, not a common password, not all digits). Empty: create the first account yourself (install notes, step 3). |
 | `bootstrap.admin.emailKey` | `"email"` | Key of the email in `existingSecret`. |
 | `bootstrap.admin.nameKey` | `"name"` | Key of the full name in `existingSecret`. |
 | `bootstrap.admin.passwordKey` | `"password"` | Key of the password in `existingSecret`. |

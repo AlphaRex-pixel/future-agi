@@ -1074,9 +1074,9 @@ bootstrap:
   extraVolumes: []
   # -- Extra volume mounts. Empty: `backend.extraVolumeMounts`.
   extraVolumeMounts: []
-  # The first admin account, created by the job after the migrations (`manage.py create_user`) when no user has its email yet; later runs leave it alone, password included.
+  # The first admin account, created by the job after the migrations (the account creation `manage.py create_user` uses) when no user has its email yet; later runs leave it alone, password included.
   admin:
-    # -- Existing Secret with the admin's email, name and password (8+ characters). Empty: create the first account yourself (install notes, step 3).
+    # -- Existing Secret with the admin's email, name and password (the sign-up rules: 8+ characters, not a common password, not all digits). Empty: create the first account yourself (install notes, step 3).
     existingSecret: ""
     # -- Key of the email in `existingSecret`.
     emailKey: email
