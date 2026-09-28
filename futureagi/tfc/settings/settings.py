@@ -1289,6 +1289,22 @@ ENABLE_INTEGRATIONS = os.getenv("ENABLE_INTEGRATIONS", "false").lower() == "true
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
+# Billing usage events go to the Redis stream usage:events, which only the
+# UsageConsumerWorkflow of Future AGI Cloud (ee.cloud) drains. Without it the
+# stream only grows until Redis is full, so unset, events are on exactly when
+# that consumer ships with this code. fi-collector reads the same variables,
+# and is off unless USAGE_EVENTS_ENABLED=true. The cap bounds the stream
+# (~160 bytes an entry) while its consumer is behind or stopped.
+from tfc.ee_loader import usage_event_consumer_available  # noqa: E402
+
+_usage_events = os.getenv("USAGE_EVENTS_ENABLED", "").strip().lower()
+USAGE_EVENTS_ENABLED = (
+    _usage_events in ("true", "1", "yes", "on")
+    if _usage_events
+    else usage_event_consumer_available()
+)
+USAGE_EVENTS_MAX_LEN = int(os.getenv("USAGE_EVENTS_MAX_LEN") or 100_000)
+
 # Django Channels layer. CHANNEL_LAYER_BACKEND: auto (default) | memory | redis |
 # rabbitmq. With one web process the layer lives in memory and needs no broker;
 # tfc/channel_layers.py explains how auto chooses.

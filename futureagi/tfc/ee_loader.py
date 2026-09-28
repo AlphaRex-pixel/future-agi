@@ -9,6 +9,13 @@ def has_ee(module: str) -> bool:
         return False
 
 
+def usage_event_consumer_available() -> bool:
+    """Whether this code ships the consumer of the usage:events Redis stream:
+    Future AGI Cloud's UsageConsumerWorkflow, which the Temporal worker loads
+    from the same modules (tfc/temporal/common/registry.py)."""
+    return has_ee("ee.cloud.temporal") or has_ee("ee.usage.temporal")
+
+
 def _is_oss_mode() -> bool:
     """Env-var-based OSS detection for use during Django settings load.
 

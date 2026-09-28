@@ -80,6 +80,11 @@ export GRANIAN_DEV_ARGS
 # never on a command line (those are world-readable). docker-compose.yml puts
 # it into every Redis URL, so it must be URL-safe (./bin/install generates
 # hex). An empty value (a compose file older than the image) keeps Redis open.
+# At the memory cap, allkeys-lru evicts the least recently used key, TTL or
+# not: nothing here must survive a restart, and every key whose loss matters
+# (locks, eval state, in-flight payloads) has a TTL, so volatile-lru would
+# evict those just the same. It only adds a failure mode: once keys without a
+# TTL fill the cap, every write fails with OOM, and with it login and /health/.
 REDIS_PASSWORD="${REDIS_PASSWORD:-}"
 case "$REDIS_PASSWORD" in
   *[!A-Za-z0-9._~-]*)
@@ -93,7 +98,7 @@ port 6379
 save ""
 appendonly no
 maxmemory ${REDIS_MAXMEMORY:-128mb}
-maxmemory-policy volatile-lru
+maxmemory-policy allkeys-lru
 loglevel warning
 EOF
   if [ -n "$REDIS_PASSWORD" ]; then

@@ -21,6 +21,12 @@ type Config struct {
 	WarmTTL     time.Duration `yaml:"warm_ttl"`
 	PGPoolRead  int           `yaml:"pg_pool_read"`
 	PGPoolWrite int           `yaml:"pg_pool_write"`
+	// UsageEvents turns on billing events on the usage:events Redis stream
+	// (USAGE_EVENTS_ENABLED). Only Future AGI Cloud runs their consumer;
+	// without one the stream only grows until Redis is full.
+	UsageEvents bool `yaml:"usage_events"`
+	// UsageEventsMaxLen caps that stream (USAGE_EVENTS_MAX_LEN); 0 → default.
+	UsageEventsMaxLen int64 `yaml:"usage_events_max_len"`
 }
 
 // EndpointFromEnv builds a PostgreSQL URL from separate endpoint fields. No

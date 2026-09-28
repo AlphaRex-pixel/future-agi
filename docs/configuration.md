@@ -346,6 +346,8 @@ empty means the feature is skipped and nothing is sent.
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | S D H | PostHog endpoint. |
 | `SENTRY_DSN` | empty: off | S D H | Send errors to your Sentry project. |
 | `SENTRY_ENABLED` | on outside `ENV_TYPE=local`, but only with a DSN | S D H | `false` turns Sentry off even with a DSN. |
+| `USAGE_EVENTS_ENABLED` | off, unless the image ships Future AGI Cloud's usage consumer | S D H | Billing usage events, one per trace export and per metered action, on the Redis stream `usage:events`. The app and fi-collector (Standalone runs it inside `app`) read it. Only Future AGI Cloud drains that stream: turned on anywhere else, it grows until it reaches `USAGE_EVENTS_MAX_LEN`, taking Redis memory the cache and locks need. |
+| `USAGE_EVENTS_MAX_LEN` | `100000` | S D H | Most entries kept on `usage:events` (about 160 bytes each) while its consumer is behind or stopped. |
 
 Browser-side analytics (Mixpanel, PostHog, Sentry, ad pixels) are build-time
 settings of the UI image. The published images are built without them, so the
@@ -414,7 +416,7 @@ Standalone publishes no Postgres, ClickHouse, Redis or Temporal port.
 | `FI_APP_TEMPORAL_MAX_CONCURRENT_ACTIVITIES` | `8` | S | Activity slots per queue of the app's embedded Temporal worker. Each running activity can hold a Postgres connection: raise it only on a larger host. |
 | `FI_APP_TEMPORAL_MAX_CONCURRENT_WORKFLOW_TASKS` | `8` | S | Workflow-task slots per queue of the embedded worker. |
 | `GRANIAN_THREADS` | `2` | S D H | API server threads. |
-| `REDIS_MAXMEMORY` | `128mb` | S | Memory cap of the app container's Redis (cache and locks; nothing in it must survive a restart). |
+| `REDIS_MAXMEMORY` | `128mb` | S | Memory cap of the app container's Redis (cache and locks; nothing in it must survive a restart). At the cap it evicts the least recently used keys (`allkeys-lru`). |
 | `FI_ADOPT_DISTRIBUTED_INSTALL_DATA` | unset | S | `true` makes Standalone take over a Postgres database created by Distributed. Uploads in the old MinIO volume and in-flight workflows are left behind. Moving an install between setups is otherwise refused. `FI_ADOPT_FULL_INSTALL_DATA`, its older name, still works. |
 
 ### Distributed sizing

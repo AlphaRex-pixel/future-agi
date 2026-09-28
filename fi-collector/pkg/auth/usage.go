@@ -14,25 +14,33 @@ import (
 
 const (
 	usageStreamKey = "usage:events"
-	usageMaxLen    = 1_000_000
+	// DefaultUsageMaxLen caps the stream when USAGE_EVENTS_MAX_LEN is unset:
+	// at ~160 bytes an entry, ~16 MB while its consumer is behind or stopped.
+	DefaultUsageMaxLen = 100_000
 )
 
 // UsageEmitter writes billing events to the Redis Stream consumed by
-// the Temporal UsageConsumerWorkflow. Same stream + schema as the Python
-// emitter (ee/usage/services/emitter.py).
+// the Temporal UsageConsumerWorkflow (Future AGI Cloud only). Same stream +
+// schema as the Python emitter (ee/usage/services/emitter.py). Only created
+// with USAGE_EVENTS_ENABLED=true: without that consumer the stream only grows.
 type UsageEmitter struct {
-	rdb *redis.Client
-	pg  *pgxpool.Pool
-	log *slog.Logger
+	rdb    *redis.Client
+	pg     *pgxpool.Pool
+	log    *slog.Logger
+	maxLen int64
 }
 
 // NewUsageEmitter creates an emitter. Returns nil if rdb is nil (disabled).
 // pg (read pool) resolves the org's tracing billing mode; nil → storage default.
-func NewUsageEmitter(rdb *redis.Client, pg *pgxpool.Pool, log *slog.Logger) *UsageEmitter {
+// maxLen caps the stream (approximately); <= 0 → DefaultUsageMaxLen.
+func NewUsageEmitter(rdb *redis.Client, pg *pgxpool.Pool, log *slog.Logger, maxLen int64) *UsageEmitter {
 	if rdb == nil {
 		return nil
 	}
-	return &UsageEmitter{rdb: rdb, pg: pg, log: log}
+	if maxLen <= 0 {
+		maxLen = DefaultUsageMaxLen
+	}
+	return &UsageEmitter{rdb: rdb, pg: pg, log: log, maxLen: maxLen}
 }
 
 // Namespace for deterministic billing event_ids (re-poll → same id → consumer dedups).
@@ -93,7 +101,7 @@ func (u *UsageEmitter) EmitIngestion(orgID string, numTraces, numSpans int, payl
 func (u *UsageEmitter) xadd(ctx context.Context, fields map[string]any) {
 	err := u.rdb.XAdd(ctx, &redis.XAddArgs{
 		Stream: usageStreamKey,
-		MaxLen: usageMaxLen,
+		MaxLen: u.maxLen,
 		Approx: true,
 		Values: fields,
 	}).Err()

@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -97,7 +98,11 @@ func main() {
 	var usageEmitter server.UsageEmitter = server.NoopUsageEmitter{}
 	var metering server.Metering = server.NoopMetering{}
 	if rdb != nil {
-		usageEmitter = auth.NewUsageEmitter(rdb, authenticator.PGRead(), log)
+		if cfg.Auth.UsageEvents {
+			usageEmitter = auth.NewUsageEmitter(rdb, authenticator.PGRead(), log, cfg.Auth.UsageEventsMaxLen)
+		} else {
+			log.Info("usage events off: nothing drains the usage:events stream on this install (USAGE_EVENTS_ENABLED=true turns them on)")
+		}
 		metering = auth.NewMetering(rdb, authenticator.PGRead(), log)
 	}
 
@@ -321,6 +326,22 @@ func applyEnvOverrides(log *slog.Logger, c *rootConfig) error {
 	}
 	if v := os.Getenv("FI_AUTH_REDIS_PASSWORD"); v != "" {
 		c.Auth.RedisPass = v
+	}
+	// Same variables as the Django emitter (tfc/settings/settings.py).
+	if v := os.Getenv("USAGE_EVENTS_ENABLED"); v != "" {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "true", "1", "yes", "on":
+			c.Auth.UsageEvents = true
+		default:
+			c.Auth.UsageEvents = false
+		}
+	}
+	if v := os.Getenv("USAGE_EVENTS_MAX_LEN"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("USAGE_EVENTS_MAX_LEN must be a positive integer")
+		}
+		c.Auth.UsageEventsMaxLen = n
 	}
 	if (c.Catalog.Mode != "" && c.Catalog.Mode != "disabled") || (c.PropertyCatalog.Mode != "" && c.PropertyCatalog.Mode != "disabled") {
 		return fmt.Errorf("legacy catalog YAML mode is obsolete; configure observed_catalog")

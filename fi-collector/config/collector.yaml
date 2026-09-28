@@ -49,6 +49,9 @@ auth:
   warm_ttl: 1h
   # Redis for rate limiting + usage event emission. Empty disables both.
   redis_addr: ""
+  # Billing events on the usage:events stream (USAGE_EVENTS_ENABLED). Only
+  # Future AGI Cloud drains it; anywhere else it only grows.
+  usage_events: false
 
 # Observed attributes remain disabled unless enabled. FI_OBSERVED_CATALOG_MODE=kafka
 # publishes them for the separate fi-property-catalog-consumer, which owns index

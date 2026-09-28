@@ -60,6 +60,45 @@ func TestAuthEnvExplicitURIsTakePrecedenceWithoutLosingTLS(t *testing.T) {
 	}
 }
 
+// Usage events stay off unless USAGE_EVENTS_ENABLED says otherwise: only
+// Future AGI Cloud drains the stream, anywhere else it would fill Redis.
+func TestUsageEventsAreOffUnlessEnabled(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"", false}, {"false", false}, {"no", false}, {"true", true}, {"TRUE", true}, {"1", true},
+	} {
+		clearCollectorEnv(t)
+		t.Setenv("USAGE_EVENTS_ENABLED", tc.value)
+		cfg := rootConfig{}
+		if err := applyEnvOverrides(slog.Default(), &cfg); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Auth.UsageEvents != tc.want {
+			t.Errorf("USAGE_EVENTS_ENABLED=%q: usage events %v, want %v", tc.value, cfg.Auth.UsageEvents, tc.want)
+		}
+	}
+}
+
+func TestUsageEventsMaxLenMustBePositive(t *testing.T) {
+	clearCollectorEnv(t)
+	t.Setenv("USAGE_EVENTS_MAX_LEN", "250000")
+	cfg := rootConfig{}
+	if err := applyEnvOverrides(slog.Default(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth.UsageEventsMaxLen != 250000 {
+		t.Fatalf("USAGE_EVENTS_MAX_LEN=250000 read as %d", cfg.Auth.UsageEventsMaxLen)
+	}
+	for _, bad := range []string{"0", "-1", "lots"} {
+		t.Setenv("USAGE_EVENTS_MAX_LEN", bad)
+		if err := applyEnvOverrides(slog.Default(), &rootConfig{}); err == nil {
+			t.Errorf("USAGE_EVENTS_MAX_LEN=%q must be rejected", bad)
+		}
+	}
+}
+
 // Generate test-only credentials under t.TempDir, never use operator files or
 // contact a database. The leaf is suitable for both offline server trust checks
 // and proving that pgx loaded the configured client certificate/private key.
