@@ -63,9 +63,12 @@ vi.mock("src/utils/axios", () => ({
 
 const HOUR_MS = 60 * 60 * 1000;
 const ROLLING = ["7D", "30D", "3M", "6M", "12M"];
-// Local wall-clock instants, so the day boundaries are the viewer's.
-const NOW = new Date(2026, 8, 21, 14, 37, 12);
-const SAME_HOUR = new Date(2026, 8, 21, 14, 59, 58);
+// The start is floored on UTC hours, so the two instants must share a UTC
+// hour in every runner timezone (a local 14:37/14:59 pair straddles a UTC
+// hour in +05:45 and +12:45 zones). No zone has a local midnight between
+// 14:37 and 15:00 UTC, so they also share the viewer's local day.
+const NOW = new Date(Date.UTC(2026, 8, 21, 14, 37, 12));
+const SAME_HOUR = new Date(Date.UTC(2026, 8, 21, 14, 59, 58));
 
 const freeze = (instant) => {
   vi.useFakeTimers({ toFake: ["Date"] });
