@@ -149,7 +149,9 @@ The API, the workers and every `docker compose exec` session run with
 `NO_STARTUP_DB_MUTATIONS=true`, so nothing changes the schema behind your back.
 `./bin/dev manage` lifts that for the one command you run. It runs the
 migration commands, `makemigrations` and `shell`; commands such as `flush`,
-`loaddata` or `dbshell` stay refused, and the error lists what runs.
+`loaddata` or `dbshell` stay refused, and the error names the commands this
+mode allows. `makemigrations --check --dry-run` writes nothing, so a plain
+`docker compose exec` session can run it too.
 
 - **Standalone** also applies pending migrations the next time the `app`
   container starts: its bootstrap step migrates whenever the code has

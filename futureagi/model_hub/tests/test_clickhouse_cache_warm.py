@@ -299,6 +299,63 @@ def test_migrate_check_does_not_bypass_guard_for_other_arguments(monkeypatch, op
     connect.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--check", "--dry-run"],
+        ["--dry-run", "--check"],
+        ["--check", "--dry-run", "--noinput"],
+    ],
+)
+@pytest.mark.parametrize(
+    "environment",
+    [
+        # A plain `docker compose exec` session.
+        {"NO_STARTUP_DB_MUTATIONS": "true"},
+        {"NO_STARTUP_DB_MUTATIONS": "true", "ENV_TYPE": "production"},
+        {"NO_STARTUP_DB_MUTATIONS": "true", "CLOUD_DEPLOYMENT": "US"},
+    ],
+)
+def test_makemigrations_check_dry_run_is_read_only_anywhere(
+    monkeypatch, options, environment
+):
+    # The migration review check: it reports and writes no migration file.
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    argv = ["manage.py", "makemigrations", *options]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    assert guarded_management_command(argv) is None
+    ModelHubConfig("model_hub", sys.modules["model_hub"]).ready()
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--check"],
+        ["--dry-run"],
+        ["--check", "--dry-run", "tracer"],
+        ["--check", "--dry-run", "--merge"],
+        ["--check", "--dry-run", "--update"],
+        ["--check", "--dry-run", "--empty"],
+        ["--check", "--dry-run", "--name", "x"],
+        ["--check", "--dry"],
+        ["--check", "--dry-run", "--settings=other.settings"],
+        ["--", "--check", "--dry-run"],
+    ],
+)
+def test_makemigrations_check_does_not_bypass_guard_for_other_arguments(
+    monkeypatch, options
+):
+    monkeypatch.setenv("NO_STARTUP_DB_MUTATIONS", "true")
+    argv = ["manage.py", "makemigrations", *options]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    assert guarded_management_command(argv) == "makemigrations"
+    with pytest.raises(RuntimeError, match="^makemigrations is disabled"):
+        ModelHubConfig("model_hub", sys.modules["model_hub"]).ready()
+
+
 def test_ready_rejects_unsafe_management_command_before_pytest_shortcut(monkeypatch):
     monkeypatch.setenv("NO_STARTUP_DB_MUTATIONS", "true")
     monkeypatch.setattr(sys, "argv", ["manage.py", "migrate"])

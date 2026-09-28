@@ -173,6 +173,13 @@ def guarded_management_command(argv: list[str]) -> str | None:
             "--no-input",
         }:
             return None
+    if command == "makemigrations":
+        # The review check: it reports missing or conflicting migrations and
+        # writes no file. Only this closed form, as for migrate --check.
+        options = set(argv[argv.index(command) + 1 :])
+        required = {"--check", "--dry-run"}
+        if required <= options <= required | {"--noinput", "--no-input"}:
+            return None
     return command
 
 
