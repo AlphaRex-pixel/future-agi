@@ -302,6 +302,7 @@ def test_ch_batch_read_error_on_a_render_path_is_logged_with_its_traceback(
     assert warning["event"] == "ch_bulk_resolve_failed"
     assert warning["log_level"] == "warning"
     assert warning["source_type"] == source_type
+    assert warning["count"] == (2 if source_type == "project" else 1)
     assert warning["caller"] == "render"
     assert warning["error_type"] == "RuntimeError"
     assert warning["exc_info"] is True

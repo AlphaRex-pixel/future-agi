@@ -891,6 +891,24 @@ def _ch_session_fields_for_item(session_id):
         return None
 
 
+def _ch_batch_read_failed(
+    exc: Exception, *, raise_on_error: bool, source_type: str, count: int, caller: str
+) -> None:
+    """Handle a failed :class:`CollectorSourceCache` batch read from inside its
+    ``except`` block: re-raise it on a write path (``raise_on_error``), else log
+    ``ch_bulk_resolve_failed`` with the traceback so the caller can FAIL OPEN."""
+    if raise_on_error:
+        raise exc  # the write fails; its request boundary logs it once
+    logger.warning(
+        "ch_bulk_resolve_failed",
+        source_type=source_type,
+        count=count,
+        error_type=type(exc).__name__,
+        caller=caller,
+        exc_info=True,
+    )
+
+
 def _batch_ch_spans(
     span_ids,
     *,
@@ -926,15 +944,12 @@ def _batch_ch_spans(
                 dedup_via_limit_by=True,  # see _batch_ch_trace_roots (TH-7226)
             )
     except Exception as exc:
-        if raise_on_error:
-            raise  # the write fails; its request boundary logs it once
-        logger.warning(
-            "ch_bulk_resolve_failed",
+        _ch_batch_read_failed(
+            exc,
+            raise_on_error=raise_on_error,
             source_type="span",
             count=len(span_ids),
-            error_type=type(exc).__name__,
             caller=caller,
-            exc_info=True,
         )
         return {}
     if not reject_ambiguous_ids:
@@ -1013,15 +1028,12 @@ def _batch_ch_trace_roots(
                 ):
                     roots_by_trace.setdefault(str(span.trace_id), []).append(span)
     except Exception as exc:
-        if raise_on_error:
-            raise  # the write fails; its request boundary logs it once
-        logger.warning(
-            "ch_bulk_resolve_failed",
+        _ch_batch_read_failed(
+            exc,
+            raise_on_error=raise_on_error,
             source_type="trace",
             count=len(ids),
-            error_type=type(exc).__name__,
             caller=caller,
-            exc_info=True,
         )
         return {}
     return {
@@ -1049,15 +1061,12 @@ def _batch_ch_session_fields(
             or {}
         )
     except Exception as exc:
-        if raise_on_error:
-            raise  # the write fails; its request boundary logs it once
-        logger.warning(
-            "ch_bulk_resolve_failed",
+        _ch_batch_read_failed(
+            exc,
+            raise_on_error=raise_on_error,
             source_type="session",
             count=len(session_ids),
-            error_type=type(exc).__name__,
             caller=caller,
-            exc_info=True,
         )
         return {}
 
@@ -1096,15 +1105,12 @@ def _newest_ch_source_projects(
                     )
                 )
     except Exception as exc:
-        if raise_on_error:
-            raise  # the write fails; its request boundary logs it once
-        logger.warning(
-            "ch_bulk_resolve_failed",
+        _ch_batch_read_failed(
+            exc,
+            raise_on_error=raise_on_error,
             source_type="project",
             count=len(span_ids) + len(trace_ids),
-            error_type=type(exc).__name__,
             caller=caller,
-            exc_info=True,
         )
         return {}, {}
     return span_projects, trace_projects
