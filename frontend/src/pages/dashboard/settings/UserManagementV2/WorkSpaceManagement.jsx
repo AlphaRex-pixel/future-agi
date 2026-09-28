@@ -129,7 +129,7 @@ const WorkSpaceManagement = () => {
     if (!newWorkspaceName.trim()) return;
     createMutation.mutate({
       name: newWorkspaceName.trim(),
-      displayName: newWorkspaceName.trim(),
+      display_name: newWorkspaceName.trim(),
       emails: [],
       role: "workspace_admin", // Backend expects lowercase with underscore, not "Workspace Admin"
     });
