@@ -27,31 +27,29 @@ vi.mock(
     default: ({ onSuccess }) => (
       <div>
         optimizer-form
-        <button type="button" onClick={() => onSuccess?.()}>form-success</button>
+        <button type="button" onClick={() => onSuccess?.()}>
+          form-success
+        </button>
       </div>
     ),
   }),
 );
 
-// The picker owns its own network hooks; stub it to a marker that proves the
-// run view hands it the execution id (the add goes to the run, not the
+// The picker owns its own network hooks (including how it grades this run —
+// by eval name, not a call count); stub it to a marker that proves the run
+// view hands it the execution id (the add goes to the run, not the
 // environment). The picker's own behaviour is covered in
 // evals/__tests__/addEvaluationDrawer.test.jsx.
-//
-// Widened to render `completedCallsCount` too, so a wiring bug
-// (`RunDetail.jsx` handing the drawer the run's TOTAL call count instead of
-// its COMPLETED count) can't hide again — every test in this file would
-// have passed with `completedCallsCount={-1}` before this.
-function AddEvaluationDrawerStub({ open, executionId, completedCallsCount }) {
-  const completed = Number.isFinite(completedCallsCount) ? completedCallsCount : "unknown";
-  return open ? <div>add-evals-drawer:{executionId} completed:{completed}</div> : null;
+function AddEvaluationDrawerStub({ open, executionId }) {
+  return open ? <div>add-evals-drawer:{executionId}</div> : null;
 }
 AddEvaluationDrawerStub.propTypes = {
   open: PropTypes.bool,
   executionId: PropTypes.string,
-  completedCallsCount: PropTypes.number,
 };
-vi.mock("../../../evals/AddEvaluationDrawer", () => ({ default: AddEvaluationDrawerStub }));
+vi.mock("../../../evals/AddEvaluationDrawer", () => ({
+  default: AddEvaluationDrawerStub,
+}));
 
 // A non-backed environment (client/template — reachable on this route via
 // the `?mockRuns=1` QA switch, which mints run history for any env) gets
@@ -59,14 +57,17 @@ vi.mock("../../../evals/AddEvaluationDrawer", () => ({ default: AddEvaluationDra
 // real API picker. Stubbed separately so the two are never confused for one
 // another.
 function AddEvalsDrawerStub({ open, envState }) {
-  return open ? <div>add-evals-drawer-fixture:{(envState?.evals || []).length}</div> : null;
+  return open ? (
+    <div>add-evals-drawer-fixture:{(envState?.evals || []).length}</div>
+  ) : null;
 }
 AddEvalsDrawerStub.propTypes = {
   open: PropTypes.bool,
   envState: PropTypes.shape({ evals: PropTypes.array }),
 };
-vi.mock("../../../evals/AddEvalsDrawer", () => ({ default: AddEvalsDrawerStub }));
-
+vi.mock("../../../evals/AddEvalsDrawer", () => ({
+  default: AddEvalsDrawerStub,
+}));
 
 // The prev/next maths has its own tests; here only the page's wiring matters.
 const callListNavigation = vi.fn();
@@ -84,7 +85,12 @@ const TABLE_QUERY = {
 
 // The per-call table owns its own network hook, so stub it to a marker that
 // reports its query, can open a call, and shows which call/page it follows.
-function RunTraceTableStub({ onOpenCall, onQueryChange, activeCallId, activePage }) {
+function RunTraceTableStub({
+  onOpenCall,
+  onQueryChange,
+  activeCallId,
+  activePage,
+}) {
   useEffect(() => {
     onQueryChange?.(TABLE_QUERY);
     return () => onQueryChange?.(null);
@@ -299,12 +305,20 @@ describe("RunDetail", () => {
       isLoading: false,
     });
     const { unmount } = renderDetail();
-    expect(screen.getByRole("button", { name: "Stop simulation" })).toHaveTextContent("Stop simulation");
+    expect(
+      screen.getByRole("button", { name: "Stop simulation" }),
+    ).toHaveTextContent("Stop simulation");
     unmount();
 
-    useRunDetail.mockReturnValue({ identity: IDENTITY, stats: STATS, isLoading: false });
+    useRunDetail.mockReturnValue({
+      identity: IDENTITY,
+      stats: STATS,
+      isLoading: false,
+    });
     renderDetail();
-    expect(screen.queryByRole("button", { name: "Stop simulation" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Stop simulation" }),
+    ).toBeNull();
   });
 
   it("shows Cancelling in the header while a stopped run winds down", () => {
@@ -317,7 +331,9 @@ describe("RunDetail", () => {
 
     expect(screen.getByText("Cancelling")).toBeInTheDocument();
     expect(screen.queryByText("Running")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Stop simulation" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Stop simulation" }),
+    ).toBeNull();
   });
 
   it("shows terminal execution failure despite partial call success", () => {
@@ -332,48 +348,25 @@ describe("RunDetail", () => {
   });
 
   it("opens the real eval picker from the header action, pointed at this run", async () => {
-    useRunDetail.mockReturnValue({ identity: IDENTITY, stats: STATS, isLoading: false });
-    const user = userEvent.setup();
-    renderDetail();
-
-    expect(screen.queryByText(/add-evals-drawer/)).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Add evals" }));
-    // STATS carries no `completed` field (still loading it) — the drawer
-    // must receive no finite count, never a borrowed number.
-    expect(screen.getByText("add-evals-drawer:ex1 completed:unknown")).toBeInTheDocument();
-  });
-
-  it("hands the picker the run's COMPLETED call count, not its total — the two differ on a run with failures", async () => {
     useRunDetail.mockReturnValue({
       identity: IDENTITY,
-      stats: { ...STATS, total: 16, failed: 4, completed: 12 },
+      stats: STATS,
       isLoading: false,
     });
     const user = userEvent.setup();
     renderDetail();
 
+    expect(screen.queryByText(/add-evals-drawer/)).toBeNull();
     await user.click(screen.getByRole("button", { name: "Add evals" }));
-    expect(screen.getByText("add-evals-drawer:ex1 completed:12")).toBeInTheDocument();
-  });
-
-  it("hands the picker no finite count while the KPIs are still loading, rather than 0", async () => {
-    // `buildRunStats` defaults `total` to 0 before the kpis query resolves;
-    // `completed` must stay unknown in that same window, never inherit that
-    // placeholder 0.
-    useRunDetail.mockReturnValue({
-      identity: IDENTITY,
-      stats: { ...STATS, total: 0 },
-      isLoading: true,
-    });
-    const user = userEvent.setup();
-    renderDetail();
-
-    await user.click(screen.getByRole("button", { name: "Add evals" }));
-    expect(screen.getByText("add-evals-drawer:ex1 completed:unknown")).toBeInTheDocument();
+    expect(screen.getByText("add-evals-drawer:ex1")).toBeInTheDocument();
   });
 
   it("falls back to the store-only picker for a non-backed environment reached via ?mockRuns=1", async () => {
-    useRunDetail.mockReturnValue({ identity: IDENTITY, stats: STATS, isLoading: false });
+    useRunDetail.mockReturnValue({
+      identity: IDENTITY,
+      stats: STATS,
+      isLoading: false,
+    });
     const user = userEvent.setup();
     renderDetail({ backed: false, envState: { evals: ["preset-eval"] } });
 
@@ -390,14 +383,22 @@ describe("RunDetail", () => {
   it("invalidates the optimization runs on launch without a detached-client crash", async () => {
     // refetchOptimizations was a detached invalidateQueries, which throws on
     // this.#queryCache in react-query v5.
-    useRunDetail.mockReturnValue({ identity: IDENTITY, stats: STATS, isLoading: false });
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    useRunDetail.mockReturnValue({
+      identity: IDENTITY,
+      stats: STATS,
+      isLoading: false,
+    });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
     const invalidateSpy = vi.spyOn(client, "invalidateQueries");
     const user = userEvent.setup();
     renderDetail({ client });
 
     await user.click(screen.getByRole("button", { name: "Debug failures" }));
-    await user.click(screen.getByRole("button", { name: "Run Self Improvement" }));
+    await user.click(
+      screen.getByRole("button", { name: "Run Self Improvement" }),
+    );
     // The optimizer form's onSuccess flows through the real launch drawer to
     // onLaunched → queryClient.invalidateQueries.
     await user.click(screen.getByRole("button", { name: "form-success" }));

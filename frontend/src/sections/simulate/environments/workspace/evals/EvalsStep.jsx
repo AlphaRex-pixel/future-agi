@@ -1,6 +1,16 @@
 import { useMemo, useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Box, CircularProgress, Stack, Typography, Button, IconButton, Tooltip, Switch } from "@mui/material";
+import {
+  Alert,
+  Box,
+  CircularProgress,
+  Stack,
+  Typography,
+  Button,
+  IconButton,
+  Tooltip,
+  Switch,
+} from "@mui/material";
 import Iconify from "src/components/iconify";
 import { getEval } from "src/api/simulate-environments/_fixtures/evalCatalog";
 import { useRemoveAppliedEvaluation } from "src/api/simulate-environments/environments";
@@ -36,7 +46,14 @@ const LOCK_TOOLTIP = "Fork this environment to edit.";
  * The designer's twin-backed suggestions and clone-eval editor are out of
  * scope for this phase and are not ported.
  */
-export default function EvalsStep({ env, envState, patch, onGo, locked = false, backed = false }) {
+export default function EvalsStep({
+  env,
+  envState,
+  patch,
+  onGo,
+  locked = false,
+  backed = false,
+}) {
   const [pickerOpen, setPickerOpen] = useState(false);
   // The workspace routes away from this tab when there are no scenarios; this
   // is the backstop if it is ever rendered directly without them.
@@ -51,9 +68,12 @@ export default function EvalsStep({ env, envState, patch, onGo, locked = false, 
   // A real backend-backed env drives its applied set from the environment
   // detail (evaluations.selected) — the authoritative list the add and remove
   // endpoints mutate. A forked/template env has no backend counterpart, so it
-  // stays store-driven (fixture-seeded preset). The detail query shares its
-  // cache with useAddEvaluation's setQueryData, so an add reflects immediately.
-  const detailQuery = useQuery(harnessEnvironmentQuery(env.id, { enabled: backed }));
+  // stays store-driven (fixture-seeded preset). AddEvaluationDrawer invalidates
+  // this same detail cache when it closes, so a pick made in the picker shows
+  // up here without a manual refetch.
+  const detailQuery = useQuery(
+    harnessEnvironmentQuery(env.id, { enabled: backed }),
+  );
   // Each `selected[]` row is a full catalogue entry plus `id` and
   // `runnable`. Kept
   // whole — the tab shows `source`, the cost line (`credits_per_run` /
@@ -70,7 +90,8 @@ export default function EvalsStep({ env, envState, patch, onGo, locked = false, 
   // evaluations added yet" about an environment that may hold eight. Neither
   // the count nor the empty state may be drawn until the list is actually
   // known, so both states are handled before the card.
-  const detailUnknown = backed && (detailQuery.isPending || detailQuery.isError);
+  const detailUnknown =
+    backed && (detailQuery.isPending || detailQuery.isError);
 
   const toolCallOn = backed
     ? !!detailQuery.data?.settings?.enable_tool_evaluation
@@ -93,7 +114,8 @@ export default function EvalsStep({ env, envState, patch, onGo, locked = false, 
   // stays store-only.
   const removeEval = useRemoveAppliedEvaluation();
   const building = env.buildStatus === BUILD_STATUS.BUILDING;
-  const removeDisabled = locked || (backed && (building || removeEval.isPending));
+  const removeDisabled =
+    locked || (backed && (building || removeEval.isPending));
   const onRemove = (id) => {
     if (!backed) {
       store.remove(id);
@@ -147,10 +169,19 @@ export default function EvalsStep({ env, envState, patch, onGo, locked = false, 
     if ((env.evalPreset || []).length === 0) return;
     // Preset exists but the user already has evals: record that the seed
     // decision is made, so a later "remove all" survives a remount.
-    if (appliedEvals.length > 0) { patch({ evalsSeeded: true }); return; }
-    if (suggested.length === 0) { patch({ evalsSeeded: true }); return; }
+    if (appliedEvals.length > 0) {
+      patch({ evalsSeeded: true });
+      return;
+    }
+    if (suggested.length === 0) {
+      patch({ evalsSeeded: true });
+      return;
+    }
     // Seed the preset and record it in one patch, so the flag can't be lost.
-    patch({ evals: [...(envState?.evals || []), ...suggested], evalsSeeded: true });
+    patch({
+      evals: [...(envState?.evals || []), ...suggested],
+      evalsSeeded: true,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seeded, backed, needsScenarios, suggested.length, appliedEvals.length]);
 
@@ -163,10 +194,14 @@ export default function EvalsStep({ env, envState, patch, onGo, locked = false, 
         sx={{ mb: 3 }}
       >
         <Box flex={1}>
-          <Typography sx={{ typography: "m2", fontWeight: "fontWeightSemiBold" }}>
+          <Typography
+            sx={{ typography: "m2", fontWeight: "fontWeightSemiBold" }}
+          >
             {EVALS_COPY.heading}
           </Typography>
-          <Typography sx={{ typography: "s1", color: "text.secondary", maxWidth: 720 }}>
+          <Typography
+            sx={{ typography: "s1", color: "text.secondary", maxWidth: 720 }}
+          >
             {EVALS_COPY.intro}
           </Typography>
         </Box>
@@ -176,7 +211,16 @@ export default function EvalsStep({ env, envState, patch, onGo, locked = false, 
           — two CTAs for one action read as noise.
         */}
         {appliedEvals.length > 0 && (
-          <Tooltip arrow title={locked ? LOCK_TOOLTIP : needsScenarios ? EVALS_COPY.needsScenariosHint : ""}>
+          <Tooltip
+            arrow
+            title={
+              locked
+                ? LOCK_TOOLTIP
+                : needsScenarios
+                  ? EVALS_COPY.needsScenariosHint
+                  : ""
+            }
+          >
             <span>
               <Button
                 variant="contained"
@@ -184,7 +228,9 @@ export default function EvalsStep({ env, envState, patch, onGo, locked = false, 
                 size="small"
                 disabled={needsScenarios || locked}
                 onClick={() => setPickerOpen(true)}
-                startIcon={<Iconify icon="solar:add-circle-linear" width={15} />}
+                startIcon={
+                  <Iconify icon="solar:add-circle-linear" width={15} />
+                }
                 sx={{ typography: "s2", fontWeight: "fontWeightBold" }}
               >
                 {EVALS_COPY.add}
@@ -200,21 +246,45 @@ export default function EvalsStep({ env, envState, patch, onGo, locked = false, 
         direction="row"
         alignItems="center"
         spacing={2}
-        sx={{ px: 2, py: 1.5, mb: 3, borderRadius: 1, border: "1px solid", borderColor: "divider" }}
+        sx={{
+          px: 2,
+          py: 1.5,
+          mb: 3,
+          borderRadius: 1,
+          border: "1px solid",
+          borderColor: "divider",
+        }}
       >
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography sx={{ typography: "s1", fontWeight: "fontWeightSemiBold" }}>
+          <Typography
+            sx={{ typography: "s1", fontWeight: "fontWeightSemiBold" }}
+          >
             {EVALS_COPY.toolCall.title}
           </Typography>
-          <Typography sx={{ typography: "s2", color: "text.secondary", mt: 0.25 }}>
+          <Typography
+            sx={{ typography: "s2", color: "text.secondary", mt: 0.25 }}
+          >
             {envState?.agent ? EVALS_COPY.toolCall.on : EVALS_COPY.toolCall.off}
           </Typography>
         </Box>
-        <Tooltip arrow title={locked ? LOCK_TOOLTIP : !envState?.agent ? EVALS_COPY.toolCall.needsAgent : ""}>
+        <Tooltip
+          arrow
+          title={
+            locked
+              ? LOCK_TOOLTIP
+              : !envState?.agent
+                ? EVALS_COPY.toolCall.needsAgent
+                : ""
+          }
+        >
           <span>
             <Switch
               checked={toolCallOn && !!envState?.agent}
-              disabled={locked || !envState?.agent || (backed && (detailUnknown || toolCall.isPending))}
+              disabled={
+                locked ||
+                !envState?.agent ||
+                (backed && (detailUnknown || toolCall.isPending))
+              }
               onChange={(e) => setToolCall(e.target.checked)}
               inputProps={{ "aria-label": EVALS_COPY.toolCall.title }}
             />
@@ -223,7 +293,10 @@ export default function EvalsStep({ env, envState, patch, onGo, locked = false, 
       </Stack>
       {backed && toolCall.isError && (
         <Alert severity="error" sx={{ mt: -2, mb: 3, typography: "s3" }}>
-          {refusalText(toolCall.error, "Couldn’t change tool-call evaluation. Try again.")}
+          {refusalText(
+            toolCall.error,
+            "Couldn’t change tool-call evaluation. Try again.",
+          )}
         </Alert>
       )}
 
@@ -236,13 +309,24 @@ export default function EvalsStep({ env, envState, patch, onGo, locked = false, 
       {backed && removeEval.isError && (
         <Alert severity="error" sx={{ mb: 2, typography: "s3" }}>
           {failedRemoveName ? `${failedRemoveName}: ` : ""}
-          {refusalText(removeEval.error, "Couldn’t remove the evaluation. Try again.")}
+          {refusalText(
+            removeEval.error,
+            "Couldn’t remove the evaluation. Try again.",
+          )}
         </Alert>
       )}
 
       <SectionCard
-        title={detailUnknown ? EVALS_COPY.addedTitleUnknown : EVALS_COPY.addedTitle(appliedEvals.length)}
-        subtitle={!detailUnknown && appliedEvals.length ? EVALS_COPY.addedSubtitle : undefined}
+        title={
+          detailUnknown
+            ? EVALS_COPY.addedTitleUnknown
+            : EVALS_COPY.addedTitle(appliedEvals.length)
+        }
+        subtitle={
+          !detailUnknown && appliedEvals.length
+            ? EVALS_COPY.addedSubtitle
+            : undefined
+        }
       >
         {detailUnknown ? (
           detailQuery.isError ? (
@@ -253,7 +337,11 @@ export default function EvalsStep({ env, envState, patch, onGo, locked = false, 
               // for a failure with no body at all.
               body={refusalText(detailQuery.error, EVALS_COPY.addedError)}
               action={
-                <Button variant="outlined" size="small" onClick={() => detailQuery.refetch()}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => detailQuery.refetch()}
+                >
                   Retry
                 </Button>
               }
@@ -270,22 +358,35 @@ export default function EvalsStep({ env, envState, patch, onGo, locked = false, 
                 ? "solar:lock-keyhole-minimalistic-linear"
                 : "solar:shield-check-linear"
             }
-            title={needsScenarios ? EVALS_COPY.lockedTitle : EVALS_COPY.emptyTitle}
-            body={needsScenarios ? EVALS_COPY.lockedBody : EVALS_COPY.emptyNoSuggestions}
+            title={
+              needsScenarios ? EVALS_COPY.lockedTitle : EVALS_COPY.emptyTitle
+            }
+            body={
+              needsScenarios
+                ? EVALS_COPY.lockedBody
+                : EVALS_COPY.emptyNoSuggestions
+            }
             action={
               // The needsScenarios branch is a nav to the Scenarios tab, not a
               // mutation, so it stays live even on a locked template; only the
               // "add evaluations" branch is gated behind a fork.
-              <Tooltip arrow title={locked && !needsScenarios ? LOCK_TOOLTIP : ""}>
+              <Tooltip
+                arrow
+                title={locked && !needsScenarios ? LOCK_TOOLTIP : ""}
+              >
                 <Box component="span" sx={{ display: "inline-flex" }}>
                   <Button
                     variant="contained"
                     color="primary"
                     size="small"
                     disabled={locked && !needsScenarios}
-                    onClick={() => (needsScenarios ? onGo?.("scenarios") : setPickerOpen(true))}
+                    onClick={() =>
+                      needsScenarios ? onGo?.("scenarios") : setPickerOpen(true)
+                    }
                     endIcon={
-                      needsScenarios ? <Iconify icon="solar:arrow-right-linear" width={15} /> : null
+                      needsScenarios ? (
+                        <Iconify icon="solar:arrow-right-linear" width={15} />
+                      ) : null
                     }
                     sx={{ typography: "s2", fontWeight: "fontWeightBold" }}
                   >
@@ -296,7 +397,11 @@ export default function EvalsStep({ env, envState, patch, onGo, locked = false, 
             }
           />
         ) : (
-          <Stack divider={<Box sx={{ borderBottom: "1px solid", borderColor: "divider" }} />}>
+          <Stack
+            divider={
+              <Box sx={{ borderBottom: "1px solid", borderColor: "divider" }} />
+            }
+          >
             {appliedEvals.map((e) => {
               const action = (
                 // No always-on evals. Every added row is removable — except on a
