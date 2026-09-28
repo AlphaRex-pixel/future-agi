@@ -31,6 +31,12 @@
 # smoke test (futureagi/docker/runtime_smoke.py) checks the extras, git, uv,
 # ffmpeg and NLTK data it promises, and a release checks its size budget and
 # contents again before any tag moves.
+#
+# Upgrade (weekly and on demand, never per PR): v1.41.1, whose
+# docker-compose.yml was the Distributed stack, installed with its own
+# ./bin/install and sent a trace, then ./bin/install re-run at this commit.
+# The install must stay Distributed (COMPOSE_FILE=docker-compose.distributed.yml
+# in .env), and its account must still sign in and read the trace.
 name: Standalone install CI
 
 on:
@@ -53,9 +59,13 @@ on:
       - "fi-collector/Dockerfile"
       - "agentcc-gateway/Dockerfile"
       - "scripts/image_size_budget.*"
+      - "scripts/install-smoke.sh"
       - "scripts/reclaim-runner-disk.sh"
       - ".github/workflows/standalone-ci.yml"
   workflow_dispatch:
+  # The upgrade job only.
+  schedule:
+    - cron: "23 3 * * 1"
 
 permissions:
   contents: read
@@ -87,7 +97,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: filter
-        if: github.event_name != 'workflow_dispatch'
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         uses: dorny/paths-filter@v3
         with:
           # Pushes compare with the branch before the push; PRs with their base.
@@ -108,6 +118,7 @@ jobs:
               - 'fi-collector/Dockerfile'
               - 'agentcc-gateway/Dockerfile'
               - 'scripts/image_size_budget.*'
+              - 'scripts/install-smoke.sh'
               - 'scripts/reclaim-runner-disk.sh'
               - '.github/workflows/standalone-ci.yml'
             arm64:
@@ -420,17 +431,10 @@ jobs:
         timeout-minutes: 15
         run: |
           set -euo pipefail
-          api=http://127.0.0.1:8000
+          . scripts/install-smoke.sh
+          api=$SMOKE_API
           pass() { echo "PASS  $*"; echo "- PASS: $*" >> "$GITHUB_STEP_SUMMARY"; }
           fail() { echo "::error::$*"; echo "- FAIL: $*" >> "$GITHUB_STEP_SUMMARY"; exit 1; }
-          eventually() { # seconds, command...: rerun the command until it succeeds
-            local deadline=$((SECONDS + $1))
-            shift
-            until "$@"; do
-              (( SECONDS < deadline )) || return 1
-              sleep 5
-            done
-          }
           echo "### Standalone install smoke test (linux/amd64)" >> "$GITHUB_STEP_SUMMARY"
 
           curl -fsS --max-time 10 -o /dev/null "$api/health/" || fail "API /health/ on :8000"
@@ -460,62 +464,18 @@ jobs:
           fi
           pass "every supervised program is running"
 
-          token=$(curl -fsS --max-time 30 -X POST "$api/accounts/token/" \
-              -H 'Content-Type: application/json' \
-              -d "$(jq -n --arg email "$FAGI_ADMIN_EMAIL" --arg password "$FAGI_ADMIN_PASSWORD" '{$email, $password}')" \
-            | jq -er '.access') || fail "sign-in as $FAGI_ADMIN_EMAIL (POST /accounts/token/)"
+          token=$(smoke_sign_in) || fail "sign-in as $FAGI_ADMIN_EMAIL (POST /accounts/token/)"
           pass "sign-in with the account ./bin/install created"
 
-          keys=$(curl -fsS --max-time 30 "$api/accounts/keys/" -H "Authorization: Bearer $token") \
-            || fail "GET /accounts/keys/"
-          api_key=$(jq -er '.data.api_key' <<<"$keys") || fail "no api_key in /accounts/keys/"
-          secret_key=$(jq -er '.data.secret_key' <<<"$keys") || fail "no secret_key in /accounts/keys/"
+          keys=$(smoke_keys "$token") || fail "no API key pair from GET /accounts/keys/"
+          { read -r api_key; read -r secret_key; } <<<"$keys"
           echo "::add-mask::$secret_key"
           pass "API key pair issued"
 
-          start=$(date +%s%N)
-          jq -n --arg trace "$(openssl rand -hex 16)" --arg root "$(openssl rand -hex 8)" \
-            --arg child "$(openssl rand -hex 8)" --arg project "$SMOKE_PROJECT" \
-            --arg t0 "$start" --arg t1 "$((start + 500000000))" \
-            --arg t2 "$((start + 1500000000))" --arg t3 "$((start + 2000000000))" '
-            def attr($k; $v): {key: $k, value: {stringValue: $v}};
-            {resourceSpans: [{
-              resource: {attributes: [attr("service.name"; $project),
-                attr("project_name"; $project), attr("project_type"; "observe")]},
-              scopeSpans: [{scope: {name: "ci-smoke"}, spans: [
-                {traceId: $trace, spanId: $root, name: "agent.run", kind: 1,
-                 startTimeUnixNano: $t0, endTimeUnixNano: $t3, status: {code: 1},
-                 attributes: [attr("fi.span.kind"; "AGENT"),
-                   attr("input.value"; "What is the capital of France?"),
-                   attr("output.value"; "Paris")]},
-                {traceId: $trace, spanId: $child, parentSpanId: $root, name: "llm.call",
-                 kind: 3, startTimeUnixNano: $t1, endTimeUnixNano: $t2, status: {code: 1},
-                 attributes: [attr("fi.span.kind"; "LLM"), attr("llm.model_name"; "gpt-4o-mini"),
-                   attr("input.value"; "capital of France?"), attr("output.value"; "Paris"),
-                   {key: "llm.token_count.prompt", value: {intValue: "12"}},
-                   {key: "llm.token_count.completion", value: {intValue: "3"}}]}
-              ]}]
-            }]}' > "$RUNNER_TEMP/otlp.json"
-          code=$(curl -sS --max-time 30 -o "$RUNNER_TEMP/otlp-response.txt" -w '%{http_code}' \
-            -X POST http://127.0.0.1:4318/v1/traces -H 'Content-Type: application/json' \
-            -H "X-Api-Key: $api_key" -H "X-Secret-Key: $secret_key" \
-            --data @"$RUNNER_TEMP/otlp.json") || true
-          [ "$code" = 200 ] || fail "OTLP/HTTP ingest on :4318 answered ${code:-nothing}: $(head -c 300 "$RUNNER_TEMP/otlp-response.txt" || true)"
+          smoke_send_trace "$SMOKE_PROJECT" "$api_key" "$secret_key" || fail "OTLP/HTTP ingest on :4318"
           pass "OTLP/HTTP trace accepted by fi-collector on :4318"
 
-          trace_readable() {
-            local project_id
-            project_id=$(curl -fsS --max-time 30 -G "$api/tracer/project/" \
-                -H "Authorization: Bearer $token" --data-urlencode "name=$SMOKE_PROJECT" \
-              | jq -er --arg name "$SMOKE_PROJECT" '[.result.projects[] | select(.name == $name)][0].id') \
-              || return 1
-            curl -fsS --max-time 30 -G "$api/tracer/observation-span/list_spans_observe/" \
-                -H "Authorization: Bearer $token" --data-urlencode "project_id=$project_id" \
-                --data-urlencode page_number=0 --data-urlencode page_size=10 \
-              > "$RUNNER_TEMP/spans.json" || return 1
-            grep -q '"llm.call"' "$RUNNER_TEMP/spans.json" && grep -q 'Paris' "$RUNNER_TEMP/spans.json"
-          }
-          eventually 180 trace_readable \
+          eventually 180 smoke_trace_readable "$token" "$SMOKE_PROJECT" \
             || fail "the trace never showed up in the Observe API: $(head -c 300 "$RUNNER_TEMP/spans.json" 2>/dev/null || true)"
           pass "trace read back through the Observe API (project $SMOKE_PROJECT)"
 
@@ -553,6 +513,160 @@ jobs:
         if: failure() && matrix.arch == 'amd64'
         with:
           name: standalone-install-diagnostics
+          path: ${{ runner.temp }}/diagnostics
+          if-no-files-found: ignore
+          retention-days: 7
+
+  upgrade:
+    name: upgrade from v1.41.1 (Distributed)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: read # ghcr layer caches
+    env:
+      FROM_VERSION: v1.41.1
+      FAGI_ADMIN_EMAIL: ci-admin@example.com
+      FAGI_ADMIN_PASSWORD: Ci-Smoke-2026!x
+      SMOKE_PROJECT: ci-upgrade
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the v1.41.1 tag
+
+      - name: Reclaim runner disk
+        # Same move as default-install: two releases' images and a build.
+        run: scripts/reclaim-runner-disk.sh
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: ghcr login (layer cache reads)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Keep this commit's smoke checks
+        # The v1.41.1 checkout has no scripts/install-smoke.sh.
+        run: cp scripts/install-smoke.sh "$RUNNER_TEMP/"
+
+      - name: ./bin/install at v1.41.1
+        timeout-minutes: 40
+        env:
+          # Its own images rather than :latest; it builds fi-collector from
+          # its checkout, as it always did.
+          FUTURE_AGI_VERSION: ${{ env.FROM_VERSION }}
+          FRONTEND_VERSION: ${{ env.FROM_VERSION }}
+          AGENTCC_GATEWAY_VERSION: ${{ env.FROM_VERSION }}
+          # With FAGI_ADMIN_EMAIL and FAGI_ADMIN_PASSWORD it creates the first
+          # account. The install at this commit does not get the name, so it
+          # does not try again.
+          FAGI_ADMIN_NAME: CI Admin
+        run: |
+          git -c advice.detachedHead=false checkout "$FROM_VERSION"
+          ./bin/install -y
+
+      - name: Send a trace to the v1.41.1 install
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          . "$RUNNER_TEMP/install-smoke.sh"
+          token=$(smoke_sign_in)
+          keys=$(smoke_keys "$token")
+          { read -r api_key; read -r secret_key; } <<<"$keys"
+          echo "::add-mask::$secret_key"
+          smoke_send_trace "$SMOKE_PROJECT" "$api_key" "$secret_key"
+          eventually 180 smoke_trace_readable "$token" "$SMOKE_PROJECT"
+
+      - name: Back to this commit
+        run: git -c advice.detachedHead=false checkout "$GITHUB_SHA"
+
+      # This commit's Distributed images, tagged `local` as --from-source tags
+      # them, from the layer caches e2e-ci.yml and the release builds keep.
+      - name: Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: futureagi
+          file: futureagi/Dockerfile.oss
+          load: true
+          tags: futureagi/future-agi:local
+          cache-from: |
+            type=registry,ref=${{ env.CACHE_REPO }}:backend
+            type=registry,ref=${{ env.BUILD_CACHE }}:backend-amd64
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          load: true
+          tags: futureagi/frontend:local
+          cache-from: type=registry,ref=${{ env.CACHE_REPO }}:frontend
+
+      - name: Build fi-collector image
+        uses: docker/build-push-action@v5
+        with:
+          context: fi-collector
+          file: fi-collector/Dockerfile
+          load: true
+          tags: futureagi/fi-collector:local
+          cache-from: type=registry,ref=${{ env.CACHE_REPO }}:fi-collector
+
+      - name: Build agentcc-gateway image
+        uses: docker/build-push-action@v5
+        with:
+          context: agentcc-gateway
+          file: agentcc-gateway/Dockerfile
+          load: true
+          tags: futureagi/agentcc-gateway:local
+          cache-from: type=registry,ref=${{ env.CACHE_REPO }}:gateway
+
+      - name: Drop the build cache
+        run: |
+          docker buildx prune -af || true
+          df -h / /mnt
+
+      - name: ./bin/install at this commit
+        timeout-minutes: 40
+        env:
+          FUTURE_AGI_VERSION: local
+          FRONTEND_VERSION: local
+          FI_COLLECTOR_VERSION: local
+          AGENTCC_GATEWAY_VERSION: local
+        run: ./bin/install -y
+
+      - name: The install stayed Distributed, with its account and trace
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          . scripts/install-smoke.sh
+          fail() { echo "::error::$*"; exit 1; }
+          grep -qx 'COMPOSE_FILE=docker-compose.distributed.yml' .env \
+            || fail ".env records $(grep '^COMPOSE_FILE=' .env || echo 'no COMPOSE_FILE'), not COMPOSE_FILE=docker-compose.distributed.yml"
+          echo "PASS  .env records COMPOSE_FILE=docker-compose.distributed.yml"
+          token=$(smoke_sign_in) || fail "the account v1.41.1 created no longer signs in"
+          echo "PASS  sign-in with the account v1.41.1 created"
+          eventually 180 smoke_trace_readable "$token" "$SMOKE_PROJECT" \
+            || fail "the trace sent to v1.41.1 is gone: $(head -c 300 "$RUNNER_TEMP/spans.json" 2>/dev/null || true)"
+          echo "PASS  the trace sent to v1.41.1 reads back"
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          out="$RUNNER_TEMP/diagnostics"
+          mkdir -p "$out"
+          cp install-*.log "$out/" 2>/dev/null || true
+          grep -E '^(COMPOSE_FILE|COMPOSE_PROJECT_NAME|COMPOSE_PROFILES)=' .env > "$out/env-mode.txt" 2>/dev/null || true
+          docker compose ps -a > "$out/ps.txt" 2>&1 || true
+          docker compose logs --no-color --tail 500 > "$out/compose.log" 2>&1 || true
+          tail -n 150 "$out/compose.log"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: upgrade-diagnostics
           path: ${{ runner.temp }}/diagnostics
           if-no-files-found: ignore
           retention-days: 7
