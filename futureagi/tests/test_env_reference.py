@@ -24,7 +24,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "env_reference.py"
 ENV_EXAMPLE = ROOT / ".env.example"
-INSTALLER = ROOT / "bin" / "install"
+# What ./bin/install generates (it sources bin/lib/*.sh).
+INSTALLER_SECRETS = ROOT / "bin" / "lib" / "secrets.sh"
 BACKEND_CI = ROOT / ".github" / "workflows" / "backend-ci.yml"
 
 # The compose files and the ${VAR} and docs-table parsers are the ones
@@ -57,7 +58,7 @@ WORD_READER_FILES = (
     "frontend/docker-entrypoint.sh",
     "futureagi/entrypoint.sh",
 )
-WORD_READER_DIRS = ("deploy/standalone/bin",)
+WORD_READER_DIRS = ("bin/lib", "deploy/standalone/bin")
 SKIPPED_DIRS = frozenset(
     {
         ".venv",
@@ -172,9 +173,11 @@ def read_keys() -> frozenset[str]:
 
 def installer_generated_keys() -> set[str]:
     """Keys ./bin/install fills with a generated secret."""
-    script = INSTALLER.read_text(encoding="utf-8")
-    array = re.search(r"declare -a INSTALL_SECRETS=\(([^)]*)\)", script)
-    assert array, "bin/install no longer declares INSTALL_SECRETS; update this test"
+    script = INSTALLER_SECRETS.read_text(encoding="utf-8")
+    array = re.search(r"^INSTALL_SECRETS=\(([^)]*)\)", script, re.MULTILINE)
+    assert array, (
+        f"{INSTALLER_SECRETS.name} no longer declares INSTALL_SECRETS; update this test"
+    )
     keys = set(re.findall(KEY, array.group(1)))
     # Filled outside the loop, e.g. `fill_secret INTEGRATION_ENCRYPTION_KEY gen_fernet_key`.
     keys.update(re.findall(rf"fill_secret ({KEY}) gen_", script))

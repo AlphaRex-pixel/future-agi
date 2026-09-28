@@ -28,6 +28,16 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _installer_files(installer: Path) -> list[Path]:
+    """An installer and the bin/lib files it sources (or dot-sources)."""
+    suffix = ".ps1" if installer.suffix == ".ps1" else ".sh"
+    return [installer, *sorted(INSTALL_LIB.glob(f"*{suffix}"))]
+
+
+def _installer_text(installer: Path) -> str:
+    return "\n".join(_read(path) for path in _installer_files(installer))
+
+
 def _compose_config() -> dict[str, object]:
     if shutil.which("docker") is None:
         pytest.skip("docker CLI is unavailable")
@@ -151,8 +161,8 @@ def test_compose_builds_the_shared_collector_image_with_bounded_resources() -> N
 
 
 def test_installers_gate_success_on_the_full_catalog_path() -> None:
-    shell = _read(INSTALL_SH)
-    powershell = _read(INSTALL_PS1)
+    shell = _installer_text(INSTALL_SH)
+    powershell = _installer_text(INSTALL_PS1)
     required_services = (
         "property-catalog-kafka",
         "property-catalog-kafka-volume-init",
@@ -184,8 +194,8 @@ def test_installers_gate_success_on_the_full_catalog_path() -> None:
 
 
 def test_installers_cover_kafka_port_and_all_catalog_persistent_state() -> None:
-    shell = _read(INSTALL_SH)
-    powershell = _read(INSTALL_PS1)
+    shell = _installer_text(INSTALL_SH)
+    powershell = _installer_text(INSTALL_PS1)
     for installer in (shell, powershell):
         assert "PROPERTY_CATALOG_KAFKA_PORT" in installer
         assert "property-catalog-kafka-data" in installer
@@ -205,9 +215,12 @@ def test_installers_cover_kafka_port_and_all_catalog_persistent_state() -> None:
     assert "docker system prune" not in powershell
 
 
-def test_shell_installer_parses() -> None:
+@pytest.mark.parametrize(
+    "script", _installer_files(INSTALL_SH), ids=lambda path: path.name
+)
+def test_shell_installer_parses(script: Path) -> None:
     result = subprocess.run(
-        ["bash", "-n", str(INSTALL_SH)],
+        ["bash", "-n", str(script)],
         cwd=ROOT,
         check=False,
         capture_output=True,
@@ -256,13 +269,16 @@ def test_shared_image_ships_the_backfill_binary_not_lifecycle_wrappers() -> None
     assert not BACKFILL_PS1.exists()
 
 
-def test_power_shell_installer_parses_when_pwsh_is_available() -> None:
+@pytest.mark.parametrize(
+    "script", _installer_files(INSTALL_PS1), ids=lambda path: path.name
+)
+def test_power_shell_installer_parses_when_pwsh_is_available(script: Path) -> None:
     if shutil.which("pwsh") is None:
         pytest.skip("pwsh is unavailable")
     command = (
         "$tokens=$null; $errors=$null; "
         "[System.Management.Automation.Language.Parser]::ParseFile("
-        f"'{INSTALL_PS1}', [ref]$tokens, [ref]$errors) > $null; "
+        f"'{script}', [ref]$tokens, [ref]$errors) > $null; "
         "if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }"
     )
     result = subprocess.run(
@@ -1674,7 +1690,7 @@ def test_two_ports_set_equal_are_unresolved_when_the_switch_is_declined(
 def test_power_shell_installer_reports_two_ports_set_equal() -> None:
     if shutil.which("pwsh") is None:
         pytest.skip("pwsh is unavailable")
-    text = _read(INSTALL_PS1)
+    text = _read(INSTALL_LIB / "ports.ps1")
     check = text[text.index("$conflicts = @()") : text.index("if ($conflicts.Count")]
     script = "\n".join(
         [
