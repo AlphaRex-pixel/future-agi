@@ -282,7 +282,7 @@ application code.
 | Model serving | Optional (`ml` profile) | Always on | Optional (`serving.enabled`) |
 | Code-eval sandbox | In-app, unprivileged, Python only; nsjail, Python and JavaScript, with the optional `sandbox` profile. See [Code evals and the sandbox](#code-evals-and-the-sandbox) | nsjail `code-executor` (privileged) | Off by default: custom code evals are refused until you enable the privileged sandbox |
 | Scaling | One machine | Per service, on one machine | Per service, with autoscaling |
-| Use it for | Laptops, evaluation, a team on one VM | High volume on one large host; the [production overlay](deploy/README.md) | Production on Kubernetes |
+| Use it for | Laptops, evaluation, a small team on one VM (a few people working at once) | High volume on one large host; the [production overlay](deploy/README.md) | Production on Kubernetes |
 
 ### Standalone (default)
 
@@ -1110,6 +1110,11 @@ busy with 32 schedules. Six of them fire every 10 seconds: dataset and
 experiment evals, optimization runs, inline and span evals, and the Postgres
 to ClickHouse sync. A host short of CPU makes those pickups, and the UI, slow;
 give Docker at least the 2 CPUs the [prerequisites](#prerequisites) ask for.
+The API and the Temporal worker also share one process. On 6 CPUs, three
+people clicking through heavy views at once (the e2e suite with three
+workers) pushed slow API calls to 10–17 s and made Temporal's SQLite log
+persistence timeouts; one or two stayed responsive. For more concurrent users
+or a steady eval load, use [Distributed](#distributed-at-scale).
 
 ### `bin/install` says the project already holds a standalone install
 
