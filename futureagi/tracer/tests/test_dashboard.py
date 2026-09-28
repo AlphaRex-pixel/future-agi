@@ -1949,6 +1949,7 @@ class TestMetricsEndpoint:
         from django.db import OperationalError, ProgrammingError
 
         from tracer.services import dataset_choice_values
+        from tracer.services.postgres_read_policy import ApplicationPostgresReadError
         from tracer.views.dashboard import DashboardViewSet
 
         deadline = MagicMock()
@@ -1974,10 +1975,16 @@ class TestMetricsEndpoint:
             response = read_values(defect)
             assert response.status_code == 500
             assert response.data["code"] == "server_error"
-        # A PostgreSQL statement_timeout surfaces as an OperationalError.
-        response = read_values(OperationalError("canceling statement"))
-        assert response.status_code == 503
-        assert response.data["code"] == "service_unavailable"
+        # A PostgreSQL statement_timeout surfaces as an OperationalError, and a
+        # connection lost under the read policy's own SET statements as an
+        # ApplicationPostgresReadError.
+        for unavailable in (
+            OperationalError("canceling statement"),
+            ApplicationPostgresReadError("read control unavailable"),
+        ):
+            response = read_values(unavailable)
+            assert response.status_code == 503
+            assert response.data["code"] == "service_unavailable"
 
     def test_native_value_vocabularies_use_signed_fixed_size_pages(self):
         from tracer.views.dashboard import DashboardViewSet

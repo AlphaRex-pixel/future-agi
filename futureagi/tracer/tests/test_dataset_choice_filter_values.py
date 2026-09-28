@@ -570,15 +570,19 @@ def test_deadline_and_inventory_remain_fail_closed(reader):
     from django.db import OperationalError, ProgrammingError
 
     from tracer.services.clickhouse.read_budget import ReadDeadlineExceeded
+    from tracer.services.postgres_read_policy import ApplicationPostgresReadError
 
     reader.deadline.remaining_ms.side_effect = [DeadlineExceeded()]
     assert reader.invoke(["west"])["status"] == 503
     reader.deadline.remaining_ms.side_effect = None
-    # A PostgreSQL statement_timeout surfaces as an OperationalError. A broken
-    # statement is a defect a retry cannot fix, so it is not relabelled.
+    # A PostgreSQL statement_timeout surfaces as an OperationalError, and a
+    # connection lost under the read policy's own SET statements as an
+    # ApplicationPostgresReadError. A broken statement is a defect a retry
+    # cannot fix, so it is not relabelled.
     for error, answer in (
         (ReadDeadlineExceeded("read deadline exceeded"), 503),
         (OperationalError("canceling statement due to statement timeout"), 503),
+        (ApplicationPostgresReadError("read control unavailable"), 503),
         (ProgrammingError('relation "model_hub_cell" does not exist'), 500),
     ):
         reader.state["failure"] = error

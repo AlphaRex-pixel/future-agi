@@ -19,7 +19,10 @@ from collections import Counter
 from django.db import InterfaceError, OperationalError, connection, transaction
 
 from tracer.services.clickhouse.read_budget import ReadDeadlineExceeded
-from tracer.services.postgres_read_policy import application_postgres_reads
+from tracer.services.postgres_read_policy import (
+    ApplicationPostgresReadError,
+    application_postgres_reads,
+)
 
 MAX_CHOICE_TEXT = 16_384
 MAX_CHOICE_NODES = 1024
@@ -232,12 +235,14 @@ class DatasetValuesTooLarge(RuntimeError):
 
 
 # The read failures a picker answers 503 for: the request wall, a PostgreSQL
-# statement timeout or lost connection, and an answer over the byte budget.
-# Anything else is a defect in the read and must reach Sentry.
+# statement timeout or lost connection (also under the read policy's own SET
+# statements), and an answer over the byte budget. Anything else is a defect
+# in the read and must reach Sentry.
 UNAVAILABLE_READ_ERRORS = (
     ReadDeadlineExceeded,
     OperationalError,
     InterfaceError,
+    ApplicationPostgresReadError,
     DatasetValuesTooLarge,
 )
 
