@@ -704,6 +704,16 @@ logging:
 #   sync_on_startup: true
 #   sync_interval: 5m                  # 0 = disabled
 
+# Providers orgs add through the control plane (Gateway > Providers).
+# org_providers:
+#   # Let an org provider's base_url point at private/LAN addresses (RFC 1918,
+#   # 100.64.0.0/10, fc00::/7, Docker service names): a local Ollama or vLLM.
+#   # Off by default; enable only when every org on this gateway is trusted.
+#   # Loopback, link-local, cloud metadata, multicast and unspecified addresses
+#   # are refused regardless. Env: AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS=true
+#   # (set it on the backend too, for model discovery).
+#   allow_private_urls: false
+
 # OpenAI-compatible Assistants API proxy.
 # assistants:
 #   enabled: true

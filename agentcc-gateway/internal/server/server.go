@@ -88,6 +88,11 @@ func New(cfg *config.Config, configPath string, registry *providers.Registry, en
 	}
 
 	orgProviderCache := providers.NewOrgProviderCache(cfg.Providers)
+	if cfg.OrgProviders.AllowPrivateURLs {
+		orgProviderCache.SetAllowPrivateBaseURLs(true)
+		slog.Warn("org provider base URLs may point at private/LAN addresses; do not enable this on a gateway shared by untrusted orgs",
+			"env", config.EnvAllowPrivateProviderURLs)
+	}
 
 	s := &Server{
 		cfg:              cfg,

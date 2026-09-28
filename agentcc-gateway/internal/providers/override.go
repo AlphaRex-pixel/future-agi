@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,8 +20,12 @@ import (
 // Thread-safe: protects the cache with a RWMutex.
 type OrgProviderCache struct {
 	mu        sync.RWMutex
-	providers map[string]Provider // key: "orgID:providerID"
+	providers map[string]Provider              // key: "orgID:providerID"
 	baseCfgs  map[string]config.ProviderConfig // providerID → base config
+
+	// allowPrivateBaseURLs lets an org base_url point at private and LAN
+	// addresses; see validateBaseURL.
+	allowPrivateBaseURLs bool
 }
 
 // NewOrgProviderCache creates a cache pre-loaded with base provider configs.
@@ -28,6 +33,19 @@ func NewOrgProviderCache(baseCfgs map[string]config.ProviderConfig) *OrgProvider
 	return &OrgProviderCache{
 		providers: make(map[string]Provider),
 		baseCfgs:  baseCfgs,
+	}
+}
+
+// SetAllowPrivateBaseURLs sets whether org base URLs may point at private and
+// LAN addresses. Providers built under the previous setting are dropped.
+func (c *OrgProviderCache) SetAllowPrivateBaseURLs(allow bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.allowPrivateBaseURLs = allow
+	for key, p := range c.providers {
+		p.Close()
+		delete(c.providers, key)
 	}
 }
 
@@ -70,7 +88,7 @@ func (c *OrgProviderCache) GetOrCreateWithTenantConfig(orgID, providerID, apiKey
 	baseCfg, ok := c.baseCfgs[providerID]
 	if tenantCfg != nil && (!ok || tenantCfg.ServiceAccountJSON != "") {
 		// Validate base URL to prevent SSRF via tenant-supplied config.
-		if err := validateBaseURL(tenantCfg.BaseURL); err != nil {
+		if err := validateBaseURL(tenantCfg.BaseURL, c.allowPrivateBaseURLs); err != nil {
 			return nil, fmt.Errorf("org %s provider %s: %w", orgID, providerID, err)
 		}
 
@@ -142,65 +160,180 @@ func resolveOrgConfig(baseCfg config.ProviderConfig, apiKey string, tenantCfg *t
 	return orgCfg
 }
 
-// isPrivateIP returns true if the given IP is in a private/reserved range.
-func isPrivateIP(ip net.IP) bool {
-	privateRanges := []struct {
-		network string
-	}{
-		{"0.0.0.0/8"},
-		{"10.0.0.0/8"},
-		{"172.16.0.0/12"},
-		{"192.168.0.0/16"},
-		{"169.254.0.0/16"},
-		{"127.0.0.0/8"},
-		{"::1/128"},
-		{"fc00::/7"},
-		{"fe80::/10"},
+// BaseURLRejection says why validateBaseURL refused an org base_url.
+type BaseURLRejection int
+
+const (
+	// BaseURLInvalid: not an http(s) URL with a host.
+	BaseURLInvalid BaseURLRejection = iota
+	// BaseURLUnresolvable: the host does not resolve.
+	BaseURLUnresolvable
+	// BaseURLPrivate: a private or LAN address. The operator can allow these.
+	BaseURLPrivate
+	// BaseURLLoopback: the gateway's own host. Never allowed.
+	BaseURLLoopback
+	// BaseURLForbidden: link-local, cloud metadata, multicast or unspecified.
+	// Never allowed.
+	BaseURLForbidden
+)
+
+// BaseURLError reports an org base_url the gateway refuses to call.
+type BaseURLError struct {
+	BaseURL string
+	Host    string
+	IP      net.IP // the offending address; nil when rejected before resolving
+	Reason  BaseURLRejection
+	Err     error // the parse or lookup failure, if any
+}
+
+func (e *BaseURLError) Error() string {
+	switch e.Reason {
+	case BaseURLUnresolvable:
+		return fmt.Sprintf("cannot resolve base_url host %q: %v", e.Host, e.Err)
+	case BaseURLPrivate:
+		return fmt.Sprintf("base_url host %q resolves to private address %s: %s (set %s=true to allow private/LAN provider URLs)",
+			e.Host, e.IP, e.BaseURL, config.EnvAllowPrivateProviderURLs)
+	case BaseURLLoopback:
+		return fmt.Sprintf("base_url host %q resolves to loopback address %s, which is never allowed: %s", e.Host, e.IP, e.BaseURL)
+	case BaseURLForbidden:
+		if e.IP == nil {
+			return fmt.Sprintf("base_url host %q is a cloud metadata endpoint, which is never allowed: %s", e.Host, e.BaseURL)
+		}
+		return fmt.Sprintf("base_url host %q resolves to link-local, metadata, multicast or unspecified address %s, which is never allowed: %s",
+			e.Host, e.IP, e.BaseURL)
+	default:
+		return fmt.Sprintf("invalid base_url %q: %v", e.BaseURL, e.Err)
 	}
-	for _, r := range privateRanges {
-		_, cidr, _ := net.ParseCIDR(r.network)
-		if cidr.Contains(ip) {
+}
+
+func (e *BaseURLError) Unwrap() error { return e.Err }
+
+// PublicMessage explains the refusal to an API caller. It leaves out the
+// resolved address, which would map the operator's internal DNS for them.
+func (e *BaseURLError) PublicMessage() string {
+	switch e.Reason {
+	case BaseURLUnresolvable:
+		return fmt.Sprintf("its base_url host %q does not resolve from the gateway", e.Host)
+	case BaseURLPrivate:
+		return "its base_url points to a private network address, which this gateway refuses by default. " +
+			"A self-hosted deployment can allow private/LAN provider URLs by setting " +
+			config.EnvAllowPrivateProviderURLs + "=true on the gateway and the backend"
+	case BaseURLLoopback:
+		return "its base_url points to a loopback address, which is never allowed: from the gateway that is the gateway itself. " +
+			"Use the model server's host or service name (host.docker.internal for a server on the Docker host)"
+	case BaseURLForbidden:
+		return "its base_url points to a link-local or cloud metadata address, which is never allowed"
+	default:
+		return "its base_url is not a valid http(s) URL"
+	}
+}
+
+var (
+	// Never reachable from an org base_url, whatever the operator allows:
+	// "this network", link-local (cloud metadata answers on 169.254.169.254),
+	// multicast, broadcast, and the metadata services that sit inside ranges
+	// the operator can open (Alibaba in CGNAT, AWS IMDS over IPv6 in
+	// fc00::/7) or in public space (Azure's WireServer).
+	forbiddenNets = mustParseCIDRs(
+		"0.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "255.255.255.255/32",
+		"::/128", "fe80::/10", "ff00::/8",
+		"100.100.100.200/32", "fd00:ec2::254/128", "168.63.129.16/32",
+	)
+
+	// Loopback is the gateway itself (in a container, only the container),
+	// never a model server, so it stays refused even when private addresses
+	// are allowed.
+	loopbackNets = mustParseCIDRs("127.0.0.0/8", "::1/128")
+
+	// Private and LAN ranges (RFC 1918, CGNAT, unique local): refused unless
+	// the operator allows private provider URLs.
+	privateNets = mustParseCIDRs("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7")
+
+	// Metadata endpoints by name, refused before any lookup.
+	metadataHosts = map[string]bool{
+		"metadata":                   true,
+		"metadata.google.internal":   true,
+		"metadata.goog":              true,
+		"instance-data":              true,
+		"instance-data.ec2.internal": true,
+	}
+
+	// lookupIP resolves a base_url host; a variable so tests can stub DNS.
+	lookupIP = net.LookupIP
+)
+
+func mustParseCIDRs(cidrs ...string) []*net.IPNet {
+	nets := make([]*net.IPNet, len(cidrs))
+	for i, c := range cidrs {
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			panic(err)
+		}
+		nets[i] = n
+	}
+	return nets
+}
+
+func inNets(ip net.IP, nets []*net.IPNet) bool {
+	for _, n := range nets {
+		if n.Contains(ip) {
 			return true
 		}
 	}
 	return false
 }
 
-// validateBaseURL checks that a base URL does not resolve to a private/internal IP.
-// Returns an error if the URL is invalid, unresolvable, or points to a private address.
-func validateBaseURL(baseURL string) error {
+// rejectIP classifies one resolved address. IPv4-mapped IPv6 addresses match
+// the IPv4 ranges (net.IPNet.Contains unmaps them).
+func rejectIP(ip net.IP, allowPrivate bool) (BaseURLRejection, bool) {
+	switch {
+	case inNets(ip, forbiddenNets):
+		return BaseURLForbidden, true
+	case inNets(ip, loopbackNets):
+		return BaseURLLoopback, true
+	case inNets(ip, privateNets) && !allowPrivate:
+		return BaseURLPrivate, true
+	}
+	return 0, false
+}
+
+// validateBaseURL checks an org-supplied base URL before the org's key is
+// sent there. Every address the host resolves to must pass. Private and LAN
+// addresses pass only when allowPrivate is set; loopback, link-local, cloud
+// metadata, multicast and unspecified addresses never do. Returns a
+// *BaseURLError.
+func validateBaseURL(baseURL string, allowPrivate bool) error {
 	if baseURL == "" {
 		return nil
 	}
 	parsed, err := url.Parse(baseURL)
 	if err != nil {
-		return fmt.Errorf("invalid base_url: %w", err)
+		return &BaseURLError{BaseURL: baseURL, Reason: BaseURLInvalid, Err: err}
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("base_url must use http or https scheme: %s", baseURL)
+		return &BaseURLError{BaseURL: baseURL, Reason: BaseURLInvalid, Err: fmt.Errorf("scheme must be http or https")}
 	}
-	host := parsed.Hostname()
+	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
 	if host == "" {
-		return fmt.Errorf("base_url has no hostname: %s", baseURL)
+		return &BaseURLError{BaseURL: baseURL, Reason: BaseURLInvalid, Err: fmt.Errorf("no hostname")}
+	}
+	if metadataHosts[host] {
+		return &BaseURLError{BaseURL: baseURL, Host: host, Reason: BaseURLForbidden}
 	}
 
-	// If the host is a raw IP, check it directly.
-	if ip := net.ParseIP(host); ip != nil {
-		if isPrivateIP(ip) {
-			return fmt.Errorf("base_url resolves to private IP (%s): %s", ip, baseURL)
+	ips := []net.IP{net.ParseIP(host)}
+	if ips[0] == nil {
+		ips, err = lookupIP(host)
+		if err == nil && len(ips) == 0 {
+			err = fmt.Errorf("no addresses")
 		}
-		return nil
+		if err != nil {
+			return &BaseURLError{BaseURL: baseURL, Host: host, Reason: BaseURLUnresolvable, Err: err}
+		}
 	}
-
-	// Resolve hostname and check all IPs.
-	addrs, err := net.LookupHost(host)
-	if err != nil {
-		return fmt.Errorf("cannot resolve base_url host %q: %w", host, err)
-	}
-	for _, addr := range addrs {
-		ip := net.ParseIP(addr)
-		if ip != nil && isPrivateIP(ip) {
-			return fmt.Errorf("base_url host %q resolves to private IP (%s): %s", host, ip, baseURL)
+	for _, ip := range ips {
+		if reason, rejected := rejectIP(ip, allowPrivate); rejected {
+			return &BaseURLError{BaseURL: baseURL, Host: host, IP: ip, Reason: reason}
 		}
 	}
 	return nil

@@ -42,6 +42,7 @@ type Config struct {
 	Cluster       ClusterConfig             `yaml:"cluster" json:"cluster"`
 	Edge          EdgeConfig                `yaml:"edge" json:"edge"`
 	ControlPlane  ControlPlaneConfig        `yaml:"control_plane" json:"control_plane"`
+	OrgProviders  OrgProvidersConfig        `yaml:"org_providers" json:"org_providers"`
 	CORS          CORSConfig                `yaml:"cors" json:"cors"`
 	Assistants    AssistantsConfig          `yaml:"assistants" json:"assistants"`
 	MCP           MCPConfig                 `yaml:"mcp" json:"mcp"`
@@ -912,6 +913,23 @@ type ControlPlaneConfig struct {
 	SyncInterval  time.Duration `yaml:"sync_interval" json:"sync_interval"`     // periodic re-sync (0 = disabled)
 }
 
+// EnvAllowPrivateProviderURLs names the env var behind
+// OrgProvidersConfig.AllowPrivateURLs. The Django backend reads the same name
+// for its model-discovery calls, so one setting covers both.
+const EnvAllowPrivateProviderURLs = "AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS"
+
+// OrgProvidersConfig governs the providers orgs configure through the control
+// plane (not the ones in this file's providers section, which are trusted).
+type OrgProvidersConfig struct {
+	// AllowPrivateURLs lets an org provider's base_url point at private and
+	// LAN addresses (RFC 1918, 100.64.0.0/10, fc00::/7, and host names such
+	// as Docker service names that resolve to them): a local Ollama or vLLM.
+	// Off by default, since on a shared gateway it lets any org reach
+	// internal hosts. Loopback, link-local, cloud metadata, multicast and
+	// unspecified addresses stay refused regardless.
+	AllowPrivateURLs bool `yaml:"allow_private_urls" json:"allow_private_urls"`
+}
+
 // EdgeRegionConfig defines a backend region for edge routing.
 type EdgeRegionConfig struct {
 	Name    string `yaml:"name" json:"name"`
@@ -1091,6 +1109,11 @@ func loadFromEnv(cfg *Config) {
 	}
 	if v := os.Getenv("AGENTCC_WEBHOOK_SECRET"); v != "" {
 		cfg.ControlPlane.WebhookSecret = v
+	}
+	if v := os.Getenv(EnvAllowPrivateProviderURLs); v != "" {
+		if allow, err := strconv.ParseBool(v); err == nil {
+			cfg.OrgProviders.AllowPrivateURLs = allow
+		}
 	}
 
 	// Auth env overrides. Evaluate the explicit toggle first, then let a present
