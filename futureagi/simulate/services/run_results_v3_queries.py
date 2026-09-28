@@ -31,9 +31,11 @@ from django.db.models.lookups import (
     GreaterThan,
     GreaterThanOrEqual,
     In,
+    LessThan,
     LessThanOrEqual,
 )
 
+from evaluations.engine.instance import resolve_pass_threshold
 from model_hub.models.develop_dataset import Cell
 from simulate.models import CallExecution, SimulateEvalConfig, TestExecution
 from simulate.semantics import SupportedProviders
@@ -77,12 +79,36 @@ def _eval_measured_q(eval_id: str) -> Q:
         Value(""),
         output_field=TextField(),
     )
-    return ~Q(In(Lower(Trim(status)), ["pending", "skipped", "error"]))
+    return Q(eval_outputs__has_key=eval_id) & ~Q(
+        In(Lower(Trim(status)), ["pending", "skipped", "error", "failed"])
+    )
 
 
-def _eval_score(eval_id: str):
-    numeric = _safe_json_float("eval_outputs", eval_id, "output")
-    numeric_type = Exact(
+def _eval_errored_q(eval_id: str) -> Q:
+    status = Coalesce(
+        _json_text("eval_outputs", eval_id, "status"),
+        Value(""),
+        output_field=TextField(),
+    )
+    return Q(eval_outputs__has_key=eval_id) & Q(
+        In(Lower(Trim(status)), ["error", "failed"])
+    )
+
+
+def _binding_setting(config: SimulateEvalConfig, name: str, fallback: Any) -> Any:
+    runtime = config.config if isinstance(config.config, dict) else {}
+    run_config = runtime.get("run_config")
+    if isinstance(run_config, dict) and run_config.get(name) is not None:
+        return run_config[name]
+    if runtime.get(name) is not None:
+        return runtime[name]
+    return fallback
+
+
+def _eval_score(eval_id: str, choice_scores: dict[str, Any] | None = None):
+    direct = _safe_json_float("eval_outputs", eval_id, "output")
+    nested = _safe_json_float("eval_outputs", eval_id, "output", "score")
+    direct_type = Exact(
         Func(
             _json_value("eval_outputs", eval_id, "output"),
             function="jsonb_typeof",
@@ -90,6 +116,27 @@ def _eval_score(eval_id: str):
         ),
         Value("number"),
     )
+    nested_type = Exact(
+        Func(
+            _json_value("eval_outputs", eval_id, "output", "score"),
+            function="jsonb_typeof",
+            output_field=TextField(),
+        ),
+        Value("number"),
+    )
+    choice_cases = [
+        When(
+            Q(
+                Exact(
+                    Lower(Trim(_json_text("eval_outputs", eval_id, "output"))),
+                    Value(str(label).strip().lower()),
+                )
+            ),
+            then=Value(float(score)),
+        )
+        for label, score in (choice_scores or {}).items()
+        if isinstance(score, int | float)
+    ]
     return Case(
         When(~_eval_measured_q(eval_id), then=Value(None, output_field=FloatField())),
         When(
@@ -104,11 +151,20 @@ def _eval_score(eval_id: str):
             ),
             then=Value(0.0),
         ),
+        *choice_cases,
         When(
-            numeric_type,
+            nested_type,
             then=Case(
-                When(GreaterThan(numeric, Value(1.0)), then=numeric / Value(100.0)),
-                default=numeric,
+                When(GreaterThan(nested, Value(1.0)), then=nested / Value(100.0)),
+                default=nested,
+                output_field=FloatField(),
+            ),
+        ),
+        When(
+            direct_type,
+            then=Case(
+                When(GreaterThan(direct, Value(1.0)), then=direct / Value(100.0)),
+                default=direct,
                 output_field=FloatField(),
             ),
         ),
@@ -120,21 +176,36 @@ def _eval_score(eval_id: str):
 def run_calls_queryset(
     execution: TestExecution, execution_ids: list[Any] | None = None
 ) -> QuerySet[CallExecution]:
-    live_eval_ids = set(
+    live_configs = list(
         SimulateEvalConfig.objects.filter(
             run_test=execution.run_test, deleted=False
-        ).values_list("id", flat=True)
+        ).select_related("eval_template")
     )
-    live_eval_ids = {str(value) for value in live_eval_ids}
-    failed_eval = _eval_verdict_q(
-        live_eval_ids,
-        [False, "false", "fail", "failed", "failure", "unsuccessful"],
-    )
-    passed_eval = Q() if live_eval_ids else Q(pk__in=[])
-    for eval_id in live_eval_ids:
-        passed_eval &= _eval_verdict_q(
-            {eval_id}, [True, "true", "pass", "passed", "success", "successful"]
+    failed_eval = Q(pk__in=[])
+    passed_eval = Q(pk__in=[])
+    errored_eval = Q(pk__in=[])
+    for config in live_configs:
+        eval_id = str(config.id)
+        template = config.eval_template
+        choice_scores = _binding_setting(
+            config, "choice_scores", template.choice_scores or {}
         )
+        score = _eval_score(
+            eval_id, choice_scores if isinstance(choice_scores, dict) else {}
+        )
+        if bool(
+            _binding_setting(
+                config,
+                "reverse_output",
+                (template.config or {}).get("reverse_output", False),
+            )
+        ):
+            score = Value(1.0) - score
+        threshold = resolve_pass_threshold(template, config.config)
+        measured = _eval_measured_q(eval_id)
+        failed_eval |= measured & Q(LessThan(score, Value(threshold)))
+        passed_eval |= measured & Q(GreaterThanOrEqual(score, Value(threshold)))
+        errored_eval |= _eval_errored_q(eval_id)
 
     # The common hosted-harness fields live in JSONB today. These annotations
     # keep filtering, grouping, ordering and aggregation inside PostgreSQL while
@@ -161,6 +232,7 @@ def run_calls_queryset(
     queryset = CallExecution.objects.filter(execution_filter).annotate(
         result_eval_outcome=Case(
             When(failed_eval, then=Value("failed")),
+            When(errored_eval, then=Value("inconclusive")),
             When(passed_eval, then=Value("passed")),
             default=Value("inconclusive"),
             output_field=CharField(),
@@ -179,13 +251,15 @@ def run_calls_queryset(
         result_outcome=Case(
             When(
                 call_metadata__harness_outcome_status__in=[
-                    "passed",
-                    "pass",
-                    "success",
-                    "successful",
+                    "error",
+                    "errored",
+                    "cancelled",
+                    "canceled",
                 ],
-                then=Value("passed"),
+                then=Value("error"),
             ),
+            When(status__in=["failed", "cancelled"], then=Value("error")),
+            When(~Q(status="completed"), then=Value("inconclusive")),
             When(
                 call_metadata__harness_outcome_status__in=[
                     "failed",
@@ -194,15 +268,8 @@ def run_calls_queryset(
                 ],
                 then=Value("failed"),
             ),
-            When(
-                call_metadata__harness_outcome_status__in=[
-                    "error",
-                    "errored",
-                    "cancelled",
-                    "canceled",
-                ],
-                then=Value("error"),
-            ),
+            When(failed_eval, then=Value("failed")),
+            When(errored_eval, then=Value("inconclusive")),
             When(
                 call_metadata__harness_outcome_status__in=[
                     "inconclusive",
@@ -211,9 +278,15 @@ def run_calls_queryset(
                 ],
                 then=Value("inconclusive"),
             ),
-            When(status__in=["failed", "cancelled"], then=Value("error")),
-            When(~Q(status="completed"), then=Value("inconclusive")),
-            When(failed_eval, then=Value("failed")),
+            When(
+                call_metadata__harness_outcome_status__in=[
+                    "passed",
+                    "pass",
+                    "success",
+                    "successful",
+                ],
+                then=Value("passed"),
+            ),
             When(passed_eval, then=Value("passed")),
             default=Value("inconclusive"),
             output_field=CharField(),
@@ -605,6 +678,12 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
     queryset = run_calls_queryset(execution)
     summary = summarize_run_calls(queryset)
     configs, _ = build_evaluation_catalog(execution)
+    scoring_configs = {
+        str(config.id): config
+        for config in SimulateEvalConfig.objects.filter(
+            run_test=execution.run_test, deleted=False
+        ).select_related("eval_template")
+    }
 
     risk = _breakdown_run_calls(queryset, "scenario")
     # Weakest first; slices with too few evaluated calls to rank go last.
@@ -634,41 +713,45 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
     evaluation_expressions = {}
     for config in configs:
         eval_id = config["id"]
-        passed_q = _eval_verdict_q(
-            {eval_id}, [True, "true", "pass", "passed", "success", "successful"]
-        )
-        failed_q = _eval_verdict_q(
-            {eval_id},
-            [False, "false", "fail", "failed", "failure", "unsuccessful"],
-        )
+        scoring_config = scoring_configs.get(eval_id)
+        if scoring_config is None:
+            score = _eval_score(eval_id)
+            passed_q = _eval_verdict_q(
+                {eval_id}, [True, "true", "pass", "passed", "success", "successful"]
+            )
+            failed_q = _eval_verdict_q(
+                {eval_id},
+                [False, "false", "fail", "failed", "failure", "unsuccessful"],
+            )
+        else:
+            template = scoring_config.eval_template
+            choice_scores = _binding_setting(
+                scoring_config, "choice_scores", template.choice_scores or {}
+            )
+            score = _eval_score(
+                eval_id, choice_scores if isinstance(choice_scores, dict) else {}
+            )
+            if bool(
+                _binding_setting(
+                    scoring_config,
+                    "reverse_output",
+                    (template.config or {}).get("reverse_output", False),
+                )
+            ):
+                score = Value(1.0) - score
+            threshold = resolve_pass_threshold(template, scoring_config.config)
+            measured_q = _eval_measured_q(eval_id)
+            passed_q = measured_q & Q(GreaterThanOrEqual(score, Value(threshold)))
+            failed_q = measured_q & Q(LessThan(score, Value(threshold)))
         evaluation_expressions[f"passed_{eval_id}"] = Count("id", filter=passed_q)
         evaluation_expressions[f"failed_{eval_id}"] = Count("id", filter=failed_q)
         evaluation_expressions[f"present_{eval_id}"] = Count(
             "id", filter=Q(eval_outputs__has_key=eval_id)
         )
-        # The evaluator ran but produced no verdict: not a fail against the agent.
         evaluation_expressions[f"errored_{eval_id}"] = Count(
-            "id",
-            filter=Q(
-                In(
-                    Lower(Trim(_json_text("eval_outputs", eval_id, "status"))),
-                    ["failed", "error"],
-                )
-            ),
+            "id", filter=_eval_errored_q(eval_id)
         )
-        output_type_key = f"eval_outputs__{eval_id}__output_type"
-        evaluation_expressions[f"score_{eval_id}"] = Avg(
-            Case(
-                When(
-                    **{
-                        output_type_key: "score",
-                        "then": _safe_json_float("eval_outputs", eval_id, "output"),
-                    }
-                ),
-                default=None,
-                output_field=FloatField(),
-            )
-        )
+        evaluation_expressions[f"score_{eval_id}"] = Avg(score)
     evaluation_values = (
         queryset.aggregate(**evaluation_expressions) if evaluation_expressions else {}
     )

@@ -1060,9 +1060,11 @@ def _apply_receipt_to_call(
     _apply_target_metrics(call, (call_data or {}).get("target_metrics"))
     update_fields.extend(
         [
+            "customer_call_id",
             "customer_cost_cents",
             "customer_latency_metrics",
             "conversation_metrics_data",
+            "ended_reason",
         ]
     )
     call.save(update_fields=list(dict.fromkeys(update_fields)))
@@ -1229,13 +1231,16 @@ _TARGET_TOKEN_FIELDS = {
 
 
 def _apply_target_metrics(call: CallExecution, target: dict[str, Any] | None) -> None:
-    """Store the agent under test's own provider-reported cost, latency and tokens.
+    """Store provider-reported identity, end reason, cost, latency and tokens.
 
     These go in the customer fields the native Vapi flow fills, never in ``cost_cents`` (the
     platform's own cost). A rerun reuses this row, so a receipt without them clears the last
-    attempt's cost and latency instead of leaving them attached to a different call.
+    attempt's provider ID, cost and latency instead of leaving them attached to another call.
     """
     target = target or {}
+    call.customer_call_id = target.get("provider_call_id")
+    if target.get("provider_end_reason"):
+        call.ended_reason = target["provider_end_reason"]
     call.customer_cost_cents = target.get("cost_cents")
     latency = dict(target.get("latency") or {})
     turns = latency.pop("turns", [])

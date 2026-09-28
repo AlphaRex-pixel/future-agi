@@ -10,7 +10,9 @@ from typing import Any
 
 from django.core.cache import cache
 
+from evaluations.engine.instance import resolve_pass_threshold
 from model_hub.models.develop_dataset import Cell
+from model_hub.utils.scoring import score_eval_output
 from simulate.models import CallExecution, SimulateEvalConfig, TestExecution
 from simulate.utils.eval_summary import iter_live_eval_outputs
 
@@ -29,38 +31,69 @@ def _number(value: Any) -> float | None:
 
 
 def _truth_value(eval_data: Any) -> bool | None:
-    if not isinstance(eval_data, dict):
-        return None
-    if str(eval_data.get("status") or "").strip().lower() in {
-        "pending",
-        "skipped",
-        "error",
-    }:
-        return None
-    value = eval_data.get("output")
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"pass", "passed", "true", "success", "successful"}:
-            return True
-        if normalized in {"fail", "failed", "false", "failure", "unsuccessful"}:
-            return False
+    outcome = _eval_outcome(eval_data)
+    if outcome == "passed":
+        return True
+    if outcome == "failed":
+        return False
     return None
 
 
-def call_outcome(call: CallExecution, live_eval_ids: set[str]) -> str:
+def _binding_setting(config: SimulateEvalConfig, name: str, fallback: Any) -> Any:
+    runtime = config.config if isinstance(config.config, dict) else {}
+    run_config = runtime.get("run_config")
+    if isinstance(run_config, dict) and run_config.get(name) is not None:
+        return run_config[name]
+    if runtime.get(name) is not None:
+        return runtime[name]
+    return fallback
+
+
+def _eval_outcome(
+    eval_data: Any, config: SimulateEvalConfig | None = None
+) -> str | None:
+    if not isinstance(eval_data, dict):
+        return None
+    status = str(eval_data.get("status") or "").strip().lower()
+    if status in {"error", "failed"}:
+        return "error"
+    if status in {"pending", "skipped"}:
+        return None
+    value = eval_data.get("output")
+    if config is None:
+        if isinstance(value, bool):
+            return "passed" if value else "failed"
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"pass", "passed", "true", "success", "successful"}:
+                return "passed"
+            if normalized in {"fail", "failed", "false", "failure", "unsuccessful"}:
+                return "failed"
+        return None
+
+    template = config.eval_template
+    score = score_eval_output(value, template, default_score=None)
+    if score is None:
+        return None
+    if bool(
+        _binding_setting(
+            config,
+            "reverse_output",
+            (template.config or {}).get("reverse_output", False),
+        )
+    ):
+        score = 1.0 - score
+    threshold = resolve_pass_threshold(template, config.config)
+    return "passed" if score >= threshold else "failed"
+
+
+def call_outcome(
+    call: CallExecution, live_eval_configs: dict[str, SimulateEvalConfig]
+) -> str:
     metadata = call.call_metadata if isinstance(call.call_metadata, dict) else {}
     harness_outcome = str(metadata.get("harness_outcome_status") or "").lower()
-    if harness_outcome in {"passed", "pass", "success", "successful"}:
-        return "passed"
-    if harness_outcome in {"failed", "fail", "failure"}:
-        return "failed"
     if harness_outcome in {"error", "errored", "cancelled", "canceled"}:
         return "error"
-    if harness_outcome in {"inconclusive", "unknown", "skipped"}:
-        return "inconclusive"
-
     if call.status in {
         CallExecution.CallStatus.FAILED,
         CallExecution.CallStatus.CANCELLED,
@@ -71,12 +104,23 @@ def call_outcome(call: CallExecution, live_eval_ids: set[str]) -> str:
 
     verdicts = [
         verdict
-        for _, data in iter_live_eval_outputs(call.eval_outputs, live_eval_ids)
-        if (verdict := _truth_value(data)) is not None
+        for eval_id, data in iter_live_eval_outputs(
+            call.eval_outputs, set(live_eval_configs)
+        )
+        if (
+            verdict := _eval_outcome(data, live_eval_configs.get(str(eval_id)))
+        )
+        is not None
     ]
-    if any(verdict is False for verdict in verdicts):
+    if harness_outcome in {"failed", "fail", "failure"} or "failed" in verdicts:
         return "failed"
-    if verdicts:
+    if "error" in verdicts:
+        return "inconclusive"
+    if harness_outcome in {"inconclusive", "unknown", "skipped"}:
+        return "inconclusive"
+    if harness_outcome in {"passed", "pass", "success", "successful"}:
+        return "passed"
+    if "passed" in verdicts:
         return "passed"
     return "inconclusive"
 
@@ -269,6 +313,12 @@ def build_call_rows(
         catalog, catalog_live_ids = build_evaluation_catalog(execution)
         columns = catalog if columns is None else columns
         live_eval_ids = catalog_live_ids if live_eval_ids is None else live_eval_ids
+    live_eval_configs = {
+        str(config.id): config
+        for config in SimulateEvalConfig.objects.filter(
+            id__in=live_eval_ids, deleted=False
+        ).select_related("eval_template")
+    }
     dimensions = _row_dimensions(calls)
     rows = []
     harness_columns: dict[str, str] = {}
@@ -339,7 +389,7 @@ def build_call_rows(
                 "persona": persona,
                 "persona_details": persona_details,
                 "sub_goals": sub_goals,
-                "outcome": call_outcome(call, live_eval_ids),
+                "outcome": call_outcome(call, live_eval_configs),
                 "execution_status": call.status,
                 "harness_outcome_status": metadata.get("harness_outcome_status"),
                 "source_scenario_key": metadata.get("harness_scenario_key"),

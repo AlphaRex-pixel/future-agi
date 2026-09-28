@@ -103,6 +103,12 @@ class HarnessTargetMetricsSerializer(serializers.Serializer):
     usage = HarnessTargetUsageSerializer(required=False)
     cost_cents = serializers.IntegerField(min_value=0, required=False)
     latency = HarnessTargetLatencySerializer(required=False)
+    provider_call_id = serializers.CharField(
+        max_length=255, required=False, allow_blank=False
+    )
+    provider_end_reason = serializers.CharField(
+        max_length=255, required=False, allow_blank=False
+    )
 
 
 class HarnessCallSerializer(serializers.Serializer):
