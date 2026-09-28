@@ -1,7 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { parse, stringify } from 'yaml';
+import { E2E } from '../lib/env';
 import { inspectManagedMock, managedMockInspectionError, MOCK_BASE, MOCK_MODEL, registerMockModel, validateBackgroundMockMounts, validateMockEnvironment, validateMockRouting } from '../lib/managed-mock';
+import { validateStandaloneAppEnvironment } from '../lib/managed-mock-standalone';
 import { test as isolatedTest } from '../lib/mock-model-fixtures';
 import type { TestActor } from '../lib/provisioning';
 import type { StateProbe } from '../lib/state-probe';
@@ -239,6 +242,145 @@ test('managed mock background rechecks an awaited safety veto immediately before
   expect(fake.calls).toHaveLength(registrations);
   expect(fake.readCount()).toBe(reads);
 });
+
+test('managed mock background refuses a sandbox provider credential', () => {
+  expect(() => validateMockEnvironment('worker', { ...backgroundEnvironment, DAYTONA_API_KEY: 'e2e-mock' }, true))
+    .toThrow('credential override');
+  expect(() => validateMockEnvironment('worker', { ...backgroundEnvironment, E2B_API_KEY: 'e2e-mock' }, true))
+    .toThrow('credential override');
+});
+
+// What Compose gives Standalone's `app`: docker-compose.yml's environment
+// interpolated from standalone-e2e.env alone (the overlay resets env_file).
+function composedStandaloneEnvironment(): Record<string, string> {
+  const vars = Object.fromEntries(readFileSync(new URL('../stack/standalone-e2e.env', import.meta.url), 'utf8')
+    .split('\n').filter(line => /^[A-Z_][A-Z0-9_]*=/.test(line))
+    .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+  const compose = parse(readFileSync(new URL('../../docker-compose.yml', import.meta.url), 'utf8'));
+  return Object.fromEntries(Object.entries(compose.services.app.environment as Record<string, unknown>)
+    .map(([key, value]) => [key, String(value ?? '').replace(/\$\{([A-Z0-9_]+)(?::?-([^}]*))?\}/g,
+      (_, name: string, fallback?: string) => vars[name] || fallback || '')]));
+}
+
+for (const evalBackground of [false, true]) {
+  test(`managed mock accepts the Standalone app environment Compose builds (background=${evalBackground})`, () => {
+    validateStandaloneAppEnvironment(composedStandaloneEnvironment(), evalBackground);
+  });
+}
+
+for (const [name, override, reason] of [
+  ['mail sender domain', { MAILGUN_SENDER_DOMAIN: 'mail.invalid' }, 'credential override'],
+  ['private provider URLs', { AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS: 'true' }, 'unsupported gateway override'],
+  ['foreign control plane', { AGENTCC_CONTROL_PLANE_URL: 'https://control-plane.invalid' }, 'unsupported gateway override'],
+  ['unknown gateway setting', { AGENTCC_BASE_URL: 'https://gateway.invalid' }, 'unsupported gateway override'],
+  ['nonlocal mail', { EMAIL_BACKEND: 'django.core.mail.backends.smtp.EmailBackend' }, 'nonlocal email backend'],
+  ['Sentry', { SENTRY_ENABLED: 'true' }, 'Sentry must be disabled'],
+] as [string, Record<string, string>, string][]) {
+  test(`managed mock refuses a Standalone app with a ${name} override`, () => {
+    expect(() => validateStandaloneAppEnvironment({ ...composedStandaloneEnvironment(), ...override }, false))
+      .toThrow(reason);
+  });
+}
+
+// A stand-in `docker` on PATH answers the read-only calls the inspection makes
+// (bin/e2e compose passes through to it), so the whole inspection runs offline.
+const fakeDockerScript = `#!/bin/sh
+if [ -n "$FAKE_DOCKER_FAIL" ]; then echo "$FAKE_DOCKER_FAIL $*" >&2; exit 1; fi
+case " $* " in
+  *" context inspect "*) cat "$FAKE_DOCKER/context.json" ;;
+  *" network inspect "*) cat "$FAKE_DOCKER/network.json" ;;
+  *" compose "*" config "*) cat "$FAKE_DOCKER/config.json" ;;
+  *" compose "*" ps "*) cat "$FAKE_DOCKER/ps.txt" ;;
+  *" inspect "*) cat "$FAKE_DOCKER/containers.json" ;;
+  *) echo "unexpected docker call" >&2; exit 64 ;;
+esac
+`;
+const repoFile = (path: string) => fileURLToPath(new URL(`../${path}`, import.meta.url));
+type FakeContainer = { service: string; ports?: Record<string, string>; cmd?: string[]; entrypoint?: string[];
+  env?: Record<string, string>; extraHosts?: string[]; mounts?: [string, string][] };
+
+function fakeStack(stack: 'standalone' | 'distributed') {
+  const project = stack === 'standalone' ? 'futureagi-e2e-standalone' : 'futureagi-e2e';
+  const network = `${project}_default`;
+  const port = (url: string) => new URL(url).port;
+  const gatewayConfig = repoFile('stack/gateway.e2e.yaml');
+  const mock: FakeContainer = { service: 'mock-llm', cmd: ['node', '/srv/server.mjs'], entrypoint: ['docker-entrypoint.sh'],
+    mounts: [[repoFile('stack/mock-llm/server.mjs'), '/srv/server.mjs']] };
+  const stores: FakeContainer[] = [{ service: 'postgres', ports: { '5432/tcp': port(E2E.pgUrl) } },
+    { service: 'clickhouse', ports: { '8123/tcp': port(E2E.chUrl) } }];
+  const services: FakeContainer[] = stack === 'standalone' ? [{ service: 'app', env: composedStandaloneEnvironment(),
+    ports: { '3000/tcp': port(E2E.appUrl), '8000/tcp': port(E2E.apiUrl), '8080/tcp': port(E2E.gatewayUrl) },
+    extraHosts: ['code-executor:127.0.0.1', 'agentcc-gateway:127.0.0.1'],
+    mounts: [[gatewayConfig, '/etc/futureagi/secrets/agentcc.yaml'], ['/dev/null', '/etc/futureagi/secrets/vertex.json']],
+  }, mock, ...stores] : [{ service: 'agentcc-gateway', cmd: ['--config', '/app/config.yaml'],
+    entrypoint: ['/app/agentcc-gateway'], ports: { '8080/tcp': port(E2E.gatewayUrl) },
+    mounts: [[gatewayConfig, '/app/config.yaml']] }, mock,
+  { service: 'backend', ports: { '80/tcp': port(E2E.apiUrl) }, env: { OPENAI_API_KEY: 'e2e-mock' } },
+  { service: 'worker' }, { service: 'frontend', ports: { '80/tcp': port(E2E.appUrl) } }, ...stores];
+  const containers = services.map((c, i) => ({
+    Id: String(i + 1).repeat(64), Image: `sha256:${String(i + 1).repeat(64)}`,
+    State: { Running: true, StartedAt: '2999-01-01T00:00:00Z' },
+    Config: { Labels: { 'com.docker.compose.service': c.service, 'com.docker.compose.project': project },
+      Env: Object.entries(c.env ?? {}).map(([key, value]) => `${key}=${value}`), Cmd: c.cmd ?? [], Entrypoint: c.entrypoint ?? [] },
+    HostConfig: { ExtraHosts: c.extraHosts ?? null },
+    Mounts: (c.mounts ?? []).map(([Source, Destination]) => ({ Type: 'bind', Source, Destination, RW: false })),
+    NetworkSettings: { Networks: { [network]: { NetworkID: 'e2e-network', Aliases: [c.service], IPAddress: '172.18.0.2' } },
+      Ports: Object.fromEntries(Object.entries(c.ports ?? {}).map(([p, host]) => [p, [{ HostIp: '127.0.0.1', HostPort: host }]])) },
+  }));
+  return {
+    'context.json': [{ Endpoints: { docker: { Host: 'unix:///var/run/docker.sock' } } }],
+    'config.json': { name: project, networks: { default: { name: network } }, services: {} },
+    'ps.txt': containers.map(c => c.Id).join('\n'),
+    'containers.json': containers,
+    'network.json': [{ Driver: 'bridge', Labels: { 'com.docker.compose.project': project, 'com.docker.compose.network': 'default' } }],
+  } as Record<string, any>;
+}
+
+function withFakeDocker<T>(dir: string, stack: 'standalone' | 'distributed', files: Record<string, unknown>,
+  inspect: () => T, fail = ''): T {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(`${dir}/docker`, fakeDockerScript, { mode: 0o755 });
+  for (const [name, body] of Object.entries(files)) writeFileSync(`${dir}/${name}`, typeof body === 'string' ? body : JSON.stringify(body));
+  const saved = Object.fromEntries(['PATH', 'DOCKER_CONTEXT', 'DOCKER_HOST', 'E2E_STACK', 'FAKE_DOCKER', 'FAKE_DOCKER_FAIL']
+    .map(key => [key, process.env[key]]));
+  Object.assign(process.env, { PATH: `${dir}:${process.env.PATH}`, DOCKER_CONTEXT: 'e2e-fake', E2E_STACK: stack,
+    FAKE_DOCKER: dir, FAKE_DOCKER_FAIL: fail });
+  delete process.env.DOCKER_HOST;
+  try {
+    return inspect();
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+}
+
+const offlineEndpoints = () => [E2E.appUrl, E2E.apiUrl, E2E.gatewayUrl, E2E.pgUrl, E2E.chUrl]
+  .every(url => new URL(url).hostname === 'localhost');
+
+for (const stack of ['standalone', 'distributed'] as const) {
+  test(`managed mock inspects a well-formed ${stack} stack offline`, ({}, testInfo) => {
+    test.skip(!offlineEndpoints(), 'attach mode points the harness at another host');
+    const receipt = withFakeDocker(testInfo.outputPath('docker'), stack, fakeStack(stack), () => inspectManagedMock());
+    expect(receipt.services.map(s => s.service)).toEqual(stack === 'standalone'
+      ? ['app', 'mock-llm', 'postgres', 'clickhouse']
+      : ['agentcc-gateway', 'mock-llm', 'backend', 'worker', 'frontend', 'postgres', 'clickhouse']);
+  });
+
+  test(`managed mock refuses a ${stack} network the project does not own`, ({}, testInfo) => {
+    test.skip(!offlineEndpoints(), 'attach mode points the harness at another host');
+    const files = fakeStack(stack);
+    files['network.json'][0].Driver = 'host';
+    expect(() => withFakeDocker(testInfo.outputPath('docker'), stack, files, () => inspectManagedMock()))
+      .toThrow('STOP: managed mock unmanaged network');
+  });
+
+  test(`managed mock ${stack} inspection failures never echo arguments or Docker output`, ({}, testInfo) => {
+    test.skip(!offlineEndpoints(), 'attach mode points the harness at another host');
+    expect(() => withFakeDocker(testInfo.outputPath('docker'), stack, fakeStack(stack), () => inspectManagedMock(),
+      'private-provider-credential')).toThrow(/^STOP: managed mock read-only Docker inspection failed \(code=unknown, status=1, signal=unknown\)$/);
+  });
+}
 
 test('managed stack routing has runtime labels, network and read-only source proof', async ({}, testInfo) => {
   const receipt = inspectManagedMock();
