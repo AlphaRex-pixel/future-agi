@@ -28,6 +28,8 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=lib.sh
+. "$here/lib.sh"
 helm=${HELM:-helm}
 python=${PYTHON:-python3}
 chart_repo=${CHART_REPO:-oci://ghcr.io/future-agi/charts}
@@ -114,25 +116,10 @@ grep -E '^[[:space:]]*(- )?image:[[:space:]]*[^[:space:]]' "$work/rendered.yaml"
   sort -u >"$work/refs.txt"
 [ -s "$work/refs.txt" ] || fail "the rendered manifests have no image"
 
-digest_of() { # image reference -> sha256:... of its manifest (list)
-  local ref=$1 digest=""
-  if command -v docker >/dev/null 2>&1 && docker buildx version >/dev/null 2>&1; then
-    digest=$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' 2>/dev/null | jq -er '.digest' 2>/dev/null) || digest=""
-  fi
-  if [ -z "$digest" ] && command -v crane >/dev/null 2>&1; then
-    digest=$(crane digest "$ref" 2>/dev/null) || digest=""
-  fi
-  if [ -z "$digest" ] && command -v oras >/dev/null 2>&1; then
-    digest=$(oras resolve "$ref" 2>/dev/null) || digest=""
-  fi
-  [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || return 1
-  printf '%s\n' "$digest"
-}
-
 : >"$work/images.txt"
 while IFS= read -r ref; do
   if [[ "$ref" != *@sha256:* ]] && [ "$resolve" = 1 ]; then
-    digest=$(digest_of "$ref") || fail "cannot resolve the digest of $ref (needs docker buildx, crane or oras, and registry access)"
+    digest=$(resolve_digest "$ref") || fail "cannot resolve the digest of $ref (needs docker buildx, crane or oras, and registry access)"
     ref="$ref@$digest"
   fi
   if [[ "$ref" != *@sha256:* ]] && [ "$require_digest" = 1 ]; then

@@ -35,6 +35,8 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=lib.sh
+. "$here/lib.sh"
 chart=$(cd "$here/.." && pwd)
 helm=${HELM:-helm}
 python=${PYTHON:-python3}
@@ -122,20 +124,6 @@ for component in digests:
 PY
   fail "cannot read the image.digests components"
 
-resolve_registry() { # reference -> digest
-  local ref=$1 digest=""
-  if command -v docker >/dev/null 2>&1 && docker buildx version >/dev/null 2>&1; then
-    digest=$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' 2>/dev/null | jq -er '.digest' 2>/dev/null) || digest=""
-  fi
-  if [ -z "$digest" ] && command -v crane >/dev/null 2>&1; then
-    digest=$(crane digest "$ref" 2>/dev/null) || digest=""
-  fi
-  if [ -z "$digest" ] && command -v oras >/dev/null 2>&1; then
-    digest=$(oras resolve "$ref" 2>/dev/null) || digest=""
-  fi
-  printf '%s' "$digest"
-}
-
 resolve_local() { # registry/repository, tag -> digest from RepoDigests
   local repo=$1 tag=$2 short
   short=${repo#docker.io/}
@@ -154,7 +142,7 @@ esac
 if [ "$digests" != none ]; then
   while read -r component repo; do
     case $digests in
-      registry) digest=$(resolve_registry "$repo:$app_version") || digest="" ;;
+      registry) digest=$(resolve_digest "$repo:$app_version") || digest="" ;;
       local) digest=$(resolve_local "$repo" "$app_version") || digest="" ;;
       file) digest=$(sed -nE "s/^$component=(sha256:[a-f0-9]{64})[[:space:]]*$/\1/p" "$digests_file" | head -n1) || digest="" ;;
     esac
