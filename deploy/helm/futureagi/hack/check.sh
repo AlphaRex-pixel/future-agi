@@ -300,9 +300,14 @@ printf '#!/bin/sh\n' >"$fake/bin/helm"
 cat >"$fake/bin/curl" <<'SH'
 #!/bin/sh
 # /health/ answers once FAKE_STATE/healthy exists and the port-forward, which
-# it goes through, is up (has recorded its PID).
+# it goes through, is up (has recorded its PID). Until then it fails slowly,
+# as a starting backend does, so the script is still waiting (about 50 s of
+# retries) when a busy machine gets round to signalling it.
 case " $* " in
-  *"/health/"*) [ -e "$FAKE_STATE/healthy" ] && [ -s "$FAKE_STATE/port-forward.pid" ] ;;
+  *"/health/"*)
+    [ -e "$FAKE_STATE/healthy" ] && [ -s "$FAKE_STATE/port-forward.pid" ] && exit 0
+    sleep 2
+    exit 1 ;;
   *) echo '{}' ;;
 esac
 SH
@@ -345,7 +350,10 @@ import time
 fake, sig, cmd = sys.argv[1], signal.Signals["SIG" + sys.argv[2]], sys.argv[3:]
 pid_file = os.path.join(fake, "port-forward.pid")
 with open(os.path.join(fake, "run.txt"), "w") as log:
-    bundle = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+    # A shell running check.sh in the background (`&`) ignores SIGINT, and an
+    # ignored signal is inherited, so give the script Ctrl-C's default back.
+    bundle = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True,
+                              preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
 for _ in range(100):
     if os.path.exists(pid_file) and os.path.getsize(pid_file):
         break
