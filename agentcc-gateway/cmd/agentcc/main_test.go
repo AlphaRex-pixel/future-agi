@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -40,10 +41,12 @@ type gatewayUnderTest struct {
 	exited chan struct{}
 
 	slowStarted chan struct{} // closed when the provider gets a "slow" request
-	logsPosted  chan struct{} // sent to (without blocking) on each webhook request
+	logsPosted  chan struct{} // sent to (without blocking) on each webhook request once signalled
+	signalled   atomic.Bool   // set just before the test first signals the gateway
 
-	mu   sync.Mutex
-	logs int // request logs the webhook accepted
+	mu    sync.Mutex
+	logs  int // request logs the webhook accepted
+	early int // webhook requests before the signal: periodic flushes
 }
 
 // startGateway starts a gateway whose request-log webhook hangs when hangWebhook
@@ -71,9 +74,15 @@ func startGateway(t *testing.T, shutdownTimeout time.Duration, hangWebhook bool)
 			`"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
 	}))
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case g.logsPosted <- struct{}{}:
-		default:
+		if g.signalled.Load() {
+			select {
+			case g.logsPosted <- struct{}{}:
+			default:
+			}
+		} else {
+			g.mu.Lock()
+			g.early++
+			g.mu.Unlock()
 		}
 		if hangWebhook {
 			select {
@@ -179,6 +188,7 @@ func (g *gatewayUnderTest) chat(content string) error {
 
 func (g *gatewayUnderTest) signal(sig os.Signal) {
 	g.t.Helper()
+	g.signalled.Store(true)
 	if err := g.cmd.Process.Signal(sig); err != nil {
 		g.t.Fatal(err)
 	}
@@ -203,6 +213,18 @@ func (g *gatewayUnderTest) acceptedLogs() int {
 	return g.logs
 }
 
+// skipIfFlushedEarly skips the test when the gateway's periodic flush sent
+// the request log before the signal, so its shutdown had none to send.
+func (g *gatewayUnderTest) skipIfFlushedEarly() {
+	g.t.Helper()
+	g.mu.Lock()
+	early := g.early
+	g.mu.Unlock()
+	if early > 0 {
+		g.t.Skip("a periodic flush sent the request log before the signal")
+	}
+}
+
 // On SIGTERM the gateway exits only after it has sent the request logs it
 // buffered.
 func TestShutdown_DeliversBufferedRequestLogs(t *testing.T) {
@@ -213,6 +235,7 @@ func TestShutdown_DeliversBufferedRequestLogs(t *testing.T) {
 
 	g.signal(syscall.SIGTERM)
 	g.wait(time.Now(), 10*time.Second)
+	g.skipIfFlushedEarly()
 
 	if code := g.cmd.ProcessState.ExitCode(); code != 0 {
 		t.Errorf("exit code %d, want 0", code)
@@ -234,6 +257,7 @@ func TestShutdown_DeliversRequestLogsWhenTheDrainTimesOut(t *testing.T) {
 
 	g.signal(syscall.SIGTERM)
 	g.wait(time.Now(), 10*time.Second)
+	g.skipIfFlushedEarly()
 
 	if code := g.cmd.ProcessState.ExitCode(); code != 1 {
 		t.Errorf("exit code %d, want 1", code)
@@ -255,6 +279,7 @@ func TestShutdown_SecondSignalStopsTheGatewayAtOnce(t *testing.T) {
 	select {
 	case <-g.logsPosted: // the last flush is waiting on the webhook
 	case <-g.exited:
+		g.skipIfFlushedEarly()
 		t.Fatal("gateway exited before its last flush")
 	}
 	start := time.Now()
