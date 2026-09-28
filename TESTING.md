@@ -150,8 +150,9 @@ env variables, the public URLs per value set, `$(POD_IP)` in a restricted
 gateway's port, and load balancer health checks (GKE HealthCheckPolicies, ALB
 annotations) that probe what the readiness probes probe. It checks that the
 install notes and `hack/support-bundle.sh` keep credentials (proxy logins,
-passwords in URLs) out, and that `.prettierignore` keeps the pre-commit
-formatter off the templates and the files `values_docs.py` writes.
+passwords in URLs) out, that `hack/support-bundle.sh` stops its port-forward
+when it finishes or is killed, and that `.prettierignore` keeps the
+pre-commit formatter off the templates and the files `values_docs.py` writes.
 `KUBE_VERSIONS` picks the Kubernetes versions kubeconform validates against
 (CI: `1.27.0 1.37.0`), and `CRD_SCHEMAS` a mirror of the CRD schema catalog
 for the Gateway API, GKE, External Secrets, Argo CD and Flux kinds when CI has
