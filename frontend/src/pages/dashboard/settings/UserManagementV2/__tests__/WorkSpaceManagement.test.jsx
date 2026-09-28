@@ -6,6 +6,7 @@ import { HelmetProvider } from "react-helmet-async";
 
 import { render } from "src/utils/test-utils";
 import { OPENAPI_CONTRACT } from "src/api/contracts/openapi-contract.generated";
+import { workspacesListKey } from "src/api/workspaces/list";
 
 const mocks = vi.hoisted(() => ({
   post: vi.fn(),
@@ -35,14 +36,22 @@ vi.mock("src/components/iconify", () => ({ default: () => null }));
 
 import WorkSpaceManagement from "../WorkSpaceManagement";
 
-const renderPage = () =>
+const renderPage = (client = new QueryClient()) =>
   render(
     <HelmetProvider>
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={client}>
         <WorkSpaceManagement />
       </QueryClientProvider>
     </HelmetProvider>,
   );
+
+const createWorkspace = (name) => {
+  fireEvent.click(screen.getByRole("button", { name: "Create New Workspace" }));
+  fireEvent.change(screen.getByPlaceholderText("Enter workspace name"), {
+    target: { value: name },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+};
 
 describe("WorkSpaceManagement create workspace", () => {
   beforeEach(() => {
@@ -54,13 +63,7 @@ describe("WorkSpaceManagement create workspace", () => {
     mocks.post.mockResolvedValueOnce({ data: { status: true, result: {} } });
     renderPage();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Create New Workspace" }),
-    );
-    fireEvent.change(screen.getByPlaceholderText("Enter workspace name"), {
-      target: { value: "  Research  " },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    createWorkspace("  Research  ");
 
     await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
     const [url, payload] = mocks.post.mock.calls[0];
@@ -77,5 +80,20 @@ describe("WorkSpaceManagement create workspace", () => {
     );
     expect(allowed.length).toBeGreaterThan(0);
     Object.keys(payload).forEach((key) => expect(allowed).toContain(key));
+  });
+
+  it("refreshes the workspace switcher's list once the workspace exists", async () => {
+    mocks.post.mockResolvedValueOnce({ data: { status: true, result: {} } });
+    const client = new QueryClient();
+    // The switcher caches this list with staleTime: Infinity.
+    const listKey = [...workspacesListKey, "org-1"];
+    client.setQueryData(listKey, { pages: [], pageParams: [] });
+    renderPage(client);
+
+    createWorkspace("Research");
+
+    await waitFor(() =>
+      expect(client.getQueryState(listKey).isInvalidated).toBe(true),
+    );
   });
 });
