@@ -16,6 +16,12 @@ from tfc.utils.redaction import redact_url_credentials
         # An unencoded "@" in the password: parsers split on the last "@".
         ("redis://:p@ss@futureagi-redis:6379/2", "redis://:***@futureagi-redis:6379/2"),
         ("redis://default:p@ss:w@rd@host:6379/0", "redis://default:***@host:6379/0"),
+        # The password as a query parameter (redis-py and ClickHouse accept it).
+        ("redis://redis:6379/2?password=s3cret", "redis://redis:6379/2?password=***"),
+        (
+            "http://clickhouse:8123/?user=default&password=s3cret&query=x",
+            "http://clickhouse:8123/?user=default&password=***&query=x",
+        ),
     ],
 )
 def test_masks_the_password(raw, expected):
