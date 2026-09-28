@@ -799,6 +799,12 @@ When `VITE_HOST_API` names a host other than `localhost`, `./bin/install` asks
 `ifconfig.io` (or `api.ipify.org`) for this host's public IP address, to print
 a "Public" URL; with the default local `VITE_HOST_API` it does not.
 
+Users' browsers load the UI's fonts and icons from public CDNs, and a few
+screens load a code editor, document viewers, videos and logos from other
+hosts. On an air-gapped install icons are blank and the code editor, which
+code evals need, does not load; [docs/telemetry.md](docs/telemetry.md#the-browser-ui)
+lists each host.
+
 The exact payloads, every setting and how to see what your install sent are in
 [docs/telemetry.md](docs/telemetry.md).
 

@@ -9,6 +9,12 @@ PostHog, reCAPTCHA, Sentry, Mailgun) stays off until you give it a key. With no
 key set, the app makes no request to that service, logs nothing about it above
 debug level, and never slows down or fails a signup or login because of it.
 
+The browser UI is the exception: users' browsers load its fonts and icons from
+public CDNs, and a few screens load a code editor, a document viewer, videos
+and logos from other hosts. None of them is Future AGI. [The browser
+UI](#the-browser-ui) lists each one and what an air-gapped install loses
+without it.
+
 This page applies to all three setups: **Standalone** (the default
 `docker-compose.yml`), **Distributed** (`docker-compose.distributed.yml`) and
 **Helm** (Distributed on Kubernetes).
@@ -28,6 +34,9 @@ This page applies to all three setups: **Standalone** (the default
 | Email | No (printed to the app log) | Mailgun | `MAILGUN_API_KEY` |
 | Enterprise licence check | Only with a licence | `FUTURE_AGI_LICENSE_URL` | `EE_LICENSE_KEY` |
 | Google Tag Manager (UI page) | No | `www.googletagmanager.com` | `VITE_GTM_ID` at frontend build time |
+| Browser UI: fonts and icons | **Yes**, from each user's browser, on every page | `fonts.googleapis.com`, `fonts.gstatic.com`, `api.iconify.design` | Not switchable; see [The browser UI](#the-browser-ui) |
+| Browser UI: editor, previews, videos, logos | **Yes**, from the browser, on the screens that use them | `cdn.jsdelivr.net`, `unpkg.com`, `view.officeapps.live.com`, Loom, Arcade, `flagcdn.com`, an S3 bucket, `flaticon.com` | Not switchable; see [The browser UI](#the-browser-ui) |
+| Browser analytics, error reports, ad pixels | No | Mixpanel, PostHog, Sentry, New Relic, Google, Reddit, X | `VITE_*` keys at frontend build time; see [The browser UI](#the-browser-ui) |
 | Model price list (litellm) | **Yes**, at each API and worker start | `raw.githubusercontent.com` | `LITELLM_LOCAL_MODEL_COST_MAP=True` in `.env` uses the list bundled with the image (prices as of the pinned litellm release) |
 | Public-IP lookup (installer only) | No | `ifconfig.io`, then `api.ipify.org` | `./bin/install` makes it only when `VITE_HOST_API` names a host other than `localhost` |
 
@@ -256,9 +265,10 @@ Each of these is off until its key is set. None is needed to run Future AGI.
 - **Browser analytics** (`VITE_MIXPANEL_TOKEN`, `VITE_POSTHOG_KEY`) are baked
   into the frontend at build time. The frontend image built from this
   repository sets neither.
-- **The UI page itself** contacts no Google host: Google Tag Manager loads only
-  in a frontend built with `VITE_GTM_ID`, and reCAPTCHA's script only in one
-  built with `VITE_GOOGLE_SITE_KEY`. The published images set neither.
+- **Google Tag Manager and reCAPTCHA** load only in a frontend built with
+  `VITE_GTM_ID` and `VITE_GOOGLE_SITE_KEY`. The published images set neither.
+  The UI does load its fonts from Google Fonts; see
+  [The browser UI](#the-browser-ui).
 
 ### reCAPTCHA
 
@@ -300,6 +310,40 @@ so your Bedrock keys or instance role are never used for it.
   usage counts as a telemetry heartbeat for the last 24 hours. It is separate from deployment telemetry:
   `FUTURE_AGI_TELEMETRY_DISABLED` does not stop it,
   `FUTURE_AGI_ENTERPRISE_HEARTBEAT_DISABLED=true` does.
+
+## The browser UI
+
+The UI runs in each user's browser, so these requests come from the browser,
+not from your server. Each host sees the browser's IP address; the UI sends no
+`Referer` to other sites (`Referrer-Policy: same-origin`). None needs a key,
+and none of them is Future AGI.
+
+| Host | Loaded when | Without it (an air-gapped install) |
+| --- | --- | --- |
+| `fonts.googleapis.com`, `fonts.gstatic.com` | Every page: the stylesheet imports Inter and IBM Plex Sans from Google Fonts. | Text uses the Inter bundled with the UI (weights 400 to 700) and system fonts. A firewall that drops these requests instead of refusing them can delay the first paint until the browser gives up. |
+| `api.iconify.design` (then `api.simplesvg.com`, `api.unisvg.com`) | Every page: each icon is fetched by name the first time it is shown, then kept in the browser's local storage. | Icons are blank, including icon-only buttons such as close, menus and show password. |
+| `cdn.jsdelivr.net` | The code editor: code evals and their test playground, JSON eval results, Execute Code columns, tool schemas, a dataset's Add Row. | The editor stays on "Loading…", so code evals, code columns and tool schemas cannot be written. |
+| `unpkg.com` | Previewing a PDF in a dataset or experiment cell. | PDF preview fails. |
+| `view.officeapps.live.com` | Previewing a Word document in a dataset cell. Microsoft's viewer receives the document's URL and downloads the document from it. | Word preview fails. It also fails online when the file is not reachable from the internet. |
+| `www.loom.com`, `cdn.loom.com` | Tutorial videos: Get started, and the empty Agent definitions and Scenarios pages under Simulate. | Empty video frames. |
+| `demo.arcade.software`, `app.arcade.software` | Interactive tours: the Knowledge base page while it has none, and some help links. | Empty frames. |
+| `flagcdn.com` | The country-code picker of a voice agent. | No flags. |
+| `fi-image-assets.s3.ap-south-1.amazonaws.com` | Model-provider logos: model pickers, the API keys page, LLM spans. | No logos. |
+| `cdn-icons-png.flaticon.com` | Annotator avatars on a dataset's Annotations tab. | No avatars. |
+
+No setting serves these from the install itself yet. Without them an
+air-gapped install still works, apart from the code editor (and so code evals)
+and PDF and Word previews. Media URLs in your datasets and traces, a LiveKit
+server, and YouTube or Vimeo links load from wherever they point.
+
+Analytics, error reports and ad pixels send nothing unless the UI was built
+with their keys, and the published images are built with none of them:
+Mixpanel (`VITE_MIXPANEL_TOKEN`), PostHog (`VITE_POSTHOG_KEY`), Sentry
+(`VITE_SENTRY_DSN`), New Relic (`VITE_NEWRELIC_LICENSE_KEY` and an application
+ID; without them the agent is not started), Google Tag Manager (`VITE_GTM_ID`),
+reCAPTCHA (`VITE_GOOGLE_SITE_KEY`), and the Google, Reddit and X ad pixels
+(`VITE_GOOGLE_ADS_ENABLED`, `VITE_REDDIT_ADS_ENABLED`,
+`VITE_TWITTER_ADS_ENABLED`, each with its ID).
 
 ## The installer
 
