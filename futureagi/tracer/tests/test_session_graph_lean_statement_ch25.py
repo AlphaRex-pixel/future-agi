@@ -14,7 +14,10 @@ set and the aggregate itself), on one thread. The lean statement:
   of each span" is resolved exactly as before (re-parents, tombstones,
   resurrections, session moves and equal-version ties included);
 * runs on ``EXACT_GRAPH_SESSION_READ_MAX_THREADS`` threads, on the
-  background worker only.
+  background worker only, except with a first/last-message filter: those
+  select on ``argMin``/``argMax(input, start_time)``, which has no
+  tie-break, so the chart keeps dev's single thread and dev's tie picks
+  (proved on tied roots split across parts at the end of this module).
 
 **The oracle is dev's statement itself**, produced by the same public reader
 with the lean switch and the session settings removed. Both run on one
@@ -857,3 +860,358 @@ def test_query_log_reads_fewer_rows_on_background_threads(store, case):
             dev_log,
         )
         assert lean_log.read_bytes <= 0.75 * dev_log.read_bytes, (lean_log, dev_log)
+
+
+# ---------------------------------------------------------------------------
+# First/last-message filters: tied roots
+# ---------------------------------------------------------------------------
+#
+# ``first_message``/``last_message`` are ``argMin``/``argMax(input,
+# start_time)`` with no tie-break. When a session has two live roots at one
+# identical microsecond, the input picked depends on read order: on one thread
+# FINAL reads in sorting-key order and the pick is stable; on several threads
+# it depends on how rows split across threads and on the merge order of the
+# partial states, so a message-filtered chart can select different sessions
+# from dev's (and from one refresh to the next). The chart therefore keeps
+# dev's single-thread settings whenever a message filter is present, while
+# still taking the lean (one FINAL scan) source.
+
+TIE_PROJECT_ID = "5e551011-0000-4000-8000-00000000a003"
+TIE_LO = datetime(2026, 6, 3, 0, 0, 0, tzinfo=UTC)
+TIE_HI = datetime(2026, 6, 4, 0, 0, 0, tzinfo=UTC)
+TIE_SESSIONS = 200
+TIE_PLAIN_SESSIONS = 2_000
+TIE_PADDING = 100_000
+TIE_METRICS = ("latency", "traffic", "tokens")
+TIE_REPEATS = 3
+_TIE_COLUMNS = (*_SPAN_COLUMNS, "input")
+
+_TIE_WINDOW = {
+    "column_id": "created_at",
+    "filter_config": {
+        "col_type": "SYSTEM_METRIC",
+        "filter_type": "datetime",
+        "filter_op": "between",
+        "filter_value": [TIE_LO.isoformat(), TIE_HI.isoformat()],
+    },
+}
+
+
+def _message_filter(column, op, value):
+    return {
+        "column_id": column,
+        "filter_config": {
+            "col_type": "SYSTEM_METRIC",
+            "filter_type": "text",
+            "filter_op": op,
+            "filter_value": value,
+        },
+    }
+
+
+TIE_CASES = {
+    # Dev's single-thread pick for these ties is never "omega" as the last
+    # message, so dev's chart is empty and any selected session is a flip.
+    "last_contains_omega": [
+        _TIE_WINDOW,
+        _message_filter("last_message", "contains", "omega"),
+    ],
+    "last_contains_alpha": [
+        _TIE_WINDOW,
+        _message_filter("last_message", "contains", "alpha"),
+    ],
+    "first_contains_alpha": [
+        _TIE_WINDOW,
+        _message_filter("first_message", "contains", "alpha"),
+    ],
+    "first_not_contains_alpha": [
+        _TIE_WINDOW,
+        _message_filter("first_message", "not_contains", "alpha"),
+    ],
+}
+
+
+def _tie_rows():
+    """Two batches (two parts). Each tied session owns two live roots at one
+    identical microsecond whose sort keys sit far apart (agent/svc-a/``f…``
+    trace against chain/svc-z/``0…`` trace) and in different parts; padding
+    children fill the tied hours so a multi-thread read splits them."""
+
+    rng = random.Random(4242)
+    batches = ([], [])
+
+    def row(otype, service, start, trace_id, parent, session, latency, text):
+        prompt, completion = rng.randint(0, 3000), rng.randint(0, 800)
+        return {
+            "project_id": uuid.UUID(TIE_PROJECT_ID),
+            "observation_type": otype,
+            "service_name": service,
+            "start_time": start,
+            "trace_id": trace_id,
+            "id": _uid("tie-span", trace_id, start.isoformat(), otype, rng.random()),
+            "parent_span_id": parent,
+            "name": f"{otype}-op",
+            "end_time": start + timedelta(milliseconds=latency),
+            "latency_ms": latency,
+            "trace_session_id": uuid.UUID(session),
+            "status": "OK",
+            "model": "",
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": prompt + completion,
+            "cost": round(rng.random() * 0.05, 6),
+            "attrs_string": {},
+            "is_deleted": 0,
+            "_version": BASE_VERSION + rng.randint(0, 1000),
+            "input": text,
+        }
+
+    tied_hour = TIE_LO + timedelta(hours=2)
+    for number in range(TIE_SESSIONS):
+        session = _uid("tied", number)
+        moment = tied_hour + timedelta(seconds=number * 30, microseconds=321)
+        first = row(
+            "agent",
+            "svc-a",
+            moment,
+            "f" + _uid("tied-a", number)[1:],
+            "",
+            session,
+            1000 + number,
+            f"alpha-{number}",
+        )
+        second = row(
+            "chain",
+            "svc-z",
+            moment,
+            "0" + _uid("tied-b", number)[1:],
+            "",
+            session,
+            3000 + number,
+            f"omega-{number}",
+        )
+        batches[number % 2].append(first)
+        batches[1 - number % 2].append(second)
+    for number in range(TIE_PLAIN_SESSIONS):
+        moment = TIE_LO + timedelta(microseconds=rng.randint(0, 86_399_999_999))
+        batches[number % 2].append(
+            row(
+                rng.choice(("agent", "chain", "llm")),
+                rng.choice(("svc-a", "svc-m", "svc-z")),
+                moment,
+                _uid("tie-plain-trace", number),
+                "",
+                _uid("tie-plain", number),
+                rng.randint(10, 5000),
+                f"plain-{number}",
+            )
+        )
+    for number in range(TIE_PADDING):
+        moment = tied_hour + timedelta(microseconds=rng.randint(0, 3 * 3_600_000_000))
+        batches[number % 2].append(
+            row(
+                rng.choice(("agent", "chain", "llm", "tool", "retriever")),
+                rng.choice(("svc-a", "svc-m", "svc-z")),
+                moment,
+                _uid("tie-pad-trace", number % 5000),
+                _uid("tie-pad-parent", number),
+                _uid("tied", number % TIE_SESSIONS),
+                rng.randint(1, 100),
+                "",
+            )
+        )
+    return batches
+
+
+def _tie_read(graph, analytics, filters, metric_id, *, dev):
+    if not dev:
+        return graph.read_exact_session_system_graph(
+            analytics=analytics,
+            project_id=TIE_PROJECT_ID,
+            filters=filters,
+            interval="hour",
+            metric_id=metric_id,
+        )
+    original_source = graph._session_aggregate_source_sql
+
+    def dev_source(**kwargs):
+        kwargs.pop("lean_graph_source", None)
+        return original_source(**kwargs)
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(graph, "_session_aggregate_source_sql", dev_source)
+        patcher.setattr(
+            graph,
+            "_session_graph_read_settings",
+            lambda: dict(graph.EXACT_GRAPH_READ_SETTINGS),
+            raising=False,
+        )
+        return graph.read_exact_session_system_graph(
+            analytics=analytics,
+            project_id=TIE_PROJECT_ID,
+            filters=filters,
+            interval="hour",
+            metric_id=metric_id,
+        )
+
+
+def _per_session_rows(client, call):
+    inner_settings = {
+        name: value
+        for name, value in call.settings.items()
+        if name not in {"max_result_rows", "max_result_bytes"}
+    }
+    rows, columns = client.execute(
+        f"SELECT * FROM ({_session_source(call.sql)}) ORDER BY session_id",
+        call.params,
+        with_column_types=True,
+        settings=inner_settings,
+    )
+    names = [name for name, _type in columns]
+    return [dict(zip(names, row, strict=True)) for row in rows]
+
+
+@pytest.fixture(scope="module")
+def tie_store():
+    from tracer.services.clickhouse import exact_graph_reads as graph
+
+    with _ch_test_owned_database("test_session_ties_") as database:
+        _apply_v2_schema(database)
+        with _ch_test_native_client(database=database) as client:
+            client.execute("SYSTEM STOP MERGES spans")
+            insert = f"INSERT INTO spans ({', '.join(_TIE_COLUMNS)}) VALUES"
+            # Small INSERTs: each opens a writer for every column, index and
+            # projection stream, which a shared test server's total memory
+            # limit does not always allow for a large block.
+            for batch in _tie_rows():
+                for offset in range(0, len(batch), 10_000):
+                    client.execute(
+                        insert,
+                        [
+                            tuple(row[name] for name in _TIE_COLUMNS)
+                            for row in batch[offset : offset + 10_000]
+                        ],
+                        settings={"optimize_on_insert": 0},
+                    )
+            active_parts = client.execute(
+                "SELECT count() FROM system.parts"
+                " WHERE database = currentDatabase() AND table = 'spans' AND active"
+            )[0][0]
+            reads = {}
+            inner = {}
+            for case, filters in TIE_CASES.items():
+                for metric in TIE_METRICS:
+                    dev = _LiveAnalytics(client, f"tie-dev:{case}:{metric}")
+                    reads[("dev", case, metric, 0)] = SimpleNamespace(
+                        payload=_tie_read(graph, dev, filters, metric, dev=True),
+                        calls=dev.calls,
+                    )
+                    for repeat in range(TIE_REPEATS):
+                        lean = _LiveAnalytics(
+                            client, f"tie-lean:{case}:{metric}:{repeat}"
+                        )
+                        reads[("lean", case, metric, repeat)] = SimpleNamespace(
+                            payload=_tie_read(graph, lean, filters, metric, dev=False),
+                            calls=lean.calls,
+                        )
+                inner[("dev", case, 0)] = _per_session_rows(
+                    client, _graph_call(reads[("dev", case, "latency", 0)].calls)
+                )
+                for repeat in range(TIE_REPEATS):
+                    inner[("lean", case, repeat)] = _per_session_rows(
+                        client,
+                        _graph_call(reads[("lean", case, "latency", repeat)].calls),
+                    )
+            client.execute("SYSTEM FLUSH LOGS")
+            log = {}
+            for key, read in reads.items():
+                call = _graph_call(read.calls)
+                found = client.execute(
+                    "SELECT read_rows, read_bytes FROM system.query_log"
+                    " WHERE type = 'QueryFinish' AND log_comment = %(comment)s"
+                    "   AND event_date >= yesterday()",
+                    {"comment": call.comment},
+                )
+                assert len(found) == 1, (key, found)
+                log[key] = SimpleNamespace(
+                    read_rows=found[0][0], read_bytes=found[0][1]
+                )
+    return SimpleNamespace(
+        reads=reads, inner=inner, log=log, active_parts=active_parts, graph=graph
+    )
+
+
+def test_tie_seed_has_tied_roots_across_parts(tie_store):
+    assert tie_store.active_parts >= 2
+    dev_all = tie_store.inner[("dev", "first_not_contains_alpha", 0)]
+    dev_alpha = tie_store.inner[("dev", "first_contains_alpha", 0)]
+    tied = {uuid.UUID(_uid("tied", number)) for number in range(TIE_SESSIONS)}
+    selected = {row["session_id"] for row in dev_all + dev_alpha}
+    selected = {uuid.UUID(str(value)) for value in selected}
+    # Every tied session is selected by one of the complementary cases.
+    assert tied <= selected
+    # Dev resolves every tie the same way on one thread: all first messages
+    # are one side of the tie and all last messages are one side, so each
+    # tied session lands in exactly one of the last-message cases.
+    for case in ("first_contains_alpha", "first_not_contains_alpha"):
+        assert tie_store.inner[("dev", case, 0)], case
+    last_selected = {
+        uuid.UUID(str(row["session_id"]))
+        for case in ("last_contains_alpha", "last_contains_omega")
+        for row in tie_store.inner[("dev", case, 0)]
+    }
+    assert tied <= last_selected
+
+
+@pytest.mark.parametrize("case", tuple(TIE_CASES))
+def test_message_filtered_chart_keeps_devs_single_thread_settings(tie_store, case):
+    graph = tie_store.graph
+    dev = _graph_call(tie_store.reads[("dev", case, "latency", 0)].calls)
+    for repeat in range(TIE_REPEATS):
+        lean = _graph_call(tie_store.reads[("lean", case, "latency", repeat)].calls)
+        assert lean.settings == dev.settings
+        assert (
+            lean.settings["max_threads"] == graph.settings.FILTER_SELECTOR_MAX_THREADS
+        )
+        # Still the lean source: one FINAL scan, root-version candidates.
+        assert _final_scans(lean.sql) == 1
+        assert "candidate_session_remap_candidate_array" in lean.sql
+        lean_log = tie_store.log[("lean", case, "latency", repeat)]
+        dev_log = tie_store.log[("dev", case, "latency", 0)]
+        assert lean_log.read_rows <= 0.6 * dev_log.read_rows, (lean_log, dev_log)
+
+
+@pytest.mark.parametrize("case", tuple(TIE_CASES))
+@pytest.mark.parametrize("metric", TIE_METRICS)
+def test_message_filtered_chart_equals_dev_on_tied_roots(tie_store, case, metric):
+    dev = _graph_call(tie_store.reads[("dev", case, metric, 0)].calls).rows
+    for repeat in range(TIE_REPEATS):
+        lean = _graph_call(tie_store.reads[("lean", case, metric, repeat)].calls).rows
+        assert [row["time_bucket"] for row in lean] == [
+            row["time_bucket"] for row in dev
+        ]
+        for mine, theirs in zip(lean, dev, strict=True):
+            assert mine["primary_traffic"] == theirs["primary_traffic"], (
+                repeat,
+                mine,
+                theirs,
+            )
+            assert abs(float(mine["value"]) - float(theirs["value"])) <= TOLERANCE
+
+
+@pytest.mark.parametrize("case", tuple(TIE_CASES))
+def test_message_filtered_session_rows_equal_dev_on_tied_roots(tie_store, case):
+    dev = tie_store.inner[("dev", case, 0)]
+    for repeat in range(TIE_REPEATS):
+        lean = tie_store.inner[("lean", case, repeat)]
+        assert [row["session_id"] for row in lean] == [
+            row["session_id"] for row in dev
+        ], repeat
+        for mine, theirs in zip(lean, dev, strict=True):
+            assert mine["first_message"] == theirs["first_message"]
+            assert mine["last_message"] == theirs["last_message"]
+            for name, value in theirs.items():
+                if isinstance(value, float):
+                    assert abs(mine[name] - value) <= TOLERANCE, (name, mine, theirs)
+                else:
+                    assert mine[name] == value, (name, mine, theirs)

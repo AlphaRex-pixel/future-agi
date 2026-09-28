@@ -2868,6 +2868,18 @@ def _is_raw_attribute_filter(item: dict[str, Any]) -> bool:
     )
 
 
+def _session_filters_need_message_aggregates(filters: list[dict[str, Any]]) -> bool:
+    """Whether a first/last-message filter selects on ``argMin``/``argMax``
+    of the session's root inputs."""
+
+    return any(
+        not _is_raw_attribute_filter(item)
+        and (item.get("column_id") or item.get("columnId"))
+        in _SESSION_MESSAGE_FILTER_COLUMNS
+        for item in filters
+    )
+
+
 def _session_having_clause(
     filters: list[dict[str, Any]], params: dict[str, Any]
 ) -> str:
@@ -3637,12 +3649,7 @@ def _session_aggregate_source_sql(
     if having_clause:
         having_clauses.append(having_clause)
     having_fragment = "HAVING " + " AND ".join(having_clauses) if having_clauses else ""
-    needs_message_aggregates = any(
-        not _is_raw_attribute_filter(item)
-        and (item.get("column_id") or item.get("columnId"))
-        in _SESSION_MESSAGE_FILTER_COLUMNS
-        for item in filters
-    )
+    needs_message_aggregates = _session_filters_need_message_aggregates(filters)
     message_aggregate_select = (
         ",\n        argMin(rs.input, rs.start_time) AS first_message,"
         "\n        argMax(rs.input, rs.start_time) AS last_message"
@@ -4801,6 +4808,9 @@ def _session_graph_read_settings() -> dict[str, Any]:
     byte, memory, result and deadline ceilings stay the shared ones. Built per
     call so a runtime or test override of the shared dict is honoured.
     Interactive statements keep ``FILTER_SELECTOR_MAX_THREADS``.
+
+    A first/last-message chart does not use this: see
+    ``read_exact_session_system_graph``.
     """
 
     return {
@@ -4885,8 +4895,16 @@ def read_exact_session_system_graph(
         return query, query_params
 
     # Background-only statement: it may use the session thread budget. The
-    # absence probe below keeps the shared exact settings.
-    graph_settings = _session_graph_read_settings()
+    # absence probe below keeps the shared exact settings. A first/last-message
+    # filter selects on argMin/argMax(input, start_time), which has no
+    # tie-break: roots tied at one start_time resolve by read order, which is
+    # stable on one thread and not on several. Such a chart keeps dev's
+    # single-thread settings for the main, witness and fallback statements
+    # (the witness copies ``graph_settings``), so it selects dev's sessions.
+    if _session_filters_need_message_aggregates(filters):
+        graph_settings = dict(EXACT_GRAPH_READ_SETTINGS)
+    else:
+        graph_settings = _session_graph_read_settings()
     query, query_params = build_query(use_scalar_witness=True)
     has_witness = "session_scalar_witness_ids AS (" in query
     query_count = 1
