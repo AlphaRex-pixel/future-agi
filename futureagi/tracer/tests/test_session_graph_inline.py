@@ -13,6 +13,12 @@ or unknown estimate, a shape that is not the lean one, a lane that cannot
 carry per-query settings, or an inline read stopped at the wall - the
 background path is unchanged.
 
+Inline is tried only on a true cache miss (a hit is served, a running refresh
+is polled, an explicit refresh of a hit goes to the worker), with at most half
+of what is left of the wall, and a scope whose inline read failed goes
+straight to the worker for a backoff: the browser gives up on a request after
+30 s and stops polling, so the fallback must answer inside that.
+
 The live equality of the inline and background numbers against an oracle is
 in ``test_latency_mean_parity_ch25`` (``session/inline/none``).
 """
@@ -156,14 +162,48 @@ class _Analytics:
         return [call for call in self.calls if "EXPLAIN ESTIMATE" not in call.query]
 
 
+class _Scheduled(list):
+    """Scheduling calls; cache-only probes are kept apart in ``probes``.
+
+    ``cached`` is what the cache holds for the identity (``None`` = a true
+    miss); a probe serves it as the real cache would, and never schedules.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.probes = []
+        self.cached = None
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()
+
+
 @pytest.fixture()
 def scheduled(monkeypatch):
     from tracer.services.clickhouse import session_graph
 
-    calls = []
+    calls = _Scheduled()
 
     def read_or_schedule(namespace, identity, **kwargs):
-        calls.append(SimpleNamespace(namespace=namespace, identity=identity, **kwargs))
+        call = SimpleNamespace(namespace=namespace, identity=identity, **kwargs)
+        if kwargs.get("schedule_on_miss", True) is False:
+            calls.probes.append(call)
+            if calls.cached is not None:
+                return dict(calls.cached)
+            return {
+                **kwargs["pending_payload"],
+                "query_refreshing": False,
+                "query_refresh_failed": False,
+            }
+        calls.append(call)
+        if calls.cached is not None:
+            return {**calls.cached, "query_refreshing": True}
         return {**kwargs["pending_payload"], "query_refreshing": True}
 
     monkeypatch.setattr(
@@ -386,6 +426,8 @@ def test_zero_turns_inline_off(scheduled):
         payload = _fetch(analytics, [WINDOW])
 
     assert analytics.calls == []
+    # Off means the old path exactly: not even a cache-only probe first.
+    assert scheduled.probes == []
     assert [call.namespace for call in scheduled] == [NAMESPACE]
     assert payload["query_status"] == "pending"
 
@@ -490,3 +532,185 @@ def test_the_threshold_is_a_registered_runtime_setting_documented_for_operators(
         spec.parse(name, "-1")
     env_example = Path(__file__).resolve().parents[2] / ".env.example"
     assert f"\n{name}=2000000\n" in env_example.read_text()
+
+
+# A scope the estimate misjudges must not cost every request the whole wall.
+# The browser's first request gives up after 30 s (AGGREGATION_REQUEST_TIMEOUT_MS)
+# and then stops polling, so an inline read that ran to the view's 30 s wall
+# before the fallback answered hid the cached or pending chart for good - on
+# every reload, even after the worker had published a complete snapshot.
+
+COMPLETE_SNAPSHOT = {
+    "metric_name": "latency",
+    "data": [{"timestamp": LO.isoformat(), "value": 7.0, "primary_traffic": 1}],
+    "query_complete": True,
+    "query_status": "complete",
+    "query_sampled": False,
+    "query_refreshing": False,
+    "query_refresh_failed": False,
+    "query_cached": True,
+    "metric_statistic": "mean",
+}
+
+
+@pytest.mark.unit
+def test_a_cached_snapshot_is_served_before_any_estimate_or_inline_read(scheduled):
+    scheduled.cached = COMPLETE_SNAPSHOT
+    analytics = _Analytics()
+
+    payload = _fetch(analytics, [WINDOW])
+
+    assert analytics.calls == []
+    assert scheduled == []
+    (probe,) = scheduled.probes
+    assert probe.namespace == NAMESPACE and probe.refresh is False
+    # The probe may revalidate an old open-window hit, as the trace path does.
+    assert probe.revalidate_open_window is True
+    assert payload["query_status"] == "complete"
+    assert payload["data"] == COMPLETE_SNAPSHOT["data"]
+
+
+@pytest.mark.unit
+def test_polls_while_a_refresh_runs_do_not_repeat_the_inline_read(scheduled):
+    scheduled.cached = {
+        "metric_name": "latency",
+        "data": [],
+        "query_complete": False,
+        "query_status": "pending",
+        "query_sampled": False,
+        "query_refreshing": True,
+        "query_refresh_failed": False,
+    }
+    analytics = _Analytics()
+
+    payload = _fetch(analytics, [WINDOW])
+
+    assert analytics.calls == [] and scheduled == []
+    assert payload["query_refreshing"] is True
+
+
+@pytest.mark.unit
+def test_an_explicit_refresh_of_a_cached_scope_goes_to_the_worker(scheduled):
+    scheduled.cached = COMPLETE_SNAPSHOT
+    analytics = _Analytics()
+
+    payload = _fetch(analytics, [WINDOW], refresh=True)
+
+    assert analytics.calls == []
+    (probe,) = scheduled.probes
+    assert probe.revalidate_open_window is False
+    (call,) = scheduled
+    assert call.refresh is True
+    assert payload["query_status"] == "complete"
+
+
+@pytest.mark.unit
+def test_a_miss_after_a_failed_background_refresh_may_still_go_inline(scheduled):
+    scheduled.cached = {
+        "metric_name": "latency",
+        "data": [],
+        "query_complete": False,
+        "query_status": "pending",
+        "query_sampled": False,
+        "query_refreshing": False,
+        "query_refresh_failed": True,
+    }
+    analytics = _Analytics()
+
+    payload = _fetch(analytics, [WINDOW])
+
+    assert scheduled == [] and len(analytics.graphs()) == 1
+    assert payload["query_status"] == "complete"
+
+
+@pytest.mark.unit
+def test_after_an_inline_read_fails_the_same_scope_goes_straight_to_the_worker(
+    scheduled,
+):
+    stopped = ServerException("stopped", code=ErrorCodes.TIMEOUT_EXCEEDED)
+    first = _Analytics(graph=_raises(stopped))
+
+    _fetch(first, [WINDOW])
+
+    assert len(first.estimates()) == 1 and len(first.graphs()) == 1
+    # The worker's job is deferred or failed, so the next request misses again:
+    # it must not spend another estimate plus an inline read on the same scope.
+    again = _Analytics(graph=_raises(stopped))
+    payload = _fetch(again, [WINDOW])
+
+    assert again.calls == []
+    assert [call.namespace for call in scheduled] == [NAMESPACE, NAMESPACE]
+    assert payload["query_status"] == "pending"
+    # Another scope is not affected.
+    other = _Analytics()
+    assert _fetch(other, LEAN_SHAPES["duration"])["query_status"] == "complete"
+
+
+@pytest.mark.unit
+def test_the_inline_failure_backoff_expires(scheduled, monkeypatch):
+    from tracer.services.clickhouse import session_graph
+
+    ttls = []
+    real_set = session_graph.cache.set
+
+    def recording_set(key, value, timeout=None, **kwargs):
+        ttls.append(timeout)
+        return real_set(key, value, timeout=timeout, **kwargs)
+
+    monkeypatch.setattr(session_graph.cache, "set", recording_set)
+    stopped = ServerException("stopped", code=ErrorCodes.TIMEOUT_EXCEEDED)
+
+    _fetch(_Analytics(graph=_raises(stopped)), [WINDOW])
+
+    assert ttls == [session_graph.SESSION_GRAPH_INLINE_FAILURE_BACKOFF_SECONDS]
+    assert 0 < ttls[0] <= 15 * 60
+
+
+@pytest.mark.unit
+def test_an_unavailable_backoff_store_does_not_fail_the_request(scheduled, monkeypatch):
+    from tracer.services.clickhouse import session_graph
+
+    def broken(*_args, **_kwargs):
+        raise ConnectionError("cache down")
+
+    monkeypatch.setattr(session_graph.cache, "get", broken)
+    monkeypatch.setattr(session_graph.cache, "set", broken)
+    stopped = ServerException("stopped", code=ErrorCodes.TIMEOUT_EXCEEDED)
+
+    payload = _fetch(_Analytics(graph=_raises(stopped)), [WINDOW])
+
+    assert payload["query_status"] == "pending"
+    assert [call.namespace for call in scheduled] == [NAMESPACE]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "wall_ms,inline_ms",
+    [(30_000, 15_000), (12_000, 6_000), (60_000, 15_000)],
+    ids=["view-wall", "late-in-the-view", "longer-wall"],
+)
+def test_the_inline_attempt_leaves_the_fallback_half_the_wall(
+    scheduled, wall_ms, inline_ms
+):
+    analytics = _Analytics()
+
+    _fetch(analytics, [WINDOW], wall_deadline_ms=wall_ms)
+
+    (estimate,) = analytics.estimates()
+    (graph,) = analytics.graphs()
+    # At most half of what is left, never more than 15 s: the fallback keeps
+    # the other half, well inside the browser's 30 s request timeout.
+    assert 0 < graph.cap <= inline_ms
+    assert graph.timeout_ms <= inline_ms
+    assert 0 < estimate.cap <= 1_500
+
+
+@pytest.mark.unit
+def test_a_wall_too_short_to_share_goes_to_the_worker(scheduled):
+    analytics = _Analytics()
+
+    payload = _fetch(analytics, [WINDOW], wall_deadline_ms=20)
+
+    assert analytics.calls == []
+    assert [call.namespace for call in scheduled] == [NAMESPACE]
+    assert payload["query_status"] == "pending"

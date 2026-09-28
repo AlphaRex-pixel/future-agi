@@ -10,6 +10,7 @@ from typing import Any
 
 import structlog
 from django.conf import settings
+from django.core.cache import cache
 
 from tracer.services.clickhouse.bounded_graph_reads import (
     GRAPH_CANDIDATE_LIMIT,
@@ -32,6 +33,7 @@ from tracer.services.clickhouse.graph_dispatch import (
     fetch_annotation_graph_ch,
     fetch_eval_graph_ch,
     format_system_metric_graph,
+    graph_payload_is_publishable,
 )
 from tracer.services.clickhouse.graph_metric_statistic import (
     publishes_latency,
@@ -53,7 +55,9 @@ from tracer.services.clickhouse.v2.query_builders.trace_list import (
     TraceListQueryBuilderV2,
 )
 from tracer.services.exact_aggregation_cache import (
+    normalized_snapshot_identity,
     read_or_schedule_exact_snapshot,
+    snapshot_cache_key,
 )
 
 logger = structlog.get_logger(__name__)
@@ -93,6 +97,18 @@ _SESSION_ROLLUP_METRICS = SESSION_SYSTEM_METRICS - {"avg_traces_per_session"}
 # Server cap on the one metadata estimate that decides inline vs background
 # (the raw trace graph's seed estimate uses the same per-probe grant).
 SESSION_GRAPH_INLINE_ESTIMATE_CAP_MS = 1_500
+# The inline attempt (estimate plus read) may use at most half of what is left
+# of the request's wall, and never more than this. The browser's first graph
+# request gives up after 30 s (AGGREGATION_REQUEST_TIMEOUT_MS, counted from
+# before the view starts) and then stops polling, so a misjudged scope must
+# leave the fallback time to answer. Basis: 2 M live roots - the default
+# threshold - take ~4 s on one thread at the largest tenant's measured rate.
+SESSION_GRAPH_INLINE_WALL_MS = 15_000
+# After an inline read of a scope fails, that scope goes straight to the
+# worker for this long (the failed-refresh backoff's default), instead of
+# every poll and reload paying the estimate and the inline wall again.
+SESSION_GRAPH_INLINE_FAILURE_BACKOFF_SECONDS = 5 * 60
+_SESSION_GRAPH_NAMESPACE = "observe-session-system-graph"
 
 _SESSION_GRAPH_READ_CAPS = {
     "max_threads": settings.DASHBOARD_TRACE_READ_MAX_THREADS,
@@ -718,6 +734,57 @@ def _session_graph_root_estimate(
     return total
 
 
+def session_latency_may_inline(
+    *, analytics: Any, project_id: str, filters: list[dict[str, Any]]
+) -> bool:
+    """Whether a Sessions latency chart for ``filters`` may be computed inline.
+
+    Inline is on (``SESSION_GRAPH_INLINE_MAX_ESTIMATED_ROWS`` > 0), the lane
+    can carry per-query settings (neither the caps nor the thread pin would
+    reach the server otherwise), and the statement is the lean one - the only
+    shape the root estimate costs. Pure: no statement, no cache read.
+    """
+
+    if int(settings.SESSION_GRAPH_INLINE_MAX_ESTIMATED_ROWS) <= 0:
+        return False
+    if not bool(getattr(analytics, "supports_per_query_read_settings", True)):
+        return False
+    return session_graph_reads_lean_roots(project_id=project_id, filters=filters)
+
+
+def _inline_failure_key(identity: dict[str, Any]) -> str:
+    """The backoff marker of one requested scope (its raw, unfrozen filters)."""
+
+    from tracer.services.clickhouse.list_cursor import normalize_filter_conjunction
+
+    normalized = normalized_snapshot_identity(identity)
+    normalized["filters"] = normalize_filter_conjunction(
+        normalized.get("filters") or []
+    )
+    return f"{snapshot_cache_key(_SESSION_GRAPH_NAMESPACE, normalized)}:inline-failed"
+
+
+def _inline_failed_recently(identity: dict[str, Any]) -> bool:
+    try:
+        return cache.get(_inline_failure_key(identity)) is not None
+    except Exception:
+        # No marker store means no memory, not a failed request: the attempt
+        # below is still bounded by its own share of the wall.
+        logger.warning("session_graph_inline_backoff_unavailable", exc_info=True)
+        return False
+
+
+def _remember_inline_failure(identity: dict[str, Any]) -> None:
+    try:
+        cache.set(
+            _inline_failure_key(identity),
+            1,
+            timeout=SESSION_GRAPH_INLINE_FAILURE_BACKOFF_SECONDS,
+        )
+    except Exception:
+        logger.warning("session_graph_inline_backoff_unavailable", exc_info=True)
+
+
 def _inline_session_latency_graph(
     *,
     analytics: QueryExecutor,
@@ -726,41 +793,40 @@ def _inline_session_latency_graph(
     interval: str,
     metric_id: str,
     wall_deadline_ms: int,
+    identity: dict[str, Any],
 ) -> dict[str, Any] | None:
     """Compute an affordable Sessions latency chart inline, or return ``None``.
 
     Every Sessions latency chart is an exact snapshot, and the exact worker
     has one slot per region: a small tenant's 0.3-1.6 s chart queued behind
-    the largest tenant's 30-day read. So before the job is scheduled, one
-    metadata estimate costs the lean statement's root read. At or below
-    ``SESSION_GRAPH_INLINE_MAX_ESTIMATED_ROWS`` (0 disables) the SAME
-    statement runs here, on the interactive wall with the interactive
-    settings (one thread), and the chart is returned complete and not cached,
-    as an inline trace graph is. ``None`` - the caller takes the unchanged
-    background path - when the scope is not the lean shape, the lane cannot
-    carry per-query settings (neither the caps nor the thread pin would reach
-    the server), the estimate is unknown or too large, or the inline read is
-    stopped at the wall.
+    the largest tenant's 30-day read. So on a cache miss, before the job is
+    scheduled, one metadata estimate costs the lean statement's root read. At
+    or below ``SESSION_GRAPH_INLINE_MAX_ESTIMATED_ROWS`` the SAME statement
+    runs here with the interactive settings (one thread), and the chart is
+    returned complete and not cached, as an inline trace graph is. The caller
+    has already checked ``session_latency_may_inline`` and the cache.
 
-    Every statement here asks the server to stop at what is left of the
-    interactive wall, so a scope the estimate misjudged costs at most that
-    wall before it goes to the worker.
+    ``None`` - the caller takes the unchanged background path - when the
+    scope's inline read failed within the backoff, the wall is too short to
+    share, the estimate is unknown or too large, or the inline read is
+    stopped. The whole attempt gets at most half of what is left of the wall
+    (``SESSION_GRAPH_INLINE_WALL_MS`` at most) and every statement asks the
+    server to stop there, so the fallback still answers inside the browser's
+    request timeout; a failed read marks the scope so the next requests skip
+    straight to the worker (``session_graph_inline_read_failed`` is the
+    alarm).
     """
 
+    if _inline_failed_recently(identity):
+        logger.info("session_graph_inline_skipped_after_failure")
+        return None
+    floor_ms = int(settings.EXACT_GRAPH_MIN_REMAINING_MS)
+    inline_wall_ms = min(int(wall_deadline_ms) // 2, SESSION_GRAPH_INLINE_WALL_MS)
+    if inline_wall_ms < floor_ms:
+        return None
+    deadline = ReadDeadline.start(inline_wall_ms, enforce_on_server=True)
+    capped = WallCappedAnalytics(analytics, deadline, floor_ms=floor_ms)
     max_estimated_rows = int(settings.SESSION_GRAPH_INLINE_MAX_ESTIMATED_ROWS)
-    if max_estimated_rows <= 0:
-        return None
-    if not bool(getattr(analytics, "supports_per_query_read_settings", True)):
-        return None
-    if not session_graph_reads_lean_roots(project_id=project_id, filters=filters):
-        return None
-    deadline = ReadDeadline.start(
-        min(int(wall_deadline_ms), SESSION_GRAPH_WALL_DEADLINE_MS),
-        enforce_on_server=True,
-    )
-    capped = WallCappedAnalytics(
-        analytics, deadline, floor_ms=int(settings.EXACT_GRAPH_MIN_REMAINING_MS)
-    )
     estimated_rows = _session_graph_root_estimate(
         analytics=capped, project_id=project_id, filters=filters
     )
@@ -778,9 +844,7 @@ def _inline_session_latency_graph(
             filters=filters,
             interval=interval,
             metric_id=metric_id,
-            wall_ms=deadline.remaining_ms(
-                floor_ms=int(settings.EXACT_GRAPH_MIN_REMAINING_MS)
-            ),
+            wall_ms=deadline.remaining_ms(floor_ms=floor_ms),
             interactive=True,
         )
     except ExactGraphReadError as exc:
@@ -789,6 +853,7 @@ def _inline_session_latency_graph(
         if not (is_read_budget_error(exc) or is_clickhouse_query_error(exc)):
             raise
         error_type = type(exc).__name__
+    _remember_inline_failure(identity)
     logger.info(
         "session_graph_inline_read_failed",
         estimated_rows=estimated_rows,
@@ -902,19 +967,6 @@ def fetch_session_graph_ch(
                 }
             )
             return response
-        if publishes_latency("session", metric_id):
-            # An affordable scope is answered now instead of queueing on the
-            # one exact slot; anything else takes the background path below.
-            inline = _inline_session_latency_graph(
-                analytics=analytics,
-                project_id=str(project_id),
-                filters=filters,
-                interval=interval,
-                metric_id=metric_id,
-                wall_deadline_ms=wall_deadline_ms,
-            )
-            if inline is not None:
-                return inline
         identity = {
             "project_id": str(project_id),
             "filters": filters,
@@ -926,22 +978,66 @@ def fetch_session_graph_ch(
             identity["organization_id"] = str(organization_id)
         if workspace_id is not None:
             identity["workspace_id"] = str(workspace_id)
+        pending_payload = {
+            "metric_name": metric_id,
+            "data": [],
+            "query_complete": False,
+            "query_status": "pending",
+            "query_sampled": False,
+            "query_refreshing": True,
+        }
+
+        def accept_snapshot(payload: Any) -> bool:
+            # A latency snapshot not marked as the mean is a miss.
+            return snapshot_names_its_statistic(
+                _SESSION_GRAPH_NAMESPACE, metric_id, payload
+            )
+
+        if publishes_latency("session", metric_id) and session_latency_may_inline(
+            analytics=analytics, project_id=str(project_id), filters=filters
+        ):
+            # An affordable scope is answered now instead of queueing on the
+            # one exact slot - but only on a true miss, as the trace path does:
+            # a cached hit is served, a running refresh is polled, and an
+            # explicit refresh of a hit goes to the worker.
+            cached = read_or_schedule_exact_snapshot(
+                _SESSION_GRAPH_NAMESPACE,
+                dict(identity),
+                refresh=False,
+                pending_payload=pending_payload,
+                schedule_on_miss=False,
+                accept_snapshot=accept_snapshot,
+                # An explicit refresh re-calls with refresh=True below; a probe
+                # claim would make that call find its own claim.
+                revalidate_open_window=not refresh,
+            )
+            hit = (
+                isinstance(cached, dict)
+                and cached.get("query_status") == "complete"
+                and graph_payload_is_publishable(cached, allow_sampled=False)
+            )
+            if isinstance(cached, dict) and cached.get("query_refreshing") is True:
+                return cached
+            if hit and not refresh:
+                return cached
+            if not hit:
+                inline = _inline_session_latency_graph(
+                    analytics=analytics,
+                    project_id=str(project_id),
+                    filters=filters,
+                    interval=interval,
+                    metric_id=metric_id,
+                    wall_deadline_ms=wall_deadline_ms,
+                    identity=identity,
+                )
+                if inline is not None:
+                    return inline
         return read_or_schedule_exact_snapshot(
-            "observe-session-system-graph",
+            _SESSION_GRAPH_NAMESPACE,
             identity,
             refresh=bool(refresh),
-            pending_payload={
-                "metric_name": metric_id,
-                "data": [],
-                "query_complete": False,
-                "query_status": "pending",
-                "query_sampled": False,
-                "query_refreshing": True,
-            },
-            # A latency snapshot not marked as the mean is a miss.
-            accept_snapshot=lambda payload: snapshot_names_its_statistic(
-                "observe-session-system-graph", metric_id, payload
-            ),
+            pending_payload=pending_payload,
+            accept_snapshot=accept_snapshot,
             # A revisit of an open window serves the hit and refreshes it.
             revalidate_open_window=True,
         )
