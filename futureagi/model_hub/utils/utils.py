@@ -35,17 +35,31 @@ from tfc.utils.clickhouse import ClickHouseClientSingleton
 from tfc.utils.error_codes import get_error_message
 from tfc.utils.types import ClickhouseDatatypes
 
+
 # The HuggingFace Hub now emits the `List` feature type (datasets 4.0) in dataset
 # metadata, which pinned datasets 3.6.0 can't parse: load_dataset() raises
 # "Feature type 'List' not found" and streaming ingestion loads zero rows. Alias it
 # to the 3.6.0 equivalent (LargeList); setdefault leaves a future upgrade untouched.
-try:
-    from datasets.features import features as _hf_features
+def _alias_hf_list_feature_type() -> None:
+    try:
+        from datasets.features import features as _hf_features
 
-    if hasattr(_hf_features, "_FEATURE_TYPES") and hasattr(_hf_features, "LargeList"):
-        _hf_features._FEATURE_TYPES.setdefault("List", _hf_features.LargeList)
-except Exception:  # defensive: datasets internals moved
-    logger.warning("hf List feature-type shim did not install", exc_info=True)
+        if hasattr(_hf_features, "_FEATURE_TYPES") and hasattr(
+            _hf_features, "LargeList"
+        ):
+            _hf_features._FEATURE_TYPES.setdefault("List", _hf_features.LargeList)
+    except ModuleNotFoundError as exc:
+        # The slim backend (and the platform image) leave `datasets` out:
+        # nothing to patch. A module missing inside datasets stays loud.
+        if exc.name != "datasets":
+            logger.warning("hf List feature-type shim did not install", exc_info=True)
+        else:
+            logger.debug("hf List feature-type shim skipped: datasets is not installed")
+    except Exception:  # defensive: datasets internals moved
+        logger.warning("hf List feature-type shim did not install", exc_info=True)
+
+
+_alias_hf_list_feature_type()
 
 
 class MyCustomLLM(CustomLLM):
