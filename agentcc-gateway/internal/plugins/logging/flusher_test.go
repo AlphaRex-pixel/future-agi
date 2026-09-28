@@ -525,6 +525,48 @@ func TestLogFlusherClose_WaitsForAFlushInProgress(t *testing.T) {
 	}
 }
 
+// A flush that has given up on its batch after maxFlushRetries as Close begins
+// drops it, and Close counts it as undelivered.
+func TestLogFlusherClose_CountsTheBatchAFlushIsDropping(t *testing.T) {
+	logs := &capturingHandler{}
+	dropping := make(chan struct{}, 1)
+	released := make(chan struct{})
+	prev := slog.Default()
+	slog.SetDefault(slog.New(blockingLogHandler{
+		msg:     "log flusher: max retries exceeded, dropping records",
+		started: dropping,
+		release: released,
+		next:    logs,
+	}))
+	defer slog.SetDefault(prev)
+	letItDrop := releaseAtCleanup(t, released)
+	wh := newFakeLogWebhook(t, func(int, *http.Request) int { return http.StatusServiceUnavailable })
+	f := NewLogFlusher(wh.URL, "secret", time.Hour, 100)
+	f.consecutiveFails = maxFlushRetries // a failing send is the flush's last try
+	enqueue(f, "req-1", "req-2")
+	go f.flush()
+	<-dropping
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		f.Close(ctx)
+	}()
+	waitUntilClosing(t, f)
+	letItDrop()
+
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return")
+	}
+	if n, _, ok := undeliveredLogged(t, logs); !ok || n != 2 {
+		t.Errorf("logged undelivered = %d (logged: %v), want 2", n, ok)
+	}
+}
+
 // A backend that has already stopped (stop order often stops it before the
 // gateway) makes the undelivered logs a WARN, not an ERROR.
 func TestLogFlusherClose_WarnsWhenTheBackendIsGone(t *testing.T) {
@@ -561,20 +603,25 @@ func TestLogFlusherClose_WarnsWhenTheBackendIsGone(t *testing.T) {
 }
 
 // blockingLogHandler holds each log line whose message is msg until release
-// closes, as a slow stdout would. It sends on started, if set, as one begins.
+// closes, as a slow stdout would. It sends on started, if set, as one begins,
+// and passes every line on to next, if set.
 type blockingLogHandler struct {
 	msg     string
 	started chan<- struct{}
 	release <-chan struct{}
+	next    slog.Handler
 }
 
 func (h blockingLogHandler) Enabled(context.Context, slog.Level) bool { return true }
-func (h blockingLogHandler) Handle(_ context.Context, r slog.Record) error {
+func (h blockingLogHandler) Handle(ctx context.Context, r slog.Record) error {
 	if r.Message == h.msg {
 		if h.started != nil {
 			h.started <- struct{}{}
 		}
 		<-h.release
+	}
+	if h.next != nil {
+		return h.next.Handle(ctx, r)
 	}
 	return nil
 }

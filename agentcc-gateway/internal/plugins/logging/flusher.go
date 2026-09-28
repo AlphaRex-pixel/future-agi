@@ -267,6 +267,7 @@ func (f *LogFlusher) flush() {
 				"consecutive_failures", f.consecutiveFails,
 			)
 			f.consecutiveFails = 0
+			f.countLost(len(records))
 			return
 		}
 		slog.Error("log flusher: send failed, re-enqueuing records",
