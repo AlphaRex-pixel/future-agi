@@ -9,9 +9,11 @@ import PlatformLogo from "../components/PlatformLogo";
 import { PLATFORM_LOGOS } from "../components/platformLogos";
 import { COUNTRY_BY_ISO } from "../components/countryCodes";
 import ContactInformation from "./ContactInformation";
+import { isValidPhoneNumber } from "../components/phoneNumber";
 import ScenarioCount from "./ScenarioCount";
 import { DEFAULT_SCENARIOS, isValidScenarioCount } from "./scenarioCountRules";
 import RuntimePreflight from "./RuntimePreflight";
+import { CreditExhaustionBanner } from "src/components/CreditExhaustionBanner";
 import ParallelismField from "./ParallelismField";
 import usePanelBuild from "../hooks/usePanelBuild";
 import { ENTRY_AGENT_TYPES } from "../agentTypes";
@@ -81,9 +83,8 @@ export default function PanelHostedPlatform() {
   // Others has no WebRTC path, so it requires a number regardless of simMode;
   // other voice envs only require it in Phone mode.
   const phoneRequired = agentType === AGENT_TYPES.VOICE && (isOther || simMode === "phone");
-  // Digits only — a number rehydrated from an older draft may still carry
-  // letters or formatting the input now strips.
-  const phoneOk = !phoneRequired || /^\d+$/.test(contactNumber);
+  const phoneOk =
+    !phoneRequired || isValidPhoneNumber(COUNTRY_BY_ISO[countryIso]?.dial, contactNumber);
   const credsOk = isOther ? !!otherPrompt.trim() : (!!id.trim() && !!key.trim());
   const canGo = !!chosen && credsOk && phoneOk;
 
@@ -225,6 +226,11 @@ export default function PanelHostedPlatform() {
         onRun={() => build.runPreflight(buildSource())}
         result={build.result}
         error={build.error}
+      />
+      <CreditExhaustionBanner
+        error={build.creditExhaustion.error}
+        onUpgrade={build.creditExhaustion.onUpgrade}
+        onDismiss={build.creditExhaustion.onDismiss}
       />
       <ContinueRow
         disabled={!build.readyToSubmit || !isValidScenarioCount(scenarioCount)}

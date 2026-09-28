@@ -4,7 +4,9 @@ import { alpha } from "@mui/material/styles";
 import { Box, Chip, CircularProgress, Stack, Typography, IconButton, Tooltip, Tab } from "@mui/material";
 
 import Iconify from "src/components/iconify";
+import EvalsTabView from "src/components/traceDetail/EvalsTabView";
 import { CustomTabs } from "src/components/tabs/tabs";
+import { ShareDialog } from "src/components/share-dialog";
 import { useCallDetail } from "src/api/simulate-environments/runDetail";
 
 import { BUILD_TONES } from "../../../buildEnvironment/buildTones";
@@ -88,7 +90,9 @@ export default function ChatCallDrawer({
   hasNext = false,
 }) {
   const [pane, setPane] = useState("transcript");
+  const [shareOpen, setShareOpen] = useState(false);
   useEffect(() => {
+    if (shareOpen) return undefined;
     const onKeyDown = (e) => {
       const tag = e.target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable) return;
@@ -102,7 +106,7 @@ export default function ChatCallDrawer({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [hasNext, hasPrev, onNext, onPrev]);
+  }, [hasNext, hasPrev, onNext, onPrev, shareOpen]);
   const [side, setSide] = useState("analytics");
   const { callDetail, isLoading } = useCallDetail(task.id);
 
@@ -112,6 +116,18 @@ export default function ChatCallDrawer({
   const stats = callDetail?.stats || {};
   const evalResults = callDetail?.evalResults ?? task.evalResults ?? [];
   const failed = evalResults.filter((r) => r.passed === false);
+  const drawerEvals = evalResults.map((result) => ({
+    ...result,
+    eval_name: result.name,
+    score: result.score == null ? null : Math.round(result.score * 100),
+    score_label:
+      result.output_type === "Pass/Fail" && result.passed != null
+        ? result.passed
+          ? "Passed"
+          : "Failed"
+        : undefined,
+    explanation: result.reason,
+  }));
   const durationMs = callDetail?.durationS != null ? callDetail.durationS * 1000 : task.durationMs;
   const turnCount = stats.turnCount ?? task.turns;
   const tokens = callDetail?.tokens ?? task.tokens;
@@ -142,6 +158,11 @@ export default function ChatCallDrawer({
           <NavArrow icon="mdi:chevron-down" label="Next conversation (↓)" onClick={onNext} disabled={!hasNext} />
         </Stack>
         <Box flex={1} />
+        <Tooltip arrow title="Share call">
+          <IconButton size="small" aria-label="Share call" onClick={() => setShareOpen(true)}>
+            <Iconify icon="basil:share-outline" width={16} sx={{ color: "text.subtitle" }} />
+          </IconButton>
+        </Tooltip>
         <IconButton size="small" onClick={onClose} aria-label="Close">
           <Iconify icon="mingcute:close-line" width={16} sx={{ color: "text.subtitle" }} />
         </IconButton>
@@ -245,44 +266,13 @@ export default function ChatCallDrawer({
             )}
 
             {side === "evals" && (
-              <Stack>
-                {evalResults.map((r) => (
-                  <Stack
-                    key={r.id}
-                    direction="row"
-                    spacing={1.5}
-                    alignItems="flex-start"
-                    sx={{ px: 2, py: 1.5, borderBottom: "1px solid", borderColor: "divider" }}
-                  >
-                    <Iconify
-                      icon={r.passed === false ? "solar:close-circle-bold" : "solar:check-circle-bold"}
-                      width={15}
-                      sx={{ color: r.passed === false ? BUILD_TONES.red : BUILD_TONES.green, flexShrink: 0, mt: "1px" }}
-                    />
-                    <Box flex={1} minWidth={0}>
-                      <Stack direction="row" alignItems="center" spacing={0.75} minWidth={0}>
-                        <Typography sx={{ typography: "s2", fontWeight: 600 }}>{r.name}</Typography>
-                        {r.removed && <RemovedChip />}
-                      </Stack>
-                      {r.reason && (
-                        <Typography sx={{ typography: "s3", color: "text.subtitle" }}>
-                          {r.reason}
-                        </Typography>
-                      )}
-                    </Box>
-                    {r.score != null && (
-                      <Typography sx={{ typography: "s2", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-                        {Math.round(r.score * 100)}
-                      </Typography>
-                    )}
-                  </Stack>
-                ))}
-                {evalResults.length === 0 && (
-                  <Typography sx={{ p: 2, typography: "s2", color: "text.subtitle" }}>
-                    No evaluations ran on this call.
-                  </Typography>
-                )}
-              </Stack>
+              <EvalsTabView
+                evals={drawerEvals}
+                emptyMessage="No evaluations ran on this call."
+                showSpanColumn={false}
+                showFixWithFalcon={false}
+                showAddEvals={false}
+              />
             )}
 
             {side === "messages" && (
@@ -311,6 +301,15 @@ export default function ChatCallDrawer({
           </Box>
         </Stack>
       </Stack>
+
+      {shareOpen && (
+        <ShareDialog
+          open
+          onClose={() => setShareOpen(false)}
+          resourceType="call_execution"
+          resourceId={task.id}
+        />
+      )}
     </Stack>
   );
 }

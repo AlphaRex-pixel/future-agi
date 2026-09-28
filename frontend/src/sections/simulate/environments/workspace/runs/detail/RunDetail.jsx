@@ -28,6 +28,7 @@ import OptimizationRunsList from "./fixmyagent/OptimizationRunsList";
 import LaunchOptimizationDrawer from "./fixmyagent/LaunchOptimizationDrawer";
 import RunAnalytics from "./RunAnalytics";
 import useCallListNavigation from "./useCallListNavigation";
+import useOpenCallParam from "./useOpenCallParam";
 
 // Terminal execution failures/cancellations outrank call-level outcomes.
 // Otherwise mixed pass/fail results are a completed run with findings.
@@ -61,16 +62,22 @@ export default function RunDetail({
   testId,
   executionId,
   onStartRun,
+  creditBanner = null,
 }) {
   const navigate = useNavigate();
   const [tab, setTab] = useState("tasks");
   const [analyticsFilters, setAnalyticsFilters] = useState({});
   const [addingEvals, setAddingEvals] = useState(false);
-  // The open call, where it was opened from ("table" or "analytics") and, after
-  // a prev/next step, the table page it sits on so the table can follow.
-  const [openCall, setOpenCall] = useState(null);
   // The exact query the trace table reads, or null when it isn't mounted.
   const [tableQuery, setTableQuery] = useState(null);
+  // The open call, where it was opened from ("table", "analytics" or "link")
+  // and, after a prev/next step, the table page it sits on so the table can
+  // follow. Mirrored in `?rowId=`.
+  const { openCall, showCall } = useOpenCallParam({
+    executionId,
+    tableQuery,
+    tableShown: tab === "tasks",
+  });
   const [debugging, setDebugging] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -82,7 +89,7 @@ export default function RunDetail({
     openCall,
     tableQuery,
     live: identity?.status === "running",
-    onStep: setOpenCall,
+    onStep: showCall,
   });
 
   // The past self-improvement (optimization) runs for this execution — REAL,
@@ -256,6 +263,7 @@ export default function RunDetail({
           Debug failures
         </Button>
       </Stack>
+      {creditBanner}
 
       <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <Box sx={{ p: 2 }}>
@@ -297,7 +305,7 @@ export default function RunDetail({
             <RunTraceTable
               executionId={executionId}
               onOpenCall={(task) =>
-                setOpenCall({ task, source: "table", page: null })
+                showCall({ task, source: "table", page: null })
               }
               onQueryChange={setTableQuery}
               activeCallId={openCall?.task.id ?? null}
@@ -342,7 +350,7 @@ export default function RunDetail({
             <RunAnalytics
               executionId={executionId}
               onOpenCall={(task) =>
-                setOpenCall({ task, source: "analytics", page: null })
+                showCall({ task, source: "analytics", page: null })
               }
               onOpenCalls={(filters) => {
                 setAnalyticsFilters(filters);
@@ -387,7 +395,7 @@ export default function RunDetail({
       <CallDrawer
         task={openCall?.task ?? null}
         agentType={stats.agentType}
-        onClose={() => setOpenCall(null)}
+        onClose={() => showCall(null)}
         hasPrev={callNav.hasPrev}
         hasNext={callNav.hasNext}
         onPrev={callNav.onPrev}
@@ -443,4 +451,5 @@ RunDetail.propTypes = {
   testId: PropTypes.string,
   executionId: PropTypes.string,
   onStartRun: PropTypes.func,
+  creditBanner: PropTypes.node,
 };

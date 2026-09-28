@@ -87,7 +87,7 @@ x-backend-env: &backend-env
   ALK_HOSTED_AGENTCC_BASE_URL: ${ALK_HOSTED_AGENTCC_BASE_URL:-}
   ALK_HOSTED_AGENTCC_MODEL: ${ALK_HOSTED_AGENTCC_MODEL:-vertex_ai/gemini-3.7-flash}
   SIMULATOR_LLM_PROVIDER: ${SIMULATOR_LLM_PROVIDER:-vertex}
-  SIMULATOR_LLM_MODEL: ${SIMULATOR_LLM_MODEL:-gemini-3.7-flash}
+  SIMULATOR_LLM_MODEL: ${SIMULATOR_LLM_MODEL:-gemini-3.8-flash}
   # Temporary, disabled-by-default Uber Guest Booking POC policy. The target value stays in
   # deployment configuration and is sent only through the platform simulator-secret channel.
   ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER: ${ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER:-}
@@ -506,7 +506,7 @@ services:
       SIMULATOR_LLM_PROVIDER: vertex
       # A flash-lite model returns no completion for the simulator's full persona prompt, so the
       # caller falls silent and the call is discarded on the deadline. Use a full flash.
-      SIMULATOR_LLM_MODEL: gemini-3.7-flash
+      SIMULATOR_LLM_MODEL: ${SIMULATOR_LLM_MODEL:-gemini-3.8-flash}
       # TTS is chosen per persona language by the hosted runner
       # (_voice_simulator_config): English -> Deepgram aura-2-andromeda-en,
       # other/unknown -> streaming Gemini (multilingual). Set

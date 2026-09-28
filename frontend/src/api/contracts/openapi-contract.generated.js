@@ -74700,7 +74700,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         resource_type: {
           title: "Resource type",
           type: "string",
-          enum: ["trace", "dashboard", "project"],
+          enum: ["trace", "dashboard", "project", "call_execution"],
         },
         resource_id: {
           title: "Resource id",
@@ -74744,7 +74744,14 @@ export const OPENAPI_CONTRACT = Object.freeze({
         resource_type: {
           title: "Resource type",
           type: "string",
-          enum: ["trace", "dashboard", "eval_run", "dataset", "project"],
+          enum: [
+            "trace",
+            "dashboard",
+            "eval_run",
+            "dataset",
+            "project",
+            "call_execution",
+          ],
           readOnly: true,
         },
         resource_id: {
@@ -74815,7 +74822,14 @@ export const OPENAPI_CONTRACT = Object.freeze({
         resource_type: {
           title: "Resource type",
           type: "string",
-          enum: ["trace", "dashboard", "eval_run", "dataset", "project"],
+          enum: [
+            "trace",
+            "dashboard",
+            "eval_run",
+            "dataset",
+            "project",
+            "call_execution",
+          ],
           readOnly: true,
         },
         resource_id: {
@@ -74952,7 +74966,14 @@ export const OPENAPI_CONTRACT = Object.freeze({
         resource_type: {
           title: "Resource type",
           type: "string",
-          enum: ["trace", "dashboard", "eval_run", "dataset", "project"],
+          enum: [
+            "trace",
+            "dashboard",
+            "eval_run",
+            "dataset",
+            "project",
+            "call_execution",
+          ],
         },
         resource_id: {
           title: "Resource id",

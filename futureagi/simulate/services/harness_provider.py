@@ -580,7 +580,7 @@ def _preflight_source_connectors(request, payload):
     return detected, required_files, scanned
 
 
-def _validate_required_credential_files(request, payload) -> None:
+def _validate_required_credential_files(request, payload):
     """Refuse a launch whose source explicitly requires an absent credential file."""
     from simulate.services.hosted_harness import HostedHarnessError
 
@@ -599,6 +599,7 @@ def _validate_required_credential_files(request, payload) -> None:
             ),
             status_code=422,
         )
+    return analysis
 
 
 def _preflight_credential_probe(payload) -> list[dict[str, Any]]:
@@ -1002,7 +1003,9 @@ def scenarios_meant(
                     take(by_number.get(number, ""))
                 continue
             # "#4", "4th", "the fourth".
-            plain = re.sub(r"^(?:the|scenario|no\.?|#)\s*", "", part, flags=re.IGNORECASE)
+            plain = re.sub(
+                r"^(?:the|scenario|no\.?|#)\s*", "", part, flags=re.IGNORECASE
+            )
             plain = re.sub(r"(?<=\d)(?:st|nd|rd|th)$", "", plain, flags=re.IGNORECASE)
             if plain.isdigit():
                 take(by_number.get(int(plain), ""))
@@ -1069,7 +1072,10 @@ class HostedHarnessProvider:
             _validate_known_hosted_egress(payload, base_url)
         except HostedHarnessError as exc:
             return Response(exc.as_dict(), status=exc.status_code)
-        from simulate.services.harness_usage import require_harness_run_usage
+        from simulate.services.harness_usage import (
+            require_harness_run_usage,
+            require_harness_source_call_usage,
+        )
 
         try:
             require_harness_run_usage(str(organization.id), payload)
@@ -1079,9 +1085,20 @@ class HostedHarnessProvider:
                 return response
             raise
         try:
-            _validate_required_credential_files(request, payload)
+            source_analysis = _validate_required_credential_files(request, payload)
         except HostedHarnessError as exc:
             return Response(exc.as_dict(), status=exc.status_code)
+        try:
+            require_harness_source_call_usage(
+                str(organization.id),
+                payload,
+                source_analysis[0] if source_analysis else (),
+            )
+        except Exception as exc:
+            response = _usage_limit_response(exc)
+            if response is not None:
+                return response
+            raise
         try:
             job, _ = create_hosted_job(
                 organization,
@@ -1260,6 +1277,15 @@ class HostedHarnessProvider:
                 {"detail": "Idempotency-Key header is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        from simulate.services.harness_usage import require_harness_call_usage
+
+        try:
+            require_harness_call_usage(environment)
+        except Exception as exc:
+            response = _usage_limit_response(exc)
+            if response is not None:
+                return response
+            raise
         try:
             child, created = create_selected_harness_run(
                 environment,
@@ -1274,8 +1300,10 @@ class HostedHarnessProvider:
                 and (child.failure or {}).get("code") == "scheduler_unavailable"
             ):
                 with transaction.atomic():
-                    child = HostedHarnessJob.no_workspace_objects.select_for_update().get(
-                        id=child.id
+                    child = (
+                        HostedHarnessJob.no_workspace_objects.select_for_update().get(
+                            id=child.id
+                        )
                     )
                     if (
                         child.state == HostedHarnessJob.State.FAILED
@@ -1464,8 +1492,9 @@ class HostedHarnessProvider:
             enqueue_message,
             serialize_conversation,
         )
+        from simulate.services.hosted_harness_ingress import _public_base_url
         from simulate.tasks.hosted_harness_conversation import (
-            ensure_hosted_harness_conversation_runtime,
+            schedule_conversation_runtime,
         )
 
         job = self._job(request, pk)
@@ -1500,6 +1529,11 @@ class HostedHarnessProvider:
                     status=status.HTTP_409_CONFLICT,
                 )
         data = request.validated_data
+        # Checked before queueing, so a message never waits on a runtime that cannot call back.
+        try:
+            base_url = _public_base_url(request)
+        except HostedHarnessError as exc:
+            return Response(exc.as_dict(), status=exc.status_code)
         try:
             conversation, _message, _created = enqueue_message(
                 job,
@@ -1511,14 +1545,8 @@ class HostedHarnessProvider:
             )
         except HostedHarnessError as exc:
             return Response(exc.as_dict(), status=exc.status_code)
-        base_url = (
-            getattr(settings, "HARNESS_PUBLIC_BASE_URL", "")
-            or request.build_absolute_uri("/")
-        ).rstrip("/")
         try:
-            ensure_hosted_harness_conversation_runtime.apply_async(
-                args=[str(conversation.id), base_url]
-            )
+            schedule_conversation_runtime(str(conversation.id), base_url)
         except Exception:
             return Response(
                 {
@@ -1778,6 +1806,7 @@ class HostedHarnessProvider:
             dict(one) for one in GROUPINGS if spoken or one["value"] != "accent"
         ]
         from simulate.services.harness_scenarios import level_labels_for
+
         response.data["level_labels"] = level_labels_for(rows, response.data["fields"])
         return response
 
@@ -1941,7 +1970,11 @@ class HostedHarnessProvider:
                     target[field] = change.get("value")
                     touched = True
                     receipts.append(
-                        {"scenario": name, "outcome": "applied", "why": f"{field} updated"}
+                        {
+                            "scenario": name,
+                            "outcome": "applied",
+                            "why": f"{field} updated",
+                        }
                     )
                     continue
                 if op == "set_persona":
@@ -1967,22 +2000,36 @@ class HostedHarnessProvider:
                         continue
                     persona = dict(target.get("persona") or {})
                     persona.update(
-                        {key: value for key, value in given.items() if value is not None}
+                        {
+                            key: value
+                            for key, value in given.items()
+                            if value is not None
+                        }
                     )
                     target["persona"] = persona
                     touched = True
                     receipts.append(
-                        {"scenario": name, "outcome": "applied", "why": "persona updated"}
+                        {
+                            "scenario": name,
+                            "outcome": "applied",
+                            "why": "persona updated",
+                        }
                     )
                     continue
                 receipts.append(
-                    {"scenario": name, "outcome": "refused", "why": f"unknown change {op!r}"}
+                    {
+                        "scenario": name,
+                        "outcome": "refused",
+                        "why": f"unknown change {op!r}",
+                    }
                 )
             # Edits pass the same gates as a written scenario.
             if touched:
                 try:
                     from fi.alk.harness.scenario import Scenario, scenario_edit_problems
-                except ImportError:  # the harness package ships in the runner image, not the web backend
+                except (
+                    ImportError
+                ):  # the harness package ships in the runner image, not the web backend
                     scenario_edit_problems = None
 
                 rejected = []
@@ -2033,7 +2080,9 @@ class HostedHarnessProvider:
                     index_scenarios(job, suite, prune=True)
                 except Exception:  # noqa: BLE001 - the edit itself applied; the index can lag
                     logger.warning(
-                        "harness_scenario_reindex_failed job_id=%s", job.id, exc_info=True
+                        "harness_scenario_reindex_failed job_id=%s",
+                        job.id,
+                        exc_info=True,
                     )
                 rewrite_authoring_scenarios(job, suite)
                 delivered = push_scenarios_into_live_sandbox(job, suite)

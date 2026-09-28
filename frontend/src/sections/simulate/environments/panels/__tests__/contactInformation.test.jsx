@@ -90,4 +90,12 @@ describe("ContactInformation", () => {
     fireEvent.change(input, { target: { value: "12345678901234567890" } });
     expect(onContactNumber).toHaveBeenLastCalledWith("123456789012345");
   });
+
+  it("shows a wrong-length number only after the field loses focus", () => {
+    render(<ContactInformation {...base} mode="phone" contactNumber="41555512345" />);
+    const input = screen.getByPlaceholderText("Number to call for the simulation");
+    expect(screen.queryByText("Enter exactly 10 digits after +1")).toBeNull();
+    fireEvent.blur(input);
+    expect(screen.getByText("Enter exactly 10 digits after +1")).toBeInTheDocument();
+  });
 });
