@@ -3,8 +3,9 @@
 #   deploy/tests/test_image_standards.py  labels, users, probes and base pins
 #       of every Dockerfile, the backend variants (the default tags stay
 #       feature-complete; -slim is the standalone image's base), the UI's
-#       nginx security headers, the scripts the release and CI workflows share
-#       (verify-binaries, code-executor-base-pin.sh) and those workflows
+#       nginx security headers and caching, the scripts the release and CI
+#       workflows share (verify-binaries, code-executor-base-pin.sh) and those
+#       workflows
 #   deploy/tests/test_image_size_budget.py  scripts/image_size_budget.py
 #       against a fake registry, and the budget file against the compose
 #       files, release-images.yml and docs/images.md

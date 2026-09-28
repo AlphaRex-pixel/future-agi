@@ -1320,7 +1320,7 @@ class GoProbe(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# The UI's nginx security headers (frontend image, Standalone, Helm)
+# The UI's nginx security headers and caching (frontend image, Standalone, Helm)
 # ---------------------------------------------------------------------------
 
 SECURITY_HEADERS = ROOT / "frontend" / "security-headers.conf"
@@ -1331,6 +1331,14 @@ UI_NGINX_CONFIGS = {
     "deploy/standalone/nginx.conf": "/etc/nginx/security-headers.conf",
     CHART_UI_CONFIGMAP: "/etc/nginx/futureagi/security-headers.conf",
 }
+
+
+def nginx_config(name: str) -> str:
+    """The UI nginx config at ROOT / name, comments removed."""
+    return "\n".join(
+        line.split("#", 1)[0]
+        for line in (ROOT / name).read_text(encoding="utf-8").splitlines()
+    )
 
 
 def nginx_blocks(text: str, keyword: str) -> list[str]:
@@ -1353,10 +1361,7 @@ class NginxSecurityHeaders(unittest.TestCase):
     def test_every_location_with_headers_of_its_own_includes_them(self):
         for name, path in UI_NGINX_CONFIGS.items():
             with self.subTest(config=name):
-                text = "\n".join(
-                    line.split("#", 1)[0]
-                    for line in (ROOT / name).read_text(encoding="utf-8").splitlines()
-                )
+                text = nginx_config(name)
                 include = f"include {path};"
                 (server,) = nginx_blocks(text, "server")
                 self.assertIn(include, server.split("location", 1)[0])
@@ -1410,6 +1415,42 @@ class NginxSecurityHeaders(unittest.TestCase):
                 "Permissions-Policy",
             ],
         )
+
+
+class NginxCaching(unittest.TestCase):
+    """Standalone and the chart restate frontend/nginx.conf's caching of the SPA
+    by hand (deploy/standalone/nginx.conf: "Caching mirrors ...")."""
+
+    maxDiff = None
+
+    @staticmethod
+    def caching(name: str) -> dict[str, list[str]]:
+        """Each location's matcher -> its expires, Cache-Control and Pragma."""
+        (server,) = nginx_blocks(nginx_config(name), "server")
+        matchers = re.findall(r"(?m)^\s*location\b([^{;]*)\{", server)
+        return {
+            " ".join(matcher.split()): [
+                " ".join(directive.split())
+                for directive in re.findall(
+                    r"(?m)^\s*((?:expires|add_header (?:Cache-Control|Pragma))\b[^;]*;)",
+                    body,
+                )
+            ]
+            for matcher, body in zip(
+                matchers, nginx_blocks(server, "location"), strict=True
+            )
+        }
+
+    def test_standalone_and_the_chart_cache_as_the_frontend_image_does(self):
+        frontend = self.caching("frontend/nginx.conf")
+        self.assertEqual(len(frontend), 5)
+        self.assertTrue(all(frontend.values()))
+        for name in ("deploy/standalone/nginx.conf", CHART_UI_CONFIGMAP):
+            with self.subTest(config=name):
+                copy = self.caching(name)
+                self.assertEqual(
+                    {matcher: copy.get(matcher) for matcher in frontend}, frontend
+                )
 
 
 # ---------------------------------------------------------------------------
