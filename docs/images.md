@@ -35,8 +35,8 @@ check it in `standalone-ci.yml`.
 |---|---|---|---|---|---|---|---|
 | `futureagi/standalone` | The Standalone app container: API with an embedded Temporal worker, Temporal dev server, fi-collector, agentcc-gateway, code-evals sandbox, UI, Redis and object storage under supervisord. Built on the `-slim` backend | Standalone | 3000 UI, 8000 API, 4317/4318 OTLP, 8080 gateway, 9005 object storage | root | the five URLs of the compose `app` healthcheck | amd64, arm64 | 549 |
 | `futureagi/future-agi` | Backend, the default [variant](#backend-variants) (feature-complete): API (`SERVICE_TYPE=backend`), Temporal and Celery workers, bootstrap jobs. Base of the simulation runner and of the EE and cloud images | Distributed, Helm | 80 HTTP, 50051 gRPC, 5555 Flower | root (runs as `1000:1000` on request) | `GET /health/` on :80 for the API; roles with no listener are healthy while they run | amd64, arm64 | 890 |
-| `futureagi/future-agi:*-slim` | The same backend, lean: the base of `standalone` | Standalone (inside `standalone`) | as above | as above | as above | amd64, arm64 | 376 |
-| `futureagi/frontend` | The web UI: the React app served by nginx | Distributed, Helm (Standalone serves the same files from `standalone`) | 80 | root master, `nginx` (101) workers | `GET /` on :80 | amd64, arm64 | 42 |
+| `futureagi/future-agi:*-slim` | The same backend, lean: the base of `futureagi/standalone` | Standalone (inside `futureagi/standalone`) | as above | as above | as above | amd64, arm64 | 376 |
+| `futureagi/frontend` | The web UI: the React app served by nginx | Distributed, Helm (Standalone serves the same files from `futureagi/standalone`) | 80 | root master, `nginx` (101) workers | `GET /` on :80 | amd64, arm64 | 42 |
 | `futureagi/fi-collector` | OTLP receiver that writes spans to ClickHouse; also `fi-property-catalog-consumer` and `fi-observed-catalog-backfill` | Distributed, Helm (`fi-collector` and `fi-observed-catalog-backfill` bundled in `standalone`) | 4317 gRPC, 4318 HTTP, 9464 admin | `nonroot` (65532) | `GET /healthz` on :9464, for the `fi-collector` command only | amd64, arm64 | 25 |
 | `futureagi/agentcc-gateway` | The LLM gateway | Distributed, Helm (binary bundled in `standalone`) | 8080 | 65532 | `GET /healthz` on :8080 | amd64, arm64 | 9 |
 | `futureagi/serving` | Embedding and audio/image model server | Standalone (`COMPOSE_PROFILES=ml`), Distributed, Helm | 8080 | root (Helm runs it as `appuser`, 1000) | `GET /health` on :8080 | amd64, arm64 | 520 amd64, 480 arm64 |
@@ -182,7 +182,7 @@ the pod probes at the same endpoints.
 
 | Image | Probe | Interval / timeout / start period / retries |
 |---|---|---|
-| `standalone` | GET `:8000/health/`, `:9464/healthz`, `:8080/healthz`, `:3000/`, `:9005/minio/health/live` (the compose `app` healthcheck) | 15 s / 10 s / 900 s / 5 |
+| `standalone` | GET `:8000/health/`, `:9464/healthz`, `:8080/healthz`, `:3000/`, `:9005/minio/health/live` (the compose `app` healthcheck) | 15 s / 10 s / 3600 s / 5 |
 | `future-agi` | `docker/healthcheck.py`: GET `:80/health/` when `SERVICE_TYPE=backend` serves HTTP, else TCP to gRPC :50051; `flower` TCP :5555; workers, beat, bootstrap jobs and containers started with their own command report healthy | 30 s / 10 s / 600 s / 3 |
 | `frontend` | GET `:80/` (busybox wget) | 30 s / 5 s / 10 s / 3 |
 | `fi-collector` | GET `:9464/healthz`, only when PID 1 is `fi-collector` (the consumer and backfill commands of the image serve no admin port) | 30 s / 10 s / 30 s / 3 |
