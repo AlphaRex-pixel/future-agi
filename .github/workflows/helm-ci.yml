@@ -24,7 +24,7 @@ on:
     branches: [dev, main]
     paths:
       - "deploy/helm/**"
-      - "deploy/platform/clickhouse/**"
+      - "deploy/standalone/clickhouse/**"
       - "futureagi/.ci/clickhouse-storage-policy.xml"
       - "futureagi/tfc/management/commands/bootstrap_install.py"
       - "futureagi/model_hub/apps.py"
@@ -36,7 +36,7 @@ on:
     branches: [dev, main]
     paths:
       - "deploy/helm/**"
-      - "deploy/platform/clickhouse/**"
+      - "deploy/standalone/clickhouse/**"
       - "futureagi/.ci/clickhouse-storage-policy.xml"
       - "futureagi/tfc/management/commands/bootstrap_install.py"
       - "futureagi/model_hub/apps.py"
@@ -143,7 +143,7 @@ jobs:
       contents: read
       packages: read # ghcr layer caches
     env:
-      # Layer caches, read only (see platform-ci.yml).
+      # Layer caches, read only (see standalone-ci.yml).
       CACHE_REPO: ghcr.io/future-agi/future-agi/e2e-cache
       BUILD_CACHE: ghcr.io/future-agi/future-agi/build-cache
       TAG: ci

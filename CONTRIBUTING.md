@@ -195,7 +195,7 @@ future-agi/
 ├── frontend/         # React + Vite (JavaScript)
 ├── fi-collector/     # OTLP trace collector (Go)
 ├── agentcc-gateway/  # LLM gateway (Go)
-├── deploy/           # Standalone app image (platform/), production overlay, Helm chart (helm/futureagi/)
+├── deploy/           # Standalone app image (standalone/), production overlay, Helm chart (helm/futureagi/)
 ├── bin/              # install, uninstall, dev, e2e
 ├── docs/             # configuration, telemetry, images, development
 └── e2e/              # Playwright end-to-end flows

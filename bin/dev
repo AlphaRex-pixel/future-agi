@@ -11,7 +11,7 @@
 #   ./bin/dev manage <args>     python manage.py <args>, allowed to change the
 #                               database (makemigrations, migrate, create_user…)
 #   ./bin/dev rebuild [what]    rebuild images after a dependency, Go or
-#                               deploy/platform change. what: all (default),
+#                               deploy/standalone change. what: all (default),
 #                               backend, frontend, collector, gateway
 #   ./bin/dev ps | down [-v]    status / stop (-v also deletes the data)
 #
@@ -81,12 +81,12 @@ build_local() {
     all|collector) docker build -t futureagi/fi-collector:local fi-collector ;;&
     all|gateway)   docker build -t futureagi/agentcc-gateway:local agentcc-gateway ;;&
     all|backend|frontend|collector|gateway)
-      [[ "$MODE" == standalone ]] && docker build -t futureagi/platform:local -f deploy/platform/Dockerfile \
+      [[ "$MODE" == standalone ]] && docker build -t futureagi/standalone:local -f deploy/standalone/Dockerfile \
         --build-arg BACKEND_IMAGE=futureagi/future-agi:local \
         --build-arg FRONTEND_IMAGE=futureagi/frontend:local \
         --build-arg FI_COLLECTOR_IMAGE=futureagi/fi-collector:local \
         --build-arg AGENTCC_GATEWAY_IMAGE=futureagi/agentcc-gateway:local \
-        deploy/platform
+        deploy/standalone
       ;;
     *) die "unknown rebuild target: $what (all, backend, frontend, collector, gateway)" ;;
   esac
@@ -110,7 +110,7 @@ case "$CMD" in
     fi
     step "Starting the $MODE stack with hot reload"
     if [[ "$MODE" == standalone ]]; then
-      docker image inspect futureagi/platform:local >/dev/null 2>&1 || build_local all
+      docker image inspect futureagi/standalone:local >/dev/null 2>&1 || build_local all
       dc up -d --build --wait --wait-timeout 900
     else
       # The distributed overlay builds futureagi/future-agi:dev itself.

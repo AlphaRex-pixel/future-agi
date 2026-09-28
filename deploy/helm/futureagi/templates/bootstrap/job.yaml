@@ -1,7 +1,7 @@
 {{- /*
 `python manage.py bootstrap_install`: migrations, seeds, ClickHouse schema,
 observed-attribute index, change data capture and Temporal schedules. The
-same steps as the Standalone install's deploy/platform/bin/bootstrap.py; all
+same steps as the Standalone install's deploy/standalone/bin/bootstrap.py; all
 idempotent, so the job runs on every install and upgrade.
 
 On upgrade it runs before the new pods roll out (pre-upgrade). On install it

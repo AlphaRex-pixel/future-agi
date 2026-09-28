@@ -74,7 +74,7 @@ def recorded_steps(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return steps
 
 
-def test_runs_every_step_in_the_platform_bootstrap_order(
+def test_runs_every_step_in_the_standalone_bootstrap_order(
     local_operator, recorded_steps
 ) -> None:
     call_command("bootstrap_install", "--clickhouse-timeout", "321")

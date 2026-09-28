@@ -161,9 +161,9 @@ else
 fi
 
 echo "== ClickHouse config files match the Standalone install"
-if [ -d "$repo/deploy/platform/clickhouse" ]; then
-  diff -u "$repo/deploy/platform/clickhouse/config.d/zz-small-host.xml" "$chart/files/clickhouse/config.d/zz-small-host.xml"
-  diff -u "$repo/deploy/platform/clickhouse/users.d/zz-small-host.xml" "$chart/files/clickhouse/users.d/zz-small-host.xml"
+if [ -d "$repo/deploy/standalone/clickhouse" ]; then
+  diff -u "$repo/deploy/standalone/clickhouse/config.d/zz-small-host.xml" "$chart/files/clickhouse/config.d/zz-small-host.xml"
+  diff -u "$repo/deploy/standalone/clickhouse/users.d/zz-small-host.xml" "$chart/files/clickhouse/users.d/zz-small-host.xml"
   diff -u "$repo/futureagi/.ci/clickhouse-storage-policy.xml" "$chart/files/clickhouse/config.d/storage-policy.xml"
   echo "ok   identical"
 else

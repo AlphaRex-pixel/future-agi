@@ -17,7 +17,7 @@
 # cloud images build on (future-agi/ee Dockerfile.ee: FROM it, then
 # `uv pip install`), and the lean <tag>-slim.
 #
-# Order: component images -> futureagi/platform (the Standalone install's app
+# Order: component images -> futureagi/standalone (the Standalone install's app
 # image, assembled FROM the -slim backend and three components of this same
 # version, pinned by digest). The simulation runner builds FROM the default
 # backend's digest. code-executor builds FROM the base image its Dockerfile
@@ -218,7 +218,7 @@ jobs:
       dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
   # Native amd64 + arm64 (no QEMU: the arm64 leg compiles wheels), so the
-  # platform image below, and anyone pulling the backend on Apple Silicon or
+  # standalone image below, and anyone pulling the backend on Apple Silicon or
   # Graviton, get a native image.
   #
   # The default variant (IMAGE_VARIANT=standard). It stays a drop-in for what
@@ -250,7 +250,7 @@ jobs:
       dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
   # The slim variant: futureagi/future-agi:<version>-slim, <minor>-slim and
-  # latest-slim, the base of futureagi/platform. Its builder's dependency
+  # latest-slim, the base of futureagi/standalone. Its builder's dependency
   # layers are the default variant's, so it also reads that variant's caches.
   backend-slim:
     needs: guard
@@ -278,11 +278,11 @@ jobs:
       dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
       dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  # The platform image is FROM the -slim backend and copies files out of three
+  # The standalone image is FROM the -slim backend and copies files out of three
   # more images. Pin all four to the digests this run just published and
   # checked, so the Standalone app image is built from exactly those bytes,
   # whatever a tag points at later.
-  platform-inputs:
+  standalone-inputs:
     needs: [guard, build, backend-slim]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -319,36 +319,36 @@ jobs:
           printf '%s\n' "$args"
           { echo 'build-args<<EOF'; printf '%s\n' "$args"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
 
-  # futureagi/platform, the Standalone install's app image (docker-compose.yml).
+  # futureagi/standalone, the Standalone install's app image (docker-compose.yml).
   # Besides its own budget, each architecture's leg checks what a fresh
-  # standalone install downloads (platform + postgres + clickhouse, distinct
+  # standalone install downloads (standalone + postgres + clickhouse, distinct
   # layers), and the growth over :latest may be at most
-  # PLATFORM_SIZE_BUDGET_PERCENT (repository variable, default 10; 0 turns
+  # STANDALONE_SIZE_BUDGET_PERCENT (repository variable, default 10; 0 turns
   # that part off), or no tag moves.
-  platform:
-    needs: [guard, platform-inputs]
+  standalone:
+    needs: [guard, standalone-inputs]
     if: github.event_name == 'push'
     permissions:
       contents: read
       packages: write # required by the reusable workflow; no cache is used
     uses: ./.github/workflows/build-image-multiarch.yml
     with:
-      image: futureagi/platform
-      context: ./deploy/platform
-      dockerfile: ./deploy/platform/Dockerfile
+      image: futureagi/standalone
+      context: ./deploy/standalone
+      dockerfile: ./deploy/standalone/Dockerfile
       version: ${{ needs.guard.outputs.version }}
       ref: ${{ github.ref }}
       push-latest: true
-      cache-scope: platform
+      cache-scope: standalone
       # Every release changes the base image, so a layer cache never hits.
       use-cache: false
       timeout-minutes: 45
-      size-budget-percent: ${{ fromJSON(vars.PLATFORM_SIZE_BUDGET_PERCENT || '10') }}
+      size-budget-percent: ${{ fromJSON(vars.STANDALONE_SIZE_BUDGET_PERCENT || '10') }}
       default-install-total: true
-      build-args: ${{ needs.platform-inputs.outputs.build-args }}
+      build-args: ${{ needs.standalone-inputs.outputs.build-args }}
       # Every bundled binary must be this architecture's and must start:
       # a single-arch source image would otherwise ship an x86 binary in the
-      # arm64 image. Keep in sync with VERIFY_PLATFORM in platform-ci.yml.
+      # arm64 image. Keep in sync with VERIFY_STANDALONE in standalone-ci.yml.
       verify-command: |
         python - <<'PY'
         import os, platform, shutil, subprocess, sys
@@ -539,7 +539,7 @@ jobs:
   # release notes. Each image was already checked before its tags moved; this
   # job never fails the release.
   size-report:
-    needs: [guard, build, serving-gpu, code-executor, backend, backend-slim, platform, simulation-runner]
+    needs: [guard, build, serving-gpu, code-executor, backend, backend-slim, standalone, simulation-runner]
     if: always() && needs.guard.result == 'success' && github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -1,5 +1,5 @@
 # ============================================================================
-# Future AGI — standalone install application image (futureagi/platform).
+# Future AGI — standalone install application image (futureagi/standalone).
 #
 # One container runs every stateless process of the standalone install under
 # supervisord (see supervisord.conf): the API with the Temporal worker in the
@@ -11,7 +11,7 @@
 #
 # The image is assembled from the published component images, so the build
 # context is just this directory and nothing is compiled:
-#   docker build -t futureagi/platform:latest deploy/platform
+#   docker build -t futureagi/standalone:latest deploy/standalone
 # A from-source install (./bin/install --from-source) and the release build
 # pass their own component tags instead. The backend they pass is the slim
 # variant (futureagi/Dockerfile.oss --build-arg IMAGE_VARIANT=slim):
@@ -19,7 +19,7 @@
 #     --build-arg FRONTEND_IMAGE=futureagi/frontend:local \
 #     --build-arg FI_COLLECTOR_IMAGE=futureagi/fi-collector:local \
 #     --build-arg AGENTCC_GATEWAY_IMAGE=futureagi/agentcc-gateway:local \
-#     -t futureagi/platform:local deploy/platform
+#     -t futureagi/standalone:local deploy/standalone
 #
 # Runs as root (docs/images.md): supervisord starts Redis, MinIO, nginx and
 # the API as root, runs code evals as the unprivileged `sandbox` user, and
@@ -140,7 +140,7 @@ ARG MINIO_IMAGE
 # Deployment telemetry reports it when FUTURE_AGI_VERSION names no release
 # (tfc/deployment_telemetry/config.py).
 ENV SERVICE_VERSION=${VERSION}
-LABEL org.opencontainers.image.title="Future AGI platform (Standalone)" \
+LABEL org.opencontainers.image.title="Future AGI standalone" \
       org.opencontainers.image.description="The Standalone install's application container: API with an embedded Temporal worker, Temporal dev server, fi-collector, agentcc-gateway, code-evals sandbox, UI, Redis and object storage under supervisord." \
       org.opencontainers.image.source="https://github.com/future-agi/future-agi" \
       org.opencontainers.image.url="https://futureagi.com" \

@@ -29,23 +29,23 @@ Distributed on Kubernetes and uses the same images.
 Size budget: the most a `docker pull` may download (compressed MB, 10^6
 bytes, per architecture), from `scripts/image_size_budget.json`. A release
 checks it on every architecture before it moves a tag, and pull requests
-check it in `platform-ci.yml`.
+check it in `standalone-ci.yml`.
 
 | Image | What it runs | Setups | Ports | User | Health check | Architectures | Size budget |
 |---|---|---|---|---|---|---|---|
-| `futureagi/platform` | The Standalone app container: API with an embedded Temporal worker, Temporal dev server, fi-collector, agentcc-gateway, code-evals sandbox, UI, Redis and object storage under supervisord. Built on the `-slim` backend | Standalone | 3000 UI, 8000 API, 4317/4318 OTLP, 8080 gateway, 9005 object storage | root | the five URLs of the compose `app` healthcheck | amd64, arm64 | 549 |
+| `futureagi/standalone` | The Standalone app container: API with an embedded Temporal worker, Temporal dev server, fi-collector, agentcc-gateway, code-evals sandbox, UI, Redis and object storage under supervisord. Built on the `-slim` backend | Standalone | 3000 UI, 8000 API, 4317/4318 OTLP, 8080 gateway, 9005 object storage | root | the five URLs of the compose `app` healthcheck | amd64, arm64 | 549 |
 | `futureagi/future-agi` | Backend, the default [variant](#backend-variants) (feature-complete): API (`SERVICE_TYPE=backend`), Temporal and Celery workers, bootstrap jobs. Base of the simulation runner and of the EE and cloud images | Distributed, Helm | 80 HTTP, 50051 gRPC, 5555 Flower | root (runs as `1000:1000` on request) | `GET /health/` on :80 for the API; roles with no listener are healthy while they run | amd64, arm64 | 890 |
-| `futureagi/future-agi:*-slim` | The same backend, lean: the base of `platform` | Standalone (inside `platform`) | as above | as above | as above | amd64, arm64 | 376 |
-| `futureagi/frontend` | The web UI: the React app served by nginx | Distributed, Helm (Standalone serves the same files from `platform`) | 80 | root master, `nginx` (101) workers | `GET /` on :80 | amd64, arm64 | 42 |
-| `futureagi/fi-collector` | OTLP receiver that writes spans to ClickHouse; also `fi-property-catalog-consumer` and `fi-observed-catalog-backfill` | Distributed, Helm (`fi-collector` and `fi-observed-catalog-backfill` bundled in `platform`) | 4317 gRPC, 4318 HTTP, 9464 admin | `nonroot` (65532) | `GET /healthz` on :9464, for the `fi-collector` command only | amd64, arm64 | 25 |
-| `futureagi/agentcc-gateway` | The LLM gateway | Distributed, Helm (binary bundled in `platform`) | 8080 | 65532 | `GET /healthz` on :8080 | amd64, arm64 | 9 |
+| `futureagi/future-agi:*-slim` | The same backend, lean: the base of `standalone` | Standalone (inside `standalone`) | as above | as above | as above | amd64, arm64 | 376 |
+| `futureagi/frontend` | The web UI: the React app served by nginx | Distributed, Helm (Standalone serves the same files from `standalone`) | 80 | root master, `nginx` (101) workers | `GET /` on :80 | amd64, arm64 | 42 |
+| `futureagi/fi-collector` | OTLP receiver that writes spans to ClickHouse; also `fi-property-catalog-consumer` and `fi-observed-catalog-backfill` | Distributed, Helm (`fi-collector` and `fi-observed-catalog-backfill` bundled in `standalone`) | 4317 gRPC, 4318 HTTP, 9464 admin | `nonroot` (65532) | `GET /healthz` on :9464, for the `fi-collector` command only | amd64, arm64 | 25 |
+| `futureagi/agentcc-gateway` | The LLM gateway | Distributed, Helm (binary bundled in `standalone`) | 8080 | 65532 | `GET /healthz` on :8080 | amd64, arm64 | 9 |
 | `futureagi/serving` | Embedding and audio/image model server | Standalone (`COMPOSE_PROFILES=ml`), Distributed, Helm | 8080 | root (Helm runs it as `appuser`, 1000) | `GET /health` on :8080 | amd64, arm64 | 520 amd64, 480 arm64 |
 | `futureagi/serving:*-gpu` | The same with CUDA 12.4 torch | any, on an NVIDIA host | 8080 | root (Helm: 1000) | `GET /health` on :8080 | amd64 | 3800 |
 | `futureagi/code-executor` | nsjail sandbox for untrusted code evals | Standalone (`COMPOSE_PROFILES=sandbox`), Distributed, Helm; needs `privileged` | 8060 | root | `GET /health` on :8060 | amd64, arm64 | 225 |
 | `futureagi/future-agi-simulation-runner` | Temporal worker for the `simulation_runner` queue: the default backend variant plus the Agent Learning Kit SDK | Distributed, Helm | none | root (from the backend) | inherited from the backend: healthy while it runs | amd64 | 1350, reported only |
 | `futureagi/code-executor-base` | Build input of `code-executor` (nsjail, Node.js, sandbox libraries); never run on its own | none | | | | amd64, arm64 | counted in `code-executor` |
 
-A fresh Standalone install downloads `platform`, `postgres:16` and
+A fresh Standalone install downloads `standalone`, `postgres:16` and
 `clickhouse/clickhouse-server:25.3-alpine`: 884 MB at most (measured 803).
 
 ## Backend variants
@@ -56,7 +56,7 @@ build argument, `IMAGE_VARIANT`:
 | | Default (`IMAGE_VARIANT=standard`) | Slim (`IMAGE_VARIANT=slim`) |
 |---|---|---|
 | Published as | `futureagi/future-agi:vX.Y.Z` (and `vX.Y`, `latest`) | `futureagi/future-agi:vX.Y.Z-slim` (and `vX.Y-slim`, `latest-slim`) |
-| Used by | Distributed, Helm, the simulation runner, and the EE and cloud images; `./bin/install --distributed --from-source` and `./bin/e2e` build it | the base of `futureagi/platform`, so Standalone; `./bin/install --from-source` and `./bin/dev` build it for Standalone |
+| Used by | Distributed, Helm, the simulation runner, and the EE and cloud images; `./bin/install --distributed --from-source` and `./bin/e2e` build it | the base of `futureagi/standalone`, so Standalone; `./bin/install --from-source` and `./bin/dev` build it for Standalone |
 | Contents | what earlier releases shipped: the `sandbox` (Daytona, E2B), `billing`, `ops` (Flower), `gcp` (Vertex AI SDK), `langchain` and `rabbitmq` dependency groups, `uv`, git, Debian's ffmpeg, every NLTK package and untrimmed site-packages. Only development tools (type stubs, the debug toolbar) moved to the `dev` group | base dependencies only, no `uv` or git, a minimal LGPL ffmpeg build, the English NLTK data the app loads, and trimmed site-packages |
 | Size | about the size of earlier releases | budget 376 MB compressed (measured 341) |
 
@@ -75,8 +75,8 @@ Standalone install that needs any of the above can build its app image from
 the default variant:
 
 ```bash
-docker build -t futureagi/platform:local \
-  --build-arg BACKEND_IMAGE=futureagi/future-agi:vX.Y.Z deploy/platform
+docker build -t futureagi/standalone:local \
+  --build-arg BACKEND_IMAGE=futureagi/future-agi:vX.Y.Z deploy/standalone
 ```
 
 or from a slim build with just the pieces it needs, e.g. `docker build -f
@@ -126,12 +126,12 @@ build without them says `dev` and `unknown`.
 | `org.opencontainers.image.url` | `https://futureagi.com` |
 | `org.opencontainers.image.documentation` | this page |
 | `org.opencontainers.image.vendor` | `Future AGI` |
-| `org.opencontainers.image.licenses` | `Apache-2.0`; `Apache-2.0 AND LicenseRef-FutureAGI-Enterprise-1.0` for `future-agi`, `platform` and the simulation runner, which ship `futureagi/ee/` (see `LICENSE-EE`) |
+| `org.opencontainers.image.licenses` | `Apache-2.0`; `Apache-2.0 AND LicenseRef-FutureAGI-Enterprise-1.0` for `future-agi`, `standalone` and the simulation runner, which ship `futureagi/ee/` (see `LICENSE-EE`) |
 | `org.opencontainers.image.version` | the release, e.g. `v1.43.0` (the `-slim` and `-gpu` variants have the same version) |
 | `org.opencontainers.image.revision` | the 40-character commit SHA the image was built from |
 | `org.opencontainers.image.created` | build time, UTC, RFC 3339 |
 
-Extra labels: `ai.futureagi.<component>.image` on `platform` (the backend,
+Extra labels: `ai.futureagi.<component>.image` on `standalone` (the backend,
 frontend, fi-collector, agentcc-gateway, Temporal and MinIO images it was
 assembled from, with digests on a release), `ai.futureagi.sdk.version` and
 `ai.futureagi.backend.image` on the simulation runner, and
@@ -140,26 +140,26 @@ assembled from, with digests on a release), `ai.futureagi.sdk.version` and
 Read them without pulling the image:
 
 ```bash
-docker buildx imagetools inspect futureagi/platform:latest --format '{{json .Image}}' \
+docker buildx imagetools inspect futureagi/standalone:latest --format '{{json .Image}}' \
   | jq '."linux/amd64".config.Labels'
 ```
 
 or from a pulled image:
 
 ```bash
-docker image inspect futureagi/platform:latest --format '{{json .Config.Labels}}' | jq
+docker image inspect futureagi/standalone:latest --format '{{json .Config.Labels}}' | jq
 ```
 
 ## Verifying an image
 
-1. **Pin the digest.** `docker buildx imagetools inspect futureagi/platform:v1.43.0`
+1. **Pin the digest.** `docker buildx imagetools inspect futureagi/standalone:v1.43.0`
    prints the manifest digest. To make Compose pull exactly those bytes, name
    it in a `docker-compose.override.yml` next to `docker-compose.yml`:
 
    ```yaml
    services:
      app:
-       image: futureagi/platform:v1.43.0@sha256:<digest>
+       image: futureagi/standalone:v1.43.0@sha256:<digest>
    ```
 
    Every release run lists, in its summary, the digest of each
@@ -182,7 +182,7 @@ the pod probes at the same endpoints.
 
 | Image | Probe | Interval / timeout / start period / retries |
 |---|---|---|
-| `platform` | GET `:8000/health/`, `:9464/healthz`, `:8080/healthz`, `:3000/`, `:9005/minio/health/live` (the compose `app` healthcheck) | 15 s / 10 s / 900 s / 5 |
+| `standalone` | GET `:8000/health/`, `:9464/healthz`, `:8080/healthz`, `:3000/`, `:9005/minio/health/live` (the compose `app` healthcheck) | 15 s / 10 s / 900 s / 5 |
 | `future-agi` | `docker/healthcheck.py`: GET `:80/health/` when `SERVICE_TYPE=backend` serves HTTP, else TCP to gRPC :50051; `flower` TCP :5555; workers, beat, bootstrap jobs and containers started with their own command report healthy | 30 s / 10 s / 600 s / 3 |
 | `frontend` | GET `:80/` (busybox wget) | 30 s / 5 s / 10 s / 3 |
 | `fi-collector` | GET `:9464/healthz`, only when PID 1 is `fi-collector` (the consumer and backfill commands of the image serve no admin port) | 30 s / 10 s / 30 s / 3 |
@@ -216,7 +216,7 @@ Kubernetes probe targets: `future-agi` `GET /health/` port 80, `frontend`
 | `fi-collector` | `nonroot` (65532) | |
 | `agentcc-gateway` | 65532 | |
 | `serving` | root | an exception: existing deployments mount a root-owned model-cache volume (`HF_HOME`) without an `fsGroup`, which uid 1000 could not write. The image is ready for `appuser` (1000), and the Helm chart runs it that way with `fsGroup: 1000` and the caches on its `/models` volume. `NUMBA_CACHE_DIR=/tmp/numba-cache`, so an arbitrary Kubernetes `runAsUser` also starts. Model downloads go to `$HOME/.cache` unless `HF_HOME`, `SENTENCE_TRANSFORMERS_HOME` and `TORCH_HOME` say otherwise: mount a volume at `/root/.cache` (or `/home/appuser/.cache` with `user: "1000:1000"`) to keep them |
-| `platform` | root | supervisord starts Redis, MinIO, nginx and the API, runs code evals as the unprivileged `sandbox` user (uid 18060), and keeps secrets in a root-only directory |
+| `standalone` | root | supervisord starts Redis, MinIO, nginx and the API, runs code evals as the unprivileged `sandbox` user (uid 18060), and keeps secrets in a root-only directory |
 | `code-executor` | root | nsjail needs root and `privileged: true` to create each jail's namespaces and cgroups; evaluated code runs inside the jail as uid 1000 |
 | `frontend` | root master | the nginx master binds :80 and writes `config.js` at start; the workers that serve requests run as `nginx` (101), as in the upstream nginx image |
 | `future-agi` (both variants), simulation runner | root | the deployments that run this image today bind :80 and mount root-owned volumes (`/app/backend/logs`). The image is ready to run as `1000:1000`: see below |
@@ -244,7 +244,7 @@ directory that user can write.
 
 Every image stops on `SIGTERM`, except `frontend` (`SIGQUIT`: nginx finishes
 the requests in flight). Give the containers that drain work time to do it:
-`platform` 60 s (the API drains its Temporal worker for up to 50 s), the
+`standalone` 60 s (the API drains its Temporal worker for up to 50 s), the
 simulation runner more than `TEMPORAL_GRACEFUL_SHUTDOWN_TIMEOUT` (compose sets
 330 s), Temporal workers `TEMPORAL_GRACEFUL_SHUTDOWN_TIMEOUT` plus a margin.
 
@@ -256,22 +256,22 @@ downloads only what changed.
 
 | Base | Pinned as | Used by |
 |---|---|---|
-| `python:3.11-slim-bookworm` | digest | `future-agi` (so `platform` and the simulation runner), `serving`, `code-executor-base`: one download for all of them |
+| `python:3.11-slim-bookworm` | digest | `future-agi` (so `standalone` and the simulation runner), `serving`, `code-executor-base`: one download for all of them |
 | `ghcr.io/astral-sh/uv:0.11.16` | digest | build stages of `future-agi` and `serving`; the default `future-agi` variant ships its `uv` and `uvx` in `/usr/local/bin` |
 | `node:22.18.0` | digest | `frontend` build stage, never shipped |
 | `nginx:1.31.6-alpine-slim` | digest | `frontend` |
 | `gcr.io/distroless/static-debian12:nonroot` | digest | `fi-collector` |
 | `scratch` | (empty) | `agentcc-gateway` |
-| `temporalio/temporal:1.9.1`, `ghcr.io/coollabsio/minio` | digest | binaries copied into `platform` |
+| `temporalio/temporal:1.9.1`, `ghcr.io/coollabsio/minio` | digest | binaries copied into `standalone` |
 
 Deliberately not pinned by digest, each explained in its Dockerfile:
 
 - `golang:1.24-alpine` and `golang:1.26-alpine` float on the minor version:
   build stages only, and Go patch releases carry standard-library security
   fixes that are compiled into the binaries.
-- `platform`'s component images and the simulation runner's backend default
+- `standalone`'s component images and the simulation runner's backend default
   to `:latest` for a quick local build; a release passes this release's
-  images pinned by digest (the `-slim` backend to `platform`, the default one
+  images pinned by digest (the `-slim` backend to `standalone`, the default one
   to the simulation runner).
 - `code-executor` pins `futureagi/code-executor-base` by an immutable version
   tag; add the digest once that version is published.
@@ -307,7 +307,7 @@ Per image:
 | `frontend` | `VITE_HOST_API` | `http://localhost:8000` | API URL baked into the bundle (a container overrides it at start with `VITE_HOST_API`) |
 | | `VITE_ENVIRONMENT` | `production` | |
 | | `PRUNE_PUBLIC_ASSETS` | README and marketing images | set it empty to keep every `public/` file |
-| `platform` | `BACKEND_IMAGE`, `FRONTEND_IMAGE`, `FI_COLLECTOR_IMAGE`, `AGENTCC_GATEWAY_IMAGE` | `futureagi/<image>:latest` | the component images it is assembled from |
+| `standalone` | `BACKEND_IMAGE`, `FRONTEND_IMAGE`, `FI_COLLECTOR_IMAGE`, `AGENTCC_GATEWAY_IMAGE` | `futureagi/<image>:latest` | the component images it is assembled from |
 | | `TEMPORAL_IMAGE`, `MINIO_IMAGE` | pinned | |
 | simulation runner | `FI_VERSION` | required | Agent Learning Kit SDK version (PyPI) |
 | | `BACKEND_IMAGE` | `futureagi/future-agi:latest` | the backend it extends; the build fails on one without the sandbox SDKs and git, such as a `-slim` tag |
@@ -339,7 +339,7 @@ telemetry reports when `FUTURE_AGI_VERSION` names none).
 ## Building and linting locally
 
 ```bash
-./bin/install --from-source          # slim backend, frontend, fi-collector, gateway, then platform, as :local
+./bin/install --from-source          # slim backend, frontend, fi-collector, gateway, then standalone, as :local
 ./bin/install --distributed --from-source   # default backend, frontend, fi-collector, gateway, as :local
 ./bin/dev                            # the same images, with hot reload
 
@@ -359,7 +359,7 @@ ignored inline with the reason) and the workflows with
 [actionlint](https://github.com/rhysd/actionlint):
 
 ```bash
-hadolint futureagi/Dockerfile.oss deploy/platform/Dockerfile frontend/Dockerfile \
+hadolint futureagi/Dockerfile.oss deploy/standalone/Dockerfile frontend/Dockerfile \
   fi-collector/Dockerfile agentcc-gateway/Dockerfile futureagi/model_serving/Dockerfile.oss \
   futureagi/code-executor/Dockerfile futureagi/code-executor/Dockerfile.base Dockerfile.simulation-runner
 actionlint .github/workflows/*.yml

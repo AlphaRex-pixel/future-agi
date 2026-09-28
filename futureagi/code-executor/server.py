@@ -44,7 +44,7 @@ NODE_PATH = shutil.which("node")
 
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), "config")
 
-# Standalone's built-in sandbox (the platform image) ships no Node.js; its
+# Standalone's built-in sandbox (the standalone image) ships no Node.js; its
 # nsjail executor, the `sandbox` compose profile, does.
 NO_NODE_MESSAGE = (
     "JavaScript evals need Node.js, which this sandbox does not have. In "

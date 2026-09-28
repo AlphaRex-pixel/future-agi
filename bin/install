@@ -1009,7 +1009,7 @@ build_image() { # tag, then `docker build` arguments
 if (( FROM_SOURCE == 1 )); then
   step "Building images from this checkout"
   # Standalone's app image is assembled on the slim backend variant, as the
-  # published futureagi/platform is; Distributed runs the default one.
+  # published futureagi/standalone is; Distributed runs the default one.
   backend_variant=()
   if (( DISTRIBUTED == 0 )); then
     backend_variant=(--build-arg IMAGE_VARIANT=slim)
@@ -1020,12 +1020,12 @@ if (( FROM_SOURCE == 1 )); then
   build_image futureagi/fi-collector:local fi-collector
   build_image futureagi/agentcc-gateway:local agentcc-gateway
   if (( DISTRIBUTED == 0 )); then
-    build_image futureagi/platform:local -f deploy/platform/Dockerfile \
+    build_image futureagi/standalone:local -f deploy/standalone/Dockerfile \
       --build-arg BACKEND_IMAGE=futureagi/future-agi:local \
       --build-arg FRONTEND_IMAGE=futureagi/frontend:local \
       --build-arg FI_COLLECTOR_IMAGE=futureagi/fi-collector:local \
       --build-arg AGENTCC_GATEWAY_IMAGE=futureagi/agentcc-gateway:local \
-      deploy/platform
+      deploy/standalone
   fi
   set_env_var FUTURE_AGI_VERSION local
   if (( DISTRIBUTED == 1 )); then
@@ -1083,7 +1083,7 @@ else
     :
   else
     log_only "[fail] pull returned $?"
-    # A release that predates an image (futureagi/platform, say) has no tag
+    # A release that predates an image (futureagi/standalone, say) has no tag
     # for it on Docker Hub. Building from the checkout still works.
     if [[ -n "$app_image" && "$app_image" != *:local ]] && \
        ! docker manifest inspect "$app_image" >/dev/null 2>&1; then

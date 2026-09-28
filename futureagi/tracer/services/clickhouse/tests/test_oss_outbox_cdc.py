@@ -451,7 +451,7 @@ def test_sync_registers_or_deletes_both_schedules(monkeypatch):
 
 
 def test_sync_wrapper_uses_the_shared_client_from_sync_code(monkeypatch):
-    """ensure_installed() calls the sync wrapper from the platform bootstrap."""
+    """ensure_installed() calls the sync wrapper from the Standalone bootstrap."""
     import tfc.temporal.common.client as client_module
     import tfc.temporal.schedules.outbox_cdc as module
 

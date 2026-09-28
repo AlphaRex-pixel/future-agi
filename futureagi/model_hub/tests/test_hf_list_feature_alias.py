@@ -1,6 +1,6 @@
 """The `List` feature-type alias for datasets 3.6.0 (model_hub/utils/utils.py).
 
-The slim backend and the platform image leave `datasets` out, and every
+The slim backend and the standalone image leave `datasets` out, and every
 process imports this module, so its absence must not log a traceback.
 """
 

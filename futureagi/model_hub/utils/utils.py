@@ -49,7 +49,7 @@ def _alias_hf_list_feature_type() -> None:
         ):
             _hf_features._FEATURE_TYPES.setdefault("List", _hf_features.LargeList)
     except ModuleNotFoundError as exc:
-        # The slim backend (and the platform image) leave `datasets` out:
+        # The slim backend (and the standalone image) leave `datasets` out:
         # nothing to patch. A module missing inside datasets stays loud.
         if exc.name != "datasets":
             logger.warning("hf List feature-type shim did not install", exc_info=True)

@@ -466,7 +466,7 @@
             },
             "lowMemory": {
               "type": "boolean",
-              "description": "Small caches and merge pools and no system log tables (deploy/platform/clickhouse), as in the Standalone install. Turn off on nodes with 8 GiB or more for ClickHouse."
+              "description": "Small caches and merge pools and no system log tables (deploy/standalone/clickhouse), as in the Standalone install. Turn off on nodes with 8 GiB or more for ClickHouse."
             },
             "persistence": {
               "type": "object",

@@ -1411,7 +1411,7 @@ def install(
 ) -> dict:
     """Check (``apply=False``, read-only) or install capture and landing tables.
 
-    Apply is idempotent; the platform bootstrap runs it on every start. The
+    Apply is idempotent; the Standalone bootstrap runs it on every start. The
     snapshot runs for at most ``snapshot_budget_s``; the drain finishes it and
     ``status`` shows progress.
     """
@@ -1575,7 +1575,7 @@ def resync(pg, *, tables: Iterable[str]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Entry points: platform bootstrap (in-process) and CLI (no Django)
+# Entry points: Standalone bootstrap (in-process) and CLI (no Django)
 # ---------------------------------------------------------------------------
 
 
@@ -1626,7 +1626,7 @@ def ensure_installed(
 ) -> dict:
     """Make the install match ``FI_CDC_MODE``. Idempotent; call on every start.
 
-    The platform bootstrap calls this once per container start, after
+    The Standalone bootstrap calls this once per container start, after
     ``migrate`` and the ClickHouse native schema phase, whatever the mode:
 
     * ``outbox``: install capture and landing tables, then create or update
@@ -1688,7 +1688,7 @@ def main(argv=None) -> int:
         ),
         help=(
             "install: read-only check, or install with --apply (no schedules). "
-            "ensure: what the platform bootstrap runs (needs Django settings)."
+            "ensure: what the Standalone bootstrap runs (needs Django settings)."
         ),
     )
     parser.add_argument("tables", nargs="*", help="resync: tables (default: all)")

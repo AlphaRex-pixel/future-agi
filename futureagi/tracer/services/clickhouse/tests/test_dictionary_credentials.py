@@ -61,7 +61,7 @@ V2_SCHEMA = BACKEND / "tracer" / "services" / "clickhouse" / "v2" / "schema"
 DATASET_VIEWS = (
     BACKEND / "tracer" / "services" / "clickhouse" / "schema" / "dataset_views.sql"
 )
-PLATFORM_BOOTSTRAP = BACKEND.parent / "deploy" / "platform" / "bin" / "bootstrap.py"
+STANDALONE_BOOTSTRAP = BACKEND.parent / "deploy" / "standalone" / "bin" / "bootstrap.py"
 
 USER = "app"
 # A single quote, a backslash and a double quote: every escaping hazard.
@@ -849,14 +849,14 @@ def test_bootstrap_install_native_schema_uses_ch_password(install_env, password)
             assert "PASSWORD" not in sql and sql in server.raw.definitions.values()
 
 
-def test_platform_bootstrap_native_schema_uses_ch_password(install_env):
+def test_standalone_bootstrap_native_schema_uses_ch_password(install_env):
     spec = importlib.util.spec_from_file_location(
-        "platform_bootstrap", PLATFORM_BOOTSTRAP
+        "standalone_bootstrap", STANDALONE_BOOTSTRAP
     )
-    platform_bootstrap = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(platform_bootstrap)
+    standalone_bootstrap = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(standalone_bootstrap)
     server = install_env(PASSWORD)
-    platform_bootstrap.clickhouse_native_schema()
+    standalone_bootstrap.clickhouse_native_schema()
     dicts = dictionary_statements(_native_writes(server.raw))
     assert len(dicts) == 3
     for sql in dicts:

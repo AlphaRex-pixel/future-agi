@@ -1,6 +1,6 @@
-# Standalone install CI. Builds futureagi/platform from this checkout (the
+# Standalone install CI. Builds futureagi/standalone from this checkout (the
 # slim backend variant, frontend, fi-collector and agentcc-gateway images
-# first, then deploy/platform/Dockerfile on top of them, as a release does),
+# first, then deploy/standalone/Dockerfile on top of them, as a release does),
 # checks the compressed size of all five and of the whole standalone install
 # against scripts/image_size_budget.json (the same check a release runs), then
 # runs ./bin/install on a fresh runner and drives the standalone stack end to
@@ -11,13 +11,13 @@
 # linux/amd64 runs whenever the standalone install can change. linux/arm64
 # (native runner: build, binary check and size budget, no install) runs when
 # what gets compiled or bundled changes: backend dependencies, the backend
-# Dockerfile, or deploy/platform.
+# Dockerfile, or deploy/standalone.
 #
 # Size budget: every image must fit its budget in
 # scripts/image_size_budget.json, and so must what a fresh standalone install
-# downloads (platform + postgres + clickhouse, distinct layers); a PR that
+# downloads (standalone + postgres + clickhouse, distinct layers); a PR that
 # needs more changes that file, where review sees it. On top of that,
-# futureagi/platform may grow at most PLATFORM_SIZE_BUDGET_PERCENT
+# futureagi/standalone may grow at most STANDALONE_SIZE_BUDGET_PERCENT
 # (repository variable, default 10; 0 turns it off) over :latest; a PR that
 # grows it on purpose takes the `image-size-approved` label (re-run the failed
 # job after adding it).
@@ -40,7 +40,7 @@ on:
     branches: [dev, main]
     paths:
       - "docker-compose.yml"
-      - "deploy/platform/**"
+      - "deploy/standalone/**"
       - "deploy/tests/**"
       - "bin/install*"
       - ".env.example"
@@ -50,7 +50,7 @@ on:
       - "fi-collector/Dockerfile"
       - "agentcc-gateway/Dockerfile"
       - "scripts/image_size_budget.*"
-      - ".github/workflows/platform-ci.yml"
+      - ".github/workflows/standalone-ci.yml"
   workflow_dispatch:
 
 permissions:
@@ -58,7 +58,7 @@ permissions:
   pull-requests: read # dorny/paths-filter and the size-budget label read the PR
 
 concurrency:
-  group: platform-ci-${{ github.event_name == 'push' && github.sha || github.ref }}
+  group: standalone-ci-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -67,15 +67,15 @@ env:
   CACHE_REPO: ghcr.io/future-agi/future-agi/e2e-cache
   BUILD_CACHE: ghcr.io/future-agi/future-agi/build-cache
   # Registry on the runner: buildx pushes the component images here so the
-  # platform build can use them as bases, and the size check reads the
+  # standalone build can use them as bases, and the size check reads the
   # compressed layer sizes from the manifest it stores.
   REGISTRY: localhost:5000
-  SIZE_BUDGET_PERCENT: ${{ vars.PLATFORM_SIZE_BUDGET_PERCENT || '10' }}
+  SIZE_BUDGET_PERCENT: ${{ vars.STANDALONE_SIZE_BUDGET_PERCENT || '10' }}
   SIZE_WAIVER_LABEL: image-size-approved
   # Every bundled binary must be this architecture's and must start: a
   # single-arch source image would otherwise put an x86 binary in the arm64
   # image. Keep in sync with verify-command in release-images.yml.
-  VERIFY_PLATFORM: |
+  VERIFY_STANDALONE: |
     python - <<'PY'
     import os, platform, shutil, subprocess, sys
     machine = {"x86_64": 0x3E, "aarch64": 0xB7}[platform.machine()]
@@ -124,7 +124,7 @@ jobs:
           filters: |
             install:
               - 'docker-compose.yml'
-              - 'deploy/platform/**'
+              - 'deploy/standalone/**'
               - 'deploy/tests/**'
               - 'bin/install*'
               - '.env.example'
@@ -134,9 +134,9 @@ jobs:
               - 'fi-collector/Dockerfile'
               - 'agentcc-gateway/Dockerfile'
               - 'scripts/image_size_budget.*'
-              - '.github/workflows/platform-ci.yml'
+              - '.github/workflows/standalone-ci.yml'
             arm64:
-              - 'deploy/platform/**'
+              - 'deploy/standalone/**'
               - 'futureagi/Dockerfile.oss'
               - 'futureagi/.dockerignore'
               - 'futureagi/docker/**'
@@ -148,7 +148,7 @@ jobs:
               - 'fi-collector/Dockerfile'
               - 'agentcc-gateway/Dockerfile'
               - 'scripts/image_size_budget.*'
-              - '.github/workflows/platform-ci.yml'
+              - '.github/workflows/standalone-ci.yml'
       - id: always
         if: github.event_name == 'workflow_dispatch'
         run: echo "install=true" >> "$GITHUB_OUTPUT"
@@ -162,10 +162,10 @@ jobs:
             echo 'arches=["amd64"]' >> "$GITHUB_OUTPUT"
           fi
 
-  # The Standalone first boot (deploy/platform/bin/bootstrap.py and its
+  # The Standalone first boot (deploy/standalone/bin/bootstrap.py and its
   # starting page) and the production overlay's checks, with fakes for the
   # backend and the datastores: standard library only, seconds to run.
-  platform-unit:
+  standalone-unit:
     name: standalone bootstrap unit tests
     needs: changes
     if: needs.changes.outputs.install == 'true'
@@ -176,9 +176,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: deploy/tests (platform bootstrap, first run, production setup)
+      - name: deploy/tests (standalone bootstrap, first run, production setup)
         run: |
-          python -m unittest discover -s deploy/tests -p 'test_platform_*.py' -v
+          python -m unittest discover -s deploy/tests -p 'test_standalone_*.py' -v
           python -m unittest discover -s deploy/tests -p 'test_production_setup.py' -v
 
   default-install:
@@ -197,13 +197,13 @@ jobs:
       pull-requests: read
     env:
       # Same build args as release-images.yml, pointed at this run's images.
-      PLATFORM_BUILD_ARGS: |
+      STANDALONE_BUILD_ARGS: |
         BACKEND_IMAGE=localhost:5000/futureagi/future-agi:ci
         FRONTEND_IMAGE=localhost:5000/futureagi/frontend:ci
         FI_COLLECTOR_IMAGE=localhost:5000/futureagi/fi-collector:ci
         AGENTCC_GATEWAY_IMAGE=localhost:5000/futureagi/agentcc-gateway:ci
       # ./bin/install then uses the image this job built (docker compose
-      # resolves futureagi/platform:local) instead of pulling a release.
+      # resolves futureagi/standalone:local) instead of pulling a release.
       FUTURE_AGI_VERSION: local
       FAGI_ADMIN_EMAIL: ci-admin@example.com
       FAGI_ADMIN_NAME: CI Admin
@@ -254,8 +254,8 @@ jobs:
         # docker only warns about an unused --build-arg, so a renamed ARG
         # would quietly build from the Dockerfile's default: the :latest
         # images, or the default backend variant instead of -slim. Covers this
-        # workflow and both installers' --from-source builds: the platform
-        # build's args against deploy/platform/Dockerfile, every other
+        # workflow and both installers' --from-source builds: the standalone
+        # build's args against deploy/standalone/Dockerfile, every other
         # installer build arg (the backend's IMAGE_VARIANT) against
         # futureagi/Dockerfile.oss.
         run: |
@@ -263,16 +263,16 @@ jobs:
           declared() { sed -nE 's/^[[:space:]]*ARG[[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*/\1/p' "$1" | sort -u; }
           names() { { grep -ohE -- "--build-arg['\", ]+[A-Za-z_][A-Za-z0-9_]*=" || true; } \
             | sed -E "s/.*['\", ]([A-Za-z_][A-Za-z0-9_]*)=$/\1/" | sort -u; }
-          platform=$({
-            printf '%s\n' "$PLATFORM_BUILD_ARGS" | sed -nE 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p'
-            { sed -n '/build_image futureagi\/platform:local/,/[^\\]$/p' bin/install
-              sed -n "/Build-Image 'futureagi\/platform:local'/,/)/p" bin/install.ps1; } | names
+          standalone=$({
+            printf '%s\n' "$STANDALONE_BUILD_ARGS" | sed -nE 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p'
+            { sed -n '/build_image futureagi\/standalone:local/,/[^\\]$/p' bin/install
+              sed -n "/Build-Image 'futureagi\/standalone:local'/,/)/p" bin/install.ps1; } | names
           } | sort -u)
-          backend=$(cat bin/install bin/install.ps1 | names | comm -23 - <(printf '%s\n' "$platform"))
+          backend=$(cat bin/install bin/install.ps1 | names | comm -23 - <(printf '%s\n' "$standalone"))
           failed=0
-          unknown=$(comm -13 <(declared deploy/platform/Dockerfile) <(printf '%s\n' "$platform"))
+          unknown=$(comm -13 <(declared deploy/standalone/Dockerfile) <(printf '%s\n' "$standalone"))
           if [ -n "$unknown" ]; then
-            echo "::error::build args not declared in deploy/platform/Dockerfile: $(paste -sd' ' - <<<"$unknown")"
+            echo "::error::build args not declared in deploy/standalone/Dockerfile: $(paste -sd' ' - <<<"$unknown")"
             failed=1
           fi
           unknown=$(comm -13 <(declared futureagi/Dockerfile.oss) <(printf '%s\n' "$backend" | sed '/^$/d'))
@@ -280,7 +280,7 @@ jobs:
             echo "::error::build args not declared in futureagi/Dockerfile.oss: $(paste -sd' ' - <<<"$unknown")"
             failed=1
           fi
-          echo "platform: $(paste -sd' ' - <<<"$platform"); backend: $(paste -sd' ' - <<<"$backend")"
+          echo "standalone: $(paste -sd' ' - <<<"$standalone"); backend: $(paste -sd' ' - <<<"$backend")"
           exit "$failed"
 
       - name: Image label build args
@@ -299,7 +299,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Build backend image (slim variant)
-        # The base of futureagi/platform, as in a release (-slim). Its
+        # The base of futureagi/standalone, as in a release (-slim). Its
         # dependency layers are the default variant's, so it reads those
         # caches too.
         uses: docker/build-push-action@v5
@@ -356,16 +356,16 @@ jobs:
             type=registry,ref=${{ env.BUILD_CACHE }}:agentcc-gateway-${{ matrix.arch }}
             ${{ matrix.arch == 'amd64' && format('type=registry,ref={0}:gateway', env.CACHE_REPO) || '' }}
 
-      - name: Build futureagi/platform from those images
+      - name: Build futureagi/standalone from those images
         uses: docker/build-push-action@v5
         with:
-          context: deploy/platform
-          file: deploy/platform/Dockerfile
+          context: deploy/standalone
+          file: deploy/standalone/Dockerfile
           push: true
           provenance: false
-          tags: ${{ env.REGISTRY }}/futureagi/platform:ci
+          tags: ${{ env.REGISTRY }}/futureagi/standalone:ci
           build-args: |
-            ${{ env.PLATFORM_BUILD_ARGS }}
+            ${{ env.STANDALONE_BUILD_ARGS }}
             ${{ steps.labels.outputs.args }}
 
       - name: OCI labels on every image
@@ -377,7 +377,7 @@ jobs:
         run: |
           set -euo pipefail
           failed=0
-          for image in future-agi frontend fi-collector agentcc-gateway platform; do
+          for image in future-agi frontend fi-collector agentcc-gateway standalone; do
             labels=$(docker buildx imagetools inspect "$REGISTRY/futureagi/$image:ci" --format '{{json .Image}}' \
               | jq -c 'if has("config") then .config.Labels else (to_entries[0].value.config.Labels) end')
             for key in title description source url documentation vendor licenses version revision created; do
@@ -397,13 +397,13 @@ jobs:
 
       - name: Verify the bundled binaries on linux/${{ matrix.arch }}
         run: |
-          docker pull --quiet "$REGISTRY/futureagi/platform:ci"
-          docker run --rm --entrypoint sh "$REGISTRY/futureagi/platform:ci" -ec "$VERIFY_PLATFORM"
+          docker pull --quiet "$REGISTRY/futureagi/standalone:ci"
+          docker run --rm --entrypoint sh "$REGISTRY/futureagi/standalone:ci" -ec "$VERIFY_STANDALONE"
 
       - name: Size budget (linux/${{ matrix.arch }})
         env:
           ARCH: ${{ matrix.arch }}
-          PLATFORM_GROWTH_PERCENT: ${{ env.SIZE_BUDGET_PERCENT }}
+          STANDALONE_GROWTH_PERCENT: ${{ env.SIZE_BUDGET_PERCENT }}
           WAIVER_LABEL: ${{ env.SIZE_WAIVER_LABEL }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ github.token }}
@@ -422,8 +422,8 @@ jobs:
           check futureagi/frontend "" || failed=1
           check futureagi/fi-collector "" || failed=1
           check futureagi/agentcc-gateway "" || failed=1
-          check futureagi/platform "" --default-install \
-            --max-growth-percent "$PLATFORM_GROWTH_PERCENT" || failed=1
+          check futureagi/standalone "" --default-install \
+            --max-growth-percent "$STANDALONE_GROWTH_PERCENT" || failed=1
           exit "$failed"
 
       # ---- linux/amd64 only: install and drive the standalone stack ----------
@@ -432,7 +432,7 @@ jobs:
         # The install needs the disk more than a finished build does.
         if: matrix.arch == 'amd64'
         run: |
-          docker tag "$REGISTRY/futureagi/platform:ci" futureagi/platform:local
+          docker tag "$REGISTRY/futureagi/standalone:ci" futureagi/standalone:local
           docker buildx prune -af || true
           df -h / /mnt
 

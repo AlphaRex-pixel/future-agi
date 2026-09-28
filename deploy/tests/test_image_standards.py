@@ -41,7 +41,7 @@ IMAGES = {
         "healthcheck": True,
         "floating": set(),
     },
-    "deploy/platform/Dockerfile": {
+    "deploy/standalone/Dockerfile": {
         "licenses": WITH_EE,
         "user": "root",
         "stopsignal": "SIGTERM",
@@ -1139,8 +1139,8 @@ class Workflows(unittest.TestCase):
         self.assertIn("VERSION=${{ inputs.version }}", base)
         self.assertIn("REVISION=${{ steps.source.outputs.revision }}", base)
 
-    def test_platform_ci_builds_every_image_with_the_label_args(self):
-        ci = (WORKFLOWS / "platform-ci.yml").read_text(encoding="utf-8")
+    def test_standalone_ci_builds_every_image_with_the_label_args(self):
+        ci = (WORKFLOWS / "standalone-ci.yml").read_text(encoding="utf-8")
         self.assertEqual(ci.count("${{ steps.labels.outputs.args }}"), 5)
         self.assertIn("OCI labels on every image", ci)
 
@@ -1170,19 +1170,19 @@ class Workflows(unittest.TestCase):
             self.assertIn(probe, default["verify-command"])
         self.assertEqual(slim["tag-suffix"], "-slim")
         self.assertEqual(slim["build-args"].split(), ["IMAGE_VARIANT=slim"])
-        # futureagi/platform is FROM the -slim digest; nothing else is.
+        # futureagi/standalone is FROM the -slim digest; nothing else is.
         self.assertEqual(
-            jobs["platform-inputs"]["needs"], ["guard", "build", "backend-slim"]
+            jobs["standalone-inputs"]["needs"], ["guard", "build", "backend-slim"]
         )
-        pin = jobs["platform-inputs"]["steps"][-1]["run"]
+        pin = jobs["standalone-inputs"]["steps"][-1]["run"]
         self.assertIn('pin BACKEND_IMAGE futureagi/future-agi "${VERSION}-slim"', pin)
         self.assertNotIn("backend-slim", jobs["simulation-runner"]["needs"])
         self.assertIn("backend-slim", jobs["size-report"]["needs"])
 
     @unittest.skipUnless(HAVE_YAML, "PyYAML unavailable")
-    def test_platform_ci_builds_the_slim_backend(self):
-        ci = (WORKFLOWS / "platform-ci.yml").read_text(encoding="utf-8")
-        steps = yaml_jobs(WORKFLOWS / "platform-ci.yml")["default-install"]["steps"]
+    def test_standalone_ci_builds_the_slim_backend(self):
+        ci = (WORKFLOWS / "standalone-ci.yml").read_text(encoding="utf-8")
+        steps = yaml_jobs(WORKFLOWS / "standalone-ci.yml")["default-install"]["steps"]
         backend = next(
             s
             for s in steps

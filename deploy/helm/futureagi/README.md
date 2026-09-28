@@ -544,7 +544,7 @@ Bracketed names are the environment variables a key sets;
 | `clickhouse.bundled.image.repository` | `"clickhouse/clickhouse-server"` | Repository of the bundled ClickHouse image. |
 | `clickhouse.bundled.image.tag` | `"25.3-alpine"` | Tag of the bundled ClickHouse image. 25.3 is the floor for the v2 spans schema. |
 | `clickhouse.bundled.image.digest` | `""` | Optional digest (`sha256:...`) pinned after the tag. |
-| `clickhouse.bundled.lowMemory` | `true` | Small caches and merge pools and no system log tables (deploy/platform/clickhouse), as in the Standalone install. Turn off on nodes with 8 GiB or more for ClickHouse. |
+| `clickhouse.bundled.lowMemory` | `true` | Small caches and merge pools and no system log tables (deploy/standalone/clickhouse), as in the Standalone install. Turn off on nodes with 8 GiB or more for ClickHouse. |
 | `clickhouse.bundled.persistence.size` | `"50Gi"` | Size of the data volume. Install-time only (see "Install-time settings" in README.md). |
 | `clickhouse.bundled.persistence.storageClass` | `""` | StorageClass of the data volume. Empty: `global.storageClass`, else the cluster default. Install-time only. |
 | `clickhouse.bundled.resources` | see values.yaml | Resources of the bundled ClickHouse. |

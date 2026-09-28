@@ -1,7 +1,7 @@
 # ============================================================================
 # Future AGI — Standalone, the default self-hosted install. Three containers:
 #
-#   app         futureagi/platform (deploy/platform): API with the Temporal
+#   app         futureagi/standalone (deploy/standalone): API with the Temporal
 #               worker in one process, Temporal dev server, fi-collector,
 #               agentcc-gateway, UI, Redis, object storage and the code-evals
 #               sandbox, under supervisord
@@ -16,7 +16,7 @@
 #
 # Code evals run inside `app` by default, as an unprivileged user with
 # resource limits but in the app's network namespace (see the sandbox program
-# in deploy/platform/supervisord.conf). Installs whose users must not trust
+# in deploy/standalone/supervisord.conf). Installs whose users must not trust
 # one another should set COMPOSE_PROFILES=sandbox in .env: the nsjail
 # executor then starts with the stack and the app sends code evals to it.
 #
@@ -27,7 +27,7 @@ name: futureagi
 
 services:
   app:
-    image: futureagi/platform:${FUTURE_AGI_VERSION:-latest}
+    image: futureagi/standalone:${FUTURE_AGI_VERSION:-latest}
     env_file:
       - path: .env
         required: false
@@ -42,7 +42,7 @@ services:
       EE_LICENSE_KEY: ${EE_LICENSE_KEY:-}
       INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:-}
       DJANGO_SETTINGS_MODULE: tfc.settings.settings
-      # Only the bootstrap process (deploy/platform/bin/bootstrap.py) changes
+      # Only the bootstrap process (deploy/standalone/bin/bootstrap.py) changes
       # schema; the API and `docker compose exec` sessions never do.
       NO_STARTUP_DB_MUTATIONS: "true"
       FI_SKIP_CH25_MIGRATION: "1"
@@ -277,7 +277,7 @@ services:
 
       # --- UI runtime config (config.js, written at container start) --------
       # Empty -> the SPA calls http://localhost:<BACKEND_PORT> (default set in
-      # deploy/platform/bin/start). Set the public API URL when the UI is
+      # deploy/standalone/bin/start). Set the public API URL when the UI is
       # reached through another host name.
       VITE_HOST_API: ${VITE_HOST_API:-}
       VITE_HELP_LINK: ${VITE_HELP_LINK:-}
@@ -305,7 +305,7 @@ services:
       clickhouse:
         condition: service_healthy
     healthcheck:
-      # The image's HEALTHCHECK (deploy/platform/Dockerfile) probes the API
+      # The image's HEALTHCHECK (deploy/standalone/Dockerfile) probes the API
       # plus every in-container service it relies on: collector, gateway, UI
       # and object storage. Only its timings are repeated here.
       interval: 15s
@@ -372,8 +372,8 @@ services:
       # `tiered` storage policy required by the v2 spans schema.
       - ./futureagi/.ci/clickhouse-storage-policy.xml:/etc/clickhouse-server/config.d/storage-policy.xml:ro
       # Smaller caches and merge pools, no system log tables.
-      - ./deploy/platform/clickhouse/config.d/zz-small-host.xml:/etc/clickhouse-server/config.d/zz-small-host.xml:ro
-      - ./deploy/platform/clickhouse/users.d/zz-small-host.xml:/etc/clickhouse-server/users.d/zz-small-host.xml:ro
+      - ./deploy/standalone/clickhouse/config.d/zz-small-host.xml:/etc/clickhouse-server/config.d/zz-small-host.xml:ro
+      - ./deploy/standalone/clickhouse/users.d/zz-small-host.xml:/etc/clickhouse-server/users.d/zz-small-host.xml:ro
     ulimits:
       nofile:
         soft: 262144

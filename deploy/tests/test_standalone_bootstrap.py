@@ -1,4 +1,4 @@
-"""The Standalone bootstrap proper (deploy/platform/bin/bootstrap.py): the
+"""The Standalone bootstrap proper (deploy/standalone/bin/bootstrap.py): the
 steps main() runs and their order, what a repeat boot skips, the refusals
 and failures that stop a boot, and the script's entry point (retry back-off,
 hand-over to the waiter, waiter mode).
@@ -32,9 +32,9 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "futureagi"
-SCRIPT = ROOT / "deploy" / "platform" / "bin" / "bootstrap.py"
+SCRIPT = ROOT / "deploy" / "standalone" / "bin" / "bootstrap.py"
 
-_spec = importlib.util.spec_from_file_location("platform_bootstrap_proper", SCRIPT)
+_spec = importlib.util.spec_from_file_location("standalone_bootstrap_proper", SCRIPT)
 bootstrap = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bootstrap)
 

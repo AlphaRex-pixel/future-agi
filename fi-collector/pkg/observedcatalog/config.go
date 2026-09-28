@@ -109,7 +109,7 @@ func RuntimeFromEnv(c RuntimeConfig, getenv func(string) string) (RuntimeConfig,
 		c.Kafka, err = kafkaFromEnv(c.Kafka, getenv)
 	} else {
 		c.ClickHouse, err = clickHouseFromEnv(c.ClickHouse, getenv)
-		// deploy/platform/bin/start looks for this text to tell whether a
+		// deploy/standalone/bin/start looks for this text to tell whether a
 		// collector binary supports direct mode.
 		if err == nil && (c.ClickHouse.URL == "" || c.ClickHouse.Database == "") {
 			err = fmt.Errorf("FI_OBSERVED_CATALOG_MODE=direct requires FI_OBSERVED_CATALOG_CH_URL and FI_OBSERVED_CATALOG_CH_DATABASE")

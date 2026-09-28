@@ -807,7 +807,7 @@ function Build-Image {
 if ($FromSource) {
   Step "Building images from this checkout"
   # Standalone's app image is assembled on the slim backend variant, as the
-  # published futureagi/platform is; Distributed runs the default one.
+  # published futureagi/standalone is; Distributed runs the default one.
   $backendVariant = @()
   if (-not $IsDistributed) { $backendVariant = @('--build-arg', 'IMAGE_VARIANT=slim') }
   Build-Image 'futureagi/future-agi:local' (@('-f', 'futureagi/Dockerfile.oss') + $backendVariant + @('futureagi'))
@@ -815,13 +815,13 @@ if ($FromSource) {
   Build-Image 'futureagi/fi-collector:local' @('fi-collector')
   Build-Image 'futureagi/agentcc-gateway:local' @('agentcc-gateway')
   if (-not $IsDistributed) {
-    Build-Image 'futureagi/platform:local' @(
-      '-f', 'deploy/platform/Dockerfile',
+    Build-Image 'futureagi/standalone:local' @(
+      '-f', 'deploy/standalone/Dockerfile',
       '--build-arg', 'BACKEND_IMAGE=futureagi/future-agi:local',
       '--build-arg', 'FRONTEND_IMAGE=futureagi/frontend:local',
       '--build-arg', 'FI_COLLECTOR_IMAGE=futureagi/fi-collector:local',
       '--build-arg', 'AGENTCC_GATEWAY_IMAGE=futureagi/agentcc-gateway:local',
-      'deploy/platform'
+      'deploy/standalone'
     )
   }
   Set-EnvValue 'FUTURE_AGI_VERSION' 'local'
@@ -887,7 +887,7 @@ if ($pullServices.Count -eq 0) {
   Append-Log @("running: $DcText $($pullArgs -join ' ')")
   Invoke-Compose @pullArgs
   if ($LASTEXITCODE -ne 0) {
-    # A release that predates an image (futureagi/platform, say) has no tag
+    # A release that predates an image (futureagi/standalone, say) has no tag
     # for it on Docker Hub. Building from the checkout still works.
     $appPull = $serviceImages | Where-Object { $_.Service -eq $AppService } | Select-Object -First 1
     if ($appPull -and -not $appPull.Image.EndsWith(':local')) {

@@ -32,7 +32,7 @@ First-run experience, around that work:
   * While it runs, the API port answers every request with a JSON 503
     ("starting", and the current phase) instead of refusing connections, and
     each phase is written to /run/futureagi/status.json, which the UI's
-    starting page (deploy/platform/starting.html, served by nginx on :3000
+    starting page (deploy/standalone/starting.html, served by nginx on :3000
     until the app is up) shows.
   * Once done it frees the API port, marks the boot ready for the API and the
     collector, and re-executes itself as a small waiter (no Django in memory

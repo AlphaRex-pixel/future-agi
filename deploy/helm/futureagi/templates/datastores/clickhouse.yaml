@@ -16,7 +16,7 @@ data:
   storage-policy.xml: |
     {{- .Files.Get "files/clickhouse/config.d/storage-policy.xml" | nindent 4 }}
   {{- if $bundled.lowMemory }}
-  # deploy/platform/clickhouse: small caches and merge pools, no system logs.
+  # deploy/standalone/clickhouse: small caches and merge pools, no system logs.
   zz-small-host.xml: |
     {{- .Files.Get "files/clickhouse/config.d/zz-small-host.xml" | nindent 4 }}
   users-zz-small-host.xml: |

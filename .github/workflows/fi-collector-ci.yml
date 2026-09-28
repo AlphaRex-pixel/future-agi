@@ -26,7 +26,7 @@ on:
       - ".hadolint.yaml"
       - ".github/workflows/build-image*.yml"
       - ".github/workflows/base-image-publish.yml"
-      - ".github/workflows/platform-ci.yml"
+      - ".github/workflows/standalone-ci.yml"
   push:
     branches: [dev, main]
     paths:
@@ -52,7 +52,7 @@ on:
       - ".hadolint.yaml"
       - ".github/workflows/build-image*.yml"
       - ".github/workflows/base-image-publish.yml"
-      - ".github/workflows/platform-ci.yml"
+      - ".github/workflows/standalone-ci.yml"
   merge_group:
   workflow_dispatch:
 
@@ -223,13 +223,13 @@ jobs:
       - name: Image conventions
         # Labels, users, probes and base pins of every Dockerfile, the backend
         # variants (the default tags stay feature-complete; -slim is the
-        # platform's base), the release and CI workflows and docs/images.md.
+        # standalone image's base), the release and CI workflows and docs/images.md.
         run: |
           python -m pip install --quiet PyYAML==6.0.3
           python -m unittest discover -s deploy/tests -p 'test_image_standards.py' -v
       - name: Shell syntax
         run: |
-          bash -n bin/install bin/uninstall bin/e2e deploy/platform/bin/start deploy/platform/bin/after-bootstrap
+          bash -n bin/install bin/uninstall bin/e2e deploy/standalone/bin/start deploy/standalone/bin/after-bootstrap
           sh -n futureagi/scripts/property_catalog_oss/bootstrap_clickhouse.sh
       - name: PowerShell installer syntax
         shell: pwsh

@@ -3,7 +3,7 @@
 ``python manage.py bootstrap_install`` is the bootstrap Job of the Helm chart
 (deploy/helm/futureagi: a pre-install/pre-upgrade hook, or post-install when
 the chart bundles its own datastores). It runs the steps of the Standalone
-install's deploy/platform/bin/bootstrap.py, in the same order, so every
+install's deploy/standalone/bin/bootstrap.py, in the same order, so every
 install path prepares the datastores the same way:
 
   1. wait until Postgres, ClickHouse, Redis and Temporal accept connections

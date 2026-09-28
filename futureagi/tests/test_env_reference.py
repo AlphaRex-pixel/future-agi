@@ -52,11 +52,11 @@ WORD_READER_FILES = (
     "bin/install",
     "bin/install.ps1",
     "bin/dev",
-    "deploy/platform/supervisord.conf",
+    "deploy/standalone/supervisord.conf",
     "frontend/docker-entrypoint.sh",
     "futureagi/entrypoint.sh",
 )
-WORD_READER_DIRS = ("deploy/platform/bin",)
+WORD_READER_DIRS = ("deploy/standalone/bin",)
 SKIPPED_DIRS = frozenset(
     {
         ".venv",

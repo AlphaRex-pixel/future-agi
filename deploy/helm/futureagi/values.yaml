@@ -205,7 +205,7 @@ clickhouse:
       tag: 25.3-alpine
       # -- Optional digest (`sha256:...`) pinned after the tag.
       digest: ""
-    # -- Small caches and merge pools and no system log tables (deploy/platform/clickhouse), as in the Standalone install. Turn off on nodes with 8 GiB or more for ClickHouse.
+    # -- Small caches and merge pools and no system log tables (deploy/standalone/clickhouse), as in the Standalone install. Turn off on nodes with 8 GiB or more for ClickHouse.
     lowMemory: true
     persistence:
       # -- Size of the data volume. Install-time only (see "Install-time settings" in README.md).

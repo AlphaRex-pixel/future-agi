@@ -2,7 +2,7 @@
 # what sandboxed user code can import, plus the executor's HTTP server.
 #
 # Every version below comes from futureagi/uv.lock, the resolution the backend
-# image ships. Standalone runs code evals in the platform image, on the
+# image ships. Standalone runs code evals in the standalone image, on the
 # backend's site-packages, so pinning to the same versions makes a code eval
 # return the same result there and in this nsjail executor (Standalone's
 # `sandbox` profile, Distributed and Helm). (The old

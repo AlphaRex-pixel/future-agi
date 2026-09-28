@@ -9,7 +9,7 @@
 #                  (granian --reload)
 #   frontend/**    Vite hot module replacement on http://localhost:3000
 # Needs `./bin/dev rebuild`: Python or Node dependency changes, fi-collector
-# and agentcc-gateway (Go) code, deploy/platform/**.
+# and agentcc-gateway (Go) code, deploy/standalone/**.
 #
 # Docker Desktop and Colima bind mounts deliver no inotify events for edits
 # made on the host, so both reloaders poll.
@@ -20,7 +20,7 @@
 services:
   app:
     # Built from this checkout by ./bin/dev (./bin/install --from-source).
-    image: futureagi/platform:local
+    image: futureagi/standalone:local
     pull_policy: never
     # Port 3000 belongs to the Vite dev server below; the built UI inside the
     # app container stays up for the healthcheck only.

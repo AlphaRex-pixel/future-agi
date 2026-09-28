@@ -33,8 +33,8 @@ name: build-image-multiarch
 on:
   workflow_call:
     inputs:
-      image:       { required: true, type: string }   # e.g. futureagi/platform
-      context:     { required: true, type: string }   # e.g. ./deploy/platform
+      image:       { required: true, type: string }   # e.g. futureagi/standalone
+      context:     { required: true, type: string }   # e.g. ./deploy/standalone
       dockerfile:  { required: true, type: string }
       version:     { required: true, type: string }   # vX.Y.Z or vX.Y.Z-suffix
       ref:         { required: true, type: string }   # git ref to build from
@@ -57,7 +57,7 @@ on:
       # (ad-hoc builds). off: skip.
       size-budget: { required: false, type: string, default: enforce }
       size-budget-percent: { required: false, type: number, default: 0 }   # max growth over :latest; 0 = off
-      default-install-total: { required: false, type: boolean, default: false }   # futureagi/platform only
+      default-install-total: { required: false, type: boolean, default: false }   # futureagi/standalone only
       verify-command: { required: false, type: string, default: '' }   # sh script run inside each arch's image
     outputs:
       digest:

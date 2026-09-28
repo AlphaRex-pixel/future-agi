@@ -9,7 +9,7 @@ set -euo pipefail
 #   OSS_VARIANT: the backend variant OSS_IMAGE was built as
 #   (futureagi/Dockerfile.oss IMAGE_VARIANT, docs/images.md). standard is
 #   feature-complete (uv, git, the sandbox SDKs, Debian ffmpeg, every NLTK
-#   package); slim is the lean base of futureagi/platform. Default: slim for a
+#   package); slim is the lean base of futureagi/standalone. Default: slim for a
 #   tag ending in -slim, else standard. Standalone local builds
 #   (./bin/install --from-source, ./bin/dev) are slim: pass OSS_VARIANT=slim;
 #   ./bin/install --distributed --from-source builds standard.

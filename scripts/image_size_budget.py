@@ -6,10 +6,10 @@ Sizes are the compressed layer bytes in the registry manifest, which is what
 (and from 11 to 38 services) with no such gate; this is the gate.
 
   # One freshly pushed single-architecture image, before any tag points at
-  # it (build-image-multiarch.yml on release, platform-ci.yml on PRs):
-  scripts/image_size_budget.py check --image futureagi/platform --arch amd64 \\
-      --ref docker.io/futureagi/platform@sha256:<digest> \\
-      --baseline docker.io/futureagi/platform:latest \\
+  # it (build-image-multiarch.yml on release, standalone-ci.yml on PRs):
+  scripts/image_size_budget.py check --image futureagi/standalone --arch amd64 \\
+      --ref docker.io/futureagi/standalone@sha256:<digest> \\
+      --baseline docker.io/futureagi/standalone:latest \\
       --max-growth-percent 10 --default-install
 
   # Every budgeted image of a published release, both architectures:
@@ -442,7 +442,7 @@ def main(argv: list[str] | None = None, registry=None) -> int:
         "check", help="check one pushed image for one architecture"
     )
     one.add_argument(
-        "--image", required=True, help="repository, e.g. futureagi/platform"
+        "--image", required=True, help="repository, e.g. futureagi/standalone"
     )
     one.add_argument(
         "--tag-suffix", default="", help="variant suffix; pass it as --tag-suffix=-gpu"

@@ -251,10 +251,10 @@ how to check a release are in [docs/images.md](docs/images.md#images-at-a-glance
 | | Standalone | Distributed |
 | --- | --- | --- |
 | Containers | 3 (+1 per optional profile) | 31: 22 long-running services and 9 one-shot setup jobs (`COMPOSE_PROFILES=all` adds 10) |
-| First download | about 800 MB: `futureagi/platform` + `postgres:16` + `clickhouse-server:25.3-alpine`. `ml` adds about 450 MB, `sandbox` about 185 MB | the Future AGI images, with the [default backend variant](docs/images.md#backend-variants), plus Postgres, ClickHouse, Redis, MinIO, Temporal, Kafka and PeerDB |
+| First download | about 800 MB: `futureagi/standalone` + `postgres:16` + `clickhouse-server:25.3-alpine`. `ml` adds about 450 MB, `sandbox` about 185 MB | the Future AGI images, with the [default backend variant](docs/images.md#backend-variants), plus Postgres, ClickHouse, Redis, MinIO, Temporal, Kafka and PeerDB |
 | Disk for images | about 2.5–3 GB unpacked | several GB more; keep 20 GB free |
 
-Standalone's `futureagi/platform` is built on the slim backend image
+Standalone's `futureagi/standalone` is built on the slim backend image
 (`futureagi/future-agi:<version>-slim`), while Distributed and Helm run the
 feature-complete default one (`futureagi/future-agi:<version>`); see
 [docs/images.md](docs/images.md#backend-variants). The two share no backend
@@ -287,7 +287,7 @@ application code.
 ### Standalone (default)
 
 `docker-compose.yml` runs three containers. Everything that is not a database
-lives in the single `app` container (image `futureagi/platform`), under a
+lives in the single `app` container (image `futureagi/standalone`), under a
 process supervisor: the Django API with the Temporal worker in the same
 process, a Temporal dev server, Redis, object storage, the trace collector,
 the LLM gateway, the code-eval sandbox and nginx serving the UI. Each start
@@ -487,8 +487,8 @@ git checkout dev
 with `--distributed`; see [docs/images.md](docs/images.md#backend-variants)),
 then `futureagi/frontend:local`,
 `futureagi/fi-collector:local` and `futureagi/agentcc-gateway:local`, and for
-Standalone the app image `futureagi/platform:local` from those four
-(`deploy/platform/Dockerfile`). It writes `FUTURE_AGI_VERSION=local` to `.env`
+Standalone the app image `futureagi/standalone:local` from those four
+(`deploy/standalone/Dockerfile`). It writes `FUTURE_AGI_VERSION=local` to `.env`
 (Distributed also gets `FRONTEND_VERSION`, `AGENTCC_GATEWAY_VERSION` and
 `FI_COLLECTOR_VERSION=local`) and never tries to pull those images.
 
@@ -592,7 +592,7 @@ docker build -f futureagi/Dockerfile.oss \
 In Distributed, point your compose file at the new tag (or add a `build:`
 override for the `backend` and `worker` services). Standalone's app image is
 built on top of the backend image, so rebuild it from the new tag:
-`docker build -f deploy/platform/Dockerfile --build-arg BACKEND_IMAGE=future-agi-backend:with-extras -t futureagi/platform:local deploy/platform`,
+`docker build -f deploy/standalone/Dockerfile --build-arg BACKEND_IMAGE=future-agi-backend:with-extras -t futureagi/standalone:local deploy/standalone`,
 then set `FUTURE_AGI_VERSION=local`. Extra versions install from `uv.lock`, so
 a rebuilt image gets the exact dependency resolution CI tests, not a fresh
 re-resolve.
@@ -1158,7 +1158,7 @@ lost. If it also finds a Standalone `app` container, a plain
 remove that container with the `docker compose ... rm -sf app` command the
 installer prints, then run `./bin/install` again.
 
-### `docker compose pull` failed: Docker Hub has no `futureagi/platform:…`
+### `docker compose pull` failed: Docker Hub has no `futureagi/standalone:…`
 
 The release you are installing was published before Standalone's image
 existed (or Docker Hub is unreachable). Build the images from your checkout

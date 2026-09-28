@@ -71,7 +71,7 @@ class FakeRegistry:
 CONFIG = {
     "arches": ["amd64", "arm64"],
     "images": [
-        {"image": "futureagi/platform", "budget_mb": 100},
+        {"image": "futureagi/standalone", "budget_mb": 100},
         {"image": "futureagi/serving", "budget_mb": {"amd64": 50, "arm64": 40}},
         {
             "image": "futureagi/serving",
@@ -82,7 +82,7 @@ CONFIG = {
         {"image": "futureagi/runner", "budget_mb": 10, "enforce": False},
     ],
     "default_install": {
-        "app": "futureagi/platform",
+        "app": "futureagi/standalone",
         "with": ["postgres:16"],
         "budget_mb": 150,
     },
@@ -113,11 +113,11 @@ class ScriptTests(unittest.TestCase):
         self.registry = FakeRegistry(
             {
                 # Pushed by digest for one architecture (a build leg).
-                "localhost:5000/futureagi/platform:ci": manifest(base=30, app_v2=60),
+                "localhost:5000/futureagi/standalone:ci": manifest(base=30, app_v2=60),
                 "localhost:5000/futureagi/serving:ci": manifest(torch=45),
                 "localhost:5000/futureagi/runner:ci": manifest(sdk=25),
                 # Published: an older single-arch tag and a multi-arch index.
-                "docker.io/futureagi/platform:latest": manifest(
+                "docker.io/futureagi/standalone:latest": manifest(
                     "amd64", base=30, app=50
                 ),
                 "postgres:16": postgres,
@@ -149,10 +149,10 @@ class ScriptTests(unittest.TestCase):
     def test_parse_ref(self):
         cases = {
             "postgres:16": ("docker.io", "library/postgres", "16"),
-            "futureagi/platform": ("docker.io", "futureagi/platform", "latest"),
-            "docker.io/futureagi/platform@sha256:ab": (
+            "futureagi/standalone": ("docker.io", "futureagi/standalone", "latest"),
+            "docker.io/futureagi/standalone@sha256:ab": (
                 "docker.io",
-                "futureagi/platform",
+                "futureagi/standalone",
                 "sha256:ab",
             ),
             "futureagi/future-agi:v1.42.0@sha256:ab": (
@@ -160,9 +160,9 @@ class ScriptTests(unittest.TestCase):
                 "futureagi/future-agi",
                 "sha256:ab",
             ),
-            "localhost:5000/futureagi/platform:ci": (
+            "localhost:5000/futureagi/standalone:ci": (
                 "localhost:5000",
-                "futureagi/platform",
+                "futureagi/standalone",
                 "ci",
             ),
             "ghcr.io/future-agi/future-agi/build-cache:backend-amd64": (
@@ -181,7 +181,9 @@ class ScriptTests(unittest.TestCase):
             budget.mb(budget.layers("postgres:16", "arm64", self.registry)), 69
         )
         with self.assertRaisesRegex(LookupError, "linux/amd64 image only"):
-            budget.layers("docker.io/futureagi/platform:latest", "arm64", self.registry)
+            budget.layers(
+                "docker.io/futureagi/standalone:latest", "arm64", self.registry
+            )
         # A build leg's own push is trusted to be the architecture it built.
         self.assertEqual(
             budget.mb(
@@ -197,10 +199,10 @@ class ScriptTests(unittest.TestCase):
 
     def test_within_budget_passes_and_reports_the_upgrade_delta(self):
         code, out = self.check(
-            "futureagi/platform",
+            "futureagi/standalone",
             "amd64",
             "--baseline",
-            "docker.io/futureagi/platform:latest",
+            "docker.io/futureagi/standalone:latest",
             "--max-growth-percent",
             "20",
         )
@@ -218,16 +220,16 @@ class ScriptTests(unittest.TestCase):
     def test_growth_limit_fails_unless_waived(self):
         args = (
             "--baseline",
-            "docker.io/futureagi/platform:latest",
+            "docker.io/futureagi/standalone:latest",
             "--max-growth-percent",
             "10",
         )
-        code, out = self.check("futureagi/platform", "amd64", *args)
+        code, out = self.check("futureagi/standalone", "amd64", *args)
         self.assertEqual(code, 1)
         self.assertIn("grew +12.5%", out)
         with mock.patch.object(budget, "waived", return_value=True):
             code, out = self.check(
-                "futureagi/platform", "amd64", *args, "--waiver-label", "ok"
+                "futureagi/standalone", "amd64", *args, "--waiver-label", "ok"
             )
         self.assertEqual(code, 0, out)
         self.assertIn("waived", out)
@@ -245,15 +247,15 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("no baseline", out)
 
     def test_default_install_counts_a_shared_layer_once(self):
-        # platform 90 + postgres 70, sharing the 30 MB base layer: 130 MB.
-        code, out = self.check("futureagi/platform", "amd64", "--default-install")
+        # standalone 90 + postgres 70, sharing the 30 MB base layer: 130 MB.
+        code, out = self.check("futureagi/standalone", "amd64", "--default-install")
         self.assertEqual(code, 0, out)
         self.assertIn("standalone install linux/amd64: 130.0 MB", out)
         config = dict(
             CONFIG, default_install=dict(CONFIG["default_install"], budget_mb=120)
         )
         self.budgets.write_text(json.dumps(config))
-        code, out = self.check("futureagi/platform", "amd64", "--default-install")
+        code, out = self.check("futureagi/standalone", "amd64", "--default-install")
         self.assertEqual(code, 1)
         self.assertIn("standalone install downloads 130.0 MB", out)
 
@@ -287,14 +289,14 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("budget 500 MB", out)
 
     def test_report_lists_every_image_and_enforces_only_when_asked(self):
-        self.registry.images["futureagi/platform:v9"] = manifest(
+        self.registry.images["futureagi/standalone:v9"] = manifest(
             "amd64", base=30, app=60
         )
         code, out = self.run_script("report", "--tag", "v9")
         self.assertEqual(code, 0)
         self.assertIn("futureagi/serving:v9-gpu", out)
         self.assertIn("standalone install (distinct layers)", out)
-        self.registry.images["futureagi/platform:v9"] = manifest(
+        self.registry.images["futureagi/standalone:v9"] = manifest(
             "amd64", base=30, app=200
         )
         self.assertEqual(self.run_script("report", "--tag", "v9", "--enforce")[0], 1)
@@ -338,7 +340,7 @@ class BudgetFileTests(unittest.TestCase):
     def test_every_released_image_has_a_budget(self):
         workflow = (ROOT / ".github/workflows/release-images.yml").read_text()
         released = set(re.findall(r"\bimage:\s*(futureagi/[a-z0-9-]+)", workflow))
-        self.assertIn("futureagi/platform", released)
+        self.assertIn("futureagi/standalone", released)
         for image in released:
             with self.subTest(image=image):
                 self.assertIn((image, ""), self.entries())

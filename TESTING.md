@@ -94,11 +94,11 @@ python3 scripts/image_size_budget.py report --tag v1.42.0
 # One image you pushed to a registry (sizes are compressed layers, which a
 # local `docker build` does not have until it is pushed; CI pushes to a
 # throwaway localhost:5000 registry):
-python3 scripts/image_size_budget.py check --image futureagi/platform --arch amd64 \
-  --ref localhost:5000/futureagi/platform:ci --baseline futureagi/platform:latest --default-install
+python3 scripts/image_size_budget.py check --image futureagi/standalone --arch amd64 \
+  --ref localhost:5000/futureagi/standalone:ci --baseline futureagi/standalone:latest --default-install
 ```
 
-CI runs `check` on pull requests (`platform-ci.yml`, for the images it builds) and on every release build before any tag moves (`build-image-multiarch.yml`). It also prints the upgrade delta: the bytes an existing install downloads to move from `:latest` to the new image, which stays small only while the release build cache hits. A change that needs a bigger image raises its budget in the same pull request, with the reason. `deploy/tests/test_image_size_budget.py` tests the script against a fake registry and checks that every image the compose files and `release-images.yml` use has a budget.
+CI runs `check` on pull requests (`standalone-ci.yml`, for the images it builds) and on every release build before any tag moves (`build-image-multiarch.yml`). It also prints the upgrade delta: the bytes an existing install downloads to move from `:latest` to the new image, which stays small only while the release build cache hits. A change that needs a bigger image raises its budget in the same pull request, with the reason. `deploy/tests/test_image_size_budget.py` tests the script against a fake registry and checks that every image the compose files and `release-images.yml` use has a budget.
 
 ### Images, docs and the Helm chart
 
@@ -251,7 +251,7 @@ CI covers frontend, sharded backend pytest, Go collector tests/builds, deploymen
 | `backend-ci.yml`                  | Backend/deployment PR changes, pushes to `dev`/`main`, merge queue               | Sharded pytest using the standard test dependency stack                                          |
 | `fi-collector-ci.yml`             | Collector/deployment PR changes (and Dockerfiles), pushes to `dev`/`main`, merge queue, manual | Go race tests/builds, real observation integration, Compose/bootstrap contracts, image conventions (`test_image_standards.py`) and installer syntax |
 | `e2e-ci.yml`                       | PRs into and pushes on `dev`/`main`, merge queue                                 | Builds the changed images from PR code, boots the `futureagi-e2e` stack, runs the Playwright flows |
-| `platform-ci.yml`                  | PRs into and pushes on `dev`/`main` that touch the Standalone setup or the backend | Builds the five Standalone images, the backend as its slim variant (amd64; arm64 when dependencies or Dockerfiles change), checks their size budgets, runs `./bin/install` and smoke-tests the Standalone stack |
+| `standalone-ci.yml`                | PRs into and pushes on `dev`/`main` that touch the Standalone setup or the backend | Builds the five Standalone images, the backend as its slim variant (amd64; arm64 when dependencies or Dockerfiles change), checks their size budgets, runs `./bin/install` and smoke-tests the Standalone stack |
 | `helm-ci.yml`                      | PRs into and pushes on `dev`/`main` that touch `deploy/helm/**`, the bootstrap command or the release-please files | `hack/check.sh` (lint, template, kubeconform, rendered invariants, values docs and schema); fails when the chart's `version` or `appVersion` drifts from the release manifest; then installs the chart on kind with bundled datastores and runs `hack/kind-smoke.sh`, including an in-place upgrade and a rollback |
 | `release-images.yml`               | a `vX.Y.Z` tag                                                                   | Builds every image natively for amd64 and arm64 (the backend in both variants: the default tags and `-slim`), checks each against its size budget, then tags it; publishes the pinned code-executor base when it is new |
 | `base-digest-check.yml`            | weekly, manual                                                                   | Fails when a digest-pinned base image (e.g. `python:3.11-slim-bookworm`) has moved, listing the new digest |

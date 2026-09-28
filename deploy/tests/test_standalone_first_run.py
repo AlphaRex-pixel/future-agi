@@ -1,4 +1,4 @@
-"""First-run experience of the standalone app container (deploy/platform):
+"""First-run experience of the standalone app container (deploy/standalone):
 the boot summary, the boot phase the starting page shows, the JSON 503 the
 API port answers while the bootstrap runs, the waiter that switches the UI to
 the app, and the nginx wiring that serves the starting page until then.
@@ -25,10 +25,10 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
-PLATFORM = ROOT / "deploy" / "platform"
+STANDALONE = ROOT / "deploy" / "standalone"
 
 _spec = importlib.util.spec_from_file_location(
-    "platform_bootstrap", PLATFORM / "bin" / "bootstrap.py"
+    "standalone_bootstrap", STANDALONE / "bin" / "bootstrap.py"
 )
 bootstrap = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bootstrap)
@@ -420,7 +420,7 @@ class WaitForApiTest(RunDir):
 
         executable, argv = execv.call_args.args
         self.assertEqual(argv[0], executable)
-        self.assertTrue(argv[1].endswith("deploy/platform/bin/bootstrap.py"))
+        self.assertTrue(argv[1].endswith("deploy/standalone/bin/bootstrap.py"))
         self.assertEqual(argv[2:], ["--wait-for-api", "1234.5"])
 
     def test_hand_over_waits_in_process_when_exec_fails(self):
@@ -445,7 +445,7 @@ class WaitForApiTest(RunDir):
 
         code = (
             "import importlib.util, sys;"
-            f"s = importlib.util.spec_from_file_location('b', {str(PLATFORM / 'bin' / 'bootstrap.py')!r});"
+            f"s = importlib.util.spec_from_file_location('b', {str(STANDALONE / 'bin' / 'bootstrap.py')!r});"
             "m = importlib.util.module_from_spec(s); s.loader.exec_module(m);"
             "print(any(n == 'django' or n.startswith('django.') for n in sys.modules))"
         )
@@ -460,8 +460,8 @@ class WaitForApiTest(RunDir):
 
 
 class NginxStartingPageTest(unittest.TestCase):
-    conf = (PLATFORM / "nginx.conf").read_text()
-    page = (PLATFORM / "starting.html").read_text()
+    conf = (STANDALONE / "nginx.conf").read_text()
+    page = (STANDALONE / "starting.html").read_text()
 
     def test_page_locations_answer_503_until_the_app_is_up(self):
         gate = "if (!-f /run/futureagi/ready) { return 503; }"
@@ -483,7 +483,7 @@ class NginxStartingPageTest(unittest.TestCase):
     def test_the_marker_and_status_paths_match_the_bootstrap(self):
         self.assertEqual(str(bootstrap.UI_READY), "/run/futureagi/ready")
         self.assertEqual(str(bootstrap.STATUS_FILE), "/run/futureagi/status.json")
-        start = (PLATFORM / "bin" / "start").read_text()
+        start = (STANDALONE / "bin" / "start").read_text()
         self.assertIn("rm -rf /run/futureagi", start)
         self.assertIn("install -d -m 0755 /run/futureagi", start)
         self.assertIn("export FI_BOOT_STARTED_AT", start)
@@ -513,7 +513,7 @@ class NginxStartingPageTest(unittest.TestCase):
         paths.discard("/etc/nginx/mime.types")
         self.assertIn("/etc/nginx/starting.html", paths)
 
-        dockerfile = (PLATFORM / "Dockerfile").read_text()
+        dockerfile = (STANDALONE / "Dockerfile").read_text()
         copied = set(re.findall(r"^COPY [^-\s]\S* (/etc/nginx/\S+)$", dockerfile, re.M))
         # A Windows checkout's CRLF line endings are stripped from each one.
         crlf = dockerfile.split("RUN sed -i 's/\\r$//'", 1)[1].split("&&", 1)[0]
@@ -522,7 +522,7 @@ class NginxStartingPageTest(unittest.TestCase):
             self.assertIn(path, crlf.split())
 
     def test_the_web_program_starts_first(self):
-        conf = (PLATFORM / "supervisord.conf").read_text()
+        conf = (STANDALONE / "supervisord.conf").read_text()
         web = conf.split("[program:web]", 1)[1].split("[", 1)[0]
         self.assertIn("priority=10", web)
 

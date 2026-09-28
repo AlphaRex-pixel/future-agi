@@ -1,5 +1,6 @@
 """Packaging contracts of the standalone install (docker-compose.yml plus the
-futureagi/platform image in deploy/platform) and of the renamed distributed topology.
+futureagi/standalone image in deploy/standalone) and of the renamed distributed
+topology.
 
 Files are parsed, never run: no Docker, no services. The code-executor's
 fallback runner is the exception: it runs real (tiny) subprocesses."""
@@ -21,7 +22,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-PLATFORM = ROOT / "deploy" / "platform"
+STANDALONE = ROOT / "deploy" / "standalone"
 DEFAULT_COMPOSE = ROOT / "docker-compose.yml"
 FULL_COMPOSE = ROOT / "docker-compose.distributed.yml"
 CODE_EXECUTOR = ROOT / "futureagi" / "code-executor" / "server.py"
@@ -35,7 +36,7 @@ def _compose(path: Path) -> dict:
 
 def _supervisor() -> configparser.RawConfigParser:
     parser = configparser.RawConfigParser()
-    parser.read(PLATFORM / "supervisord.conf", encoding="utf-8")
+    parser.read(STANDALONE / "supervisord.conf", encoding="utf-8")
     return parser
 
 
@@ -51,7 +52,7 @@ def _programs() -> dict[str, dict[str, str]]:
 @pytest.fixture(scope="module")
 def bootstrap():
     spec = importlib.util.spec_from_file_location(
-        "platform_bootstrap", PLATFORM / "bin" / "bootstrap.py"
+        "standalone_bootstrap", STANDALONE / "bin" / "bootstrap.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -82,7 +83,7 @@ def test_default_app_service_contract() -> None:
     app = _compose(DEFAULT_COMPOSE)["services"]["app"]
     env = app["environment"]
     # A published image only: a failed pull must never turn into a source build.
-    assert app["image"] == "futureagi/platform:${FUTURE_AGI_VERSION:-latest}"
+    assert app["image"] == "futureagi/standalone:${FUTURE_AGI_VERSION:-latest}"
     assert "build" not in app
     assert env["NO_STARTUP_DB_MUTATIONS"] == "true"
     assert env["FI_SKIP_CH25_MIGRATION"] == "1"
@@ -167,14 +168,14 @@ def test_secrets_are_mounted_where_eval_code_cannot_read_them() -> None:
         f'GOOGLE_APPLICATION_CREDENTIALS="{SECRETS_DIR}/vertex.json"'
         in (gateway["environment"])
     )
-    dockerfile = (PLATFORM / "Dockerfile").read_text(encoding="utf-8")
+    dockerfile = (STANDALONE / "Dockerfile").read_text(encoding="utf-8")
     assert f"install -d -m 0700 -o root -g root {SECRETS_DIR}" in dockerfile
-    start = (PLATFORM / "bin" / "start").read_text(encoding="utf-8")
+    start = (STANDALONE / "bin" / "start").read_text(encoding="utf-8")
     assert "chmod 700 /data " in start
 
 
 def _image_healthcheck() -> str:
-    dockerfile = (PLATFORM / "Dockerfile").read_text(encoding="utf-8")
+    dockerfile = (STANDALONE / "Dockerfile").read_text(encoding="utf-8")
     return dockerfile.split("\nHEALTHCHECK ", 1)[1].split("\nENTRYPOINT ", 1)[0]
 
 
@@ -362,19 +363,19 @@ def test_start_makes_a_webhook_secret_only_when_none_is_set(
 
 
 def test_supervisor_keeps_secrets_off_command_lines_and_out_of_tmp() -> None:
-    conf = (PLATFORM / "supervisord.conf").read_text(encoding="utf-8")
+    conf = (STANDALONE / "supervisord.conf").read_text(encoding="utf-8")
     programs = _programs()
     assert programs["redis"]["command"] == (f"redis-server {SECRETS_DIR}/redis.conf")
     for name, program in programs.items():
         assert "requirepass" not in program["command"], name
         assert "PASSWORD" not in program["command"], name
     assert "/tmp/" not in conf
-    nginx = (PLATFORM / "nginx.conf").read_text(encoding="utf-8")
+    nginx = (STANDALONE / "nginx.conf").read_text(encoding="utf-8")
     directives = [
         line for line in nginx.splitlines() if not line.lstrip().startswith("#")
     ]
     assert not [line for line in directives if "/tmp" in line]
-    start = (PLATFORM / "bin" / "start").read_text(encoding="utf-8")
+    start = (STANDALONE / "bin" / "start").read_text(encoding="utf-8")
     assert f"> {SECRETS_DIR}/redis.conf" in start
     assert "requirepass" in start and "umask 077" in start
 
@@ -390,25 +391,25 @@ def test_a_fatal_program_stops_the_container() -> None:
 
 
 def test_every_nginx_location_with_headers_repeats_the_security_headers() -> None:
-    nginx = (PLATFORM / "nginx.conf").read_text(encoding="utf-8")
+    nginx = (STANDALONE / "nginx.conf").read_text(encoding="utf-8")
     include = "include /etc/nginx/security-headers.conf;"
     locations = re.findall(r"location [^{]*\{([^}]*)\}", nginx)
     assert locations
     for body in locations:
         if "add_header" in body:
             assert include in body, body
-    headers = (PLATFORM / "security-headers.conf").read_text(encoding="utf-8")
+    headers = (STANDALONE / "security-headers.conf").read_text(encoding="utf-8")
     for header in ("X-Frame-Options", "X-Content-Type-Options", "Referrer-Policy"):
         assert f"add_header {header}" in headers
 
 
-def _dockerfile_args(dockerfile: Path = PLATFORM / "Dockerfile") -> set[str]:
+def _dockerfile_args(dockerfile: Path = STANDALONE / "Dockerfile") -> set[str]:
     text = dockerfile.read_text(encoding="utf-8")
     return set(re.findall(r"^ARG ([A-Za-z_][A-Za-z0-9_]*)", text, re.M))
 
 
-def test_platform_image_builds_from_its_own_directory() -> None:
-    dockerfile = (PLATFORM / "Dockerfile").read_text(encoding="utf-8")
+def test_standalone_image_builds_from_its_own_directory() -> None:
+    dockerfile = (STANDALONE / "Dockerfile").read_text(encoding="utf-8")
     for arg in (
         "BACKEND_IMAGE",
         "FRONTEND_IMAGE",
@@ -427,7 +428,7 @@ def test_platform_image_builds_from_its_own_directory() -> None:
     assert "useradd --system --uid 18060 " in dockerfile
     ignored = [
         line.strip().rstrip("/")
-        for line in (PLATFORM / ".dockerignore")
+        for line in (STANDALONE / ".dockerignore")
         .read_text(encoding="utf-8")
         .splitlines()
         if line.strip() and not line.startswith("#")
@@ -435,17 +436,17 @@ def test_platform_image_builds_from_its_own_directory() -> None:
     for line in dockerfile.splitlines():
         if line.startswith("COPY ") and "--from=" not in line:
             source = line.split()[1]
-            assert (PLATFORM / source).exists(), source
+            assert (STANDALONE / source).exists(), source
             assert source.rstrip("/") not in ignored, source
     for script in ("start", "after-bootstrap", "bootstrap.py"):
-        assert (PLATFORM / "bin" / script).stat().st_mode & 0o111, script
+        assert (STANDALONE / "bin" / script).stat().st_mode & 0o111, script
 
 
-def test_the_platform_image_reports_its_version_to_telemetry() -> None:
+def test_the_standalone_image_reports_its_version_to_telemetry() -> None:
     """tfc.deployment_telemetry falls back to SERVICE_VERSION when
     FUTURE_AGI_VERSION names no release. Set with the metadata, after every
     layer, so a new version never invalidates the build cache."""
-    lines = (PLATFORM / "Dockerfile").read_text(encoding="utf-8").splitlines()
+    lines = (STANDALONE / "Dockerfile").read_text(encoding="utf-8").splitlines()
     env = lines.index("ENV SERVICE_VERSION=${VERSION}")
     assert lines.index("ARG VERSION=dev") < env
     layers = [
@@ -454,12 +455,12 @@ def test_the_platform_image_reports_its_version_to_telemetry() -> None:
         if line.startswith(("RUN ", "COPY ", "ADD "))
     ]
     assert max(layers) < env
-    ignored = (PLATFORM / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    ignored = (STANDALONE / ".dockerignore").read_text(encoding="utf-8").splitlines()
     assert "**/__pycache__" in ignored
 
 
 @pytest.mark.parametrize("installer", ["install", "install.ps1"])
-def test_installer_build_args_are_declared_in_the_platform_dockerfile(
+def test_installer_build_args_are_declared_in_the_standalone_dockerfile(
     installer,
 ) -> None:
     # docker only warns about an unknown --build-arg; the image would then be
@@ -467,10 +468,10 @@ def test_installer_build_args_are_declared_in_the_platform_dockerfile(
     # as the wrong variant.
     text = (ROOT / "bin" / installer).read_text(encoding="utf-8")
     build_arg = r"--build-arg['\", ]+([A-Za-z_][A-Za-z0-9_]*)="
-    platform = re.search(
-        r"futureagi/platform:local.*?deploy/platform'?$", text, re.S | re.M
+    standalone = re.search(
+        r"futureagi/standalone:local.*?deploy/standalone'?$", text, re.S | re.M
     ).group(0)
-    passed = set(re.findall(build_arg, platform))
+    passed = set(re.findall(build_arg, standalone))
     assert {"BACKEND_IMAGE", "FI_COLLECTOR_IMAGE", "AGENTCC_GATEWAY_IMAGE"} <= passed
     assert passed <= _dockerfile_args()
     # The rest go to the backend build (futureagi/Dockerfile.oss).
@@ -480,14 +481,14 @@ def test_installer_build_args_are_declared_in_the_platform_dockerfile(
 
 
 def test_start_runs_one_off_commands_without_supervisor() -> None:
-    start = (PLATFORM / "bin" / "start").read_text(encoding="utf-8")
+    start = (STANDALONE / "bin" / "start").read_text(encoding="utf-8")
     one_off = start.index('exec "$@"')
     assert one_off < start.index("rm -f /data/.bootstrap-ok")
     assert one_off < start.index("exec supervisord")
 
 
 def _start_section(first_line: str, last_line: str) -> str:
-    start = (PLATFORM / "bin" / "start").read_text(encoding="utf-8")
+    start = (STANDALONE / "bin" / "start").read_text(encoding="utf-8")
     begin = start.index(first_line)
     return start[begin : start.index(last_line, begin) + len(last_line)]
 
@@ -587,7 +588,7 @@ def _run_start_section(section: str, env: dict[str, str], epilogue: str) -> str:
 def test_start_keeps_a_collector_without_direct_mode_running(
     tmp_path, binary, expected
 ) -> None:
-    """docker-compose.yml asks for FI_OBSERVED_CATALOG_MODE=direct; a platform
+    """docker-compose.yml asks for FI_OBSERVED_CATALOG_MODE=direct; a standalone
     image built with an older fi-collector would refuse it and never start."""
     collector = tmp_path / "fi-collector"
     collector.write_bytes(binary)
@@ -1294,7 +1295,7 @@ def test_execute_clamps_the_requested_timeout(executor, monkeypatch, timeout, ex
 def test_a_javascript_eval_without_node_says_how_to_run_it(
     executor, monkeypatch
 ) -> None:
-    """The platform image ships no Node.js; the `sandbox` profile's nsjail
+    """The standalone image ships no Node.js; the `sandbox` profile's nsjail
     executor has it (futureagi/code-executor/Dockerfile.base)."""
     monkeypatch.setattr(executor, "NODE_PATH", None)
 

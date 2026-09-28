@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Entrypoint of the futureagi/platform image.
+# Entrypoint of the futureagi/standalone image.
 #   no arguments  prepare /data and run every process under supervisord
 #   arguments     run just that command, e.g.
 #                 docker compose run --rm app python manage.py create_user

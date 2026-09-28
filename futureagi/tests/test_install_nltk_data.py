@@ -36,7 +36,7 @@ def test_backend_dockerfiles_install_pinned_nltk_data(dockerfile: Path) -> None:
 def test_slim_image_installs_the_minimal_profile() -> None:
     contents = (REPO_ROOT / "futureagi" / "Dockerfile.oss").read_text()
 
-    # The slim variant (the base of futureagi/platform) installs minimal; the
+    # The slim variant (the base of futureagi/standalone) installs minimal; the
     # default variant full (futureagi/docker/image-variant.sh).
     variant = (REPO_ROOT / "futureagi" / "docker" / "image-variant.sh").read_text()
     slim = variant.split("    slim)", 1)[1].split(";;", 1)[0]

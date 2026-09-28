@@ -376,7 +376,7 @@ value `image.tag`. The keys below are the Compose equivalents.
 
 | Key | Default | Setups | What it does |
 | --- | --- | --- | --- |
-| `FUTURE_AGI_VERSION` | `latest` | S D | Tag of the Future AGI images (`futureagi/platform` in Standalone, built on the slim backend; `futureagi/future-agi`, the default backend, in Distributed; see [backend variants](images.md#backend-variants)). Pin a release such as `v1.42.0`; `local` means images built from this checkout by `./bin/install --from-source` (needed for a development branch: published images are built from `main`). Also reported as the version in telemetry. |
+| `FUTURE_AGI_VERSION` | `latest` | S D | Tag of the Future AGI images (`futureagi/standalone` in Standalone, built on the slim backend; `futureagi/future-agi`, the default backend, in Distributed; see [backend variants](images.md#backend-variants)). Pin a release such as `v1.42.0`; `local` means images built from this checkout by `./bin/install --from-source` (needed for a development branch: published images are built from `main`). Also reported as the version in telemetry. |
 | `FRONTEND_VERSION`, `AGENTCC_GATEWAY_VERSION`, `SERVING_VERSION`, `CODE_EXECUTOR_VERSION` | `latest` | S D | Tags of the UI, gateway, embedding-server and code-executor images. Standalone uses only `SERVING_VERSION` (`ml` profile) and `CODE_EXECUTOR_VERSION` (`sandbox` profile). |
 | `FI_COLLECTOR_VERSION` | `local` (built from `./fi-collector`) | D | Tag of the trace collector image. The production overlay requires a published, reviewed tag. |
 | `SIMULATION_RUNNER_VERSION` | `latest` | D | Tag of the simulation runner image. Required by the production overlay. |

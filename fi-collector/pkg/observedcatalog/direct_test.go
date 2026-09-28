@@ -49,7 +49,7 @@ func TestDirectModeReadsTheSinkConfigurationNotKafka(t *testing.T) {
 	for _, missing := range []string{"FI_OBSERVED_CATALOG_CH_URL", "FI_OBSERVED_CATALOG_CH_DATABASE"} {
 		saved := env[missing]
 		env[missing] = ""
-		// deploy/platform/bin/start detects direct-mode support by this text.
+		// deploy/standalone/bin/start detects direct-mode support by this text.
 		if _, err := RuntimeFromEnv(RuntimeConfig{}, getenv); err == nil || !strings.Contains(err.Error(), "FI_OBSERVED_CATALOG_MODE=direct requires") {
 			t.Fatal("direct mode without its index accepted", missing, err)
 		}

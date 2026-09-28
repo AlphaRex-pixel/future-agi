@@ -321,7 +321,7 @@ if [ "$1" = "compose" ]; then
           "frontend futureagi/frontend:${frontend:-latest}" \
           "postgres postgres:16"
       else
-        set -- "app futureagi/platform:${version:-latest}" \
+        set -- "app futureagi/standalone:${version:-latest}" \
           "clickhouse clickhouse/clickhouse-server:25.3-alpine" \
           "postgres postgres:16"
       fi
@@ -1117,7 +1117,7 @@ def test_from_source_builds_every_image_in_order_and_never_pulls_them(
         "build -t futureagi/agentcc-gateway:local agentcc-gateway",
     ]
     assert builds[4].startswith(
-        "build -t futureagi/platform:local -f deploy/platform/Dockerfile"
+        "build -t futureagi/standalone:local -f deploy/standalone/Dockerfile"
     )
     for arg in (
         "BACKEND_IMAGE=futureagi/future-agi:local",
@@ -1140,7 +1140,7 @@ def test_full_from_source_tags_the_full_stacks_own_images_local(tmp_path: Path) 
     assert code == 0, stderr
     builds = _lines(state / "build.log")
     assert len(builds) == 4
-    assert not any("platform" in build for build in builds)
+    assert not any("standalone" in build for build in builds)
     # The standard backend variant, as the published futureagi/future-agi.
     assert builds[0] == (
         "build -t futureagi/future-agi:local -f futureagi/Dockerfile.oss futureagi"
@@ -1158,7 +1158,7 @@ def test_full_from_source_tags_the_full_stacks_own_images_local(tmp_path: Path) 
 
 def test_a_local_tag_without_its_image_points_at_from_source(tmp_path: Path) -> None:
     script, environment, _ = _installer_sandbox(
-        tmp_path, CI="1", FAGI_STUB_MISSING_IMAGES="futureagi/platform:local"
+        tmp_path, CI="1", FAGI_STUB_MISSING_IMAGES="futureagi/standalone:local"
     )
     (script.parents[1] / ".env").write_text(
         SANDBOX_ENV_EXAMPLE + "FUTURE_AGI_VERSION=local\n", encoding="utf-8"
@@ -1167,7 +1167,7 @@ def test_a_local_tag_without_its_image_points_at_from_source(tmp_path: Path) -> 
     code, _, stderr = _run_installer(script, environment, "--skip-user-creation")
 
     assert code == 1
-    assert "futureagi/platform:local is not built yet" in stderr
+    assert "futureagi/standalone:local is not built yet" in stderr
     assert "--from-source" in stderr
 
 
@@ -1305,7 +1305,7 @@ def test_an_upgrade_names_the_retired_rabbitmq_container(tmp_path: Path) -> None
 @pytest.mark.parametrize(
     ("manifest", "expected"),
     [
-        ("missing", "Docker Hub has no futureagi/platform:latest"),
+        ("missing", "Docker Hub has no futureagi/standalone:latest"),
         ("found", "Docker Hub's pull rate limit"),
     ],
 )
@@ -1614,27 +1614,27 @@ def test_the_first_trace_goes_to_the_collector_url_the_app_shows(
     assert f"     Traces       {url}  (OTLP/HTTP" in stdout
 
 
-def _platform_build(text: str) -> str:
-    """The installer's `docker build` of futureagi/platform, through its
-    context (deploy/platform)."""
+def _standalone_build(text: str) -> str:
+    """The installer's `docker build` of futureagi/standalone, through its
+    context (deploy/standalone)."""
     found = re.search(
-        r"futureagi/platform:local.*?deploy/platform'?$", text, re.S | re.M
+        r"futureagi/standalone:local.*?deploy/standalone'?$", text, re.S | re.M
     )
-    assert found, "no futureagi/platform build"
+    assert found, "no futureagi/standalone build"
     return found.group(0)
 
 
-def test_installers_pass_only_build_args_the_platform_image_declares() -> None:
-    dockerfile = _read(ROOT / "deploy" / "platform" / "Dockerfile")
+def test_installers_pass_only_build_args_the_standalone_image_declares() -> None:
+    dockerfile = _read(ROOT / "deploy" / "standalone" / "Dockerfile")
     declared = set(re.findall(r"^ARG ([A-Z0-9_]+)", dockerfile, re.MULTILINE))
     shell_text, powershell_text = _read(INSTALL_SH), _read(INSTALL_PS1)
-    shell = set(re.findall(r"--build-arg ([A-Z0-9_]+)=", _platform_build(shell_text)))
+    shell = set(re.findall(r"--build-arg ([A-Z0-9_]+)=", _standalone_build(shell_text)))
     powershell = set(
-        re.findall(r"'--build-arg', '([A-Z0-9_]+)=", _platform_build(powershell_text))
+        re.findall(r"'--build-arg', '([A-Z0-9_]+)=", _standalone_build(powershell_text))
     )
 
     # Docker ignores an undeclared build arg with only a warning, which would
-    # silently build the platform image from published components.
+    # silently build the standalone image from published components.
     assert len(shell) == 4
     assert shell == powershell
     assert shell <= declared
@@ -1667,7 +1667,7 @@ def test_an_emulated_app_image_is_called_out_before_start(tmp_path: Path) -> Non
 
     assert code == 0, stderr
     assert (
-        "futureagi/platform:latest is built for amd64 but Docker runs on arm64"
+        "futureagi/standalone:latest is built for amd64 but Docker runs on arm64"
         in stderr
     )
     assert "--from-source builds native images" in stderr
@@ -1702,7 +1702,7 @@ printf '%s\n' "$*" >> "$FAGI_STUB_STATE/calls"
 case " $* " in
   *" config --images "*)
     # This project's resolved stack; builds from source carry the local tag.
-    printf 'futureagi/platform:%s\npostgres:16\nclickhouse/clickhouse-server:25.3-alpine\n' \
+    printf 'futureagi/standalone:%s\npostgres:16\nclickhouse/clickhouse-server:25.3-alpine\n' \
       "$FAGI_STUB_TAG"
     exit 0 ;;
 esac
@@ -1713,7 +1713,7 @@ case "$1 $2" in
   "images --filter")
     case "$3" in
       reference=futureagi/*)
-        printf 'futureagi/platform:latest\nfutureagi/platform:local\n'
+        printf 'futureagi/standalone:latest\nfutureagi/standalone:local\n'
         printf 'futureagi/future-agi:local\nfutureagi/future-agi:v1.2.0\n<none>:<none>\n' ;;
     esac ;;
 esac
@@ -1786,14 +1786,14 @@ def test_uninstall_purges_its_own_project_in_either_stack(
     if tag == "latest":
         # Only the released images this project uses; never another
         # release, another project's images or third-party ones.
-        assert removed == ["rmi futureagi/platform:latest"]
+        assert removed == ["rmi futureagi/standalone:latest"]
         assert "built by --from-source" not in output
     else:
         # Builds from source share their tag across checkouts: -y keeps them.
         assert removed == []
         assert "Kept (-y never removes them)" in output
         assert (
-            "docker rmi futureagi/future-agi:local futureagi/platform:local" in output
+            "docker rmi futureagi/future-agi:local futureagi/standalone:local" in output
         )
     assert not (repo / ".env").exists()
 

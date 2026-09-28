@@ -43,7 +43,7 @@ cd future-agi
 ```
 
 The first run builds every image from your checkout (backend, frontend,
-fi-collector, agentcc-gateway, then the Standalone `futureagi/platform:local`
+fi-collector, agentcc-gateway, then the Standalone `futureagi/standalone:local`
 image from those four) and installs through `./bin/install --from-source`. The
 backend is its slim variant, the one a published Standalone install runs
 ([docs/images.md](images.md#backend-variants)). The installer writes `.env`
@@ -79,10 +79,10 @@ storage, the collector and the gateway) runs as in a normal Standalone install.
 | Node dependencies (`frontend/package.json`, `frontend/yarn.lock`) | `./bin/dev rebuild frontend` |
 | `fi-collector/**` (Go) | `./bin/dev rebuild collector` |
 | `agentcc-gateway/**` (Go) | `./bin/dev rebuild gateway` |
-| `deploy/platform/**` (supervisord, nginx, `bin/start`, `bootstrap.py`) | `./bin/dev rebuild` |
+| `deploy/standalone/**` (supervisord, nginx, `bin/start`, `bootstrap.py`) | `./bin/dev rebuild` |
 | `docker-compose.yml`, `docker-compose.dev.yml` | Run `./bin/dev` again. |
 
-In Standalone, every rebuild target also rebuilds the `futureagi/platform:local`
+In Standalone, every rebuild target also rebuilds the `futureagi/standalone:local`
 image on top of what it built; images that did not change come from Docker's
 build cache. `./bin/dev rebuild` with no target rebuilds everything, and the
 backend is always the slim variant, as on the first run.
@@ -286,7 +286,7 @@ replaces the `node_modules` volume. Distributed keeps `node_modules` in an
 anonymous volume: after `./bin/dev --distributed rebuild`, add
 `docker compose -f docker-compose.distributed.yml -f docker-compose.distributed.dev.yml up -d --renew-anon-volumes frontend`.
 
-**`futureagi/platform:local` or `futureagi/frontend:dev` not found.** Development
+**`futureagi/standalone:local` or `futureagi/frontend:dev` not found.** Development
 images are built, never pulled. Run `./bin/dev rebuild`.
 
 **The first build runs out of memory or is killed.** Give Docker 8 GB (see

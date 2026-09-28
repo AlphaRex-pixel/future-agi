@@ -10,8 +10,8 @@
 #       docker-compose.distributed.yml, Helm and the simulation runner, and
 #       the base of the EE and cloud images, which `uv pip install` on top.
 #   IMAGE_VARIANT=slim  the lean build: futureagi/future-agi:<version>-slim,
-#       the base of the Standalone install's futureagi/platform image
-#       (deploy/platform/Dockerfile). Every byte removed there is removed
+#       the base of the Standalone install's futureagi/standalone image
+#       (deploy/standalone/Dockerfile). Every byte removed there is removed
 #       from what a Standalone install downloads.
 #
 # Per-feature build args. Empty (the default) takes the variant's value; a
@@ -314,7 +314,7 @@ ARG REVISION=unknown
 ARG CREATED=""
 # Deployment telemetry reports it when FUTURE_AGI_VERSION names no release
 # (tfc/deployment_telemetry/config.py). Images built FROM this one inherit
-# it: the simulation runner (same release) and futureagi/platform, which sets
+# it: the simulation runner (same release) and futureagi/standalone, which sets
 # its own.
 ENV SERVICE_VERSION=${VERSION}
 LABEL org.opencontainers.image.title="Future AGI backend" \

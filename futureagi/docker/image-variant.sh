@@ -9,7 +9,7 @@
 #            for Distributed, Helm, the simulation runner and the EE and cloud
 #            images, which `uv pip install` on top of it.
 #   slim     the lean build, published as futureagi/future-agi:<version>-slim:
-#            the base of futureagi/platform (Standalone).
+#            the base of futureagi/standalone (Standalone).
 #
 # EXTRAS=none installs no optional group. The FFMPEG_FLAVOR defaults must
 # match the ffmpeg-standard and ffmpeg-slim stages of Dockerfile.oss, which
