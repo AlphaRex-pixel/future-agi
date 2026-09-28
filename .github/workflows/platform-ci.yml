@@ -41,6 +41,7 @@ on:
     paths:
       - "docker-compose.yml"
       - "deploy/platform/**"
+      - "deploy/tests/**"
       - "bin/install*"
       - ".env.example"
       - "futureagi/**"
@@ -124,6 +125,7 @@ jobs:
             install:
               - 'docker-compose.yml'
               - 'deploy/platform/**'
+              - 'deploy/tests/**'
               - 'bin/install*'
               - '.env.example'
               - 'futureagi/**'
@@ -159,6 +161,25 @@ jobs:
           else
             echo 'arches=["amd64"]' >> "$GITHUB_OUTPUT"
           fi
+
+  # The Standalone first boot (deploy/platform/bin/bootstrap.py and its
+  # starting page) and the production overlay's checks, with fakes for the
+  # backend and the datastores: standard library only, seconds to run.
+  platform-unit:
+    name: standalone bootstrap unit tests
+    needs: changes
+    if: needs.changes.outputs.install == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: deploy/tests (platform bootstrap, first run, production setup)
+        run: |
+          python -m unittest discover -s deploy/tests -p 'test_platform_*.py' -v
+          python -m unittest discover -s deploy/tests -p 'test_production_setup.py' -v
 
   default-install:
     name: standalone install (${{ matrix.arch }})
