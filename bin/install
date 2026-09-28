@@ -66,6 +66,8 @@ trap 'on_err $LINENO' ERR
 # ---------------- log file (gitignored as /install-*.log) ----------------
 # Opened before arg parsing so helpers (esp. die) can append from any point.
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/env.sh
+. "$ROOT/bin/lib/env.sh"
 LOG_FILE="$ROOT/install-$(date +%Y%m%d-%H%M%S).log"
 exec 3>>"$LOG_FILE"
 printf "# Future AGI install log — %s\n# host: %s, uname: %s\n\n" \
@@ -186,33 +188,6 @@ else
   fi
 fi
 
-# Portable in-place sed (BSD on mac, GNU on linux).
-sed_inplace() {
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    sed -i '' "$@"
-  else
-    sed -i "$@"
-  fi
-}
-
-# Value of var in .env, or the default when unset/empty.
-env_value() {
-  local var="$1" default="$2"
-  local v
-  v=$(grep -E "^${var}=" .env | tail -1 | cut -d= -f2- || true)
-  printf '%s' "${v:-$default}"
-}
-
-# Set var=value in .env (replace if present, append otherwise).
-set_env_var() {
-  local var="$1" val="$2"
-  if grep -Eq "^${var}=" .env; then
-    sed_inplace -E "s|^${var}=.*|${var}=${val}|" .env
-  else
-    printf "%s=%s\n" "$var" "$val" >> .env
-  fi
-}
-
 gen_secret() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 32
@@ -287,7 +262,9 @@ next_free_project_name() {
 
 # Set / replace COMPOSE_PROJECT_NAME in .env. Compose reads this and it
 # overrides the `name:` in the compose file, so volumes / containers /
-# networks become ${name}_*, ${name}-N, ${name}_default.
+# networks become ${name}_*, ${name}-N, ${name}_default. Exported too, for
+# this run's compose commands: a value exported in the shell would win over
+# .env.
 set_project_name_in_env() {
   local name="$1"
   if grep -Eq '^COMPOSE_PROJECT_NAME=' .env; then
@@ -295,14 +272,14 @@ set_project_name_in_env() {
   else
     printf "\nCOMPOSE_PROJECT_NAME=%s\n" "$name" >> .env
   fi
+  export COMPOSE_PROJECT_NAME="$name"
 }
 
 # ---------------- this project's existing state ----------------
 # Compose names volumes <project>_<volume> and labels containers with their
 # project and service, so both show whether this project already holds an
 # install, and of which stack.
-project_name=$(grep -E '^COMPOSE_PROJECT_NAME=' .env | tail -1 | cut -d= -f2- || true)
-project_name="${project_name:-futureagi}"
+project_name=$(compose_project_name)
 declare -a PERSISTENT_VOLUME_SUFFIXES=(
   app-data
   postgres-data
@@ -1148,8 +1125,7 @@ fi
 
 bounded_env_int() {
   local var="$1" default="$2" min="$3" max="$4" value
-  value=$(grep -E "^${var}=" .env | tail -1 | cut -d= -f2- || true)
-  value="${value:-$default}"
+  value=$(env_value "$var" "$default")
   if [[ ! "$value" =~ ^[0-9]+$ ]] || (( value < min || value > max )); then
     die "$var must be an integer in [$min,$max] (got '$value')"
   fi

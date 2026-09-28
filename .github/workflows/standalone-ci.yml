@@ -43,6 +43,7 @@ on:
       - "deploy/standalone/**"
       - "deploy/tests/**"
       - "bin/install*"
+      - "bin/lib/**"
       - ".env.example"
       - "futureagi/**"
       - "frontend/Dockerfile"
@@ -95,6 +96,7 @@ jobs:
               - 'deploy/standalone/**'
               - 'deploy/tests/**'
               - 'bin/install*'
+              - 'bin/lib/**'
               - '.env.example'
               - 'futureagi/**'
               - 'frontend/Dockerfile'

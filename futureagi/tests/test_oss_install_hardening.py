@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_FILE = ROOT / "docker-compose.distributed.yml"
 INSTALL_SH = ROOT / "bin" / "install"
 INSTALL_PS1 = ROOT / "bin" / "install.ps1"
+# Sourced by bin/install, bin/uninstall and bin/dev.
+INSTALL_LIB = ROOT / "bin" / "lib"
 BACKFILL_SH = ROOT / "bin" / "property-catalog-backfill"
 BACKFILL_PS1 = ROOT / "bin" / "property-catalog-backfill.ps1"
 
@@ -505,6 +507,7 @@ def _installer_sandbox(
     script = repo / "bin" / "install"
     script.write_bytes(INSTALL_SH.read_bytes())
     script.chmod(0o755)
+    shutil.copytree(INSTALL_LIB, repo / "bin" / "lib")
     (repo / ".env.example").write_text(SANDBOX_ENV_EXAMPLE, encoding="utf-8")
     # Only their presence is checked; the stub docker answers `compose config`.
     for compose in ("docker-compose.yml", "docker-compose.distributed.yml"):
@@ -1286,6 +1289,28 @@ def test_placeholders_next_to_existing_volumes_are_never_replaced(
     assert "PG_PASSWORD" not in values
 
 
+def test_a_project_name_exported_in_the_shell_wins_over_env(tmp_path: Path) -> None:
+    """As in Compose, which the installer's compose commands run under: the
+    installer inspects that project's volumes, not .env's."""
+    script, environment, _ = _installer_sandbox(
+        tmp_path,
+        CI="1",
+        COMPOSE_PROJECT_NAME="custom",
+        FAGI_STUB_VOLUMES="custom_app-data custom_postgres-data",
+    )
+    repo = script.parents[1]
+    (repo / ".env").write_text(
+        SANDBOX_ENV_EXAMPLE + "COMPOSE_PROJECT_NAME=futureagi\n", encoding="utf-8"
+    )
+
+    code, _, stderr = _run_installer(script, environment, "--no-up")
+
+    assert code == 0, stderr
+    # An existing install: its secrets are never generated.
+    assert "PG_PASSWORD" not in _env_values(repo)
+    assert "still use the defaults published in this repository" in stderr
+
+
 def test_a_new_instance_next_to_existing_volumes_gets_fresh_secrets(
     tmp_path: Path,
 ) -> None:
@@ -1841,6 +1866,7 @@ def test_uninstall_purges_its_own_project_in_either_stack(
     (repo / "bin").mkdir(parents=True)
     script = repo / "bin" / "uninstall"
     script.write_bytes(UNINSTALL_SH.read_bytes())
+    shutil.copytree(INSTALL_LIB, repo / "bin" / "lib")
     (repo / ".env").write_text(
         f"COMPOSE_PROJECT_NAME=futureagi-2\nCOMPOSE_FILE={compose_file}\n",
         encoding="utf-8",

@@ -298,7 +298,9 @@ function Show-TelemetryNotice {
 # install, and of which stack. Deletion happens only behind the explicit
 # -WipeVolumes switch and targets exact Compose volume names; no wildcard or
 # broad Docker cleanup command is used.
-$projectName = Get-EnvValue 'COMPOSE_PROJECT_NAME'
+# Resolved as Compose does: the environment, then .env, then `name:`.
+$projectName = $env:COMPOSE_PROJECT_NAME
+if (-not $projectName) { $projectName = Get-EnvValue 'COMPOSE_PROJECT_NAME' }
 if (-not $projectName) { $projectName = 'futureagi' }
 $persistentVolumeSuffixes = @(
   'app-data',

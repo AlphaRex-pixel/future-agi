@@ -56,6 +56,7 @@ jobs:
               - 'docker-compose.distributed.dev.yml'
               - 'deploy/**'
               - 'bin/install*'
+              - 'bin/lib/**'
               - 'bin/uninstall'
               - '.github/workflows/e2e-ci.yml'
       - id: always

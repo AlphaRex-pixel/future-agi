@@ -42,6 +42,7 @@ jobs:
               - 'docker-compose*.yml'
               - 'fi-collector/Dockerfile'
               - 'bin/install*'
+              - 'bin/lib/**'
               - 'bin/uninstall'
               - 'deploy/**'
               - '.github/workflows/backend-ci.yml'

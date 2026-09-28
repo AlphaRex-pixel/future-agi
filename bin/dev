@@ -54,9 +54,9 @@ CMD="${1:-up}"
 docker info >/dev/null 2>&1 || die "Docker is not running. Start Docker Desktop or Colima and re-run."
 docker compose version >/dev/null 2>&1 || die "docker compose v2 is required."
 
-env_value() { [[ -f .env ]] && sed -n "s/^$1=//p" .env | tail -1 || true; }
-PROJECT="${COMPOSE_PROJECT_NAME:-$(env_value COMPOSE_PROJECT_NAME)}"
-PROJECT="${PROJECT:-futureagi}"
+# shellcheck source=lib/env.sh
+. "$ROOT/bin/lib/env.sh"
+PROJECT=$(compose_project_name)
 
 if [[ "$MODE" == distributed ]]; then
   FILES=(-f docker-compose.distributed.yml -f docker-compose.distributed.dev.yml)

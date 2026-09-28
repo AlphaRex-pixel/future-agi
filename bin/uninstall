@@ -62,15 +62,10 @@ done
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
+# shellcheck source=lib/env.sh
+. "$ROOT/bin/lib/env.sh"
 
-# Same precedence as Compose: the environment, then .env, then the compose
-# files' `name:`. bin/install --new-instance writes futureagi-2, -3, … here.
-env_value() {
-  [[ -f .env ]] || return 0
-  grep -E "^$1=" .env | tail -1 | cut -d= -f2- || true
-}
-PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(env_value COMPOSE_PROJECT_NAME)}"
-PROJECT_NAME="${PROJECT_NAME:-futureagi}"
+PROJECT_NAME=$(compose_project_name)
 if [[ "${COMPOSE_FILE:-$(env_value COMPOSE_FILE)}" == *docker-compose.distributed.yml* ]]; then
   STACK="distributed stack (docker-compose.distributed.yml)"
 else
