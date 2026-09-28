@@ -10,9 +10,14 @@ STARTUP_SAFE_MANAGEMENT_COMMANDS = frozenset(
     {
         "check",
         "collectstatic",
-        # First-account bootstrap for self-hosted installs; AppConfig.ready
-        # stays mutation-free.
+        # First-account bootstrap and account recovery that self-hosted
+        # installs tell an operator to run ("Forgot password" without email
+        # names reset_password); each writes only the account it is given,
+        # and AppConfig.ready stays mutation-free.
+        "changepassword",
         "create_user",
+        "createsuperuser",
+        "reset_password",
         "generate_swagger",
         "grpcrunaioserver",
         "runserver",

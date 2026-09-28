@@ -213,13 +213,11 @@ warnings and change nothing else.
 - The last registration payload is kept in your own database:
 
   ```bash
-  # Standalone
-  docker compose exec app python manage.py shell -c \
-    "from tfc.deployment_telemetry.models import DeploymentTelemetryState as S; print(S.objects.values('instance_id', 'registration_kind', 'registered_at', 'registration_metadata', 'last_heartbeat_at').first())"
+  docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -x -c \
+    "SELECT instance_id, registration_kind, registered_at, registration_metadata, last_heartbeat_at FROM deployment_telemetry_state"'
   ```
 
-  For Distributed, run the same command with
-  `docker compose -f docker-compose.distributed.yml exec backend`.
+  This works for Standalone and Distributed alike.
 - Heartbeats that are waiting to be delivered are plain JSON files in
   `FUTURE_AGI_TELEMETRY_BUFFER_DIR`.
 
