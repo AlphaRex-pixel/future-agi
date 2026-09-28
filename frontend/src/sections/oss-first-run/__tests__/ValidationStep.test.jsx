@@ -41,14 +41,14 @@ const STORAGE_DOWN = check({
 function renderStep(
   mode = LAUNCH_MODE.LIVE,
   onSwitchMode = vi.fn(),
-  { authenticated = false } = {},
+  { authenticated = false, onContinue = vi.fn() } = {},
 ) {
   render(
     <ThemeProvider theme={theme}>
       <ValidationStep
         mode={mode}
         onSwitchMode={onSwitchMode}
-        onContinue={vi.fn()}
+        onContinue={onContinue}
         authenticated={authenticated}
       />
     </ThemeProvider>,
@@ -139,24 +139,15 @@ describe("ValidationStep", () => {
     );
   });
 
-  it("names the setup that is running", async () => {
-    mockData = { ...mockData, setup: "standalone" };
+  it.each([
+    ["standalone", "Standalone setup.", /one app container/],
+    ["distributed", "Distributed setup.", /in its own container/],
+    ["helm", "Helm setup.", /on Kubernetes/],
+  ])("names the setup that is running (%s)", async (setup, title, phrase) => {
+    mockData = { ...mockData, setup };
     renderStep();
-    expect(await screen.findByText("Standalone setup.")).toBeInTheDocument();
-    expect(screen.getByText(/one app container/)).toBeInTheDocument();
-  });
-
-  it("names the distributed setup too", async () => {
-    mockData = { ...mockData, setup: "distributed" };
-    renderStep();
-    expect(await screen.findByText("Distributed setup.")).toBeInTheDocument();
-  });
-
-  it("names the Helm setup too", async () => {
-    mockData = { ...mockData, setup: "helm" };
-    renderStep();
-    expect(await screen.findByText("Helm setup.")).toBeInTheDocument();
-    expect(screen.getByText(/on Kubernetes/)).toBeInTheDocument();
+    expect(await screen.findByText(title)).toBeInTheDocument();
+    expect(screen.getByText(phrase)).toBeInTheDocument();
   });
 
   it("says nothing about the setup when an older server does not report it", async () => {
@@ -243,16 +234,7 @@ describe("ValidationStep", () => {
       checks: [check()],
     };
     const onContinue = vi.fn();
-    render(
-      <ThemeProvider theme={theme}>
-        <ValidationStep
-          mode={LAUNCH_MODE.LIVE}
-          onSwitchMode={vi.fn()}
-          onContinue={onContinue}
-        />
-      </ThemeProvider>,
-    );
-
+    renderStep(LAUNCH_MODE.LIVE, vi.fn(), { onContinue });
     expect(
       await screen.findByText(/already has an account: sign in with it/),
     ).toBeInTheDocument();
