@@ -753,7 +753,7 @@ Secret named by that group's `existingSecret`
 ([`examples/external-secrets.yaml`](examples/external-secrets.yaml), with
 Vault). They are pre-install hooks, so the Secrets exist before the
 bootstrap job, with `creationPolicy: Orphan`, so they survive upgrades and
-uninstalls. Seed the six application keys in the store once.
+uninstalls. Seed the seven application keys in the store once.
 
 **Rotation.** Pods read Secrets at start. `reloader.enabled` annotates every
 Deployment for Stakater Reloader, which restarts them when a Secret they use
@@ -913,12 +913,13 @@ OCIRepository with a HelmRelease for the published chart.
 
 - **Argo CD** renders the chart with `helm template`, so Helm's `lookup`
   returns nothing and generated secrets would change on every sync. Set
-  `secrets.existingSecret`, and give bundled datastores explicit passwords
-  (`postgres.password`, ...) or existing Secrets. Register
-  `ghcr.io/future-agi/charts` as a Helm repository with `enableOCI: "true"`
-  if your version asks for it. Argo CD maps the chart's hooks to sync
-  phases: the Secret and the bootstrap job to PreSync (PostSync for the job
-  when a datastore is bundled).
+  `secrets.existingSecret` to a Secret with all seven application keys
+  ([Secrets](#secrets)), `AGENTCC_WEBHOOK_SECRET` included, and give bundled
+  datastores explicit passwords (`postgres.password`, ...) or existing
+  Secrets. Register `ghcr.io/future-agi/charts` as a Helm repository with
+  `enableOCI: "true"` if your version asks for it. Argo CD maps the chart's
+  hooks to sync phases: the Secret and the bootstrap job to PreSync
+  (PostSync for the job when a datastore is bundled).
 - **Flux**'s helm-controller runs Helm against the live cluster, so `lookup`
   works and generated secrets stay put; `existingSecret` values are still
   the cleaner choice for GitOps. The OCIRepository verifies the chart's
