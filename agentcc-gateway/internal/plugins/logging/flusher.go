@@ -244,21 +244,25 @@ func (f *LogFlusher) flush() {
 	body, err := encodeLogs(records)
 	if err != nil {
 		slog.Error("log flusher: marshal failed", "error", err, "count", len(records))
-		f.dropped(len(records))
+		f.countLost(len(records))
 		return
 	}
 
 	status, err := f.post(f.sendCtx, body)
-	if err != nil {
-		if f.sendCtx.Err() != nil {
-			// Close's deadline passed during the send; Close counts these.
-			f.reEnqueue(records)
-			return
+	if err != nil && f.sendCtx.Err() != nil {
+		// Close's deadline passed during the send; Close counts these.
+		f.reEnqueue(records)
+		return
+	}
+	if retryable(status, err) {
+		cause := slog.Any("error", err)
+		if err == nil {
+			cause = slog.Int("status", status)
 		}
 		f.consecutiveFails++
 		if f.consecutiveFails > maxFlushRetries && !f.closing() {
 			slog.Error("log flusher: max retries exceeded, dropping records",
-				"error", err,
+				cause,
 				"count", len(records),
 				"consecutive_failures", f.consecutiveFails,
 			)
@@ -266,27 +270,7 @@ func (f *LogFlusher) flush() {
 			return
 		}
 		slog.Error("log flusher: send failed, re-enqueuing records",
-			"error", err,
-			"count", len(records),
-			"retry", f.consecutiveFails,
-		)
-		f.reEnqueue(records)
-		return
-	}
-
-	if status >= 500 {
-		f.consecutiveFails++
-		if f.consecutiveFails > maxFlushRetries && !f.closing() {
-			slog.Error("log flusher: max retries exceeded after server errors, dropping records",
-				"status", status,
-				"count", len(records),
-				"consecutive_failures", f.consecutiveFails,
-			)
-			f.consecutiveFails = 0
-			return
-		}
-		slog.Error("log flusher: webhook returned server error, re-enqueuing records",
-			"status", status,
+			cause,
 			"count", len(records),
 			"retry", f.consecutiveFails,
 		)
@@ -300,7 +284,7 @@ func (f *LogFlusher) flush() {
 			"count", len(records),
 		)
 		f.consecutiveFails = 0
-		f.dropped(len(records))
+		f.countLost(len(records))
 		return
 	}
 
@@ -379,18 +363,15 @@ func (f *LogFlusher) deliver(ctx context.Context, records []TraceRecord) error {
 			}
 			return err
 		}
-		var status int
-		status, err = f.post(ctx, body)
-		if err == nil {
-			if status < 400 {
-				return nil
-			}
-			err = fmt.Errorf("webhook returned status %d", status)
-			if status < 500 {
-				return err // a client error: retrying won't help
-			}
+		status, postErr := f.post(ctx, body)
+		if postErr == nil && status < 400 {
+			return nil
 		}
-		if attempt >= finalFlushAttempts {
+		err = postErr
+		if err == nil {
+			err = fmt.Errorf("webhook returned status %d", status)
+		}
+		if !retryable(status, postErr) || attempt >= finalFlushAttempts {
 			return err
 		}
 		select {
@@ -399,6 +380,13 @@ func (f *LogFlusher) deliver(ctx context.Context, records []TraceRecord) error {
 			return err
 		}
 	}
+}
+
+// retryable reports whether a send that returned status and err may succeed
+// if tried again: it failed before the webhook answered, or the webhook had a
+// server error. A client error will not change on a retry.
+func retryable(status int, err error) bool {
+	return err != nil || status >= 500
 }
 
 // backendGone reports whether err says there is no backend to send to: it
@@ -417,9 +405,9 @@ func (f *LogFlusher) closing() bool {
 	return f.closed
 }
 
-// dropped notes that a flush dropped n records for good. Once Close has
+// countLost notes that a flush dropped n records for good. Once Close has
 // begun, Close reports them as undelivered.
-func (f *LogFlusher) dropped(n int) {
+func (f *LogFlusher) countLost(n int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.closed {

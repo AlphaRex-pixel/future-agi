@@ -203,6 +203,48 @@ func TestLogFlusher_StaysBoundedWhileASendIsSlow(t *testing.T) {
 	}
 }
 
+// A flush keeps a batch for the next flush after a failed send or a server
+// error, until the webhook has failed maxFlushRetries times in a row, and
+// drops a batch that met a client error at once.
+func TestLogFlusherFlush_RetriesThenDrops(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		wantSends int
+	}{
+		{"after a dropped connection", dropConnection, maxFlushRetries + 1},
+		{"after a server error", http.StatusServiceUnavailable, maxFlushRetries + 1},
+		{"after a client error", http.StatusBadRequest, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, restore := installCapturingLogger()
+			defer restore()
+			wh := newFakeLogWebhook(t, func(int, *http.Request) int { return tc.status })
+			f := NewLogFlusher(wh.URL, "secret", time.Hour, 100)
+			enqueue(f, "req-1", "req-2")
+			buffered := func() int {
+				f.mu.Lock()
+				defer f.mu.Unlock()
+				return len(f.buffer)
+			}
+
+			for sends := 1; sends <= 2*maxFlushRetries; sends++ {
+				f.flush()
+				if buffered() == 0 {
+					if sends != tc.wantSends {
+						t.Errorf("dropped the batch after %d sends, want %d", sends, tc.wantSends)
+					}
+					if f.consecutiveFails != 0 {
+						t.Errorf("consecutive failures = %d after the drop, want 0", f.consecutiveFails)
+					}
+					return
+				}
+			}
+			t.Errorf("still holds the batch after %d sends, want it dropped after %d", 2*maxFlushRetries, tc.wantSends)
+		})
+	}
+}
+
 // A backend that is restarting when the gateway stops refuses the first send;
 // the records buffered then are delivered on the retry, once each.
 func TestPluginClose_DeliversBufferedLogsWhenTheWebhookComesBack(t *testing.T) {
