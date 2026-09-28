@@ -112,14 +112,18 @@ _RAW_SCAN_ROWS_PER_MS = 1_796
 # work, so this errs toward scheduling), an upper bound of every measured
 # window, and it is coupled to that granule cap and to
 # DASHBOARD_TRACE_READ_MAX_THREADS: re-measure if either moves.
+# Production, read-only on 2026-09-28 (largest voice project, 7/30/90 days,
+# 82/203/420 granules): 3.7-7.9 ms a granule, so this price is 7-15 times
+# production's. It errs toward the worker; recalibrate it on production.
 _RAW_LOG_GRANULE_SCAN_MS = 56
 
 # The eval and annotation charts carry the same toggle in a different
 # statement: ``latest_span_membership_source_sql`` over ``spans FINAL`` at
 # EXACT_GRAPH_READ_SETTINGS (FILTER_SELECTOR_MAX_THREADS = 1 worker), which
 # collects every trace in the window whose live root is a simulator call and
-# drops it with ``trace_id NOT IN``. Measured read-only on dev, first run of
-# each window (bytes read / granules / duration):
+# drops it with ``trace_id NOT IN``. Measured read-only on dev on 2026-09-26,
+# first run of each window (bytes read / granules / duration; granule counts
+# drift as parts merge: the 90-day eval window was 148 granules on 09-28):
 #
 #   the eval chart statement (EvalMetricsQueryBuilderV2, project 2843b914):
 #     30 days 977 MiB / 96 / 1,206 ms; 90 days 4.81 GiB / 302 / 6,628 ms;
