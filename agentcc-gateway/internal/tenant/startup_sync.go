@@ -24,16 +24,11 @@ var (
 	startupSyncTimeout    = 10 * time.Second // per request
 )
 
-// SyncOnStartup loads org configs and API keys from the control plane,
-// retrying with capped exponential backoff until both have loaded or ctx ends.
-// It does not give up on its own: until it succeeds, the gateway serves only
-// its config.yaml keys. Run it in a goroutine so startup never waits on it.
-// Reports whether the sync completed.
-func SyncOnStartup(ctx context.Context, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore) bool {
-	return syncOnStartup(ctx, baseURL, adminToken, store, keyStore, &syncLoaded{})
-}
-
-// syncOnStartup is SyncOnStartup, marking each half in loaded as it loads.
+// syncOnStartup loads org configs and API keys from the control plane,
+// retrying with capped exponential backoff until both have loaded or ctx ends,
+// and marks each half in loaded as it loads. It does not give up on its own:
+// until it succeeds, the gateway serves only its config.yaml keys. Reports
+// whether the sync completed.
 func syncOnStartup(ctx context.Context, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore, loaded *syncLoaded) bool {
 	start := time.Now()
 	var lastWarn time.Time

@@ -224,8 +224,8 @@ func TestSyncOnStartup_RetriesQuietlyWhileTheControlPlaneStarts(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if !SyncOnStartup(ctx, cp.URL, "token", store, ks) {
-		t.Fatal("SyncOnStartup gave up")
+	if !syncOnStartup(ctx, cp.URL, "token", store, ks, &syncLoaded{}) {
+		t.Fatal("syncOnStartup gave up")
 	}
 
 	assertSynced(t, store, ks)
@@ -251,8 +251,8 @@ func TestSyncOnStartup_DoesNotGiveUp(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if !SyncOnStartup(ctx, cp.URL, "token", store, ks) {
-		t.Fatal("SyncOnStartup gave up")
+	if !syncOnStartup(ctx, cp.URL, "token", store, ks, &syncLoaded{}) {
+		t.Fatal("syncOnStartup gave up")
 	}
 	assertSynced(t, store, ks)
 }
@@ -270,7 +270,7 @@ func TestSyncOnStartup_WarnsOnceWhenTheOutageIsLong(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	done := make(chan bool, 1)
-	go func() { done <- SyncOnStartup(ctx, cp.URL, "token", store, ks) }()
+	go func() { done <- syncOnStartup(ctx, cp.URL, "token", store, ks, &syncLoaded{}) }()
 
 	// Keep failing well past the first WARN.
 	deadline := time.Now().Add(5 * time.Second)
@@ -281,7 +281,7 @@ func TestSyncOnStartup_WarnsOnceWhenTheOutageIsLong(t *testing.T) {
 	down.Store(false)
 
 	if !<-done {
-		t.Fatal("SyncOnStartup gave up")
+		t.Fatal("syncOnStartup gave up")
 	}
 	assertSynced(t, store, ks)
 	if n := logs.count(slog.LevelWarn, ""); n != 1 {
@@ -302,7 +302,9 @@ func TestSyncOnStartup_StopsWhenTheContextEnds(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan bool, 1)
-	go func() { done <- SyncOnStartup(ctx, cp.URL, "token", NewStore(), auth.NewKeyStore(config.AuthConfig{})) }()
+	go func() {
+		done <- syncOnStartup(ctx, cp.URL, "token", NewStore(), auth.NewKeyStore(config.AuthConfig{}), &syncLoaded{})
+	}()
 	for cp.orgRequests.Load() == 0 {
 		time.Sleep(time.Millisecond)
 	}
@@ -311,10 +313,10 @@ func TestSyncOnStartup_StopsWhenTheContextEnds(t *testing.T) {
 	select {
 	case ok := <-done:
 		if ok {
-			t.Fatal("SyncOnStartup reported success against a control plane that never answered")
+			t.Fatal("syncOnStartup reported success against a control plane that never answered")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("SyncOnStartup still waiting after its context ended")
+		t.Fatal("syncOnStartup still waiting after its context ended")
 	}
 }
 
@@ -340,7 +342,9 @@ func TestSyncOnStartup_WarningNamesWhatIsMissing(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan bool, 1)
-			go func() { done <- SyncOnStartup(ctx, cp.URL, "token", NewStore(), auth.NewKeyStore(config.AuthConfig{})) }()
+			go func() {
+				done <- syncOnStartup(ctx, cp.URL, "token", NewStore(), auth.NewKeyStore(config.AuthConfig{}), &syncLoaded{})
+			}()
 			deadline := time.Now().Add(5 * time.Second)
 			for logs.count(slog.LevelWarn, "") == 0 && time.Now().Before(deadline) {
 				time.Sleep(time.Millisecond)
