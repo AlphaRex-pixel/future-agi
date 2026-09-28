@@ -259,7 +259,8 @@ manager; do not commit it. The production gateway must grant that key access to 
 provider and map the Claude SDK's `claude-sonnet-4-6` alias to the desired Gemini model.
 Verify the mapping with one
 short authoring run before moving full suites. The simulated caller's model is configured
-separately by `SIMULATOR_LLM_PROVIDER` and `SIMULATOR_LLM_MODEL`.
+separately by `SIMULATOR_LLM_PROVIDER` and `SIMULATOR_LLM_MODEL`; `SIMULATOR_LLM_THINKING`
+optionally lowers its deliberation (for example `minimal`) where the model supports it.
 
 ## 1. Generate secrets
 

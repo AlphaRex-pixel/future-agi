@@ -307,6 +307,11 @@ def _platform_simulator_material() -> tuple[dict[str, str], bytes | None]:
         "SIMULATOR_LLM_PROVIDER": provider,
         "SIMULATOR_LLM_MODEL": model,
     }
+    # Unset keeps ALK's per-model least deliberation; set it to go lower where a model allows
+    # (e.g. "minimal" on gemini-3.5-flash-lite, which gemini-3.7-flash refuses).
+    thinking = str(os.environ.get("SIMULATOR_LLM_THINKING") or "").strip()
+    if thinking:
+        values["SIMULATOR_LLM_THINKING"] = thinking
     if agentcc_ready:
         values["ALK_CLAUDE_GATEWAY_URL"] = agentcc_url.rstrip("/")
         values["ALK_CLAUDE_GATEWAY_API_KEY"] = agentcc_key
