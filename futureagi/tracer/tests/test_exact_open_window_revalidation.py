@@ -1,8 +1,9 @@
 """An open-window exact graph hit revalidates its own identity once it is old.
 
 The Observe system-metric charts (``observe-system-graph``,
-``observe-session-system-graph``, ``observe-user-system-graph``) serve a cached
-exact snapshot immediately. When the snapshot's window was still open when it
+``observe-session-system-graph``, ``observe-user-system-graph``) and the Agent
+Graph (``observe-agent-graph``, which reads the same toolbar window) serve a
+cached exact snapshot immediately. When the snapshot's window was still open when it
 was computed (window end later than ``completed_at``), spans that arrived since
 are missing from it. Once such a hit is older than the revalidation floor, and
 no refresh of the same identity is running or recently failed, the read claims
@@ -35,7 +36,8 @@ from tracer.services.clickhouse.graph_metric_statistic import (
 PROJECT = str(uuid4())
 ORG = str(uuid4())
 SESSION_NS = "observe-session-system-graph"
-SCOPED = ["observe-system-graph", SESSION_NS, "observe-user-system-graph"]
+AGENT_NS = "observe-agent-graph"
+SCOPED = ["observe-system-graph", SESSION_NS, "observe-user-system-graph", AGENT_NS]
 _VALUE = 42.5
 
 _MODEL_FILTER = {
@@ -299,7 +301,7 @@ def test_guard_rejected_hit_is_a_miss_not_a_revalidation(queue, marker):
 
 @pytest.mark.parametrize(
     "namespace",
-    ["observe-agent-graph", "dashboard-widget", "eval-usage", "attribute-detail"],
+    ["dashboard-widget", "eval-usage", "attribute-detail"],
 )
 def test_namespaces_outside_the_three_graphs_never_revalidate(namespace, queue):
     identity = _identity()
@@ -594,6 +596,89 @@ def test_explicit_refresh_of_an_old_hit_enqueues_exactly_once(
     _seed(namespace, _entry_identity(namespace, filters), age=OLD)
 
     served = fetch(filters, True)
+
+    assert served["query_status"] == "complete"
+    assert served["query_refreshing"] is True
+    assert len(queue) == 1
+    assert temporal_status == []
+
+
+# ---------------------------------------------------------------------------
+# Agent Graph shares the toolbar window, so it shares the rule
+# ---------------------------------------------------------------------------
+
+
+def _agent_body() -> dict:
+    return {
+        "nodes": [{"id": "agent"}],
+        "edges": [],
+        "path_edges": [],
+        "query_complete": True,
+        "query_status": "complete",
+        "query_sampled": False,
+    }
+
+
+def _agent_graph(filters, refresh):
+    return graph_dispatch.fetch_agent_graph_ch(
+        project_id=PROJECT,
+        filters=filters,
+        refresh=refresh,
+        organization_id=ORG,
+    )
+
+
+def _seed_agent_graph(filters, *, age):
+    from tracer.services.clickhouse.graph_dispatch import AGENT_GRAPH_PAYLOAD_VERSION
+
+    return _seed(
+        AGENT_NS,
+        {
+            "project_id": PROJECT,
+            "filters": filters,
+            "payload_version": AGENT_GRAPH_PAYLOAD_VERSION,
+            "organization_id": ORG,
+        },
+        age=age,
+        payload=_agent_body(),
+    )
+
+
+@pytest.mark.usefixtures("no_carry")
+def test_agent_graph_revalidates_an_old_open_hit_once(queue, temporal_status):
+    # The toolbar window is hour-stable, so a revisit replays the same Agent
+    # Graph identity; an old open-window hit must not be served as current.
+    filters = [_window(end_offset=OPEN)]
+    completed_at = _seed_agent_graph(filters, age=OLD)
+
+    first = _agent_graph(filters, False)
+    poll = _agent_graph(filters, False)
+
+    assert first["query_status"] == "complete"
+    assert first["query_completed_at"] == completed_at
+    assert first["nodes"] == [{"id": "agent"}]
+    assert first["query_refreshing"] is True
+    assert poll["query_refreshing"] is True
+    assert [job["namespace"] for job in queue] == [AGENT_NS]
+    assert temporal_status == []
+
+
+def test_agent_graph_young_or_closed_hit_is_served_plain(queue):
+    young = [_window(end_offset=OPEN)]
+    _seed_agent_graph(young, age=YOUNG)
+    closed = [_window(end_offset=CLOSED)]
+    _seed_agent_graph(closed, age=OLD)
+
+    assert _agent_graph(young, False)["query_refreshing"] is False
+    assert _agent_graph(closed, False)["query_refreshing"] is False
+    assert queue == []
+
+
+def test_agent_graph_explicit_refresh_enqueues_exactly_once(queue, temporal_status):
+    filters = [_window(end_offset=OPEN)]
+    _seed_agent_graph(filters, age=OLD)
+
+    served = _agent_graph(filters, True)
 
     assert served["query_status"] == "complete"
     assert served["query_refreshing"] is True

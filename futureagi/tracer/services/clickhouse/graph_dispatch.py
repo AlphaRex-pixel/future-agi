@@ -2086,6 +2086,10 @@ def fetch_agent_graph_ch(
         },
         organization_id=organization_id,
         workspace_id=workspace_id,
+        # The toolbar window is hour-stable, so a revisit replays this
+        # identity: an old open-window hit is served and refreshed in the
+        # background. An explicit refresh already schedules.
+        revalidate_open_window=not refresh,
     )
 
 

@@ -61,13 +61,16 @@ _CACHE_FENCE_FALLBACK_LOCK = RLock()
 _ALLOWED_EXACT_AGGREGATION_TASK_QUEUES = frozenset({"tasks_xl", "exact_aggregation"})
 _DEFAULT_MAX_INFLIGHT_PER_SCOPE = 2
 # Open-window revalidation (``read_or_schedule_exact_snapshot``) applies only to
-# the three Observe system-metric charts. Dashboards, eval usage, attribute
-# detail, eval/annotation charts and the agent graph keep reload-only snapshots.
+# the Observe charts that read the hour-stable toolbar window: the three
+# system-metric charts and the Agent Graph (whose filters carry the same
+# window, so a revisit replays the same identity). Dashboards, eval usage,
+# attribute detail and eval/annotation charts keep reload-only snapshots.
 _OPEN_WINDOW_REVALIDATION_NAMESPACES = frozenset(
     {
         "observe-system-graph",
         "observe-session-system-graph",
         "observe-user-system-graph",
+        "observe-agent-graph",
     }
 )
 # How old an open-window snapshot must be before a visit refreshes it
@@ -1691,7 +1694,7 @@ def read_or_schedule_exact_snapshot(
     the re-read after a refresh is enqueued.
 
     ``revalidate_open_window`` (honoured only for the three Observe
-    system-metric graph namespaces) refreshes a served hit of the same
+    system-metric graph namespaces and the Agent Graph) refreshes a served hit of the same
     identity when its window was still open at ``completed_at``, the hit is
     older than ``EXACT_AGGREGATION_REVALIDATE_AFTER_SECONDS``, it passed
     ``accept_snapshot``, and no refresh of it is running or recently failed.
