@@ -4,6 +4,7 @@ import {
   useQueryClient,
   keepPreviousData,
 } from "@tanstack/react-query";
+import axios, { endpoints } from "src/utils/axios";
 import {
   createHarnessJob,
   harnessIdempotencyKey,
@@ -15,8 +16,6 @@ import {
   deleteHarnessEnvironment,
   renameHarnessEnvironment,
   deleteAppliedEvaluation,
-  getAvailableEvaluations,
-  addEvaluation,
   addRunEvaluation,
 } from "src/api/simulate-environments/harnessEnvironments";
 import { harnessEnvironmentKey } from "src/api/simulate-environments/environment";
@@ -26,7 +25,10 @@ import { LIVE_ENV_STATUSES } from "src/sections/simulate/environments/myEnvironm
 export const SIMULATE_ENVIRONMENTS_KEY = ["simulate-environments"];
 // The prefix every page of the list shares — invalidating it refetches whatever
 // page is currently shown.
-export const myEnvironmentsListKey = () => [...SIMULATE_ENVIRONMENTS_KEY, "list"];
+export const myEnvironmentsListKey = () => [
+  ...SIMULATE_ENVIRONMENTS_KEY,
+  "list",
+];
 export const myEnvironmentsQueryKey = (page = 0, pageSize = 25) => [
   ...myEnvironmentsListKey(),
   { page, pageSize },
@@ -102,11 +104,12 @@ export function useRenameEnvironment() {
 // reconciles it, and without that the row sits there refusing every retry
 // until something else happens to refetch.
 //
-// Unlike the two add paths this also invalidates the offer list, which a
-// remove genuinely stales (the eval can be added again). Nothing is observing
-// it here — remove is pressed from the Evaluations tab with the picker closed
-// — so this only marks it stale; there is no open drawer for a refetch to
-// pull a row out from under.
+// Unlike the two add paths this also invalidates the run test's own eval
+// list, which a remove genuinely stales (the eval can be added again). That
+// list is what the picker's "Added evaluations" box reads, and the picker is
+// closed while remove is pressed from the Evaluations tab, so this only
+// marks it stale; there is no open drawer for a refetch to pull a row out
+// from under.
 export function useRemoveAppliedEvaluation() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -117,62 +120,61 @@ export function useRemoveAppliedEvaluation() {
       deleteAppliedEvaluation(id, evalConfigId),
     onSettled: (_data, _error, { id }) => {
       queryClient.invalidateQueries({ queryKey: harnessEnvironmentKey(id) });
-      queryClient.invalidateQueries({ queryKey: availableEvaluationsKey(id) });
+      queryClient.invalidateQueries({
+        queryKey: [...SIMULATE_ENVIRONMENTS_KEY, "run-test"],
+      });
     },
   });
 }
 
-// The evaluations this environment can still add (catalogue filtered to its
-// modality, minus what is already selected). Drives the add-eval picker.
-export const availableEvaluationsKey = (envId) => [
+// A harness environment's evals live on its run test, like any simulation's,
+// so the picker reads and adds them through the run test's own endpoints.
+export const environmentRunTestKey = (runTestId) => [
   ...SIMULATE_ENVIRONMENTS_KEY,
-  "available-evals",
-  envId,
+  "run-test",
+  runTestId,
 ];
 
-export function useAvailableEvaluations(envId, { enabled = true } = {}) {
+// Every eval bound to the run test — including the result columns the harness
+// reports itself — so the picker can show all of them as already added.
+export function useEnvironmentRunTest(runTestId, { enabled = true } = {}) {
   return useQuery({
-    queryKey: availableEvaluationsKey(envId),
-    queryFn: () => getAvailableEvaluations(envId),
-    enabled: Boolean(envId) && enabled,
-    select: (data) => (Array.isArray(data?.evaluations) ? data.evaluations : []),
+    queryKey: environmentRunTestKey(runTestId),
+    queryFn: async () =>
+      (await axios.get(endpoints.runTests.detail(runTestId))).data,
+    enabled: Boolean(runTestId) && enabled,
+    select: (data) =>
+      Array.isArray(data?.simulate_eval_configs_detail)
+        ? data.simulate_eval_configs_detail
+        : [],
   });
 }
 
-// THE RULE BOTH ADD PATHS FOLLOW: neither refetches anything while the picker
-// that triggered it can still be open. Both adds are pressed from that drawer,
-// and both of its lists are being observed by it, so a same-tick refetch pulls
-// rows out from under the click that caused them — the offer list comes back
-// without the just-added eval, and a detail read can land before the write it
-// is meant to confirm and flip the row from "Added" back to "Add". The drawer
-// refetches once, on the way out, where a stale read costs nothing.
-//
-// The cost of the rule: an add still in flight at that moment gets no refetch
-// of its own, so the applied list, the tab badge and the pre-flight tile keep
-// the last read until the drawer next closes. Nothing on screen is showing
-// that list in the meantime, and the drawer's own handling of a pending
-// mutation already leaves exactly this window open.
-//
-// Add an evaluation by name (the mapping is resolved server-side by modality).
-// The 201 body is the full environment detail with the new row in
-// `evaluations.selected`, so seed the detail cache from it — that is what
-// flips the row to "Added", and it is the server's own answer rather than
-// patched-up client state. Idempotent server-side; 409 at the 8-eval cap or
-// while building; the caller surfaces it.
-export function useAddEvaluation() {
+// Add one eval with the person's own mapping, exactly as the simulation page
+// does. Refreshing the run test's list here is what moves the new eval out of
+// the picker's list and into its "Added evaluations" box.
+export function useAddRunTestEval() {
   const queryClient = useQueryClient();
   return useMutation({
-    // Same reasoning as `useRemoveAppliedEvaluation`'s opt-out; kept explicit
-    // so `AddEvaluationDrawer`'s own Alert stays the single owner of the
-    // message if the error shape ever changes.
     meta: { errorHandled: true },
-    mutationFn: ({ id, name }) => addEvaluation(id, name),
-    onSuccess: (detail, { id }) => {
-      if (detail) queryClient.setQueryData(harnessEnvironmentKey(id), detail);
+    mutationFn: ({ runTestId, body }) =>
+      axios.post(endpoints.runTests.addEvals(runTestId), {
+        evaluations_config: [body],
+      }),
+    onSuccess: (_data, { runTestId }) => {
+      queryClient.invalidateQueries({
+        queryKey: environmentRunTestKey(runTestId),
+      });
     },
   });
 }
 
+// The run-level add refetches nothing while its picker is open — it is
+// pressed from that drawer, and a same-tick refetch would pull the row it
+// just observed the drawer's own applied list out from under the click that
+// caused it. The drawer refetches once, on the way out, where a stale read
+// costs nothing.
+//
 // Add an evaluation from inside a run. Same body as the environment-level add
 // (`{ name }`), same refusals, but the 202 body is the five grading counts
 // rather than the detail — so there is nothing to seed, and by the rule above
@@ -182,7 +184,6 @@ export function useAddEvaluation() {
 // they are a receipt for one click, not cached state.
 export function useAddRunEvaluation() {
   return useMutation({
-    // Same reasoning as `useAddEvaluation` above.
     meta: { errorHandled: true },
     mutationFn: ({ id, executionId, name }) =>
       addRunEvaluation(id, executionId, name),
@@ -206,9 +207,15 @@ export function useBuildEnvironment() {
     mutationFn: async (draft) => {
       const built = draftToPreflightPayload(draft);
       if (built.skipped) {
-        return { envId: `env-${Date.now().toString(36)}`, skipped: built.skipped };
+        return {
+          envId: `env-${Date.now().toString(36)}`,
+          skipped: built.skipped,
+        };
       }
-      const dto = await createHarnessJob(built.payload, harnessIdempotencyKey());
+      const dto = await createHarnessJob(
+        built.payload,
+        harnessIdempotencyKey(),
+      );
       return { envId: dto.job.job_id };
     },
     onSuccess: (result) => {
@@ -237,7 +244,10 @@ export function useBuildEnvironment() {
 export function useUploadSecretFile() {
   return useMutation({
     meta: { errorHandled: true },
-    mutationFn: async ({ file, environmentName = "GOOGLE_APPLICATION_CREDENTIALS" }) => {
+    mutationFn: async ({
+      file,
+      environmentName = "GOOGLE_APPLICATION_CREDENTIALS",
+    }) => {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("environment_name", environmentName);
