@@ -4,18 +4,22 @@ the build workflows that feed the labels."""
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import http.server
 import importlib.util
+import io
 import json
 import os
 import re
+import runpy
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 import threading
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -498,6 +502,294 @@ class BackendVariants(unittest.TestCase):
         runs = [rest for keyword, rest in steps if keyword == "RUN"]
         self.assertEqual(runs[0], 'python -c "import daytona, e2b" && git --version')
         self.assertIn("/opt/alk-venv", runs[1])
+
+
+# ---------------------------------------------------------------------------
+# Build-time scripts of the backend image (futureagi/docker)
+# ---------------------------------------------------------------------------
+
+SMOKE = ROOT / "futureagi" / "docker" / "runtime_smoke.py"
+PRUNE = ROOT / "futureagi" / "docker" / "prune_test_dirs.py"
+MP3_ENCODERS = 'echo " A..... libmp3lame           libmp3lame MP3 (MPEG audio layer 3)"'
+
+
+class RuntimeSmoke(unittest.TestCase):
+    """runtime_smoke.py against stand-in modules, NLTK data and discovery
+    documents, and fake uv/git/ffmpeg/ffprobe on PATH."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.bin = Path(tmp.name) / "bin"
+        self.bin.mkdir()
+        self.tool_log = Path(tmp.name) / "tools.log"
+        self.smoke = _load_module(SMOKE)
+        self.missing: set[str] = set()
+        self.docs: list[str] = []
+        self.resources: list[str] = []
+
+    def tool(self, name: str, script: str = "") -> None:
+        path = self.bin / name
+        path.write_text(
+            f'#!/bin/sh\necho "{name} $*" >> "{self.tool_log}"\n{script}\n',
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+
+    def ran(self) -> list[str]:
+        if not self.tool_log.exists():
+            return []
+        return self.tool_log.read_text(encoding="utf-8").splitlines()
+
+    def get_static_doc(self, api: str, version: str):
+        self.docs.append(f"{api}.{version}")
+        return None if f"{api}.{version}" in self.missing else "{}"
+
+    def find(self, resource: str) -> str:
+        self.resources.append(resource)
+        if resource in self.missing:
+            raise LookupError(resource)
+        return resource
+
+    def modules(self) -> dict:
+        extras = [m for group in self.smoke.EXTRA_MODULES.values() for m in group]
+        fakes = {
+            name: None if name in self.missing else types.ModuleType(name)
+            for name in (*self.smoke.MODULES, *extras)
+        }
+        discovery_cache = types.ModuleType("googleapiclient.discovery_cache")
+        discovery_cache.get_static_doc = self.get_static_doc
+        nltk = types.ModuleType("nltk")
+        nltk.data = types.SimpleNamespace(find=self.find)
+        fakes.update(
+            {
+                "googleapiclient": types.ModuleType("googleapiclient"),
+                "googleapiclient.discovery_cache": discovery_cache,
+                "nltk": nltk,
+            }
+        )
+        return fakes
+
+    def run_smoke(self, env: dict, missing=(), as_script: bool = False):
+        """(exit code or message, stdout) of one run, as the RUN step sees it."""
+        self.missing = set(missing)
+        self.docs.clear()
+        self.resources.clear()
+        out = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"PATH": str(self.bin), **env}, clear=True),
+            mock.patch.dict(sys.modules, self.modules()),
+            contextlib.redirect_stdout(out),
+        ):
+            try:
+                if as_script:
+                    runpy.run_path(str(SMOKE), run_name="__main__")
+                else:
+                    self.smoke.main()
+            except SystemExit as exit_:
+                return exit_.code, out.getvalue()
+        return 0, out.getvalue()
+
+    def test_a_feature_complete_standard_runtime_passes(self):
+        for name in ("uv", "git", "ffprobe"):
+            self.tool(name)
+        self.tool("ffmpeg", MP3_ENCODERS)
+
+        code, out = self.run_smoke(resolved(), as_script=True)
+
+        self.assertEqual((code, out), (0, "runtime smoke test: OK\n"))
+        self.assertEqual(
+            self.docs,
+            ["servicecontrol.v1", "cloudcommerceprocurement.v1", "drive.v3"],
+        )
+        self.assertEqual(
+            self.resources,
+            [*self.smoke.NLTK_RESOURCES, *self.smoke.NLTK_FULL_RESOURCES],
+        )
+        self.assertEqual(
+            self.ran(),
+            [
+                "ffmpeg -hide_banner -version",
+                "ffprobe -hide_banner -version",
+                "ffmpeg -hide_banner -encoders",
+            ],
+        )
+
+    def test_a_slim_runtime_needs_no_extras_uv_git_or_full_data(self):
+        self.tool("ffprobe")
+        self.tool("ffmpeg", MP3_ENCODERS)
+        extras = {m for group in self.smoke.EXTRA_MODULES.values() for m in group}
+
+        code, out = self.run_smoke(
+            resolved(IMAGE_VARIANT="slim"),
+            missing={*extras, *self.smoke.NLTK_FULL_RESOURCES, "drive.v3"},
+        )
+
+        self.assertEqual((code, out), (0, "runtime smoke test: OK\n"))
+        self.assertEqual(
+            self.docs, ["servicecontrol.v1", "cloudcommerceprocurement.v1"]
+        )
+        self.assertEqual(self.resources, list(self.smoke.NLTK_RESOURCES))
+
+    def test_every_missing_piece_is_reported_and_fails_the_build(self):
+        self.tool("git")
+        stderr = "0" * 600 + " libavcodec.so.61: cannot open shared object file"
+        self.tool("ffprobe", f'printf "%s\\n" "{stderr}" >&2; exit 127')
+        self.tool("ffmpeg", 'echo " A..... libshine MP3 (MPEG audio layer 3)"')
+        # The standard variant, but only one extra group and git not wanted.
+        env = {**resolved(), "EXTRAS": "billing", "WITH_GIT": "false"}
+
+        code, out = self.run_smoke(
+            env,
+            missing={"litellm", "stripe", "daytona", "drive.v3", "corpora/omw-1.4/"},
+        )
+
+        self.assertEqual(out, "")
+        header, *failures = code.split("\n  ")
+        self.assertEqual(header, "runtime smoke test FAILED:")
+        self.assertTrue(failures[0].startswith("import litellm: ModuleNotFoundError"))
+        # daytona is missing too, but the sandbox group was not asked for.
+        self.assertTrue(failures[1].startswith("import stripe: ModuleNotFoundError"))
+        self.assertEqual(
+            failures[2:],
+            [
+                "googleapiclient discovery document drive.v3 missing",
+                "NLTK resource corpora/omw-1.4/ missing",
+                "uv on PATH: None, WITH_UV=True",
+                f"git on PATH: '{self.bin / 'git'}', WITH_GIT=False",
+                "ffprobe -version: " + (stderr + "\n")[-500:],
+                "ffmpeg has no libmp3lame encoder",
+            ],
+        )
+
+    def test_every_core_module_is_imported(self):
+        self.tool("ffprobe")
+        self.tool("ffmpeg", MP3_ENCODERS)
+        # nltk stays: its stand-in also serves the data lookups.
+        core = [m for m in self.smoke.MODULES if m != "nltk"]
+
+        code, _ = self.run_smoke(resolved(IMAGE_VARIANT="slim"), missing=core)
+
+        reported = [
+            line.split(":", 1)[0].removeprefix("import ")
+            for line in code.split("\n  ")[1:]
+        ]
+        self.assertEqual(reported, core)
+
+    def test_ffmpeg_none_means_no_ffmpeg_on_path(self):
+        env = resolved(IMAGE_VARIANT="slim", FFMPEG_FLAVOR="none")
+        self.assertEqual(self.run_smoke(env)[0], 0)
+
+        self.tool("ffmpeg", MP3_ENCODERS)
+        code, _ = self.run_smoke(env)
+
+        self.assertEqual(
+            code,
+            "runtime smoke test FAILED:\n  FFMPEG_FLAVOR=none but ffmpeg is on PATH",
+        )
+        self.assertEqual(self.ran(), [])
+
+
+class PruneTestDirs(unittest.TestCase):
+    """prune_test_dirs.py on a stand-in site-packages."""
+
+    REMOVED = ("pandas/tests", "numpy/linalg/tests", "tests", "selfref/tests")
+    KEPT = (
+        "elevenlabs/conversational_ai/tests",
+        "absref/api/tests",
+        "strref/api/tests",
+        "lazy/tests",
+        "parentref/tests",
+    )
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.sp = Path(tmp.name) / "site-packages"
+        files = {
+            # Test suites nothing imports.
+            "pandas/core/frame.py": "import numpy\n",
+            "pandas/tests/test_frame.py": "x" * 1_200_000,
+            "numpy/__init__.py": "from . import linalg\n",
+            "numpy/linalg/tests/test_linalg.py": "x" * 300_000,
+            "tests/__init__.py": "",
+            # References that do not count: test code and helpers of the same
+            # distribution, a relative import above its top level, and
+            # another distribution.
+            "selfref/conftest.py": "import selfref.tests\n",
+            "selfref/testing.py": "from selfref.tests import fixtures\n",
+            "selfref/deep.py": "from ...tests import fixtures\n",
+            "selfref/tests/test_a.py": "from selfref.tests import fixtures\n",
+            "other/uses_pandas.py": "import pandas.tests\n",
+            # `tests` subpackages the runtime imports.
+            "elevenlabs/conversational_ai/__init__.py": "from .tests import Client\n",
+            "elevenlabs/conversational_ai/tests/__init__.py": "class Client: ...\n",
+            "absref/client.py": "import absref.api.tests\n",
+            "absref/api/tests/__init__.py": "",
+            "strref/registry.py": 'PLUGINS = ["strref.api.tests"]\n',
+            "strref/api/tests/__init__.py": "",
+            "lazy/__init__.py": '_SUBMODULES = {"TestsApi": ".tests"}\n',
+            "lazy/tests/__init__.py": "",
+            "parentref/sub/mod.py": "from ..tests import helper\n",
+            "parentref/tests/helper.py": "",
+            # `test` is never pruned: django/test is a runtime package.
+            "django/test/client.py": "",
+        }
+        for rel, text in files.items():
+            path = self.sp / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        # Unreadable modules are skipped; symlinks are not counted as freed.
+        (self.sp / "pandas" / "broken.py").symlink_to(self.sp / "missing.py")
+        self.outside = Path(tmp.name) / "big.bin"
+        self.outside.write_bytes(b"\0" * 5_000_000)
+        (self.sp / "pandas" / "tests" / "big.bin").symlink_to(self.outside)
+
+    def run_prune(self, *args: str) -> list[str]:
+        out = io.StringIO()
+        with (
+            mock.patch.object(sys, "argv", [str(PRUNE), str(self.sp), *args]),
+            contextlib.redirect_stdout(out),
+        ):
+            runpy.run_path(str(PRUNE), run_name="__main__")
+        return out.getvalue().splitlines()
+
+    def assert_keeping(self, lines: list[str]) -> None:
+        self.assertEqual(
+            sorted(lines),
+            sorted(
+                f"prune_test_dirs: keeping {os.path.join(*rel.split('/'))} "
+                "(imported by its package)"
+                for rel in self.KEPT
+            ),
+        )
+
+    def test_removes_suites_and_keeps_runtime_tests_packages(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _load_module(PRUNE).main(str(self.sp))
+        lines = out.getvalue().splitlines()
+
+        self.assert_keeping(lines[:-1])
+        self.assertEqual(
+            lines[-1], "prune_test_dirs: removed 4 test directories (1.5 MB), kept 5"
+        )
+        for rel in self.REMOVED:
+            self.assertFalse((self.sp / rel).exists(), rel)
+        for rel in (*self.KEPT, "django/test", "pandas/core/frame.py"):
+            self.assertTrue((self.sp / rel).exists(), rel)
+        self.assertTrue(self.outside.exists())
+
+    def test_dry_run_reports_without_removing(self):
+        lines = self.run_prune("--dry-run")
+
+        self.assert_keeping(lines[:-1])
+        self.assertEqual(
+            lines[-1],
+            "prune_test_dirs: would remove 4 test directories (1.5 MB), kept 5",
+        )
+        for rel in (*self.REMOVED, *self.KEPT):
+            self.assertTrue((self.sp / rel).is_dir(), rel)
 
 
 class NonRootBackend(unittest.TestCase):
