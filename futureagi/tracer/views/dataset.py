@@ -15,7 +15,7 @@ from model_hub.views.utils.dataset_limit import (
     dataset_limit_check_failed_response,
     dataset_limit_reached_response,
 )
-from tfc.constants.api_calls import DATASET_LIMIT_CHECK_FAILED
+from tfc.utils.api_errors import ApiErrorCode
 from tfc.utils.base_viewset import BaseModelViewSetMixinWithUserOrg
 from tfc.utils.error_codes import get_error_message
 from tfc.utils.general_methods import GeneralMethods
@@ -445,7 +445,7 @@ def create_new_dataset(new_dataset_name, organization, workspace, user_id):
 
     if check_if_dataset_creation_is_allowed is not None:
         allowed, detail = check_if_dataset_creation_is_allowed(organization)
-        if detail.get("error_code") == DATASET_LIMIT_CHECK_FAILED:
+        if detail.get("error_code") == ApiErrorCode.DATASET_LIMIT_CHECK_FAILED:
             raise DatasetLimitCheckFailed
         if not allowed:
             raise DatasetLimitReached

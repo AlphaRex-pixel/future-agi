@@ -28,7 +28,7 @@ from accounts.services.aws_marketplace_metering import (
 )
 from agentic_eval.core.utils.functions import detect_input_type
 from ee.usage.deployment import DeploymentMode
-from tfc.constants.api_calls import DATASET_LIMIT_CHECK_FAILED
+from tfc.utils.api_errors import ApiErrorCode
 
 logger = structlog.get_logger(__name__)
 from model_hub.utils import call_websocket
@@ -1556,7 +1556,7 @@ def log_and_deduct_cost_for_resource_request(
                     logger.error(f"Unhandled api_call_type: {api_call_type}")
                     return None
 
-            if detail.get("error_code") == DATASET_LIMIT_CHECK_FAILED:
+            if detail.get("error_code") == ApiErrorCode.DATASET_LIMIT_CHECK_FAILED:
                 if not sdk_source:
                     # The limit was never verified: refuse without recording a
                     # resource-limit hit or sending the upgrade alert.
@@ -2207,7 +2207,7 @@ def check_if_dataset_creation_is_allowed(organization, config=None):
         # allows off-cloud); on cloud the quota is billing, so fail closed.
         if not DeploymentMode.is_cloud():
             return True, {}
-        return False, {"error_code": DATASET_LIMIT_CHECK_FAILED}
+        return False, {"error_code": ApiErrorCode.DATASET_LIMIT_CHECK_FAILED}
 
 
 def check_if_row_limit_reached(organization, row_count):

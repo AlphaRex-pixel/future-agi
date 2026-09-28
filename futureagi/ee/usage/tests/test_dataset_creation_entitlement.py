@@ -25,6 +25,7 @@ from ee.usage.schemas.events import CheckResult
 from ee.usage.utils.usage_entries import check_if_dataset_creation_is_allowed
 from model_hub.models.develop_dataset import Dataset
 from tfc.constants.api_calls import APICallStatusChoices, APICallTypeChoices
+from tfc.utils.api_errors import ApiErrorCode
 from tfc.utils.error_codes import get_error_message
 
 
@@ -71,7 +72,7 @@ def test_entitlement_error_blocks_dataset_creation_on_cloud(organization):
         allowed, detail = check_if_dataset_creation_is_allowed(organization)
 
     assert allowed is False
-    assert detail == {"error_code": "DATASET_LIMIT_CHECK_FAILED"}
+    assert detail == {"error_code": ApiErrorCode.DATASET_LIMIT_CHECK_FAILED}
 
 
 @pytest.mark.django_db
