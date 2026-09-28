@@ -14,15 +14,26 @@ import (
 
 const maxFlushRetries = 3 // drop records after this many consecutive failures
 
+// Enqueue refuses records while the buffer holds twice maxBuffer, and warns
+// about it at most this often.
+const overflowWarnInterval = 10 * time.Second
+
 type LogFlusher struct {
 	buffer           []TraceRecord
 	mu               sync.Mutex
+	overflow         int       // under mu: records Enqueue refused because the buffer was full
+	overflowWarned   time.Time // under mu: when that was last logged
 	webhookURL       string
 	webhookSecret    string
 	interval         time.Duration
 	maxBuffer        int
 	client           *http.Client
 	consecutiveFails int
+
+	// kick asks Run for a flush once the buffer reaches maxBuffer. It holds
+	// one request, so the records that arrive during a slow send wait for
+	// the next flush instead of each starting one.
+	kick chan struct{}
 }
 
 type logFlushPayload struct {
@@ -65,6 +76,7 @@ func NewLogFlusher(webhookURL, webhookSecret string, interval time.Duration, max
 		maxBuffer = 5000
 	}
 	return &LogFlusher{
+		kick:          make(chan struct{}, 1),
 		webhookURL:    webhookURL,
 		webhookSecret: webhookSecret,
 		interval:      interval,
@@ -91,18 +103,41 @@ func (f *LogFlusher) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			f.flush()
+		case <-f.kick:
+			f.flush()
 		}
 	}
 }
 
 func (f *LogFlusher) Enqueue(rec TraceRecord) {
 	f.mu.Lock()
+	if len(f.buffer) >= 2*f.maxBuffer {
+		// The webhook is not keeping up: refuse the record rather than let
+		// the buffer grow without bound.
+		f.overflow++
+		overflow := f.overflow
+		warn := time.Since(f.overflowWarned) >= overflowWarnInterval
+		if warn {
+			f.overflowWarned = time.Now()
+		}
+		f.mu.Unlock()
+		if warn {
+			slog.Warn("log flusher: buffer full, dropping new records",
+				"dropped_total", overflow,
+				"buffered", 2*f.maxBuffer,
+			)
+		}
+		return
+	}
 	f.buffer = append(f.buffer, rec)
 	shouldFlush := len(f.buffer) >= f.maxBuffer
 	f.mu.Unlock()
 
 	if shouldFlush {
-		go f.flush()
+		select {
+		case f.kick <- struct{}{}:
+		default: // a flush is already pending
+		}
 	}
 }
 
