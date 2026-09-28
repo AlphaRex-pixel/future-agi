@@ -419,10 +419,13 @@ def test_eval_usage_snapshot_without_a_completion_time_is_not_stale(
     """A cold read, or a payload with no readable completion time, is never
     refreshed on the strength of newer runs alone."""
 
+    from ee.usage.models.usage import APICallLog
+
     template = _usage_template(organization, workspace)
     _usage_row(template, organization, workspace)
 
     assert not eval_usage_snapshot_is_stale(
+        usage_log_model=APICallLog,
         organization=organization,
         template_id=template.id,
         cache_identity={"template_id": str(template.id)},

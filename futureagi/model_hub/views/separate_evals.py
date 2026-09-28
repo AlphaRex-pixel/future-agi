@@ -5969,6 +5969,7 @@ class EvalUsageStatsView(APIView):
                             # background once newer runs exist.
                             refresh=bool(query["refresh"])
                             or eval_usage_snapshot_is_stale(
+                                usage_log_model=APICallLog,
                                 organization=organization,
                                 template_id=template_id,
                                 cache_identity=cache_identity,

@@ -25,11 +25,6 @@ from tracer.services.clickhouse.trace_project_scope import (
 )
 from tracer.services.exact_aggregation_cache import exact_refresh_state
 
-try:
-    from ee.usage.models.usage import APICallLog
-except ImportError:
-    APICallLog = None
-
 if TYPE_CHECKING:
     from accounts.models.organization import Organization
 
@@ -832,6 +827,7 @@ _EVAL_USAGE_LATE_ROW_MARGIN = _EVAL_USAGE_AUTO_REFRESH_MIN_AGE
 
 def eval_usage_snapshot_is_stale(
     *,
+    usage_log_model: Any,
     organization: Organization,
     template_id: UUID | str,
     cache_identity: dict[str, Any],
@@ -851,7 +847,10 @@ def eval_usage_snapshot_is_stale(
       publishes, so its snapshot stays old; retrying it waits for the user's
       Refresh instead of resubmitting a failing read on every poll.
 
-    The row scan stays on the ``(organization, source_id, -created_at)`` index.
+    ``usage_log_model`` is the usage ledger model, passed in by the caller that
+    owns the enterprise import so this module needs none; it is only touched
+    once the cheap checks pass. The row scan stays on the
+    ``(organization, source_id, -created_at)`` index.
     A read that takes longer than ``_EVAL_USAGE_LATE_ROW_MARGIN`` can still miss
     rows that landed as it started; the next run or a Refresh picks them up.
     """
@@ -869,7 +868,7 @@ def eval_usage_snapshot_is_stale(
     if exact_refresh_state("eval-usage", cache_identity) is not None:
         return False
     written_after = completed_at - _EVAL_USAGE_LATE_ROW_MARGIN
-    return APICallLog.objects.filter(
+    return usage_log_model.objects.filter(
         organization=organization,
         source_id=str(template_id),
         created_at__gte=written_after - _EVAL_USAGE_IN_FLIGHT_WINDOW,
