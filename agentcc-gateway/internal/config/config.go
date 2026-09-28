@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -1130,8 +1131,12 @@ func loadFromEnv(cfg *Config) {
 		cfg.ControlPlane.WebhookSecret = v
 	}
 	if v := os.Getenv(EnvAllowPrivateProviderURLs); v != "" {
-		if allow, err := strconv.ParseBool(v); err == nil {
+		// Read as the backend reads it, so " true" or "TRUE" opts in both.
+		if allow, err := strconv.ParseBool(strings.ToLower(strings.TrimSpace(v))); err == nil {
 			cfg.OrgProviders.AllowPrivateURLs = allow
+		} else {
+			slog.Warn("ignoring unrecognised value; expected true or false",
+				"env", EnvAllowPrivateProviderURLs, "value", v)
 		}
 	}
 

@@ -347,6 +347,12 @@ func TestLoadFromEnv_AllowPrivateProviderURLs(t *testing.T) {
 		{"1", true},
 		{"false", false},
 		{"yes-please", false}, // unparseable keeps the safe default
+		// Parsed like the backend parses it, so the two never disagree.
+		{" true", true},
+		{"TRUE\n", true},
+		{"tRuE", true},
+		{"t", true},
+		{" 0 ", false},
 	} {
 		t.Run(tt.env, func(t *testing.T) {
 			t.Setenv(EnvAllowPrivateProviderURLs, tt.env)
