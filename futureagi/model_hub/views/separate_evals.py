@@ -6022,8 +6022,6 @@ class EvalUsageStatsView(APIView):
                 )
                 total_runs = usage_read.total_runs
                 runs_period = usage_read.runs_period
-                success_count = usage_read.success_count
-                error_count = usage_read.error_count
                 read_completeness = usage_read.completeness.value
                 unavailable_fields = list(usage_read.unavailable_fields)
             else:
@@ -6044,12 +6042,6 @@ class EvalUsageStatsView(APIView):
                     created_at__gte=start_date, created_at__lte=end_date
                 )
                 runs_period = period_qs.count()
-                success_count = period_qs.filter(
-                    status=APICallStatusChoices.SUCCESS.value
-                ).count()
-                error_count = period_qs.filter(
-                    status=APICallStatusChoices.ERROR.value
-                ).count()
 
             # Chart data — aggregate by time bucket
             from collections import defaultdict
@@ -6434,14 +6426,13 @@ class EvalUsageStatsView(APIView):
 
                 table_rows.append(row)
 
+            # Usage is successful runs only, so these three are constant.
             stats_response = {
                 "total_runs": total_runs,
                 "runs_period": runs_period,
-                "success_count": success_count,
-                "error_count": error_count,
-                "pass_rate": round(
-                    (success_count / runs_period * 100) if runs_period > 0 else 0, 2
-                ),
+                "success_count": runs_period,
+                "error_count": 0,
+                "pass_rate": 100.0 if runs_period else 0,
             }
             response = {
                 "template_id": str(template_id),

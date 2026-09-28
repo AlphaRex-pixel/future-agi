@@ -11231,8 +11231,11 @@ export const EvalUsageStatsResponseResultApiCompleteness = {
 export interface EvalUsageStatsApi {
   total_runs: number;
   runs_period: number;
+  /** Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period. */
   success_count: number;
+  /** Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the eval logs. */
   error_count: number;
+  /** Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0. */
   pass_rate: number;
 }
 
@@ -22726,11 +22729,18 @@ export interface EvalTaskUsageStatsApi {
   total_runs: number;
   /** @minimum 0 */
   runs_period: number;
-  /** @minimum 0 */
+  /**
+   * Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period.
+   * @minimum 0
+   */
   success_count: number;
-  /** @minimum 0 */
+  /**
+   * Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the task logs.
+   * @minimum 0
+   */
   error_count: number;
   /**
+   * Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0.
    * @minimum 0
    * @maximum 100
    */

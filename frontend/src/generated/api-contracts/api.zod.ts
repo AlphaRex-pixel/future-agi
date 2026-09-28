@@ -22930,9 +22930,21 @@ export const ModelHubEvalTemplatesUsageListResponse = zod.object({
     stats: zod.object({
       total_runs: zod.number(),
       runs_period: zod.number(),
-      success_count: zod.number(),
-      error_count: zod.number(),
-      pass_rate: zod.number(),
+      success_count: zod
+        .number()
+        .describe(
+          "Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period.",
+        ),
+      error_count: zod
+        .number()
+        .describe(
+          "Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the eval logs.",
+        ),
+      pass_rate: zod
+        .number()
+        .describe(
+          "Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0.",
+        ),
     }),
     chart: zod.array(
       zod.object({
@@ -50084,14 +50096,23 @@ export const TracerEvalTaskGetUsageResponse = zod.object({
           .min(tracerEvalTaskGetUsageResponseResultStatsRunsPeriodMin),
         success_count: zod
           .number()
-          .min(tracerEvalTaskGetUsageResponseResultStatsSuccessCountMin),
+          .min(tracerEvalTaskGetUsageResponseResultStatsSuccessCountMin)
+          .describe(
+            "Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period.",
+          ),
         error_count: zod
           .number()
-          .min(tracerEvalTaskGetUsageResponseResultStatsErrorCountMin),
+          .min(tracerEvalTaskGetUsageResponseResultStatsErrorCountMin)
+          .describe(
+            "Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the task logs.",
+          ),
         pass_rate: zod
           .number()
           .min(tracerEvalTaskGetUsageResponseResultStatsPassRateMin)
-          .max(tracerEvalTaskGetUsageResponseResultStatsPassRateMax),
+          .max(tracerEvalTaskGetUsageResponseResultStatsPassRateMax)
+          .describe(
+            "Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0.",
+          ),
         total_runs_is_lower_bound: zod.boolean().optional(),
         runs_period_is_lower_bound: zod.boolean().optional(),
       })

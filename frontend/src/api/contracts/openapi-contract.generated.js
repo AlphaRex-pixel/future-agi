@@ -102616,16 +102616,22 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         success_count: {
           title: "Success count",
+          description:
+            "Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period.",
           type: "integer",
           minimum: 0,
         },
         error_count: {
           title: "Error count",
+          description:
+            "Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the task logs.",
           type: "integer",
           minimum: 0,
         },
         pass_rate: {
           title: "Pass rate",
+          description:
+            "Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0.",
           type: "number",
           maximum: 100,
           minimum: 0,
@@ -102864,14 +102870,20 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         success_count: {
           title: "Success count",
+          description:
+            "Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period.",
           type: "integer",
         },
         error_count: {
           title: "Error count",
+          description:
+            "Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the eval logs.",
           type: "integer",
         },
         pass_rate: {
           title: "Pass rate",
+          description:
+            "Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0.",
           type: "number",
         },
       },

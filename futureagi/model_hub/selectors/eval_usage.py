@@ -101,8 +101,6 @@ class EvalUsageReadError(RuntimeError):
 class EvalUsageRead:
     total_runs: int
     runs_period: int
-    success_count: int
-    error_count: int
     chart: list[EvalUsageChartBucket]
     logs: list[EvalUsageLog]
     completeness: EvalUsageReadCompleteness
@@ -277,7 +275,6 @@ def read_eval_usage(
             "end_date": _utc(end_date) + timedelta(microseconds=1),
             "bucket_minutes": bucket_minutes,
             "success_status": "success",
-            "error_status": "error",
         }
     )
 
@@ -373,9 +370,7 @@ def read_eval_usage(
             sumKahanIf({score_expr}, {score_expr} IS NOT NULL) AS score_sum,
             countIf({score_expr} IS NOT NULL) AS score_count,
             countIf({pass_expr}) AS pass_count,
-            countIf({fail_expr}) AS fail_count,
-            countIf(status = %(success_status)s) AS success_count,
-            countIf(status = %(error_status)s) AS error_count
+            countIf({fail_expr}) AS fail_count
         FROM ({period_slice}) AS latest_usage
         WHERE {live}
         GROUP BY bucket
@@ -497,8 +492,6 @@ def read_eval_usage(
             return EvalUsageRead(
                 total_runs=0,
                 runs_period=0,
-                success_count=0,
-                error_count=0,
                 chart=[],
                 logs=[],
                 completeness=EvalUsageReadCompleteness.COMPLETE,
@@ -519,8 +512,6 @@ def read_eval_usage(
 
         chart: list[EvalUsageChartBucket] = []
         runs_period = 0
-        success_count = 0
-        error_count = 0
         for row in chart_rows:
             calls = int(row[1] or 0)
             duration_sum = _finite_float_or_none(row[2])
@@ -548,8 +539,6 @@ def read_eval_usage(
                 )
             )
             runs_period += calls
-            success_count += int(row[8] or 0)
-            error_count += int(row[9] or 0)
 
         def execute_page_count(
             query: str,
@@ -811,8 +800,6 @@ def read_eval_usage(
         return EvalUsageRead(
             total_runs=total_runs,
             runs_period=runs_period,
-            success_count=success_count,
-            error_count=error_count,
             chart=chart,
             logs=logs,
             completeness=EvalUsageReadCompleteness.COMPLETE,

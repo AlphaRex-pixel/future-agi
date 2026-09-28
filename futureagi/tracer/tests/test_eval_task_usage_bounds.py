@@ -392,7 +392,7 @@ def test_usage_aggregations_exclude_nonterminal_errored_and_skipped_rows():
     assert set(by_span) == {str(completed_span_id)}
 
 
-def test_usage_chart_counts_only_completed_and_errored_lifecycle_rows():
+def test_usage_chart_counts_only_completed_rows():
     created_at = datetime(2026, 8, 12, tzinfo=UTC)
     rows = [
         {
@@ -423,9 +423,9 @@ def test_usage_chart_counts_only_completed_and_errored_lifecycle_rows():
 
     [bucket] = _aggregate_usage_chart_rows(rows, timedelta(minutes=5))
 
-    assert bucket["calls"] == 2
+    assert bucket["calls"] == 1
     assert bucket["pass_count"] == 1
-    assert bucket["fail_count"] == 1
+    assert bucket["fail_count"] == 0
 
 
 def test_usage_endpoint_does_not_widen_empty_period_or_iterate_log_queryset():

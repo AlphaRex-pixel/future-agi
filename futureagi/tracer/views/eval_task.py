@@ -1097,18 +1097,11 @@ def _aggregate_usage_chart_rows(rows, bucket_delta):
         }
     )
     for row in rows:
-        row_status = row.get("status")
-        if row_status not in (
-            EvalEntryStatus.COMPLETED,
-            EvalEntryStatus.ERRORED,
-        ):
+        if row.get("status") != EvalEntryStatus.COMPLETED:
             continue
         bucket = _floor_usage_bucket(row["created_at"], bucket_delta)
         values = buckets[bucket]
         values["calls"] += 1
-        if row_status == EvalEntryStatus.ERRORED:
-            values["fail_count"] += 1
-            continue
         if row["output_bool"] is True:
             values["pass_count"] += 1
             values["score_sum"] += 1.0
@@ -2396,15 +2389,6 @@ class EvalTaskView(BaseModelViewSetMixin, ModelViewSet):
                 total_runs, total_runs_is_lower_bound = _bounded_usage_count(base_qs)
                 period_rows, period_sampled = _bounded_period_usage_rows(period_qs)
             runs_period = len(period_rows)
-            success_count = sum(
-                row["status"] == EvalEntryStatus.COMPLETED for row in period_rows
-            )
-            error_count = sum(
-                row["status"] == EvalEntryStatus.ERRORED for row in period_rows
-            )
-            pass_rate = (
-                round((success_count / runs_period * 100), 2) if runs_period > 0 else 0
-            )
 
             # ── Chart data — bucket by period and aggregate ──
             chart_data = []
@@ -2688,9 +2672,11 @@ class EvalTaskView(BaseModelViewSetMixin, ModelViewSet):
                     stats={
                         "total_runs": total_runs,
                         "runs_period": runs_period,
-                        "success_count": success_count,
-                        "error_count": error_count,
-                        "pass_rate": pass_rate,
+                        # Usage is successful runs only, so these three are
+                        # constant.
+                        "success_count": runs_period,
+                        "error_count": 0,
+                        "pass_rate": 100.0 if runs_period else 0,
                         "total_runs_is_lower_bound": total_runs_is_lower_bound,
                         "runs_period_is_lower_bound": period_sampled,
                     },

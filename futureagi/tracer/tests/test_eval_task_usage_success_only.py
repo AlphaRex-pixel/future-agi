@@ -7,7 +7,10 @@ listed the 47 errors, while the template Usage listed none of them. The Task
 Logs keep reporting every run.
 """
 
+from datetime import timedelta
+
 import pytest
+from django.utils import timezone
 
 # Break the import cycle (see test_eval_logger_schema.py for the
 # canonical comment).
@@ -110,3 +113,66 @@ def test_task_logs_still_report_every_run(auth_client, task_runs):
     assert result["success_count"] == 2
     assert result["errors_count"] == 1
     assert result["skipped_count"] == 1
+
+
+@pytest.mark.integration
+@pytest.mark.api
+@pytest.mark.django_db
+def test_task_usage_stats_publish_success_only_constants(
+    auth_client, task_runs, observation_span
+):
+    """success_count equals runs_period, error_count is 0 and pass_rate is 100
+    whenever there are runs: Usage counts only successful runs."""
+
+    task, success = task_runs
+    for output in ({"output_bool": False}, {"output_float": 0.5}):
+        _row(
+            span=_fresh_span(observation_span),
+            cfg=success.custom_eval_config,
+            task=task,
+            status=EvalEntryStatus.COMPLETED,
+            **output,
+        )
+
+    result = _result(
+        auth_client.get(USAGE_URL, {"eval_task_id": str(task.id), "period": "30d"})
+    )
+
+    assert result["stats"] == {
+        "total_runs": 3,
+        "runs_period": 3,
+        "success_count": 3,
+        "error_count": 0,
+        "pass_rate": 100.0,
+        "total_runs_is_lower_bound": False,
+        "runs_period_is_lower_bound": False,
+    }
+    assert sum(bucket["calls"] for bucket in result["chart"]) == 3
+    assert sum(bucket["pass_count"] for bucket in result["chart"]) == 1
+    assert sum(bucket["fail_count"] for bucket in result["chart"]) == 1
+
+    now = timezone.now()
+    empty = _result(
+        auth_client.get(
+            USAGE_URL,
+            {
+                "eval_task_id": str(task.id),
+                "start_date": (now - timedelta(days=60)).isoformat(),
+                "end_date": (now - timedelta(days=50)).isoformat(),
+            },
+        )
+    )
+
+    assert empty["stats"] == {
+        "total_runs": 3,
+        "runs_period": 0,
+        "success_count": 0,
+        "error_count": 0,
+        "pass_rate": 0,
+        "total_runs_is_lower_bound": False,
+        "runs_period_is_lower_bound": False,
+    }
+    # This response is not rendered through its serializer: the wire value
+    # has always been the integer 0 here, not 0.0.
+    assert type(empty["stats"]["pass_rate"]) is int
+    assert empty["chart"] == []

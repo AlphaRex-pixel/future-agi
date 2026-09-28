@@ -9,15 +9,28 @@ three. The logs keep every settled run; only the Usage read narrows.
 
 from __future__ import annotations
 
+import json
+import os
 import uuid
+from datetime import UTC, datetime, timedelta
+from inspect import unwrap
+from types import SimpleNamespace
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 
+from conftest import _ch_test_native_client, _ch_test_native_port
 from ee.usage.models.usage import APICallLog, APICallStatusChoices
 from model_hub.models.choices import OwnerChoices
 from model_hub.models.evals_metric import EvalTemplate
+from model_hub.selectors import eval_usage
+from model_hub.serializers.contracts import EvalUsageQuerySerializer
 from model_hub.views import separate_evals
 from tracer.services import exact_aggregation_cache
+from tracer.services.clickhouse import trace_project_scope
+from tracer.services.clickhouse.client import ClickHouseClient
 from tracer.services.exact_aggregation_cache import publish_exact_snapshot
 
 USAGE_QUERY = {"page": 0, "page_size": 25, "period": "30d"}
@@ -254,3 +267,253 @@ def test_evaluations_usage_page_counts_only_successful_runs(
     # stays is an owner decision, so it is pinned unchanged here.
     error_rate = rows[1]["error_rate"]
     assert max(point["value"] for point in error_rate) == len(failures)
+
+
+# ── Constant success-only fields ────────────────────────────────────────────
+#
+# Usage counts only successful runs, so ``success_count`` equals
+# ``runs_period``, ``error_count`` is 0 and ``pass_rate`` is 100 whenever there
+# are runs. The response keeps the fields; these pin their values and prove the
+# read no longer asks the database for them.
+
+
+def _usage_stats(auth_client, template):
+    response = auth_client.get(
+        f"/model-hub/eval-templates/{template.id}/usage/", USAGE_QUERY
+    )
+    assert response.status_code == 200, response.content
+    return response.json()["result"]
+
+
+def _backdate(row, days):
+    APICallLog.objects.filter(id=row.id).update(
+        created_at=timezone.now() - timedelta(days=days)
+    )
+
+
+@pytest.mark.django_db
+def test_usage_stats_publish_success_only_constants(
+    auth_client, organization, workspace, seeded_runs
+):
+    template, *_ = seeded_runs
+    for output in ("Failed", 0.5):
+        _ledger_row(
+            template,
+            organization,
+            workspace,
+            status=APICallStatusChoices.SUCCESS.value,
+            source="tracer",
+            config={"output": {"output": output}},
+        )
+    older = _ledger_row(
+        template,
+        organization,
+        workspace,
+        status=APICallStatusChoices.SUCCESS.value,
+        source="tracer",
+        config={"output": {"output": "Passed"}},
+    )
+    _backdate(older, days=40)
+
+    result = _usage_stats(auth_client, template)
+
+    assert result["stats"] == {
+        "total_runs": 4,
+        "runs_period": 3,
+        "success_count": 3,
+        "error_count": 0,
+        "pass_rate": 100.0,
+    }
+    assert result["logs"]["total"] == 3
+    assert sum(point["calls"] for point in result["chart"]) == 3
+    assert sum(point["pass_count"] for point in result["chart"]) == 1
+    assert sum(point["fail_count"] for point in result["chart"]) == 1
+
+
+@pytest.mark.django_db
+def test_usage_stats_for_an_empty_period(auth_client, organization, workspace):
+    template = _template(organization, workspace)
+    older = _ledger_row(
+        template,
+        organization,
+        workspace,
+        status=APICallStatusChoices.SUCCESS.value,
+        source="tracer",
+        config={"output": {"output": "Passed"}},
+    )
+    _backdate(older, days=40)
+
+    result = _usage_stats(auth_client, template)
+
+    assert result["stats"] == {
+        "total_runs": 1,
+        "runs_period": 0,
+        "success_count": 0,
+        "error_count": 0,
+        "pass_rate": 0.0,
+    }
+    assert result["logs"]["total"] == 0
+    assert sum(point["calls"] for point in result["chart"]) == 0
+
+
+@pytest.mark.django_db
+def test_usage_fallback_does_not_count_constant_status_fields(auth_client, seeded_runs):
+    """The Postgres fallback counts total runs, period runs and the log total.
+
+    It ran two more COUNTs, success rows and error rows over the success-only
+    period queryset, which always returned ``runs_period`` and 0.
+    """
+
+    template, *_ = seeded_runs
+    usage_table = f'"{APICallLog._meta.db_table}"'
+
+    with CaptureQueriesContext(connection) as queries:
+        _usage_stats(auth_client, template)
+
+    usage_counts = [
+        query["sql"]
+        for query in queries.captured_queries
+        if "COUNT(" in query["sql"] and usage_table in query["sql"]
+    ]
+    assert len(usage_counts) == 3, usage_counts
+
+
+@pytest.fixture
+def clickhouse_usage_table(settings, monkeypatch):
+    """A usage table on the test ClickHouse that the Usage view reads."""
+
+    settings.EVAL_USAGE_CLICKHOUSE_ENABLED = True
+    monkeypatch.setattr(separate_evals, "is_clickhouse_enabled", lambda: True)
+    suffix = uuid.uuid4().hex[:10]
+    usage_table = f"_test_eval_usage_stats_{suffix}"
+    trace_table = f"_test_eval_usage_stats_trace_{suffix}"
+    with _ch_test_native_client() as admin:
+        admin.execute(
+            f"""
+            CREATE TABLE {usage_table} (
+                id Int64,
+                log_id UUID,
+                organization_id UUID,
+                workspace_id Nullable(UUID),
+                source_id String,
+                status String,
+                config String,
+                eval_trace_id String,
+                deleted UInt8,
+                created_at DateTime64(6, 'UTC'),
+                _peerdb_is_deleted UInt8,
+                _peerdb_version Int64
+            ) ENGINE = MergeTree
+            ORDER BY id
+            """
+        )
+        admin.execute(
+            f"""
+            CREATE TABLE {trace_table} (
+                id UUID, project_id UUID, is_deleted UInt8, _version UInt64
+            ) ENGINE = ReplacingMergeTree(_version, is_deleted)
+            ORDER BY (project_id, id)
+            """
+        )
+        read_client = ClickHouseClient(
+            host=os.environ.get("CH25_HOST", "127.0.0.1"),
+            port=_ch_test_native_port().port,
+            database="default",
+        )
+        monkeypatch.setattr(eval_usage, "_USAGE_TABLE", usage_table)
+        monkeypatch.setattr(trace_project_scope, "_TRACE_TABLE", trace_table)
+        monkeypatch.setattr(eval_usage, "get_clickhouse_client", lambda: read_client)
+
+        def insert(rows):
+            admin.execute(f"INSERT INTO {usage_table} VALUES", rows)
+
+        try:
+            yield insert
+        finally:
+            read_client.close()
+            admin.execute(f"DROP TABLE IF EXISTS {trace_table}")
+            admin.execute(f"DROP TABLE IF EXISTS {usage_table}")
+
+
+def _clickhouse_usage_result(template, organization, workspace):
+    """The payload the exact-aggregation worker publishes for a 30D read."""
+
+    query = EvalUsageQuerySerializer(
+        data={**USAGE_QUERY, "refresh": True},
+    )
+    query.is_valid(raise_exception=True)
+    request = SimpleNamespace(
+        validated_query_data=query.validated_data,
+        organization=organization,
+        workspace=workspace,
+        user=SimpleNamespace(organization=organization),
+        _exact_aggregation_worker=True,
+    )
+    response = unwrap(separate_evals.EvalUsageStatsView.get)(
+        separate_evals.EvalUsageStatsView(), request, template.id
+    )
+    assert response.status_code == 200, response.data
+    return response.data["result"]
+
+
+@pytest.mark.integration
+@pytest.mark.django_db
+def test_clickhouse_usage_stats_publish_success_only_constants(
+    organization, workspace, clickhouse_usage_table
+):
+    template = _template(organization, workspace)
+    quiet = _template(organization, workspace)
+    now = datetime.now(UTC).replace(microsecond=0)
+
+    def row(row_id, source, status, days_ago, version=1, output=None):
+        config = json.dumps({"output": {"output": output}} if output else {})
+        return (
+            row_id,
+            uuid.uuid4(),
+            organization.id,
+            workspace.id,
+            str(source.id),
+            status,
+            config,
+            "",
+            0,
+            now - timedelta(days=days_ago, minutes=row_id),
+            0,
+            version,
+        )
+
+    clickhouse_usage_table(
+        [
+            row(1, template, "success", 1, output="Passed"),
+            row(2, template, "success", 2, output="Failed"),
+            row(3, template, "success", 3, output=0.5),
+            row(4, template, "success", 40, output="Passed"),
+            row(5, template, "error", 1),
+            row(6, template, "processing", 1),
+            # The newest version decides: this run errored after a success.
+            row(7, template, "success", 1, output="Passed"),
+            row(7, template, "error", 1, version=2),
+            row(8, quiet, "success", 40, output="Passed"),
+        ]
+    )
+
+    busy = _clickhouse_usage_result(template, organization, workspace)
+    empty = _clickhouse_usage_result(quiet, organization, workspace)
+
+    assert busy["stats"] == {
+        "total_runs": 4,
+        "runs_period": 3,
+        "success_count": 3,
+        "error_count": 0,
+        "pass_rate": 100.0,
+    }
+    assert busy["logs"]["total"] == 3
+    assert sum(point["pass_count"] for point in busy["chart"]) == 1
+    assert sum(point["fail_count"] for point in busy["chart"]) == 1
+    assert empty["stats"] == {
+        "total_runs": 1,
+        "runs_period": 0,
+        "success_count": 0,
+        "error_count": 0,
+        "pass_rate": 0.0,
+    }

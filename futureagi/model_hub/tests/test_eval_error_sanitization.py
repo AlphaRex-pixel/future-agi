@@ -193,8 +193,6 @@ def test_eval_usage_clickhouse_response_preserves_required_total_runs(
         lambda **_kwargs: EvalUsageRead(
             total_runs=0,
             runs_period=0,
-            success_count=0,
-            error_count=0,
             chart=[],
             logs=[],
             completeness=EvalUsageReadCompleteness.COMPLETE,
@@ -226,8 +224,6 @@ def test_eval_usage_non_finite_chart_averages_do_not_crash_api(
         lambda **kwargs: EvalUsageRead(
             total_runs=1,
             runs_period=1,
-            success_count=1,
-            error_count=0,
             chart=[
                 EvalUsageChartBucket(
                     bucket=separate_evals._round_to_usage_bucket(

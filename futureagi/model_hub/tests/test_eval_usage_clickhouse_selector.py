@@ -46,8 +46,6 @@ class _FakeClient:
                         3,
                         2,
                         1,
-                        2,
-                        1,
                     )
                 ],
                 [],
@@ -94,8 +92,6 @@ class _HeavyFullWindowClient:
                         self.total_rows,
                         self.total_rows * 0.5,
                         self.total_rows,
-                        self.total_rows,
-                        0,
                         self.total_rows,
                         0,
                     )
@@ -157,8 +153,6 @@ class _DenseSeekClient:
                         self.total_rows,
                         float(self.total_rows),
                         self.total_rows,
-                        self.total_rows,
-                        0,
                         self.total_rows,
                         0,
                     )
@@ -512,8 +506,6 @@ def test_eval_usage_maps_one_exact_chart_aggregate(monkeypatch):
                             5,
                             3,
                             2,
-                            3,
-                            2,
                         )
                     ],
                     [],
@@ -542,8 +534,6 @@ def test_eval_usage_maps_one_exact_chart_aggregate(monkeypatch):
     )
 
     assert result.runs_period == 5
-    assert result.success_count == 3
-    assert result.error_count == 2
     assert len(result.chart) == 1
     assert result.chart[0].calls == 5
     assert result.chart[0].avg_duration == pytest.approx(13.0 / 5.0)
@@ -941,8 +931,6 @@ def test_eval_usage_real_ch25_latest_tombstone_and_project_scope(
         assert result.completeness == eval_usage.EvalUsageReadCompleteness.COMPLETE
         assert result.unavailable_fields == ()
         assert result.runs_period == 2
-        assert result.success_count == 2
-        assert result.error_count == 0
         assert len(result.logs) == 2
         assert sum(bucket.calls for bucket in result.chart) == 2
     finally:
@@ -1064,8 +1052,6 @@ def test_eval_usage_real_ch25_counts_only_successful_runs(ch_client, monkeypatch
 
         assert result.total_runs == 3
         assert result.runs_period == 3
-        assert result.success_count == 3
-        assert result.error_count == 0
         assert sum(bucket.calls for bucket in result.chart) == 3
         assert sum(bucket.pass_count for bucket in result.chart) == 3
         assert [log.log_id for log in result.logs] == [
