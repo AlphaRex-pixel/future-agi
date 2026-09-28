@@ -230,8 +230,8 @@ docker compose run --rm --no-deps \
 ```
 
 Every hour of the range takes at least one page, and a run stops after
-`--max-pages`. A preview keeps no checkpoint, so preview a range with no more
-hours than `--max-pages`, or raise it.
+`--max-pages`. A preview keeps no checkpoint, so give it a `--max-pages` of at
+least the range's hours (busy hours take more), or narrow the range.
 
 To apply the reviewed scope, repeat with `--apply --checkpoint /backfill/progress.json`
 and mount an operator-owned writable directory at `/backfill`. The container

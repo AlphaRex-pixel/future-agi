@@ -428,7 +428,7 @@ Preview spans:
 Apply/resume: add --apply --checkpoint /writable/progress.json
 Bounds: --page-size 64 --max-pages 100 --page-delay 100ms
 Every hour of the range takes at least one page. A preview keeps no checkpoint:
-raise --max-pages to the range's hours or narrow it.
+raise --max-pages to at least the range's hours or narrow it.
 
 Preview a verified historical batch instead:
   --source legacy --project UUID --legacy-epoch N --legacy-revision N --legacy-build UUID

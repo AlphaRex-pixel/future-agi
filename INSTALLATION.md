@@ -1499,7 +1499,7 @@ in its range (a 30-day month has 720), or a shorter range.
 
 To index, run it over the whole range you need with `--apply` and a
 checkpoint, which records its progress. This range has 6552 hours, so
-`--max-pages 7000` covers it unless some hours hold more than 64 spans:
+`--max-pages 7000` leaves 448 pages for busy hours:
 
 ```bash
 docker compose exec app sh -c 'FI_PG_DSN="$FI_PG_READ" \
