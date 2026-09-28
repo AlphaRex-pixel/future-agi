@@ -243,6 +243,20 @@ test('managed mock background rechecks an awaited safety veto immediately before
   expect(fake.readCount()).toBe(reads);
 });
 
+for (const evalBackground of [false, true]) {
+  test(`managed mock refuses a private-provider or foreign control-plane gateway (background=${evalBackground})`, () => {
+    for (const service of ['backend', 'worker', 'agentcc-gateway']) {
+      validateMockEnvironment(service, { ...backgroundEnvironment, AGENTCC_CONTROL_PLANE_URL: 'http://backend',
+        AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS: 'false' }, evalBackground);
+      for (const override of [{ AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS: 'true' },
+        { AGENTCC_CONTROL_PLANE_URL: 'https://control-plane.invalid' }] as Record<string, string>[]) {
+        expect(() => validateMockEnvironment(service, { ...backgroundEnvironment, ...override }, evalBackground))
+          .toThrow('unsupported gateway override');
+      }
+    }
+  });
+}
+
 test('managed mock background refuses a sandbox provider credential', () => {
   expect(() => validateMockEnvironment('worker', { ...backgroundEnvironment, DAYTONA_API_KEY: 'e2e-mock' }, true))
     .toThrow('credential override');
@@ -269,18 +283,28 @@ for (const evalBackground of [false, true]) {
 }
 
 for (const [name, override, reason] of [
+  ['real provider key', { OPENAI_API_KEY: 'private-provider-key' }, 'non-mock provider key'],
+  ['Sentry DSN', { SENTRY_DSN: 'https://sentry.invalid/1' }, 'credential override'],
+  ['proxy', { HTTPS_PROXY: 'http://proxy.invalid' }, 'proxy/preload override'],
   ['mail sender domain', { MAILGUN_SENDER_DOMAIN: 'mail.invalid' }, 'credential override'],
   ['private provider URLs', { AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS: 'true' }, 'unsupported gateway override'],
   ['foreign control plane', { AGENTCC_CONTROL_PLANE_URL: 'https://control-plane.invalid' }, 'unsupported gateway override'],
   ['unknown gateway setting', { AGENTCC_BASE_URL: 'https://gateway.invalid' }, 'unsupported gateway override'],
   ['nonlocal mail', { EMAIL_BACKEND: 'django.core.mail.backends.smtp.EmailBackend' }, 'nonlocal email backend'],
   ['Sentry', { SENTRY_ENABLED: 'true' }, 'Sentry must be disabled'],
+  ['telemetry', { FUTURE_AGI_TELEMETRY_DISABLED: 'false' }, 'required app FUTURE_AGI_TELEMETRY_DISABLED'],
 ] as [string, Record<string, string>, string][]) {
   test(`managed mock refuses a Standalone app with a ${name} override`, () => {
     expect(() => validateStandaloneAppEnvironment({ ...composedStandaloneEnvironment(), ...override }, false))
       .toThrow(reason);
   });
 }
+
+test('managed mock refuses a Standalone app without the telemetry opt-out', () => {
+  const env = composedStandaloneEnvironment();
+  delete env.FUTURE_AGI_TELEMETRY_DISABLED;
+  expect(() => validateStandaloneAppEnvironment(env, false)).toThrow('required app FUTURE_AGI_TELEMETRY_DISABLED');
+});
 
 // A stand-in `docker` on PATH answers the read-only calls the inspection makes
 // (bin/e2e compose passes through to it), so the whole inspection runs offline.
