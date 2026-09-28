@@ -57,17 +57,18 @@ const PROXY_OR_PRELOAD = /^(https?_proxy|all_proxy|node_options|ld_preload|pytho
  * is strict: the Distributed background opt-in, and always in Standalone. */
 const CREDENTIAL_OVERRIDE = /^(EE_LICENSE_KEY|SENTRY_DSN|SLACK_.*|DEPLOYMENT_TELEMETRY_SLACK_WEBHOOK|ERROR_LOGS_WEBHOOK|MIX_PANEL_TOKEN|MAILGUN_.*|SMTP_.*|SENDGRID_.*|RESEND_.*|AWS_SESSION_TOKEN|GOOGLE_APPLICATION_CREDENTIALS|DAYTONA_API_KEY|E2B_API_KEY)$/;
 
-/** Where the gateway and the API it syncs from listen: their own services in
- * Distributed, loopback inside Standalone's one `app` container. */
-export interface MockTopology { gateway: string; controlPlane: string }
-const DISTRIBUTED: MockTopology = { gateway: 'http://agentcc-gateway:8080', controlPlane: 'http://backend' };
+/** Where the gateway, the API it syncs from and Temporal listen: their own
+ * services in Distributed, loopback inside Standalone's one `app` container. */
+export interface MockTopology { gateway: string; controlPlane: string; temporal: string }
+const DISTRIBUTED: MockTopology = { gateway: 'http://agentcc-gateway:8080', controlPlane: 'http://backend',
+  temporal: 'temporal:7233' };
 
 function gatewayValues({ gateway, controlPlane }: MockTopology) {
   const allowed: Record<string, string> = { AGENTCC_INTERNAL_API_KEY: MOCK_KEY,
     AGENTCC_ADMIN_TOKEN: 'local-dev-only-admin-token-replace-me',
     AGENTCC_INTERNAL_URL: gateway, AGENTCC_GATEWAY_INTERNAL_URL: gateway };
-  // Control-plane wiring of the gateway (docker-compose.distributed.yml): it
-  // pulls keys from the backend and posts request logs back. No provider route,
+  // Control-plane wiring of the gateway, in both compose files: it pulls keys
+  // from the API and posts request logs back. No provider route,
   // credential or network allowance: private provider URLs stay refused.
   const wiring: Record<string, string> = { AGENTCC_CONTROL_PLANE_URL: controlPlane,
     AGENTCC_CONTROL_PLANE_TOKEN: allowed.AGENTCC_ADMIN_TOKEN, AGENTCC_SYNC_ON_STARTUP: 'true',
@@ -105,6 +106,19 @@ export function validateEnvironmentEntries(service: string, env: Record<string, 
   }
 }
 
+/** Values the containers running the API and the workers must carry, checked
+ * even when absent: the gateway wiring and the telemetry opt-out, plus, with the
+ * background opt-in, the mock serving URL, the local Temporal and no licence or
+ * mail key. Distributed checks them with the opt-in only; Standalone always.
+ */
+export function requiredMockValues(topology: MockTopology, evalBackground: boolean): Record<string, string> {
+  const pins = { ...gatewayValues(topology).allowed, FUTURE_AGI_TELEMETRY_DISABLED: 'true' };
+  if (!evalBackground) return pins;
+  return { ...pins, MODEL_SERVING_URL: MOCK_SERVING_BASE, ENV_TYPE: 'local', EE_LICENSE_KEY: '',
+    NO_STARTUP_DB_MUTATIONS: 'true', OTEL_ENABLED: 'false', TEMPORAL_HOST: topology.temporal,
+    TEMPORAL_NAMESPACE: 'default', DJANGO_SETTINGS_MODULE: 'tfc.settings.settings', MAILGUN_API_KEY: '' };
+}
+
 /** Required values are checked even when absent. No license or generic-provider
  * fallback. Pure validation so offline tests never need Docker, API or SDK requests.
  */
@@ -119,11 +133,9 @@ export function validateMockEnvironment(service: string, env: Record<string, str
     }
   }
   if (!['backend', 'worker'].includes(service)) return;
-  const required = { ...allowed, MODEL_SERVING_URL: MOCK_SERVING_BASE, ENV_TYPE: 'local',
-    EE_LICENSE_KEY: '', NO_STARTUP_DB_MUTATIONS: 'true', OTEL_ENABLED: 'false',
-    FUTURE_AGI_TELEMETRY_DISABLED: 'true', TEMPORAL_HOST: 'temporal:7233', TEMPORAL_NAMESPACE: 'default',
-    DJANGO_SETTINGS_MODULE: 'tfc.settings.settings', MAILGUN_API_KEY: '' };
-  for (const [key, value] of Object.entries(required)) requireSafe(env[key] === value, `required ${service} ${key} mismatch`);
+  for (const [key, value] of Object.entries(requiredMockValues(DISTRIBUTED, true))) {
+    requireSafe(env[key] === value, `required ${service} ${key} mismatch`);
+  }
   if (service === 'worker') {
     requireSafe(env.TEMPORAL_ALL_QUEUES === 'true' && env.TEMPORAL_EXCLUDED_QUEUES === 'simulation_runner',
       'worker must include the native agent_compass queue');

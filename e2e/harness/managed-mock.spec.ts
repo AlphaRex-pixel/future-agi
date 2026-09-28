@@ -306,6 +306,17 @@ test('managed mock refuses a Standalone app without the telemetry opt-out', () =
   expect(() => validateStandaloneAppEnvironment(env, false)).toThrow('required app FUTURE_AGI_TELEMETRY_DISABLED');
 });
 
+// The same pins as Distributed's backend and worker (validateMockEnvironment),
+// with Standalone's loopback gateway and Temporal.
+for (const [key, evalBackground] of [['AGENTCC_ADMIN_TOKEN', false], ['EE_LICENSE_KEY', true],
+  ['MAILGUN_API_KEY', true]] as [string, boolean][]) {
+  test(`managed mock refuses a Standalone app without ${key} (background=${evalBackground})`, () => {
+    const env = composedStandaloneEnvironment();
+    delete env[key];
+    expect(() => validateStandaloneAppEnvironment(env, evalBackground)).toThrow(`required app ${key} mismatch`);
+  });
+}
+
 // A stand-in `docker` on PATH answers the read-only calls the inspection makes
 // (bin/e2e compose passes through to it), so the whole inspection runs offline.
 const fakeDockerScript = `#!/bin/sh

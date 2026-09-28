@@ -16,25 +16,21 @@
 // Not re-expressed: the Python constructor attestation of the background eval
 // client (managed-mock-background.py pins Distributed hostnames such as
 // temporal:7233 and agentcc-gateway:8080). evalBackground therefore adds only
-// the Standalone environment pins below.
+// the environment pins Distributed's backend and worker carry (requiredMockValues).
 import { E2E } from './env';
-import { containerEnvironment, gatewayFile, MOCK_KEY, mockFile, requireSafe, validateEnvironmentEntries,
+import { containerEnvironment, gatewayFile, mockFile, requiredMockValues, requireSafe, validateEnvironmentEntries,
   type MockStack, type MockTopology } from './managed-mock';
 
-// docker-compose.yml app: the gateway and the API it syncs from share the container.
-const STANDALONE: MockTopology = { gateway: 'http://127.0.0.1:8080', controlPlane: 'http://127.0.0.1:8000' };
+// docker-compose.yml app: the gateway, the API it syncs from and Temporal share the container.
+const STANDALONE: MockTopology = { gateway: 'http://127.0.0.1:8080', controlPlane: 'http://127.0.0.1:8000',
+  temporal: '127.0.0.1:7233' };
 
 export function validateStandaloneAppEnvironment(env: Record<string, string>, evalBackground: boolean): void {
   // One container runs the gateway and the workers, so the strict checks always apply.
   validateEnvironmentEntries('app', env, STANDALONE, true);
-  const required: Record<string, string> = {
-    FUTURE_AGI_TELEMETRY_DISABLED: 'true', AGENTCC_INTERNAL_API_KEY: MOCK_KEY,
-    AGENTCC_INTERNAL_URL: STANDALONE.gateway, AGENTCC_GATEWAY_INTERNAL_URL: STANDALONE.gateway,
-  };
-  if (evalBackground) Object.assign(required, { MODEL_SERVING_URL: 'http://mock-llm:8080', ENV_TYPE: 'local',
-    TEMPORAL_HOST: '127.0.0.1:7233', TEMPORAL_NAMESPACE: 'default', OTEL_ENABLED: 'false',
-    DJANGO_SETTINGS_MODULE: 'tfc.settings.settings', NO_STARTUP_DB_MUTATIONS: 'true' });
-  for (const [key, value] of Object.entries(required)) requireSafe(env[key] === value, `required app ${key} mismatch`);
+  for (const [key, value] of Object.entries(requiredMockValues(STANDALONE, evalBackground))) {
+    requireSafe(env[key] === value, `required app ${key} mismatch`);
+  }
 }
 
 export function standaloneMockStack(evalBackground: boolean): MockStack {
