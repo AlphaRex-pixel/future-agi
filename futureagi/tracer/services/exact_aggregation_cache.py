@@ -92,11 +92,21 @@ _OPEN_WINDOW_REVALIDATION_NAMESPACES = frozenset(
 #   The cost of that reservation: while ANY exact job of the same scope is in
 #   flight (another chart's cold read, an eval chart, another revalidation),
 #   an old open-window hit is served plain, complete and not refreshing, with
-#   nothing retrying until the next visit. Because the toolbar window's start
-#   moves each hour, such a hit can be up to about one hour old (plus read
-#   time), not five minutes; the only sign is its completed_at ("Last
-#   updated"). Serving it marked refreshing, or polling for a free slot, or
-#   raising the default to three slots, are owner decisions left open.
+#   nothing retrying until the next visit. How old it can get depends on how
+#   long its identity lives, not on the floor:
+#   - Rolling presets (7D .. 12M): the start is floored to the UTC hour, so
+#     the identity changes each hour and such a hit is at most about one hour
+#     old (plus read time).
+#   - "Today" ([local midnight, next local midnight], never rounded; the
+#     default window in user mode): the identity lives all day, so on a scope
+#     that often has an exact job in flight the hit can be many hours old.
+#   - A custom window ending in the future: the identity lives until the
+#     viewer changes it, so there is no bound at all.
+#   (Yesterday and the sub-day presets end by the time they are computed, so
+#   they never revalidate.) In every case the only sign is completed_at
+#   ("Last updated"). Serving it marked refreshing, polling for a free slot,
+#   claiming the reserved slot past a second, larger age floor, or raising the
+#   default to three slots, are owner decisions left open.
 # - A revalidation whose Temporal dispatch is accepted but never starts keeps
 #   its "running" state for the dispatch lease, exactly like an explicit
 #   refresh today: hit polls never reconcile against Temporal, so the chart
