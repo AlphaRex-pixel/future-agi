@@ -4840,6 +4840,11 @@ def session_graph_reads_lean_roots(
     shape; span-level and message filters do not. Only this shape is costed by
     ``session_graph_root_estimate_sql``: its work follows the live roots of
     the window, which is what that estimate counts.
+
+    It runs on the request path, so it reads no metadata: ``has_annotation``
+    (whose plan reads the project's labels from PostgreSQL) is always a
+    span-level leaf, and a plan that cannot be built is not lean - the
+    background path owns that error and reports it as a failed refresh.
     """
 
     if _session_filters_need_message_aggregates(filters):
@@ -4855,7 +4860,17 @@ def session_graph_reads_lean_roots(
             *SESSION_ID_FILTER_COLS,
         }
     ]
-    plan = _session_membership_plan(project_id=project_id, filters=span_filters)
+    if any(
+        not _is_raw_attribute_filter(item)
+        and (item.get("column_id") or item.get("columnId")) == "has_annotation"
+        for item in span_filters
+    ):
+        return False
+    try:
+        plan = _session_membership_plan(project_id=project_id, filters=span_filters)
+    except Exception:
+        logger.warning("session_graph_lean_classification_failed", exc_info=True)
+        return False
     return not (plan.scalar_predicates or plan.relational_predicates)
 
 

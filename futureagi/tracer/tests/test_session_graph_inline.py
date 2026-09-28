@@ -714,3 +714,83 @@ def test_a_wall_too_short_to_share_goes_to_the_worker(scheduled):
     assert analytics.calls == []
     assert [call.namespace for call in scheduled] == [NAMESPACE]
     assert payload["query_status"] == "pending"
+
+
+# Classifying a shape must not read metadata on the request path: a
+# has_annotation filter can never be the lean shape, and building its
+# membership plan read PostgreSQL - during an outage that answered HTTP 500
+# where the background path answers pending.
+
+
+def _has_annotation(complete):
+    return _system("has_annotation", "boolean", "equals", complete)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("complete", [True, False], ids=["complete", "incomplete"])
+def test_a_has_annotation_filter_is_classified_without_a_metadata_read(
+    scheduled, monkeypatch, complete
+):
+    from django.db import DatabaseError
+
+    from tracer.services.clickhouse import exact_graph_reads
+
+    reads = []
+
+    def unavailable(project_id):
+        reads.append(project_id)
+        raise DatabaseError("metadata down")
+
+    monkeypatch.setattr(
+        exact_graph_reads, "get_annotation_labels_for_project", unavailable
+    )
+    analytics = _Analytics()
+
+    payload = _fetch(analytics, [WINDOW, _has_annotation(complete)])
+
+    assert reads == []
+    assert analytics.calls == []
+    assert [call.namespace for call in scheduled] == [NAMESPACE]
+    assert payload["query_status"] == "pending"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("complete", [True, False], ids=["complete", "incomplete"])
+def test_the_has_annotation_shortcut_agrees_with_the_membership_plan(
+    monkeypatch, complete
+):
+    from tracer.services.clickhouse import exact_graph_reads
+
+    monkeypatch.setattr(
+        exact_graph_reads,
+        "_annotation_label_ids_for_filters",
+        lambda *_args: ("11111111-1111-4111-8111-111111111111",),
+    )
+    plan = exact_graph_reads._session_membership_plan(
+        project_id=PROJECT_ID, filters=[_has_annotation(complete)]
+    )
+
+    # The plan the classifier used to build always had a span-level leaf.
+    assert plan.scalar_predicates or plan.relational_predicates
+    assert not exact_graph_reads.session_graph_reads_lean_roots(
+        project_id=PROJECT_ID, filters=[WINDOW, _has_annotation(complete)]
+    )
+
+
+@pytest.mark.unit
+def test_a_classification_that_cannot_be_built_takes_the_background_path(
+    scheduled, monkeypatch
+):
+    from tracer.services.clickhouse import exact_graph_reads
+
+    def unbuildable(**_kwargs):
+        raise exact_graph_reads.ExactGraphReadError("metadata unavailable")
+
+    monkeypatch.setattr(exact_graph_reads, "_session_membership_plan", unbuildable)
+    analytics = _Analytics()
+
+    payload = _fetch(analytics, NOT_LEAN_SHAPES["model"])
+
+    assert analytics.calls == []
+    assert [call.namespace for call in scheduled] == [NAMESPACE]
+    assert payload["query_status"] == "pending"
