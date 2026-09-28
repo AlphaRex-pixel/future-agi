@@ -18,6 +18,7 @@ from tracer.models.trace_grouping import (
     TraceGroupingFeatureJob,
 )
 from tracer.models.trace_investigation import (
+    TraceInvestigationAttempt,
     TraceInvestigationJob,
     TraceInvestigationJobState,
     TraceInvestigationReport,
@@ -491,6 +492,91 @@ def test_debug_groups_a_run_once_every_call_is_read(
     (claim,) = claim_grouping_work(worker_id="test-f6-worker", limit=1)["claims"]
     # The whole run is one cohort, so a failure shared across calls meets its peers.
     assert len(claim["pending_snapshots"]) == 2
+
+
+def _unreadable_result(claim, call):
+    """An Omega attempt that could not read the call (e.g. unparseable output)."""
+    result = _failure_result(claim, call)
+    result.update(
+        execution_status="failed", outcome="unknown", findings=[], requirement_checks=[]
+    )
+    result["result_digest"] = canonical_wire_result_digest(result)
+    return result
+
+
+def test_debug_reads_a_call_again_once_when_its_analysis_fails(
+    auth_client, organization, workspace
+):
+    scenario = Scenarios.objects.create(
+        name="Refund",
+        source="Refund policy",
+        organization=organization,
+        workspace=workspace,
+    )
+    execution, call = _execution(
+        organization, workspace, scenario, "run", CallExecution.CallStatus.COMPLETED
+    )
+    url = f"/simulate/test-executions/{execution.id}/debug-analysis/"
+    auth_client.post(url)
+
+    def fail_once_more():
+        (claim,) = claim_due_investigations(
+            worker_id="test-worker", engine_version="omega-v1", limit=1
+        )["claims"]
+        result = _unreadable_result(claim, call)
+        publish_investigation(
+            idempotency_key=str(claim["attempt_id"]),
+            lease_token=claim["lease_token"],
+            result=result,
+            wire_result_digest=result["result_digest"],
+        )
+        return TraceInvestigationJob.no_workspace_objects.get(call_execution=call)
+
+    # The first failure is read again before anyone sees it.
+    job = fail_once_more()
+    assert (job.state, job.generation, job.current_report_id) == (
+        TraceInvestigationJobState.WAITING,
+        2,
+        None,
+    )
+    assert auth_client.get(url).json()["status"] == "pending"
+
+    # One that repeats is left for the user to retry.
+    job = fail_once_more()
+    assert (job.state, job.generation) == (TraceInvestigationJobState.COMPLETED, 2)
+    assert job.current_report.execution_status == "failed"
+
+
+def test_debug_reads_a_call_again_when_its_read_outlived_its_lease(
+    auth_client, organization, workspace
+):
+    scenario = Scenarios.objects.create(
+        name="Refund",
+        source="Refund policy",
+        organization=organization,
+        workspace=workspace,
+    )
+    execution, call = _execution(
+        organization, workspace, scenario, "run", CallExecution.CallStatus.COMPLETED
+    )
+    auth_client.post(f"/simulate/test-executions/{execution.id}/debug-analysis/")
+    (claim,) = claim_due_investigations(
+        worker_id="test-worker", engine_version="omega-v1", limit=1
+    )["claims"]
+    # The result lands after the attempt's lease ran out, so it cannot count.
+    TraceInvestigationAttempt.no_workspace_objects.filter(
+        id=claim["attempt_id"]
+    ).update(lease_expires_at=timezone.now() - timedelta(seconds=1))
+    result = _failure_result(claim, call)
+    publish_investigation(
+        idempotency_key=str(claim["attempt_id"]),
+        lease_token=claim["lease_token"],
+        result=result,
+        wire_result_digest=result["result_digest"],
+    )
+
+    job = TraceInvestigationJob.no_workspace_objects.get(call_execution=call)
+    assert (job.state, job.generation) == (TraceInvestigationJobState.WAITING, 2)
 
 
 def test_debug_counts_calls_whose_own_analysis_ended_without_a_report(

@@ -17,6 +17,7 @@ from tracer.models.trace_investigation import (
     TraceInvestigationFinding,
     TraceInvestigationJob,
     TraceInvestigationJobState,
+    TraceInvestigationReport,
 )
 from tracer.services.simulation_diagnosis import build_diagnosis
 
@@ -101,28 +102,51 @@ def ensure_simulation_investigation(
                     workload_type=InvestigationWorkload.SIMULATION_TEST_EXECUTION,
                     not_before=now,
                 )
-            elif job.state == TraceInvestigationJobState.CANCELLED or (
-                job.current_report is not None
-                and job.current_report.execution_status == "failed"
-            ):
-                if job.current_report is not None:
-                    job.current_report.is_current = False
-                    job.current_report.save(update_fields=["is_current", "updated_at"])
-                    job.current_report = None
-                job.generation += 1
-                job.state = TraceInvestigationJobState.WAITING
-                job.not_before = now
-                job.save(
-                    update_fields=[
-                        "generation",
-                        "state",
-                        "not_before",
-                        "current_report",
-                        "updated_at",
-                    ]
-                )
+            elif _unread(job):
+                _rearm(job, now)
             jobs.append(job)
         return jobs
+
+
+def _unread(job: TraceInvestigationJob) -> bool:
+    """The call's analysis ended without a usable report: cancelled or failed."""
+    return job.state == TraceInvestigationJobState.CANCELLED or (
+        job.state == TraceInvestigationJobState.COMPLETED
+        and job.current_report is not None
+        and job.current_report.execution_status == "failed"
+    )
+
+
+def _rearm(job: TraceInvestigationJob, now) -> None:
+    """Queue a call's investigation again as a fresh generation."""
+    if job.current_report is not None:
+        job.current_report.is_current = False
+        job.current_report.save(update_fields=["is_current", "updated_at"])
+        job.current_report = None
+    job.generation += 1
+    job.state = TraceInvestigationJobState.WAITING
+    job.not_before = now
+    job.save(
+        update_fields=[
+            "generation",
+            "state",
+            "not_before",
+            "current_report",
+            "updated_at",
+        ]
+    )
+
+
+def retry_unread_call_once(job: TraceInvestigationJob, now) -> None:
+    """Read a call again when its first analysis ended unread, before anyone sees it.
+
+    Most are a hiccup (unparseable model output, an upstream error, a read that
+    outlived its lease) that a second read clears; one that repeats is left for
+    the user to retry.
+    """
+    first = TraceInvestigationReport.no_workspace_objects.filter(job=job).count() == 1
+    if first and _unread(job):
+        _rearm(job, now)
 
 
 def _finding_payload(finding, clusters: dict, goals: set[str]) -> dict:

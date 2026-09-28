@@ -1159,6 +1159,10 @@ def publish_investigation(
             else:
                 job.state = TraceInvestigationJobState.CANCELLED
             job.save(update_fields=["state", "current_report", "updated_at"])
+        if simulation:
+            from tracer.services.simulation_investigation import retry_unread_call_once
+
+            retry_unread_call_once(job, now)
         if active and old_current_report_id and old_current_report_id != report.id:
             from tracer.services.grouping.lifecycle import deproject_superseded_report
 
