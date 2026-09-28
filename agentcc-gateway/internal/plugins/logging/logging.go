@@ -116,7 +116,8 @@ func markRedacted(record *TraceRecord) {
 // shutdownFlushTimeout bounds Close's last attempt to deliver request logs.
 // The Helm chart gives a stopping gateway 45 s: a 10 s preStop sleep, up to
 // 30 s (server.shutdown_timeout) for in-flight requests, then this, which
-// runs alongside the emitter's drain and leaves a second for the rest.
+// ends a second before the 45 s are up. It runs alongside the emitter's
+// drain, which only a slow stdout stretches to its 5 s cap.
 const shutdownFlushTimeout = 4 * time.Second
 
 // Close drains buffered trace records and stops workers while it makes a
