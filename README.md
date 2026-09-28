@@ -538,15 +538,11 @@ We love contributions — bug fixes, new evaluators, framework integrations, doc
 
 ##  Telemetry
 
-Self-hosted Future AGI sends deployment telemetry, **on by default**, so we can count installs and size release testing. **No trace data, no prompts, no completions, no datasets, no API keys**, ever.
+Self-hosted Future AGI sends deployment telemetry, **on by default**, so we can count installs and size release testing: one registration with the **email addresses of the install's owner and administrator accounts**, then usage counts on a schedule. **No trace data, no prompts, no completions, no datasets, no API keys**, ever.
 
-**What is sent:**
-- **Registration** (once, when the first account is created): a random instance ID, the version, the deployment type, and the **email addresses and domains** of the organization owners and admins (and of any Django staff or superuser accounts).
-- **Heartbeat** (every 6 hours): aggregate usage counts, such as traces, spans and evaluations.
+To opt out, install with `./bin/install --no-telemetry`, or set `FUTURE_AGI_TELEMETRY_DISABLED=true` in `.env` (`deploy/.env.production` for the production overlay, `config.telemetry=false` for Helm) and run `docker compose up -d`. Everything else that could leave your install (HubSpot, Slack, Mixpanel, PostHog, reCAPTCHA, Sentry, Mailgun) is **off until you set its key**.
 
-The app logs a `deployment_telemetry_disclosure` line saying what it sends and where. To opt out, install with `./bin/install --no-telemetry`, or set `FUTURE_AGI_TELEMETRY_DISABLED=true` in `.env` (`deploy/.env.production` for the production overlay, `config.telemetry=false` for Helm) and run `docker compose up -d`. The instance then sends one minimal registration (instance ID, version, deployment type, timestamp, **no emails**) and no heartbeats. For no connection to Future AGI at all, also block outbound traffic to `api.futureagi.com`; [docs/telemetry.md](docs/telemetry.md) lists every outbound connection, including litellm's model price list (`LITELLM_LOCAL_MODEL_COST_MAP=True` keeps it offline).
-
-Everything else that could leave your install (HubSpot, Slack, Mixpanel, PostHog, reCAPTCHA, Sentry, Mailgun) is **off until you set its key**. Exact payloads and every setting: [docs/telemetry.md](docs/telemetry.md).
+[docs/telemetry.md](docs/telemetry.md) has the exact payloads, what the opt-out still sends, every setting, and every outbound connection, with what an install that allows no outbound traffic must also set.
 
 ---
 

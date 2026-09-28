@@ -74,7 +74,7 @@ refuses to start while a required value is empty. See
 | Send traces from SDKs on other machines | A reverse proxy in front of port 4318, and `FI_COLLECTOR_PUBLIC_URL` ([Public URLs](#public-urls)) |
 | Invite teammates by email, send password-reset emails | `MAILGUN_API_KEY`, `MAILGUN_SENDER_DOMAIN`, `DEFAULT_FROM_EMAIL`, optionally `DEFAULT_REPLY_TO_EMAIL` ([Email](#email)) |
 | Run `docker compose up` without `./bin/install` | Every key in [section 1](#1-generated-by-the-installer) |
-| Stop sending deployment telemetry | `FUTURE_AGI_TELEMETRY_DISABLED=true`, or install with `./bin/install --no-telemetry` ([Telemetry](#telemetry-what-this-install-sends-to-future-agi)) |
+| Stop sending deployment telemetry | `FUTURE_AGI_TELEMETRY_DISABLED=true`, or install with `./bin/install --no-telemetry` ([Telemetry](#deployment-telemetry)) |
 | Isolate code evals from each other | `COMPOSE_PROFILES=sandbox` ([Extra services](#extra-services)) |
 | Go to production | The [minimal production checklist](#minimal-production-checklist) |
 
@@ -85,12 +85,18 @@ fills every key below that is empty or still a `CHANGEME-` placeholder with a
 random value and writes it to `.env`. It never changes a value afterwards. On
 an existing install it fills only `INTEGRATION_ENCRYPTION_KEY` and
 `REDIS_PASSWORD`, which hold no state, and warns about the rest.
+`--wipe-volumes` and `./bin/uninstall --wipe-data` make the next install fresh
+again, and a value already in `.env` is kept even then.
 
 Without the installer, set them yourself before the first start:
 `openssl rand -hex 32` for each, and
 `python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"`
 for `INTEGRATION_ENCRYPTION_KEY`. Left empty, the stack runs on the defaults
 below, which are published in this repository and therefore not secret.
+
+Every secret below but `PG_PASSWORD` and `INTEGRATION_ENCRYPTION_KEY` can
+change at any time: set it in `.env` and run `docker compose up -d`. Those two
+hold state, as their rows say.
 
 ### Secrets
 
@@ -305,26 +311,17 @@ organization.
 | `VAPI_API_BASE_URL` | Vapi's public API | S D H | Vapi API endpoint. |
 | `SYSTEM_VOICE_PROVIDER` | `vapi` | S D H | Provider of the simulator side of a voice call. Calls to LiveKit agents always use LiveKit. |
 
-### Telemetry: what this install sends to Future AGI
+### Deployment telemetry
 
 Deployment telemetry is **on** by default, so Future AGI knows how many
-installs run which version. It sends:
-
-- **Once, at registration:** a random instance id, the version, the deployment
-  type (docker, kubernetes, ...), a timestamp, and the email addresses and
-  domains of active organization owners and admins and of Django staff and
-  superuser accounts.
-- **Every 6 hours:** counts for the previous window: active users, traces,
-  spans, projects, evaluations, dataset eval runs, simulation runs and calls,
-  experiments, gateway requests and datasets.
-
-It never sends traces, prompts, completions, datasets or any other content.
-At startup the app logs a `deployment_telemetry_disclosure` line saying exactly
-which of the two modes it runs in and where it sends.
+installs run which version. It never sends traces, prompts, completions,
+datasets or any other content. What it sends and when, what the opt-out still
+sends, and how to see what your install sent:
+[docs/telemetry.md](telemetry.md).
 
 | Key | Default | Setups | What it does |
 | --- | --- | --- | --- |
-| `FUTURE_AGI_TELEMETRY_DISABLED` | `false` | S D H | `true` opts out: no admin emails and no heartbeats; one minimal registration ping (instance id, version, deployment type, timestamp) remains. `./bin/install --no-telemetry` (`.\bin\install.ps1 -NoTelemetry`) writes it before anything starts. Helm: `config.telemetry=false`. |
+| `FUTURE_AGI_TELEMETRY_DISABLED` | `false` | S D H | `true` opts out: no email addresses and no heartbeats; one minimal registration remains ([what it contains](telemetry.md#turning-it-off)). `./bin/install --no-telemetry` (`.\bin\install.ps1 -NoTelemetry`) writes it before anything starts. Helm: `config.telemetry=false`. |
 | `FUTURE_AGI_TELEMETRY_URL` | `https://api.futureagi.com` | S D H | Receiver. Change it only to test against another receiver. |
 | `FUTURE_AGI_TELEMETRY_INTERVAL_HOURS` | `6` | S D H | Heartbeat interval: 1, 2, 3, 4, 6, 8, 12 or 24. Other values fall back to 6. |
 | `FUTURE_AGI_TELEMETRY_JITTER_SECONDS` | `1800` | S D H | Random delay spread over installs. |
@@ -385,7 +382,9 @@ value `image.tag`. The keys below are the Compose equivalents.
 
 `./bin/install` checks every port the chosen setup publishes and offers a free
 one when a default is taken. Ports marked `127.0.0.1` only accept connections
-from the Docker host.
+from the Docker host; the rest listen on all interfaces. Under
+`./bin/dev --distributed`, Postgres, ClickHouse, Redis, MinIO and Temporal
+listen on all interfaces too.
 
 | Key | Default | Setups | What it publishes |
 | --- | --- | --- | --- |
@@ -403,12 +402,13 @@ from the Docker host.
 | `REDIS_PORT` | `6379` | D dev | Redis, `127.0.0.1`. |
 | `MINIO_CONSOLE_PORT` | `9006` | D dev | MinIO console, `127.0.0.1`. |
 | `TEMPORAL_PORT` | `7233` | D dev | Temporal gRPC, `127.0.0.1`. |
-| `TEMPORAL_UI_PORT` | `8085` | D | Temporal UI (`all` or `observability` profile). |
+| `TEMPORAL_UI_PORT` | `8085` | D | Temporal UI (`all` or `observability` profile, or `./bin/dev --distributed`). |
 | `PEERDB_PORT` | `9900` | D | PeerDB, `127.0.0.1`. |
 | `PEERDB_UI_PORT` | `3001` | D | PeerDB UI (`all` or `peerdb` profile). |
 | `PROPERTY_CATALOG_KAFKA_PORT` | `29092` | D | Kafka of the observed-attribute catalog, `127.0.0.1`. |
 
-Standalone publishes no Postgres, ClickHouse, Redis or Temporal port.
+Standalone publishes no Postgres, ClickHouse, Redis, Temporal or code-eval
+sandbox port, and its `ml` and `sandbox` profiles publish none either.
 
 ### Standalone sizing
 

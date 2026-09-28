@@ -295,7 +295,7 @@ from the build cache.
 
 **A port is already in use.** Another stack holds it, often a normal install of
 the same checkout. Stop that one, or move the ports in `.env` (`FRONTEND_PORT`,
-`BACKEND_PORT`, ...; see the [ports reference](../INSTALLATION.md#ports-reference))
+`BACKEND_PORT`, ...; see [Host ports](configuration.md#host-ports))
 and run `./bin/dev` again.
 
 **Switching between Standalone and Distributed.** The two setups keep their
