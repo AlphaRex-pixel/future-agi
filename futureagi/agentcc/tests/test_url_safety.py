@@ -93,6 +93,7 @@ NEVER = [
     "http://168.63.129.16",
     "http://0.0.0.0:8080",
     "http://224.0.0.1",
+    "http://255.255.255.255",
     "http://no-such-host.invalid",
     "ftp://api.openai.com",
     "http://mock-llm:6379",  # blocked port

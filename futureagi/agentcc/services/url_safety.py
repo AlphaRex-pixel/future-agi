@@ -1,9 +1,10 @@
-import ipaddress
 import os
 import socket
 from urllib.parse import urlparse
 
 import requests as http_requests
+
+from tfc.utils.ssrf_guard import METADATA_HOSTNAMES, IPClass, classify_ip
 
 BLOCKED_PORTS = {6379, 5432, 3306, 27017, 9200, 11211, 2379}
 WEBHOOK_PRIVATE_URL_ERROR = "Webhook URL cannot point to internal or private addresses"
@@ -32,54 +33,12 @@ PROVIDER_PRIVATE_URL_ERROR = (
     "gateway."
 )
 
-# Never reachable, whatever the operator allows: "this network", and the
-# metadata services outside link-local (Alibaba's inside CGNAT, AWS IMDS over
-# IPv6 inside fc00::/7, Azure's WireServer in public space).
-_NEVER_ALLOWED_NETWORKS = tuple(
-    ipaddress.ip_network(n)
-    for n in (
-        "0.0.0.0/8",
-        "100.100.100.200/32",
-        "fd00:ec2::254/128",
-        "168.63.129.16/32",
-    )
-)
-# RFC 6598 carrier-grade NAT: private, but not covered by ipaddress.is_private.
-_EXTRA_PRIVATE_NETWORKS = (ipaddress.ip_network("100.64.0.0/10"),)
-_METADATA_HOSTNAMES = frozenset(
-    {
-        "metadata",
-        "metadata.google.internal",
-        "metadata.goog",
-        "instance-data",
-        "instance-data.ec2.internal",
-    }
-)
-
 
 def private_provider_urls_allowed() -> bool:
     return os.environ.get(ALLOW_PRIVATE_PROVIDER_URLS_ENV, "").strip().lower() in (
         "1",
         "t",
         "true",
-    )
-
-
-def _never_allowed(ip) -> bool:
-    return (
-        ip.is_loopback
-        or ip.is_link_local  # covers the 169.254.169.254 metadata endpoint
-        or ip.is_multicast
-        or ip.is_unspecified
-        or any(ip in net for net in _NEVER_ALLOWED_NETWORKS)
-    )
-
-
-def _is_private(ip) -> bool:
-    return (
-        ip.is_private
-        or ip.is_reserved
-        or any(ip in net for net in _EXTRA_PRIVATE_NETWORKS)
     )
 
 
@@ -110,7 +69,7 @@ def _raise_if_unsafe_url(
     if port and port in BLOCKED_PORTS:
         raise exception_cls(message)
 
-    if hostname.rstrip(".").lower() in _METADATA_HOSTNAMES:
+    if hostname.rstrip(".").lower() in METADATA_HOSTNAMES:
         raise exception_cls(message)
 
     try:
@@ -123,12 +82,10 @@ def _raise_if_unsafe_url(
         raise exception_cls(message) from None
 
     for _, _, _, _, sockaddr in resolved:
-        ip = ipaddress.ip_address(sockaddr[0])
-        if ip.version == 6 and ip.ipv4_mapped:
-            ip = ip.ipv4_mapped
-        if _never_allowed(ip):
+        ip_class = classify_ip(sockaddr[0])
+        if ip_class is IPClass.NEVER:
             raise exception_cls(message)
-        if _is_private(ip) and not allow_private:
+        if ip_class is IPClass.PRIVATE and not allow_private:
             raise exception_cls(private_message or message)
 
 
