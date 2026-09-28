@@ -10,9 +10,10 @@ vi.mock("src/components/iconify", () => ({
   }),
 }));
 
-import { ProcessingStatusCell } from "./knowledge-cells";
+import { ProcessingStatusCell } from "./CellRenderer";
 
-describe("knowledge base files ProcessingStatusCell", () => {
+// Both the knowledge base list and the files table inside one render this.
+describe("knowledge base ProcessingStatusCell", () => {
   it("shows why a failed file failed", async () => {
     const error =
       "Knowledge bases need the model serving service to embed documents";
@@ -21,6 +22,13 @@ describe("knowledge base files ProcessingStatusCell", () => {
     expect(screen.getByText("Failed")).toBeInTheDocument();
     fireEvent.mouseOver(screen.getByTestId("kb-file-error-icon"));
     expect(await screen.findByText(error)).toBeInTheDocument();
+  });
+
+  it("shows no empty tooltip when a failure has no reason", () => {
+    render(<ProcessingStatusCell value="Failed" data={{}} />);
+
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.queryByTestId("kb-file-error-icon")).not.toBeInTheDocument();
   });
 
   it("shows no error affordance for completed files", () => {
