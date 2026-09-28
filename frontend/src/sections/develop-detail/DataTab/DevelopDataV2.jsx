@@ -1025,6 +1025,20 @@ const DevelopDataV2 = ({ datasetId, viewOptions }) => {
             refreshAverage();
           }
 
+          // The grid still shows the processing placeholders, which an
+          // update transaction cannot replace (their ids match no real row).
+          // The refresh fired when processing ended may have been answered
+          // by a page request sent before it ended, so reload the grid from
+          // this response instead.
+          if (
+            !processingData &&
+            useProcessingStore.getState().isProcessingData
+          ) {
+            queryClient.setQueryData(queryOptions.queryKey, data);
+            gridApiRef.current.api.refreshServerSide();
+            continue;
+          }
+
           if (rows?.length === 0) {
             gridApiRef.current?.api.refreshServerSide({ purge: true });
             gridApiRef.current?.api.setGridOption("context", {
