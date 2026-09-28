@@ -82,7 +82,13 @@ _OPEN_WINDOW_REVALIDATION_NAMESPACES = frozenset(
 # - Per project, a revalidation claims admission only while it leaves a slot
 #   free (``_revalidation_admission_limit``): with the default two slots, at
 #   most one revalidation per project runs at a time and a user's new chart
-#   always has the other.
+#   always has the other. (With EXACT_AGGREGATION_MAX_INFLIGHT_PER_SCOPE=1
+#   there is no slot to spare, and a revalidation may take the only one.)
+# - A revalidation whose Temporal dispatch is accepted but never starts keeps
+#   its "running" state for the dispatch lease, exactly like an explicit
+#   refresh today: hit polls never reconcile against Temporal, so the chart
+#   shows "Refreshing data" until the poll budget pauses it; an explicit
+#   Reload takes the scheduling path, which reconciles a terminal dispatch.
 # 300 s is also the failed-state TTL, so a failing and a succeeding identity
 # are retried on the same cadence, and a revisited chart is never served more
 # than five minutes old without a refresh under way.
