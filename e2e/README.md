@@ -547,9 +547,10 @@ label runs it next to the Distributed leg, and `E2E Tests Pass` waits for both. 
 only if the PR has it when the run starts, so add it and then push: a re-run keeps the labels of
 the run it repeats. The Standalone leg builds the four component images with the layer cache,
 assembles the app image with `bin/e2e build standalone-app`, and boots with `E2E_STACK=standalone`.
-The `upgrade` job in `.github/workflows/standalone-ci.yml` runs weekly and on demand. It installs
-v1.41.1 with its own `./bin/install` and sends a trace. Then it re-runs `./bin/install` at the head
-commit and checks four things: the install stays on the Distributed setup
+The `upgrade` job in `.github/workflows/standalone-ci.yml` runs weekly, on demand, and on a pull
+request labelled `upgrade-check` (the same rule: add the label, then push). It installs v1.41.1
+with its own `./bin/install` and sends a trace. Then it re-runs `./bin/install` at the head commit
+and checks four things: the install stays on the Distributed setup
 (`COMPOSE_FILE=docker-compose.distributed.yml` in `.env`), its backend, worker, frontend and gateway
 run the head commit's `:local` images, the first account still signs in, and the trace is still
 there.

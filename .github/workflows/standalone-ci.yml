@@ -32,7 +32,8 @@
 # ffmpeg and NLTK data it promises, and a release checks its size budget and
 # contents again before any tag moves.
 #
-# Upgrade (weekly and on demand, never per PR): v1.41.1, whose
+# Upgrade (weekly, on demand, and on a PR that carries the upgrade-check
+# label when the run starts: add it, then push): v1.41.1, whose
 # docker-compose.yml was the Distributed stack, installed with its own
 # ./bin/install and sent a trace, then ./bin/install re-run at this commit.
 # The install must stay Distributed (COMPOSE_FILE=docker-compose.distributed.yml
@@ -524,7 +525,11 @@ jobs:
 
   upgrade:
     name: upgrade from v1.41.1 (Distributed)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # The label is read from the event: a re-run keeps the labels of the run
+    # it repeats.
+    if: >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'upgrade-check'))
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
