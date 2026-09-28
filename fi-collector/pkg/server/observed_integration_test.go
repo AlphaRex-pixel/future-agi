@@ -244,6 +244,15 @@ func observedDDL(t *testing.T, directory, name string) string {
 	return strings.Join(lines, "\n")
 }
 
+// observedTestCredentials is the fixture's administrator, test/test unless
+// OBS_TEST_CH_USERNAME (and OBS_TEST_CH_PASSWORD) name another local one.
+func observedTestCredentials() (string, string) {
+	if user := os.Getenv("OBS_TEST_CH_USERNAME"); user != "" {
+		return user, os.Getenv("OBS_TEST_CH_PASSWORD")
+	}
+	return "test", "test"
+}
+
 func observedLocalSQL(t *testing.T, origin, database, sql string) string {
 	t.Helper()
 	query := url.Values{"database": {database}, "wait_end_of_query": {"1"}}
@@ -251,7 +260,7 @@ func observedLocalSQL(t *testing.T, origin, database, sql string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.SetBasicAuth("test", "test")
+	req.SetBasicAuth(observedTestCredentials())
 	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(req)
 	if err != nil {

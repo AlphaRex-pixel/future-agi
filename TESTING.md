@@ -182,11 +182,16 @@ with its confirmed ports; do not start or tear down that project. Override
 `OBS_TEST_CH_PORT`, `OBS_TEST_KAFKA_PORT`, `OBS_TEST_PG_PORT` and the matching
 Go endpoints together if the defaults are occupied.
 
-CI uses the same fixture, repeats OSS bootstrap, requires all ten integration
-proofs to pass (missing/skipped tests fail), captures logs, and always cleans up
+CI uses the same fixture, repeats OSS bootstrap, requires every listed
+integration proof to pass (missing/skipped tests fail), captures logs, and always cleans up
 its unique run/attempt project. The HTTP test covers parsing, trusted scope,
-async source write, spool restart, Kafka and index consumption; authentication
-is a synthetic trusted result, not live PostgreSQL API-key authentication.
+async source write, spool restart, Kafka and index consumption; its direct-mode
+twin (`TestClickHouseDirectObservedCatalogFromOTLPHTTP`, Standalone and Helm)
+replays the spool into the index as a restricted writer and compares the rows
+with the consumer's. Authentication is a synthetic trusted result, not live
+PostgreSQL API-key authentication. The direct-mode test also runs against a
+ClickHouse whose administrator is not `test`/`test`: set `OBS_TEST_CH_USERNAME`
+and `OBS_TEST_CH_PASSWORD`.
 Three-replica qualification remains optional via `replicated.yml` and
 `OBS_TEST_REPLICA_URLS`, outside the default CI job.
 

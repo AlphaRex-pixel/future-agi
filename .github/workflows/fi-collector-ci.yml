@@ -141,6 +141,7 @@ jobs:
               "TestPostgresOwnershipIsCurrentAndReadOnly",
               "TestBackfillCLIThroughKafkaWithResume",
               "TestObservedCatalogHTTPToLocalStack",
+              "TestClickHouseDirectObservedCatalogFromOTLPHTTP",
           }
           evidence = Path(os.environ["RUNNER_TEMP"]) / "observed-integration.jsonl"
           events = [json.loads(line) for line in evidence.read_text().splitlines()]

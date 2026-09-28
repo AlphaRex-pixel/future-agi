@@ -118,28 +118,41 @@ func main() {
 	if pricer != nil {
 		opts = append(opts, server.WithPricer(pricer))
 	}
-	var catalog *observedcatalog.Writer
-	var producer *observedcatalog.Producer
 	var replayDone chan struct{}
-	if cfg.Observed.Mode == "kafka" {
-		catalog, err = observedcatalog.NewWriter(cfg.Observed.Spool, cfg.Observed.Limits)
+	var finalReplay func(context.Context) (int, error)
+	if cfg.Observed.Mode != "disabled" {
+		catalog, err := observedcatalog.NewWriter(cfg.Observed.Spool, cfg.Observed.Limits)
 		if err != nil {
 			log.Error("observed catalog spool init failed", "err", err)
 			os.Exit(1)
 		}
 		defer catalog.Close()
-		producer, err = observedcatalog.NewProducer(cfg.Observed.Kafka)
-		if err != nil {
-			log.Error("observed catalog producer init failed", "err", err)
-			os.Exit(1)
+		var publisher observedcatalog.Publisher
+		replay := catalog.Replay
+		if cfg.Observed.Mode == "kafka" {
+			producer, err := observedcatalog.NewProducer(cfg.Observed.Kafka)
+			if err != nil {
+				log.Error("observed catalog producer init failed", "err", err)
+				os.Exit(1)
+			}
+			defer producer.Close()
+			publisher = producer
+		} else {
+			// direct: no Kafka; replay writes the index with the consumer's sink.
+			sink, err := observedcatalog.NewClickHouseSink(cfg.Observed.ClickHouse)
+			if err != nil {
+				log.Error("observed catalog ClickHouse sink init failed", "err", err)
+				os.Exit(1)
+			}
+			replay, publisher = catalog.ReplayMerged, sink
 		}
-		defer producer.Close()
 		opts = append(opts, server.WithPropertyCatalogWriter(catalog))
 		replayDone = make(chan struct{})
 		go func() {
 			defer close(replayDone)
-			runObservedReplay(ctx, catalog, producer, cfg.Observed.ReplayInterval, log)
+			runObservedReplay(ctx, replay, publisher, cfg.Observed.ReplayInterval, log)
 		}()
+		finalReplay = func(ctx context.Context) (int, error) { return replay(ctx, publisher) }
 	}
 	traceNotifications, err := traceavailable.FromEnv(log)
 	if err != nil {
@@ -182,6 +195,13 @@ func main() {
 	cancel()
 	if replayDone != nil {
 		<-replayDone
+		// One bounded attempt at the final drain's observations: a Kubernetes
+		// emptyDir spool does not outlive the pod.
+		final, stopFinal := context.WithTimeout(context.Background(), 5*time.Second)
+		if count, err := finalReplay(final); err != nil {
+			log.Warn("observed catalog final replay incomplete; spool retained", "delivered", count, "err", err)
+		}
+		stopFinal()
 	}
 	log.Info("shutdown complete", "stats", writer.Snapshot())
 	if unexpectedExit {
@@ -310,7 +330,7 @@ func applyEnvOverrides(log *slog.Logger, c *rootConfig) error {
 	if err != nil {
 		return err
 	}
-	if c.Observed.Mode == "kafka" && c.Writer.AsyncInsert {
+	if c.Observed.Mode != "disabled" && c.Writer.AsyncInsert {
 		return fmt.Errorf("observed catalog requires confirmed canonical inserts; async_insert without wait is unsupported")
 	}
 	return nil
