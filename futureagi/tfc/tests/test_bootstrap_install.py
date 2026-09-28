@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -29,6 +30,9 @@ CATALOG_SCHEMA = (
 )
 CATALOG_VALIDATION = (
     REPO_ROOT / "futureagi/scripts/property_catalog_oss/validate_clickhouse.sql"
+)
+CATALOG_SHELL_BOOTSTRAP = (
+    REPO_ROOT / "futureagi/scripts/property_catalog_oss/bootstrap_clickhouse.sh"
 )
 # Before any fixture replaces it.
 REGISTER_SEARCH_ATTRIBUTES = command.register_search_attributes
@@ -565,6 +569,50 @@ def test_property_catalog_defaults_match_the_compose_files(clickhouse) -> None:
         for _, _, sql, parameters in _user_and_grant_statements(clickhouse.log)
         if "USER" in sql
     ] == [command.CATALOG_WRITER_DEFAULT] * 2 + [command.CATALOG_READER_DEFAULT] * 2
+
+
+def test_property_catalog_users_and_grants_match_the_shell_bootstrap(
+    clickhouse,
+) -> None:
+    """The Distributed stack runs bootstrap_clickhouse.sh instead (no Python
+    in the ClickHouse image); both must create the same users and grants."""
+    script = CATALOG_SHELL_BOOTSTRAP.read_text()
+    script = re.sub(
+        r"(?ms)^[ \t]*for table in ([\w ]+); do\n(.*?)^[ \t]*done$",
+        lambda loop: "".join(
+            loop[2].replace("$table", table) for table in loop[1].split()
+        ),
+        script,
+    )
+    passwords = {
+        "WRITER": {"password": "writer-secret"},
+        "READER": {"password": "reader-secret"},
+        "": None,
+    }
+    shell = [
+        (
+            sql.replace("\\`", "`").replace("$TARGET_DATABASE", "catalog"),
+            passwords[password],
+        )
+        for password, sql in re.findall(
+            r'clickhouse (?:--param_password "\$(WRITER|READER)_PARAMETER" )?'
+            r'--query "((?:CREATE USER|ALTER USER|GRANT) [^"]*)"',
+            script,
+        )
+    ]
+
+    command.property_catalog(lambda _: None, CATALOG_ENV)
+
+    assert [
+        (sql, parameters)
+        for _, _, sql, parameters in _user_and_grant_statements(clickhouse.log)
+    ] == shell
+    assert dict(
+        re.findall(r"(?m)^(WRITER|READER)_PASSWORD=\$\{\w+:-([^}]*)\}$", script)
+    ) == {
+        "WRITER": command.CATALOG_WRITER_DEFAULT,
+        "READER": command.CATALOG_READER_DEFAULT,
+    }
 
 
 @pytest.mark.parametrize("rows", [[(1,)], [(True,)]])
