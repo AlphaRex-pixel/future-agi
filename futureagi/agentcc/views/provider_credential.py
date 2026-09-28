@@ -236,6 +236,7 @@ class AgentccProviderCredentialViewSet(BaseModelViewSetMixinWithUserOrg, ModelVi
         base_url = None
         api_format = None
         api_path_prefix = None
+        saved_base_url = None
 
         if provider_name:
             organization = getattr(request, "organization", None)
@@ -263,11 +264,26 @@ class AgentccProviderCredentialViewSet(BaseModelViewSetMixinWithUserOrg, ModelVi
                     )
                 api_key = decrypted.get("api_key", "")
                 base_url = cred.base_url.rstrip("/") if cred.base_url else ""
+                saved_base_url = base_url
                 api_format = cred.api_format
                 api_path_prefix = (cred.extra_config or {}).get("api_path_prefix")
 
+        # The saved key only ever goes where it was saved for: a caller who can
+        # use the credential but not read it must not be able to redirect it.
+        requested_base_url = (request.data.get("base_url") or "").rstrip("/")
+        if (
+            saved_base_url is not None
+            and not request.data.get("api_key")
+            and requested_base_url
+            and requested_base_url != saved_base_url
+        ):
+            return self._gm.bad_request(
+                "The saved API key is only sent to the provider's saved base URL. "
+                "Provide an api_key to fetch models from a different one."
+            )
+
         # Raw values from request body override or fill gaps.
-        base_url = (request.data.get("base_url") or base_url or "").rstrip("/")
+        base_url = (requested_base_url or base_url or "").rstrip("/")
         api_key = request.data.get("api_key") or api_key or ""
         api_format = request.data.get("api_format") or api_format or "openai"
         # Presence, not truthiness: "" is an explicit "no version segment", and

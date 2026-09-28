@@ -620,3 +620,52 @@ class TestFetchModelsPrivateProviderURLs:
         assert response.status_code == 400
         assert "never allowed" in str(response.json())
 
+
+@pytest.mark.integration
+@pytest.mark.api
+class TestFetchModelsKeepsTheSavedKeyOnItsBaseURL:
+    """A caller who can use a saved credential cannot point its key elsewhere."""
+
+    def test_saved_key_is_not_sent_to_a_request_supplied_base_url(
+        self, secondary_org_context, secondary_org_client
+    ):
+        org_b, _ = secondary_org_context
+        AgentccProviderCredential.no_workspace_objects.create(
+            organization=org_b,
+            provider_name="openai",
+            display_name="OpenAI",
+            encrypted_credentials=CredentialManager.encrypt({"api_key": "sk-saved"}),
+            api_format="openai",
+            base_url="https://api.openai.com/v1",
+        )
+
+        with patch(
+            "agentcc.views.provider_credential.AgentccProviderCredentialViewSet._fetch_models_from_provider",
+            return_value=[],
+        ) as mock_fetch:
+            response = secondary_org_client.post(
+                "/agentcc/provider-credentials/fetch_models/",
+                {"provider_name": "openai", "base_url": "https://attacker.example"},
+                format="json",
+            )
+            assert response.status_code == 400
+            mock_fetch.assert_not_called()
+
+            # The saved base URL itself, or a key of the caller's own, is fine.
+            response = secondary_org_client.post(
+                "/agentcc/provider-credentials/fetch_models/",
+                {"provider_name": "openai", "base_url": "https://api.openai.com/v1/"},
+                format="json",
+            )
+            assert response.status_code == 200, response.json()
+            response = secondary_org_client.post(
+                "/agentcc/provider-credentials/fetch_models/",
+                {
+                    "provider_name": "openai",
+                    "base_url": "https://other.example",
+                    "api_key": "sk-typed",
+                },
+                format="json",
+            )
+            assert response.status_code == 200, response.json()
+            assert mock_fetch.call_args[0][2] == "sk-typed"
