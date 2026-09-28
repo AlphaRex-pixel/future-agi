@@ -14,7 +14,13 @@ from agentcc.serializers.provider_credential import (
     AgentccProviderCredentialUpdateSerializer,
 )
 from agentcc.services.config_push import push_org_config
-from agentcc.services.url_safety import build_ssrf_safe_session, ensure_public_http_url
+from agentcc.services.url_safety import (
+    PROVIDER_PRIVATE_URL_ERROR,
+    PROVIDER_URL_ERROR,
+    build_ssrf_safe_session,
+    ensure_public_http_url,
+    private_provider_urls_allowed,
+)
 from tfc.utils.base_viewset import BaseModelViewSetMixinWithUserOrg
 from tfc.utils.general_methods import GeneralMethods
 
@@ -316,8 +322,16 @@ class AgentccProviderCredentialViewSet(BaseModelViewSetMixinWithUserOrg, ModelVi
         # Validate user-supplied base_url and use safe session to prevent SSRF
         # (including DNS rebinding).
         if base_url:
-            ensure_public_http_url(base_url, "Invalid base URL")
-            http = build_ssrf_safe_session("Connection to private address blocked")
+            allow_private = private_provider_urls_allowed()
+            ensure_public_http_url(
+                base_url,
+                PROVIDER_URL_ERROR,
+                allow_private=allow_private,
+                private_message=PROVIDER_PRIVATE_URL_ERROR,
+            )
+            http = build_ssrf_safe_session(
+                "Connection to private address blocked", allow_private=allow_private
+            )
         else:
             http = http_requests
 

@@ -1,4 +1,5 @@
 import ipaddress
+import os
 import socket
 from urllib.parse import urlparse
 
@@ -7,10 +8,88 @@ import requests as http_requests
 BLOCKED_PORTS = {6379, 5432, 3306, 27017, 9200, 11211, 2379}
 WEBHOOK_PRIVATE_URL_ERROR = "Webhook URL cannot point to internal or private addresses"
 
+# Lets provider base URLs point at private and LAN addresses (a local Ollama
+# or vLLM, a service on the Docker network) for model discovery here. The
+# gateway reads the same variable for the requests themselves. Off by default:
+# on a shared deployment it would let any org reach internal hosts.
+ALLOW_PRIVATE_PROVIDER_URLS_ENV = "AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS"
+
+PROVIDER_URL_ERROR = (
+    "Invalid base URL: it must be an http(s) URL whose host resolves, and "
+    "loopback, link-local and cloud metadata addresses are never allowed"
+)
+PROVIDER_PRIVATE_URL_ERROR = (
+    "Base URL points to a private network address, which is refused by "
+    "default. A self-hosted deployment can allow private/LAN provider URLs by "
+    f"setting {ALLOW_PRIVATE_PROVIDER_URLS_ENV}=true on the backend and the "
+    "gateway."
+)
+
+# Never reachable, whatever the operator allows: "this network", and the
+# metadata services outside link-local (Alibaba's inside CGNAT, AWS IMDS over
+# IPv6 inside fc00::/7, Azure's WireServer in public space).
+_NEVER_ALLOWED_NETWORKS = tuple(
+    ipaddress.ip_network(n)
+    for n in (
+        "0.0.0.0/8",
+        "100.100.100.200/32",
+        "fd00:ec2::254/128",
+        "168.63.129.16/32",
+    )
+)
+# RFC 6598 carrier-grade NAT: private, but not covered by ipaddress.is_private.
+_EXTRA_PRIVATE_NETWORKS = (ipaddress.ip_network("100.64.0.0/10"),)
+_METADATA_HOSTNAMES = frozenset(
+    {
+        "metadata",
+        "metadata.google.internal",
+        "metadata.goog",
+        "instance-data",
+        "instance-data.ec2.internal",
+    }
+)
+
+
+def private_provider_urls_allowed() -> bool:
+    return os.environ.get(ALLOW_PRIVATE_PROVIDER_URLS_ENV, "").strip().lower() in (
+        "1",
+        "t",
+        "true",
+    )
+
+
+def _never_allowed(ip) -> bool:
+    return (
+        ip.is_loopback
+        or ip.is_link_local  # covers the 169.254.169.254 metadata endpoint
+        or ip.is_multicast
+        or ip.is_unspecified
+        or any(ip in net for net in _NEVER_ALLOWED_NETWORKS)
+    )
+
+
+def _is_private(ip) -> bool:
+    return (
+        ip.is_private
+        or ip.is_reserved
+        or any(ip in net for net in _EXTRA_PRIVATE_NETWORKS)
+    )
+
 
 def _raise_if_unsafe_url(
-    url: str, message: str, exception_cls: type[Exception]
+    url: str,
+    message: str,
+    exception_cls: type[Exception],
+    *,
+    allow_private: bool = False,
+    private_message: str | None = None,
 ) -> None:
+    """Raise unless every address ``url``'s host resolves to may be called.
+
+    Loopback, link-local, metadata, multicast and unspecified addresses always
+    raise ``message``. Private/LAN addresses raise ``private_message`` (or
+    ``message``) unless ``allow_private``.
+    """
     parsed = urlparse(url)
     hostname = parsed.hostname
     port = parsed.port
@@ -22,27 +101,53 @@ def _raise_if_unsafe_url(
     if port and port in BLOCKED_PORTS:
         raise exception_cls(message)
 
+    if hostname.rstrip(".").lower() in _METADATA_HOSTNAMES:
+        raise exception_cls(message)
+
     try:
         resolved = socket.getaddrinfo(
             hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM
         )
     except socket.gaierror:
-        raise exception_cls(message)
+        raise exception_cls(message) from None
 
     for _, _, _, _, sockaddr in resolved:
         ip = ipaddress.ip_address(sockaddr[0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+        if ip.version == 6 and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        if _never_allowed(ip):
             raise exception_cls(message)
+        if _is_private(ip) and not allow_private:
+            raise exception_cls(private_message or message)
 
 
-def ensure_public_http_url(url: str, error_message: str) -> None:
-    _raise_if_unsafe_url(url, error_message, ValueError)
+def ensure_public_http_url(
+    url: str,
+    error_message: str,
+    *,
+    allow_private: bool = False,
+    private_message: str | None = None,
+) -> None:
+    _raise_if_unsafe_url(
+        url,
+        error_message,
+        ValueError,
+        allow_private=allow_private,
+        private_message=private_message,
+    )
 
 
-def build_ssrf_safe_session(connect_error_message: str) -> http_requests.Session:
+def build_ssrf_safe_session(
+    connect_error_message: str, *, allow_private: bool = False
+) -> http_requests.Session:
     class _SSRFSafeAdapter(http_requests.adapters.HTTPAdapter):
         def send(self, request, **kwargs):
-            _raise_if_unsafe_url(request.url, connect_error_message, ConnectionError)
+            _raise_if_unsafe_url(
+                request.url,
+                connect_error_message,
+                ConnectionError,
+                allow_private=allow_private,
+            )
             return super().send(request, **kwargs)
 
     session = http_requests.Session()

@@ -547,3 +547,76 @@ class TestFetchModelsHonoursThePathPrefix:
         assert response.json()["result"]["models"] == ["sonar"]
         called_url = session.get.call_args[0][0]
         assert called_url == "https://provider.example/openai/v1/models"
+
+
+def _resolve(answers):
+    """getaddrinfo stub: host name -> list of addresses."""
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        return [(2, 1, 6, "", (addr, 0)) for addr in answers[host]]
+
+    return fake_getaddrinfo
+
+
+@pytest.mark.integration
+@pytest.mark.api
+class TestFetchModelsPrivateProviderURLs:
+    """Model discovery for local providers (Ollama, vLLM, a Docker service)."""
+
+    def _fetch(self, client, base_url):
+        return client.post(
+            "/agentcc/provider-credentials/fetch_models/",
+            {"base_url": base_url, "api_key": "sk-local", "api_format": "openai"},
+            format="json",
+        )
+
+    def test_private_base_url_is_refused_with_the_opt_in_to_set(
+        self, monkeypatch, secondary_org_client
+    ):
+        monkeypatch.delenv("AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS", raising=False)
+        with patch(
+            "agentcc.services.url_safety.socket.getaddrinfo",
+            side_effect=_resolve({"mock-llm": ["172.20.0.5"]}),
+        ):
+            response = self._fetch(secondary_org_client, "http://mock-llm:8080")
+
+        assert response.status_code == 400
+        assert "AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS=true" in str(response.json())
+
+    def test_private_base_url_is_fetched_with_the_opt_in(
+        self, monkeypatch, secondary_org_client
+    ):
+        monkeypatch.setenv("AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS", "true")
+        session = MagicMock()
+        session.get.return_value.json.return_value = {"data": [{"id": "mock-custom"}]}
+
+        with (
+            patch(
+                "agentcc.services.url_safety.socket.getaddrinfo",
+                side_effect=_resolve({"mock-llm": ["172.20.0.5"]}),
+            ),
+            patch(
+                "agentcc.views.provider_credential.build_ssrf_safe_session",
+                return_value=session,
+            ) as build_session,
+        ):
+            response = self._fetch(secondary_org_client, "http://mock-llm:8080")
+
+        assert response.status_code == 200, response.json()
+        assert response.json()["result"]["models"] == ["mock-custom"]
+        assert build_session.call_args.kwargs["allow_private"] is True
+        assert session.get.call_args[0][0] == "http://mock-llm:8080/v1/models"
+
+    def test_metadata_address_is_refused_even_with_the_opt_in(
+        self, monkeypatch, secondary_org_client
+    ):
+        monkeypatch.setenv("AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS", "true")
+        with patch(
+            "agentcc.services.url_safety.socket.getaddrinfo",
+            side_effect=_resolve({"169.254.169.254": ["169.254.169.254"]}),
+        ):
+            response = self._fetch(secondary_org_client, "http://169.254.169.254")
+
+        assert response.status_code == 400
+        assert "never allowed" in str(response.json())
+
