@@ -578,6 +578,20 @@ def create_synthetic_dataset(
         raise e
 
 
+def _file_metadata_with_error(metadata, error):
+    """Return a file's metadata with ``error`` set, as the JSON string the files view reads."""
+    meta = metadata or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except ValueError:
+            meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    meta["error"] = error[:10000]
+    return json.dumps(meta)
+
+
 def remove_from_kb(deleted_files, kb_file_id, org_id):
     try:
         futures = []
@@ -732,18 +746,11 @@ def ingest_files_to_s3(files, kb_id, org):
             Files.objects.filter(id__in=docs).update(status=StatusType.COMPLETED.value)
         # Keep each file's own error so the files table can show why it failed.
         for failed_file in Files.objects.filter(id__in=list(file_errors)):
-            # Stored as a JSON string (the files view json.loads it).
-            meta = failed_file.metadata or {}
-            if isinstance(meta, str):
-                try:
-                    meta = json.loads(meta)
-                except ValueError:
-                    meta = {}
-            if not isinstance(meta, dict):
-                meta = {}
-            meta["error"] = file_errors[str(failed_file.id)][:10000]
             Files.objects.filter(id=failed_file.id).update(
-                status=StatusType.FAILED.value, metadata=json.dumps(meta)
+                status=StatusType.FAILED.value,
+                metadata=_file_metadata_with_error(
+                    failed_file.metadata, file_errors[str(failed_file.id)]
+                ),
             )
 
         kb_file.refresh_from_db()
@@ -842,10 +849,10 @@ def remove_kb_files(files, org, kb_id):
                 try:
                     file_instance = Files.objects.filter(id=res["file_id"]).first()
                     if file_instance:
-                        meta = json.loads(file_instance.metadata)
                         if res.get("error", None):
-                            meta.update({"error": res["error"]})
-                        file_instance.metadata = json.dumps(meta)
+                            file_instance.metadata = _file_metadata_with_error(
+                                file_instance.metadata, res["error"]
+                            )
                         file_instance.status = res["status"]
                         file_instance.deleted = (
                             True
