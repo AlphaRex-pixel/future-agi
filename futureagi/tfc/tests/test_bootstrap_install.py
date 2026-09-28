@@ -694,6 +694,15 @@ def test_endpoint_takes_host_and_port_or_a_bare_host(value, expected) -> None:
 
 
 @pytest.mark.parametrize(
+    "value", ["temporal:grpc", "temporal:", ":7233", "[fd00::1]:port"]
+)
+def test_endpoint_refuses_a_port_that_is_not_a_number(value) -> None:
+    # Otherwise the whole value is a hostname and the wait times out.
+    with pytest.raises(command.BootstrapError, match="the port must be a number"):
+        command.endpoint(value, 7233)
+
+
+@pytest.mark.parametrize(
     ("url", "expected"),
     [
         ("redis://:secret@redis.data:6380/0", ("redis.data", 6380)),

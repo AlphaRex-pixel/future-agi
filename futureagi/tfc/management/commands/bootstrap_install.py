@@ -60,11 +60,15 @@ class BootstrapError(CommandError):
 
 
 def endpoint(value: str, default_port: int) -> tuple[str, int]:
-    """``host:port`` (or a bare host) as a (host, port) pair."""
-    host, _, port = value.rpartition(":")
+    """``host:port``, ``[IPv6]:port`` or a bare host as a (host, port) pair.
+
+    A port that is not a number fails at once rather than after the wait."""
+    host, colon, port = value.rpartition(":")
+    if not colon or (value.startswith("[") and value.endswith("]")):
+        return value.strip("[]"), default_port
     if host and port.isdigit():
         return host.strip("[]"), int(port)
-    return value.strip("[]"), default_port
+    raise BootstrapError(f"{value!r} is not host:port: the port must be a number")
 
 
 def url_endpoint(url: str, default_port: int) -> tuple[str, int] | None:
