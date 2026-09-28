@@ -270,7 +270,8 @@ test(
           const url = new URL(r.url());
           return (
             url.pathname === MONITOR_LIST_PATH &&
-            url.searchParams.get('search_text') === monitorName
+            url.searchParams.get('search_text') === monitorName &&
+            r.request().method() === 'GET'
           );
         },
         { timeout: UI_READY },
