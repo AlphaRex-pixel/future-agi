@@ -18,6 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tfc.utils.error_codes import get_error_message
+
 URL = "/tracer/dashboard/filter_values/"
 
 
@@ -204,6 +206,9 @@ def test_an_inventory_over_the_cap_is_refused_not_sampled(
 
     assert response.status_code == 422, response.content
     assert response.json()["code"] == "filter_value_inventory_too_broad"
+    assert response.json()["message"] == get_error_message(
+        "FILTER_VALUE_INVENTORY_TOO_BROAD"
+    )
 
 
 @pytest.mark.django_db

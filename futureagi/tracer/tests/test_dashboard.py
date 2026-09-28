@@ -29,6 +29,7 @@ from django.core import signing
 from accounts.models.workspace import Workspace
 from model_hub.models.ai_model import AIModel
 from model_hub.models.develop_dataset import Dataset
+from tfc.utils.error_codes import get_error_message
 from tracer.models.dashboard import Dashboard, DashboardWidget
 from tracer.models.project import Project
 from tracer.serializers.dashboard import (
@@ -2088,6 +2089,9 @@ class TestMetricsEndpoint:
 
         assert response.status_code == 422
         assert response.data["code"] == "filter_value_inventory_too_broad"
+        assert response.data["message"] == get_error_message(
+            "FILTER_VALUE_INVENTORY_TOO_BROAD"
+        )
 
     def test_dashboard_eval_config_registry_id_resolves_to_its_template(self):
         config_id = "11111111-1111-4111-8111-111111111111"

@@ -493,3 +493,39 @@ def test_ai_filter_grounding_logs_a_defect_in_its_value_read(dataset, lagging_mi
     assert refused.value.code == "ai_filter_grounding_unavailable"
     logger.exception.assert_called_once()
     assert logger.exception.call_args.args == ("dataset_column_values_query_failed",)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("data_type", "source", "stored"),
+    [
+        # Three distinct stored values: the read itself is over the cap.
+        ("text", "OTHERS", ["a", "b", "c"]),
+        # One stored value that decodes to three labels.
+        ("array", "evaluation", ["['a', 'b', 'c']"]),
+    ],
+)
+def test_an_inventory_over_the_cap_answers_the_registered_message(
+    auth_client, dataset, lagging_mirror, data_type, source, stored
+):
+    from tfc.utils.error_codes import get_error_message
+
+    column = _column(dataset, data_type=data_type, source=source)
+    for value in stored:
+        _cell(column, value)
+
+    with patch("tracer.views.dashboard._LEGACY_NATIVE_FILTER_VALUE_MAX", 2):
+        response = auth_client.get(
+            URL,
+            {
+                "source": "dataset_column",
+                "metric_name": str(column.id),
+                "dataset_id": str(column.dataset_id),
+            },
+        )
+
+    assert response.status_code == 422, response.content
+    assert response.json()["code"] == "filter_value_inventory_too_broad"
+    assert response.json()["message"] == get_error_message(
+        "FILTER_VALUE_INVENTORY_TOO_BROAD"
+    )
