@@ -118,13 +118,7 @@ class SharedLinkViewSet(BaseModelViewSetMixin, ModelViewSet):
         # Add ACL entries if provided
         emails = data.get("emails", [])
         for email in emails:
-            user = User.objects.filter(email=email).first()
-            SharedLinkAccess.objects.create(
-                shared_link=link,
-                email=email,
-                user=user,
-                granted_by=request.user,
-            )
+            _grant_access(link, email, request.user)
 
         return self._gm.success_response(
             SharedLinkDetailSerializer(link, context={"request": request}).data,
@@ -162,12 +156,7 @@ class SharedLinkViewSet(BaseModelViewSetMixin, ModelViewSet):
 
         created = []
         for email in serializer.validated_data["emails"]:
-            user = User.objects.filter(email=email).first()
-            obj, was_created = SharedLinkAccess.objects.get_or_create(
-                shared_link=link,
-                email=email,
-                defaults={"user": user, "granted_by": request.user},
-            )
+            obj, was_created = _grant_access(link, email, request.user)
             if was_created:
                 created.append(SharedLinkAccessSerializer(obj).data)
 
@@ -383,6 +372,29 @@ def _in_link_workspace(link, build, *args):
         set_workspace_context(
             workspace=previous[0], organization=previous[1], user=previous[2]
         )
+
+
+def _grant_access(link, email, granted_by):
+    """Add ``email`` to the link's ACL; returns ``(entry, newly_granted)``.
+
+    A removed entry is soft-deleted, and the (link, email) unique constraint
+    still counts it, so re-inviting restores that row instead of inserting.
+    """
+    user = User.objects.filter(email=email).first()
+    entry = SharedLinkAccess.all_objects.filter(shared_link=link, email=email).first()
+    if entry is None:
+        entry = SharedLinkAccess.objects.create(
+            shared_link=link, email=email, user=user, granted_by=granted_by
+        )
+        return entry, True
+    if not entry.deleted:
+        return entry, False
+    entry.deleted = False
+    entry.deleted_at = None
+    entry.user = user
+    entry.granted_by = granted_by
+    entry.save(update_fields=["deleted", "deleted_at", "user", "granted_by"])
+    return entry, True
 
 
 def _get_shared_link_by_token(token):

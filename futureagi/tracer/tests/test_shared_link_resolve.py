@@ -757,3 +757,45 @@ def test_call_shared_link_without_a_workspace_still_resolves(
     assert resolved.status_code == status.HTTP_200_OK
     assert resolved.json()["data"]["id"] == str(chat_call.id)
     assert len(resolved.json()["data"]["transcript"]) == 1
+
+
+@pytest.mark.django_db
+def test_removed_invite_can_be_invited_again(
+    api_client,
+    auth_client,
+    organization,
+    voice_call,
+):
+    email = "re-invited@example.com"
+    viewer = User.objects.create_user(
+        email=email,
+        password="testpassword123",
+        name="Invited Twice",
+        organization=organization,
+        organization_role=OrganizationRoles.MEMBER,
+    )
+    link = _share_call(auth_client, voice_call, access_type="restricted").json()[
+        "result"
+    ]
+    api_client.force_authenticate(user=viewer)
+
+    added = auth_client.post(
+        f"/tracer/shared-links/{link['id']}/access/", {"emails": [email]}, format="json"
+    )
+    assert added.status_code == status.HTTP_201_CREATED
+    access_id = added.json()["result"][0]["id"]
+    removed = auth_client.delete(
+        f"/tracer/shared-links/{link['id']}/access/{access_id}/"
+    )
+    assert removed.status_code == status.HTTP_200_OK
+    blocked = api_client.get(f"/tracer/shared/{link['token']}/")
+    assert blocked.status_code == status.HTTP_403_FORBIDDEN
+
+    again = auth_client.post(
+        f"/tracer/shared-links/{link['id']}/access/", {"emails": [email]}, format="json"
+    )
+
+    assert again.status_code == status.HTTP_201_CREATED
+    assert [row["email"] for row in again.json()["result"]] == [email]
+    allowed = api_client.get(f"/tracer/shared/{link['token']}/")
+    assert allowed.status_code == status.HTTP_200_OK
