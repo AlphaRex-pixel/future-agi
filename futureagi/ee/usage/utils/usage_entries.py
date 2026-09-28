@@ -72,7 +72,6 @@ TRACES_LIMIT_REACHED_MESSAGE = "Traces limit reached. \
       avail more traces."
 
 
-
 EVALUATOR_CALLS = [
     APICallTypeChoices.TURING_LARGE_EVALUATOR.value,
     APICallTypeChoices.TURING_SMALL_EVALUATOR.value,
