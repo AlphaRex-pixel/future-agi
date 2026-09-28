@@ -108097,6 +108097,18 @@ export const OPENAPI_CONTRACT = Object.freeze({
         latency: {
           $ref: "#/definitions/HarnessTargetLatency",
         },
+        provider_call_id: {
+          title: "Provider call id",
+          type: "string",
+          maxLength: 255,
+          minLength: 1,
+        },
+        provider_end_reason: {
+          title: "Provider end reason",
+          type: "string",
+          maxLength: 255,
+          minLength: 1,
+        },
       },
       "x-nullable": true,
     },

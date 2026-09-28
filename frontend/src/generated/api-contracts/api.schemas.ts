@@ -18486,6 +18486,16 @@ export interface HarnessTargetMetricsApi {
   /** @minimum 0 */
   cost_cents?: number;
   latency?: HarnessTargetLatencyApi;
+  /**
+   * @minLength 1
+   * @maxLength 255
+   */
+  provider_call_id?: string;
+  /**
+   * @minLength 1
+   * @maxLength 255
+   */
+  provider_end_reason?: string;
 }
 
 export interface HarnessCallApi {

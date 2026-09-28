@@ -37656,6 +37656,10 @@ export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyTurnsI
 
 export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyTurnsMax = 1000;
 
+export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsProviderCallIdMax = 255;
+
+export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsProviderEndReasonMax = 255;
+
 export const simulateApiHarnessAttemptsResultsBodyFailureStageMax = 64;
 
 export const simulateApiHarnessAttemptsResultsBodyFailureCodeMax = 128;
@@ -37802,6 +37806,20 @@ export const SimulateApiHarnessAttemptsResultsBody = zod.object({
               )
               .optional(),
           })
+          .optional(),
+        provider_call_id: zod
+          .string()
+          .min(1)
+          .max(
+            simulateApiHarnessAttemptsResultsBodyCallTargetMetricsProviderCallIdMax,
+          )
+          .optional(),
+        provider_end_reason: zod
+          .string()
+          .min(1)
+          .max(
+            simulateApiHarnessAttemptsResultsBodyCallTargetMetricsProviderEndReasonMax,
+          )
           .optional(),
       })
       .optional(),
