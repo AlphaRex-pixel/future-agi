@@ -252,21 +252,15 @@ class TestAgentccProviderCredentialOrganizationIsolation:
             )
 
         assert response.status_code == 200, response.json()
-        body = response.json()
-        # PUT falls through to DRF's default UpdateModelMixin (no override in
-        # the view) so the payload comes back raw; PATCH is overridden to
-        # wrap via _gm.success_response. Accept both shapes.
-        data = body.get("result", body)
+        # PUT is handled as PATCH, so it is wrapped by _gm.success_response.
+        data = response.json()["result"]
         assert data["display_name"] == "New Display"
 
         cred.refresh_from_db()
         assert cred.display_name == "New Display"
         assert cred.models_list == ["gpt-4o"]
-        # Current behavior: PUT does not push to the gateway because the
-        # view only overrides create/partial_update/destroy/rotate. PATCH
-        # (below) is the client path that fans out to the gateway. If PUT
-        # is ever overridden to push, this assertion should flip.
-        assert mock_push.call_count == 0
+        # PUT goes through partial_update, so it pushes to the gateway too.
+        assert mock_push.call_count == 1
 
     def test_patch_updates_single_field_leaving_others_intact(
         self, secondary_org_context, secondary_org_client
@@ -906,3 +900,33 @@ class TestProviderBaseURLIsCheckedOnSave:
         assert response.status_code == 200, response.json()
         cred.refresh_from_db()
         assert cred.base_url == "https://api.openai.com/v1"
+
+    def test_credential_api_put_is_checked_like_patch(
+        self, monkeypatch, secondary_org_context, secondary_org_client
+    ):
+        monkeypatch.delenv(self.OPT_IN, raising=False)
+        org_b, _ = secondary_org_context
+        cred = AgentccProviderCredential.no_workspace_objects.create(
+            organization=org_b,
+            provider_name="custom",
+            display_name="Local vLLM",
+            encrypted_credentials=CredentialManager.encrypt({"api_key": "sk-local"}),
+            api_format="openai",
+            base_url="https://api.openai.com/v1",
+        )
+
+        response = secondary_org_client.put(
+            f"/agentcc/provider-credentials/{cred.id}/",
+            {
+                "provider_name": "custom",
+                "display_name": "Renamed",
+                "base_url": "http://100.64.77.10:8080",
+            },
+            format="json",
+        )
+
+        assert response.status_code == 400, response.json()
+        assert f"{self.OPT_IN}=true" in response.json()["message"]
+        cred.refresh_from_db()
+        assert cred.base_url == "https://api.openai.com/v1"
+        assert cred.display_name == "Local vLLM"
