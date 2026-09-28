@@ -113,11 +113,14 @@ func markRedacted(record *TraceRecord) {
 	record.Metadata["privacy_redacted"] = "true"
 }
 
-// shutdownFlushTimeout bounds Close's last attempt to deliver request logs.
-// The Helm chart gives a stopping gateway 45 s: a 10 s preStop sleep, up to
-// 30 s (server.shutdown_timeout) for in-flight requests, then this, which
-// ends a second before the 45 s are up. It runs alongside the emitter's
-// drain, which only a slow stdout stretches to its 5 s cap.
+// shutdownFlushTimeout bounds Close's last attempt to deliver request logs,
+// which runs alongside the emitter's drain. A stopping gateway needs
+//
+//	grace ≥ preStop + shutdown_timeout + max(shutdownFlushTimeout, emitterDrainTimeout)
+//
+// where grace and preStop are the Helm chart's
+// agentccGateway.terminationGracePeriodSeconds and preStopSleepSeconds, and
+// shutdown_timeout is the gateway's server.shutdown_timeout.
 const shutdownFlushTimeout = 4 * time.Second
 
 // Close drains buffered trace records and stops workers while it makes a

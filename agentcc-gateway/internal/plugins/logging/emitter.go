@@ -10,6 +10,10 @@ import (
 	"github.com/futureagi/agentcc-gateway/internal/config"
 )
 
+// emitterDrainTimeout bounds how long Close waits for the workers to write out
+// the buffered trace records.
+const emitterDrainTimeout = 5 * time.Second
+
 // TraceEmitter manages the buffered channel and worker goroutines for async trace emission.
 type TraceEmitter struct {
 	ch      chan TraceRecord
@@ -93,7 +97,7 @@ func (e *TraceEmitter) Close() {
 	select {
 	case <-done:
 		// All records drained.
-	case <-time.After(5 * time.Second):
+	case <-time.After(emitterDrainTimeout):
 		slog.Warn("trace emitter drain timeout", "remaining", len(e.ch))
 	}
 
