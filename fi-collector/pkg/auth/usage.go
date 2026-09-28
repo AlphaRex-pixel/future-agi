@@ -15,14 +15,16 @@ import (
 const (
 	usageStreamKey = "usage:events"
 	// DefaultUsageMaxLen caps the stream when USAGE_EVENTS_MAX_LEN is unset:
-	// at ~160 bytes an entry, ~16 MB while its consumer is behind or stopped.
-	DefaultUsageMaxLen = 100_000
+	// at ~160 bytes an entry, ~160 MB while its consumer is behind or stopped.
+	// The Python emitter's default (tfc/settings/settings.py) is the same.
+	DefaultUsageMaxLen = 1_000_000
 )
 
 // UsageEmitter writes billing events to the Redis Stream consumed by
 // the Temporal UsageConsumerWorkflow (Future AGI Cloud only). Same stream +
-// schema as the Python emitter (ee/usage/services/emitter.py). Only created
-// with USAGE_EVENTS_ENABLED=true: without that consumer the stream only grows.
+// schema as the Python emitter (ee/usage/services/emitter.py). Created
+// unless USAGE_EVENTS_ENABLED=false, which every self-hosted install sets:
+// without that consumer the stream only grows.
 type UsageEmitter struct {
 	rdb    *redis.Client
 	pg     *pgxpool.Pool

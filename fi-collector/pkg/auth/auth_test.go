@@ -1111,8 +1111,10 @@ func TestEmitIngestionCapsTheStream(t *testing.T) {
 	if n := rdb.XLen(context.Background(), usageStreamKey).Val(); n != 5 {
 		t.Fatalf("stream must be trimmed to its cap of 5, has %d", n)
 	}
-	if got := NewUsageEmitter(rdb, nil, slog.Default(), 0).maxLen; got != DefaultUsageMaxLen {
-		t.Fatalf("unset cap must be DefaultUsageMaxLen, got %d", got)
+	// Future AGI Cloud's billing consumer can fall this far behind before
+	// XADD MAXLEN ~ trims unread events; the Django emitter uses the same.
+	if got := NewUsageEmitter(rdb, nil, slog.Default(), 0).maxLen; got != 1_000_000 {
+		t.Fatalf("unset cap must be 1,000,000, got %d", got)
 	}
 }
 

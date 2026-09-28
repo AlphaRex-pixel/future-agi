@@ -345,7 +345,7 @@ empty means the feature is skipped and nothing is sent.
 | `SENTRY_DSN` | empty: off | S D H | Send errors to your Sentry project. |
 | `SENTRY_ENABLED` | on outside `ENV_TYPE=local`, but only with a DSN | S D H | `false` turns Sentry off even with a DSN. |
 | `USAGE_EVENTS_ENABLED` | `false` in both compose files and the chart (`config.usageEvents`) | S D H | Billing usage events, one per trace export and per metered action, on the Redis stream `usage:events`. The app and fi-collector (Standalone runs it inside `app`) read it. Only Future AGI Cloud drains that stream: turned on anywhere else, it grows until it reaches `USAGE_EVENTS_MAX_LEN`, taking Redis memory the cache and locks need. Unset, the app turns it on only when the image ships that consumer, and fi-collector turns it on. |
-| `USAGE_EVENTS_MAX_LEN` | `100000` | S D H | Most entries kept on `usage:events` (about 160 bytes each) while its consumer is behind or stopped. |
+| `USAGE_EVENTS_MAX_LEN` | `1000000` | S D H | Most entries kept on `usage:events` (about 160 bytes each) while its consumer is behind or stopped. A positive integer; the app and fi-collector refuse to start on anything else. |
 
 Browser-side analytics (Mixpanel, PostHog, Sentry, ad pixels) are build-time
 settings of the UI image. The published images are built without them, so the

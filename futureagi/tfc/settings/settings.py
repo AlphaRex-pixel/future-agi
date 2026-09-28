@@ -1294,9 +1294,11 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 # stream only grows until Redis is full, so unset, events are on exactly when
 # that consumer ships with this code. fi-collector reads the same variables
 # and is on unless USAGE_EVENTS_ENABLED=false, which every self-hosted compose
-# file and the Helm chart set. The cap bounds the stream
-# (~160 bytes an entry) while its consumer is behind or stopped.
+# file and the Helm chart set. The cap bounds the stream (~160 bytes an entry,
+# ~160 MB at the default) while its consumer is behind or stopped; XADD trims
+# unread events beyond it. A positive integer, as fi-collector requires.
 from tfc.ee_loader import usage_event_consumer_available  # noqa: E402
+from tfc.utils.env import env_int  # noqa: E402
 
 _usage_events = os.getenv("USAGE_EVENTS_ENABLED", "").strip().lower()
 USAGE_EVENTS_ENABLED = (
@@ -1304,7 +1306,7 @@ USAGE_EVENTS_ENABLED = (
     if _usage_events
     else usage_event_consumer_available()
 )
-USAGE_EVENTS_MAX_LEN = int(os.getenv("USAGE_EVENTS_MAX_LEN") or 100_000)
+USAGE_EVENTS_MAX_LEN = env_int("USAGE_EVENTS_MAX_LEN", 1_000_000, minimum=1)
 
 # Django Channels layer. CHANNEL_LAYER_BACKEND: auto (default) | memory | redis |
 # rabbitmq. With one web process the layer lives in memory and needs no broker;
