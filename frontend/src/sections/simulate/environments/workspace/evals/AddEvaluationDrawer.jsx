@@ -75,7 +75,7 @@ export default function AddEvaluationDrawer({
   const gradeRun = useAddRunEvaluation();
 
   // The picker needs the run test's own eval list to know what is already
-  // bound (D5: nothing already on the run can be picked again), so it must
+  // bound (nothing already on the run can be picked again), so it must
   // wait on that read too, not just the environment detail — a run test with
   // a big payload can hit the bounded-read wall or a DB hiccup on its own.
   const pending =
@@ -151,7 +151,10 @@ export default function AddEvaluationDrawer({
     onClose?.();
   };
 
-  if (open && runTestId && runTestQuery.isSuccess) {
+  // Once the run test's evals have been read, a failed background refresh
+  // (window focus, the add's own refetch) keeps the last good list rather
+  // than tearing down a picker the person may be halfway through.
+  if (open && runTestId && runTestQuery.data !== undefined) {
     return (
       <EvalPickerDrawer
         open
@@ -196,7 +199,10 @@ export default function AddEvaluationDrawer({
               <Button
                 variant="outlined"
                 size="small"
-                onClick={() => failed.refetch()}
+                onClick={() => {
+                  if (detailQuery.isError) detailQuery.refetch();
+                  if (runTestId && runTestQuery.isError) runTestQuery.refetch();
+                }}
               >
                 Retry
               </Button>

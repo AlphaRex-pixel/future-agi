@@ -636,3 +636,32 @@ describe("dead offer-list exports", () => {
     }
   });
 });
+
+describe("useRemoveAppliedEvaluation — effect on a cached run test", () => {
+  it("marks a cached run test's eval list stale after a remove", async () => {
+    deleteAppliedEvaluation.mockResolvedValue(undefined);
+    const { queryClient, Wrapper } = makeWrapper();
+    queryClient.setQueryData(environmentRunTestKey("rt-1"), {
+      simulate_eval_configs_detail: [],
+    });
+    const { result } = renderHook(() => useRemoveAppliedEvaluation(), {
+      wrapper: Wrapper,
+    });
+    await result.current.mutateAsync({ id: "env-1", evalConfigId: "cfg-1" });
+    expect(
+      queryClient.getQueryState(environmentRunTestKey("rt-1")).isInvalidated,
+    ).toBe(true);
+  });
+});
+
+describe("useEnvironmentRunTest — failure display", () => {
+  it("leaves a failed read to the drawer's own message, without the global toast", async () => {
+    const { queryClient, Wrapper } = makeWrapper();
+    renderHook(() => useEnvironmentRunTest("rt-1"), { wrapper: Wrapper });
+    expect(
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: environmentRunTestKey("rt-1") }).options.meta,
+    ).toEqual({ errorHandled: true });
+  });
+});

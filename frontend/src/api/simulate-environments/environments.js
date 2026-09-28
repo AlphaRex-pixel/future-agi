@@ -137,6 +137,8 @@ export const environmentRunTestKey = (runTestId) => [
 export function useEnvironmentRunTest(runTestId, { enabled = true } = {}) {
   return useQuery({
     queryKey: environmentRunTestKey(runTestId),
+    // The drawer shows this read's failure itself, with a Retry.
+    meta: { errorHandled: true },
     queryFn: async () =>
       (await axios.get(endpoints.runTests.detail(runTestId))).data,
     enabled: Boolean(runTestId) && enabled,

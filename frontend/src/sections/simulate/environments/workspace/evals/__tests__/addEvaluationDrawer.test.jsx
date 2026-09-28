@@ -5,6 +5,7 @@ import {
   screen,
   fireEvent,
   waitFor,
+  act,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { serializeEvalConfig } from "src/sections/common/EvalPicker/serializeEvalConfig";
@@ -94,9 +95,8 @@ const { addRunEvaluation, getHarnessEnvironment } = await import(
 const { enqueueSnackbar } = await import("notistack");
 const { default: AddEvaluationDrawer } = await import("../AddEvaluationDrawer");
 
-// harnessEnvironmentQuery and useEnvironmentRunTest each set their own `retry`
-// (no-retry on 404, up to 3 otherwise), which overrides `retry: false` here —
-// retryDelay:0 is what keeps that non-404 retry path instant in tests.
+// harnessEnvironmentQuery sets its own `retry` (none on 404, up to 3 otherwise),
+// which overrides `retry: false` here; retryDelay:0 keeps those retries instant.
 const render = (ui) =>
   rtlRender(
     <QueryClientProvider
@@ -380,5 +380,87 @@ describe("AddEvaluationDrawer — inside a run", () => {
       }),
     );
     resolveGrade(COUNTS);
+  });
+});
+
+describe("AddEvaluationDrawer — load states", () => {
+  const client = () =>
+    new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, retryDelay: 0 },
+        mutations: { retry: false },
+      },
+    });
+  const withClient = (c, ui) => (
+    <QueryClientProvider client={c}>{ui}</QueryClientProvider>
+  );
+
+  it("keeps the picker open when a later refresh of the run test's evals fails", async () => {
+    const c = client();
+    rtlRender(
+      withClient(c, <AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />),
+    );
+    await screen.findByTestId("eval-picker");
+    axios.get.mockRejectedValue({
+      statusCode: 503,
+      detail: "Simulations are temporarily unavailable. Please retry.",
+    });
+    await act(() =>
+      c.refetchQueries({
+        queryKey: ["simulate-environments", "run-test", "rt-1"],
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByTestId("eval-picker")).toBeInTheDocument();
+    expect(picker.props.addedEvals).toHaveLength(2);
+  });
+
+  it("shows a spinner, not the not-built message, while the run test's evals load", async () => {
+    axios.get.mockReturnValue(new Promise(() => {}));
+    render(<AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />);
+    await waitFor(() => expect(axios.get).toHaveBeenCalled());
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    expect(screen.queryByText("Not ready yet")).toBeNull();
+    expect(screen.queryByTestId("eval-picker")).toBeNull();
+  });
+
+  it("retries the environment itself when that read failed", async () => {
+    getHarnessEnvironment.mockRejectedValue({
+      statusCode: 500,
+      detail: "boom",
+    });
+    render(<AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />);
+    expect(await screen.findByText("boom")).toBeInTheDocument();
+    getHarnessEnvironment.mockResolvedValue(detail());
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByTestId("eval-picker");
+  });
+
+  it("hides the picker once closed, even with everything cached", async () => {
+    const c = client();
+    const { rerender } = rtlRender(
+      withClient(c, <AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />),
+    );
+    await screen.findByTestId("eval-picker");
+    rerender(
+      withClient(
+        c,
+        <AddEvaluationDrawer open={false} env={ENV} onClose={vi.fn()} />,
+      ),
+    );
+    expect(screen.queryByTestId("eval-picker")).toBeNull();
+  });
+
+  it("does not read the run test while closed, even when the environment is cached", async () => {
+    const c = client();
+    c.setQueryData(["harness-environment", "env-1"], detail());
+    rtlRender(
+      withClient(
+        c,
+        <AddEvaluationDrawer open={false} env={ENV} onClose={vi.fn()} />,
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(axios.get).not.toHaveBeenCalled();
   });
 });
