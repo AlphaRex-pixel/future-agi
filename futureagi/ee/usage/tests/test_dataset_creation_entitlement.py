@@ -131,6 +131,7 @@ def test_entitlement_error_on_cloud_asks_to_retry_without_limit_alert(
         response = _create_empty_dataset(auth_client, "Unverified Dataset")
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.json()["code"] == "dataset_limit_check_failed"
     assert response.json()["message"] == get_error_message("DATASET_LIMIT_CHECK_FAILED")
     websocket.assert_not_called()
     assert not _dataset_add_logs(organization).exists()
@@ -242,6 +243,7 @@ def test_entitlement_error_on_cloud_refuses_sdk_file_upload(
         )
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.json()["code"] == "dataset_limit_check_failed"
     assert not Dataset.no_workspace_objects.filter(
         name="Unverified SDK Dataset", organization=organization
     ).exists()

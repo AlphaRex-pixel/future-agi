@@ -28,7 +28,10 @@ from tracer.tasks import CHUNK_SIZE, process_spans_chunk_task
 logger = structlog.get_logger(__name__)
 
 try:
-    from ee.usage.utils.usage_entries import check_if_dataset_creation_is_allowed
+    from ee.usage.utils.usage_entries import (
+        DATASET_LIMIT_CHECK_FAILED,
+        check_if_dataset_creation_is_allowed,
+    )
 except ImportError:
     check_if_dataset_creation_is_allowed = None
 
@@ -439,7 +442,7 @@ def create_new_dataset(new_dataset_name, organization, workspace, user_id):
 
     if check_if_dataset_creation_is_allowed is not None:
         allowed, detail = check_if_dataset_creation_is_allowed(organization)
-        if detail.get("error_code") == "DATASET_LIMIT_CHECK_FAILED":
+        if detail.get("error_code") == DATASET_LIMIT_CHECK_FAILED:
             raise DatasetLimitCheckFailed
         if not allowed:
             raise ValueError(get_error_message("DATASET_CREATE_LIMIT_REACHED"))

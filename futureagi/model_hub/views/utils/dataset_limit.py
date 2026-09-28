@@ -15,9 +15,11 @@ class DatasetLimitCheckFailed(Exception):
 
 def dataset_limit_check_failed_response():
     # 503: the refusal is transient, like the other retryable read failures.
+    # The typed code lets the frontend show this message despite the 5xx.
     return _gm.custom_error_response(
         status.HTTP_503_SERVICE_UNAVAILABLE,
         get_error_message("DATASET_LIMIT_CHECK_FAILED"),
+        code="dataset_limit_check_failed",
     )
 
 

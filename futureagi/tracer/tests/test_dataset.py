@@ -749,6 +749,7 @@ class TestAddToNewDatasetAPI:
 
         assert response.status_code == expected_status
         if is_cloud:
+            assert response.json()["code"] == "dataset_limit_check_failed"
             assert response.json()["message"] == get_error_message(
                 "DATASET_LIMIT_CHECK_FAILED"
             )

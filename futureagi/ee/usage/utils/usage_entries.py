@@ -70,6 +70,10 @@ TRACES_LIMIT_REACHED_MESSAGE = "Traces limit reached. \
       Please delete existing traces or upgrade to a higher tier to \
       avail more traces."
 
+# detail["error_code"] of a dataset limit check that could not run (also the
+# tfc/utils/error_codes.py key of its message).
+DATASET_LIMIT_CHECK_FAILED = "DATASET_LIMIT_CHECK_FAILED"
+
 
 EVALUATOR_CALLS = [
     APICallTypeChoices.TURING_LARGE_EVALUATOR.value,
@@ -1557,7 +1561,7 @@ def log_and_deduct_cost_for_resource_request(
 
             # The limit was never verified: refuse without recording a
             # resource-limit hit or sending the upgrade alert.
-            if detail.get("error_code") == "DATASET_LIMIT_CHECK_FAILED":
+            if detail.get("error_code") == DATASET_LIMIT_CHECK_FAILED:
                 return None
 
             is_billing_api_call = check_if_api_call_is_billing_api_call(
@@ -2202,7 +2206,7 @@ def check_if_dataset_creation_is_allowed(organization, config=None):
         # allows off-cloud); on cloud the quota is billing, so fail closed.
         if not DeploymentMode.is_cloud():
             return True, {}
-        return False, {"error_code": "DATASET_LIMIT_CHECK_FAILED"}
+        return False, {"error_code": DATASET_LIMIT_CHECK_FAILED}
 
 
 def check_if_row_limit_reached(organization, row_count):
