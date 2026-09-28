@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math/rand/v2"
 	"time"
 
 	"github.com/futureagi/agentcc-gateway/internal/auth"
@@ -13,7 +14,8 @@ import (
 // gateway boots (a first boot can spend minutes on migrations), so failed
 // attempts are expected: they log at INFO, and only an outage longer than
 // startupSyncWarnAfter logs a WARN, repeated at most every
-// startupSyncWarnEvery. Variables so tests can shorten them.
+// startupSyncWarnEvery. Each retry waits within 10% of the backoff (see
+// jittered). Variables so tests can shorten them.
 var (
 	startupSyncFirstRetry = 2 * time.Second
 	startupSyncMaxRetry   = 30 * time.Second
@@ -70,18 +72,20 @@ func SyncOnStartup(ctx context.Context, baseURL, adminToken string, store *Store
 		}
 
 		err := errors.Join(errs...)
+		sleep := jittered(wait)
 		failingFor := time.Since(start)
 		if failingFor >= startupSyncWarnAfter && (lastWarn.IsZero() || time.Since(lastWarn) >= startupSyncWarnEvery) {
 			lastWarn = time.Now()
-			slog.Warn("control plane sync still failing: the gateway serves only its config.yaml keys until keys and org settings load from the app; still retrying",
-				"failing_for", failingFor.Round(time.Second).String(), "attempts", attempt, "error", err)
+			slog.Warn("control plane sync still failing: "+startupSyncImpact(orgsSynced, keysSynced)+"; still retrying",
+				"failing_for", failingFor.Round(time.Second).String(), "attempts", attempt,
+				"need_orgs", !orgsSynced, "need_keys", !keysSynced, "error", err)
 		} else {
 			slog.Info("control plane not ready yet, retrying startup sync",
-				"attempt", attempt, "retry_in", wait.String(),
+				"attempt", attempt, "retry_in", sleep.Round(time.Millisecond).String(),
 				"need_orgs", !orgsSynced, "need_keys", !keysSynced, "error", err)
 		}
 
-		timer := time.NewTimer(wait)
+		timer := time.NewTimer(sleep)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -92,13 +96,44 @@ func SyncOnStartup(ctx context.Context, baseURL, adminToken string, store *Store
 	}
 }
 
-// RunControlPlaneSync runs the startup sync when startup is set, then the
-// periodic re-sync every interval (0 = none) until ctx ends. One loop at a
-// time, so a control plane that is still starting is not polled twice. Blocks;
-// run it in a goroutine.
-func RunControlPlaneSync(ctx context.Context, startup bool, interval time.Duration, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore) {
-	if startup && !SyncOnStartup(ctx, baseURL, adminToken, store, keyStore) {
-		return // ctx ended
+// startupSyncImpact says what the gateway lacks while the startup sync fails.
+func startupSyncImpact(orgsSynced, keysSynced bool) string {
+	switch {
+	case !orgsSynced && !keysSynced:
+		return "the gateway serves only its config.yaml keys until keys and org settings load from the app"
+	case !keysSynced:
+		return "the gateway serves only its config.yaml keys until keys load from the app"
+	default:
+		return "the gateway runs without org settings until they load from the app"
 	}
-	StartPeriodicSync(ctx, interval, baseURL, adminToken, store, keyStore)
+}
+
+// jittered returns d spread by up to 10% either way, so gateway replicas
+// started together do not retry the control plane in lockstep.
+func jittered(d time.Duration) time.Duration {
+	spread := d / 5
+	if spread <= 0 {
+		return d
+	}
+	return d - spread/2 + rand.N(spread)
+}
+
+// RunControlPlaneSync runs the startup sync when startup is set, and the
+// periodic re-sync every interval (0 = none), until ctx ends. The periodic
+// re-sync starts right away, so what has loaded is re-synced even while the
+// rest keeps failing. Next to a startup sync it logs a half's failures at INFO
+// until that half first loads: the startup sync is the one that warns about a
+// long outage. Blocks; run it in a goroutine.
+func RunControlPlaneSync(ctx context.Context, startup bool, interval time.Duration, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore) {
+	if !startup {
+		StartPeriodicSync(ctx, interval, baseURL, adminToken, store, keyStore)
+		return
+	}
+	periodic := make(chan struct{})
+	go func() {
+		defer close(periodic)
+		runPeriodicSync(ctx, interval, baseURL, adminToken, store, keyStore, true)
+	}()
+	SyncOnStartup(ctx, baseURL, adminToken, store, keyStore)
+	<-periodic
 }

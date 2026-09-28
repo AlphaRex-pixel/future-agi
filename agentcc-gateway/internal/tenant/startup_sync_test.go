@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -45,6 +46,19 @@ func (r *logRecorder) count(level slog.Level, msg string) int {
 	return n
 }
 
+// messages returns the messages of the records logged at level.
+func (r *logRecorder) messages(level slog.Level) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var msgs []string
+	for _, rec := range r.records {
+		if rec.Level == level {
+			msgs = append(msgs, rec.Message)
+		}
+	}
+	return msgs
+}
+
 func recordLogs(t *testing.T) *logRecorder {
 	t.Helper()
 	rec := &logRecorder{}
@@ -65,11 +79,14 @@ func shortenStartupSync(t *testing.T, firstRetry, maxRetry, warnAfter, warnEvery
 }
 
 // fakeControlPlane answers 503 on both bulk endpoints while down reports true,
-// then serves one org and one API key (sk-agentcc-ui-key, as key_7).
+// then serves one org and one API key (sk-agentcc-ui-key, as key_7). Setting
+// orgsBroken or keysBroken makes that endpoint answer 500 regardless.
 type fakeControlPlane struct {
 	*httptest.Server
 	orgRequests atomic.Int32
 	keyRequests atomic.Int32
+	orgsBroken  atomic.Bool
+	keysBroken  atomic.Bool
 }
 
 func newFakeControlPlane(t *testing.T, down func() bool) *fakeControlPlane {
@@ -79,6 +96,10 @@ func newFakeControlPlane(t *testing.T, down func() bool) *fakeControlPlane {
 		switch r.URL.Path {
 		case "/agentcc/org-configs/bulk/":
 			cp.orgRequests.Add(1)
+			if cp.orgsBroken.Load() {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			if down() {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
@@ -89,6 +110,10 @@ func newFakeControlPlane(t *testing.T, down func() bool) *fakeControlPlane {
 			})
 		case "/agentcc/api-keys/bulk/":
 			cp.keyRequests.Add(1)
+			if cp.keysBroken.Load() {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			if down() {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
@@ -228,14 +253,73 @@ func TestSyncOnStartup_StopsWhenTheContextEnds(t *testing.T) {
 	}
 }
 
-// With an interval, the periodic re-sync takes over once the startup sync has
-// loaded everything, and not before: a starting control plane is polled by
-// one loop, which does not warn.
-func TestRunControlPlaneSync_PeriodicSyncFollowsTheStartupSync(t *testing.T) {
+// The WARN for a long outage names what is still missing: keys that have
+// loaded are not reported as missing.
+func TestSyncOnStartup_WarningNamesWhatIsMissing(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		breakOrgs  bool
+		breakKeys  bool
+		wantPhrase string
+		notPhrase  string
+	}{
+		{"orgs failing", true, false, "org settings", "keys"},
+		{"keys failing", false, true, "config.yaml keys", "org settings"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := recordLogs(t)
+			shortenStartupSync(t, time.Millisecond, time.Millisecond, 0, time.Hour)
+			cp := newFakeControlPlane(t, func() bool { return false })
+			cp.orgsBroken.Store(tc.breakOrgs)
+			cp.keysBroken.Store(tc.breakKeys)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan bool, 1)
+			go func() { done <- SyncOnStartup(ctx, cp.URL, "token", NewStore(), auth.NewKeyStore(config.AuthConfig{})) }()
+			deadline := time.Now().Add(5 * time.Second)
+			for logs.count(slog.LevelWarn, "") == 0 && time.Now().Before(deadline) {
+				time.Sleep(time.Millisecond)
+			}
+			cancel()
+			<-done
+
+			warns := logs.messages(slog.LevelWarn)
+			if len(warns) != 1 {
+				t.Fatalf("logged WARN records %q, want 1", warns)
+			}
+			if !strings.Contains(warns[0], tc.wantPhrase) || strings.Contains(warns[0], tc.notPhrase) {
+				t.Errorf("WARN = %q, want it to name %q and not %q", warns[0], tc.wantPhrase, tc.notPhrase)
+			}
+		})
+	}
+}
+
+// Replicas started together must not retry the control plane in lockstep.
+func TestStartupSyncBackoffIsJittered(t *testing.T) {
+	const wait = 10 * time.Second
+	seen := map[time.Duration]bool{}
+	for range 100 {
+		d := jittered(wait)
+		if d < wait*9/10 || d > wait*11/10 {
+			t.Fatalf("jittered(%s) = %s, want within 10%%", wait, d)
+		}
+		seen[d] = true
+	}
+	if len(seen) < 2 {
+		t.Errorf("jittered(%s) returned the same value 100 times", wait)
+	}
+	if d := jittered(0); d != 0 {
+		t.Errorf("jittered(0) = %s, want 0", d)
+	}
+}
+
+// The periodic re-sync runs from the start, next to the startup sync, so a
+// half that has loaded is kept fresh even while the other keeps failing.
+func TestRunControlPlaneSync_PeriodicSyncKeepsTheLoadedHalfFresh(t *testing.T) {
 	logs := recordLogs(t)
-	shortenStartupSync(t, 20*time.Millisecond, 20*time.Millisecond, time.Hour, time.Hour)
-	var cp *fakeControlPlane
-	cp = newFakeControlPlane(t, downFor(2, &cp))
+	shortenStartupSync(t, time.Hour, time.Hour, time.Hour, time.Hour)
+	cp := newFakeControlPlane(t, func() bool { return false })
+	cp.keysBroken.Store(true)
 	store, ks := NewStore(), auth.NewKeyStore(config.AuthConfig{})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -245,21 +329,76 @@ func TestRunControlPlaneSync_PeriodicSyncFollowsTheStartupSync(t *testing.T) {
 		close(done)
 	}()
 
-	// Two failures and one success from the startup sync, then periodic ticks.
 	deadline := time.Now().Add(5 * time.Second)
-	for cp.orgRequests.Load() < 6 && time.Now().Before(deadline) {
+	for cp.orgRequests.Load() < 4 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	// Counted before cancelling: a periodic sync cut short by shutdown warns.
-	warns := logs.count(slog.LevelWarn, "")
+	warns := logs.messages(slog.LevelWarn)
 	cancel()
 	<-done
 
-	if n := cp.orgRequests.Load(); n < 6 {
-		t.Fatalf("control plane got %d org sync requests, want the periodic sync running after startup", n)
+	if n := cp.orgRequests.Load(); n < 4 {
+		t.Fatalf("control plane got %d org sync requests, want the periodic sync re-syncing orgs while keys fail", n)
 	}
+	if store.Get("org-1") == nil {
+		t.Error("org-1 not loaded from the control plane")
+	}
+	// Keys have never loaded, so their periodic failures are INFO; the
+	// startup sync is the one that warns about a long outage.
+	if len(warns) != 0 {
+		t.Errorf("logged WARN records %q while keys had never loaded", warns)
+	}
+}
+
+// Until a half first loads, the periodic re-sync logs its failures at INFO (a
+// starting control plane is expected to fail); after that they are WARN.
+func TestRunControlPlaneSync_PeriodicSyncIsQuietUntilItLoads(t *testing.T) {
+	logs := recordLogs(t)
+	shortenStartupSync(t, 50*time.Millisecond, 50*time.Millisecond, time.Hour, time.Hour)
+	var down atomic.Bool
+	down.Store(true)
+	cp := newFakeControlPlane(t, down.Load)
+	store, ks := NewStore(), auth.NewKeyStore(config.AuthConfig{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		RunControlPlaneSync(ctx, true, 5*time.Millisecond, cp.URL, "token", store, ks)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for !cond() {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	waitFor("periodic failures while the control plane starts", func() bool {
+		return logs.count(slog.LevelInfo, "periodic sync failed") >= 2 &&
+			logs.count(slog.LevelInfo, "periodic key sync failed") >= 2
+	})
+	if warns := logs.messages(slog.LevelWarn); len(warns) != 0 {
+		t.Fatalf("logged WARN records %q while the control plane was starting", warns)
+	}
+
+	down.Store(false)
+	waitFor("the startup and periodic syncs to load", func() bool {
+		return logs.count(slog.LevelInfo, "control plane startup sync succeeded") == 1 &&
+			logs.count(slog.LevelDebug, "periodic sync completed") >= 1
+	})
 	assertSynced(t, store, ks)
-	if warns != 0 {
-		t.Errorf("logged %d WARN records: the periodic sync ran while the control plane was starting", warns)
-	}
+
+	cp.orgsBroken.Store(true)
+	waitFor("a WARN for a periodic failure after loading", func() bool {
+		return logs.count(slog.LevelWarn, "periodic sync failed") >= 1
+	})
 }

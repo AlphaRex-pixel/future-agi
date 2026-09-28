@@ -606,8 +606,8 @@ func main() {
 	}
 
 	// Control plane sync: the startup sync retries until the backend answers
-	// (it can take minutes on a first boot), then the periodic re-sync takes
-	// over if an interval is set. Do NOT add another ticker.
+	// (it can take minutes on a first boot), next to the periodic re-sync if
+	// an interval is set. Do NOT add another ticker.
 	if cfg.ControlPlane.URL != "" {
 		go tenant.RunControlPlaneSync(syncCtxBg, cfg.ControlPlane.SyncOnStartup, cfg.ControlPlane.SyncInterval,
 			cfg.ControlPlane.URL, cfg.ControlPlane.AdminToken, tenantStore, keyStore)

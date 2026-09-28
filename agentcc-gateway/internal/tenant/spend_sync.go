@@ -76,9 +76,17 @@ func SyncSpendFromControlPlane(ctx context.Context, baseURL, adminToken, period 
 // StartPeriodicSync runs SyncFromControlPlane (and optionally key sync)
 // on a timer. It blocks until ctx is cancelled — call it in a goroutine.
 func StartPeriodicSync(ctx context.Context, interval time.Duration, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore) {
+	runPeriodicSync(ctx, interval, baseURL, adminToken, store, keyStore, false)
+}
+
+// runPeriodicSync is StartPeriodicSync. With quietUntilLoaded, the org and key
+// syncs each log their failures at INFO until they first succeed here, and at
+// WARN after that.
+func runPeriodicSync(ctx context.Context, interval time.Duration, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore, quietUntilLoaded bool) {
 	if interval <= 0 || baseURL == "" {
 		return
 	}
+	orgsLoaded, keysLoaded := !quietUntilLoaded, !quietUntilLoaded
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -93,16 +101,26 @@ func StartPeriodicSync(ctx context.Context, interval time.Duration, baseURL, adm
 		case <-ticker.C:
 			syncCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			if err := SyncFromControlPlane(syncCtx, baseURL, adminToken, store); err != nil {
-				slog.Warn("periodic sync failed", "error", err)
+				slog.Log(ctx, periodicFailureLevel(orgsLoaded), "periodic sync failed", "error", err)
 			} else {
+				orgsLoaded = true
 				slog.Debug("periodic sync completed", "orgs", store.Count())
 			}
 			if keyStore != nil {
 				if err := auth.SyncKeysFromControlPlane(syncCtx, baseURL, adminToken, keyStore); err != nil {
-					slog.Warn("periodic key sync failed", "error", err)
+					slog.Log(ctx, periodicFailureLevel(keysLoaded), "periodic key sync failed", "error", err)
+				} else {
+					keysLoaded = true
 				}
 			}
 			cancel()
 		}
 	}
+}
+
+func periodicFailureLevel(loaded bool) slog.Level {
+	if loaded {
+		return slog.LevelWarn
+	}
+	return slog.LevelInfo
 }
