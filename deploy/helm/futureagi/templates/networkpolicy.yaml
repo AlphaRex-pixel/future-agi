@@ -99,9 +99,9 @@ spec:
 {{- end }}
 {{- if $v.codeExecutor.enabled }}
 ---
-# Eval code runs here: only the backend and the workers may call it, and it
-# may reach DNS and, optionally, the internet, never the cluster's networks
-# or the cloud metadata endpoint.
+# Eval code runs here: every pod of this release may call it (the backend and
+# the workers do), and it may reach DNS and, optionally, the internet, never
+# the cluster's networks or the cloud metadata endpoint.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

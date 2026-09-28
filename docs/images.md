@@ -218,7 +218,7 @@ Kubernetes probe targets: `future-agi` `GET /health/` port 80, `frontend`
 | `agentcc-gateway` | 65532 | |
 | `serving` | root | an exception: existing deployments mount a root-owned model-cache volume (`HF_HOME`) without an `fsGroup`, which uid 1000 could not write. The image is ready for `appuser` (1000), and the Helm chart runs it that way with `fsGroup: 1000` and the caches on its `/models` volume. `NUMBA_CACHE_DIR=/tmp/numba-cache`, so an arbitrary Kubernetes `runAsUser` also starts. Model downloads go to `$HOME/.cache` unless `HF_HOME`, `SENTENCE_TRANSFORMERS_HOME` and `TORCH_HOME` say otherwise: mount a volume at `/root/.cache` (or `/home/appuser/.cache` with `user: "1000:1000"`) to keep them |
 | `standalone` | root | supervisord starts Redis, MinIO, nginx and the API, runs code evals as the unprivileged `sandbox` user (uid 18060), and keeps secrets in a root-only directory |
-| `code-executor` | root | nsjail needs root and `privileged: true` to create each jail's namespaces and cgroups; evaluated code runs inside the jail as uid 1000 |
+| `code-executor` | root | nsjail needs root and `privileged: true` to create each jail's namespaces and cgroups; evaluated code runs inside the jail as uid 0 with every capability dropped, a read-only root and no seccomp filter |
 | `frontend` | root master | the nginx master binds :80 and writes `config.js` at start; the workers that serve requests run as `nginx` (101), as in the upstream nginx image |
 | `future-agi` (both variants), simulation runner | root | the deployments that run this image today bind :80 and mount root-owned volumes (`/app/backend/logs`). The image is ready to run as `1000:1000`: see below |
 

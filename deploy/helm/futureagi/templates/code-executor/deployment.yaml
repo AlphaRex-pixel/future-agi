@@ -60,8 +60,10 @@ spec:
           resources:
             {{- toYaml $e.resources | nindent 12 }}
           # nsjail creates Linux namespaces for each run, which needs a
-          # privileged container. Each run is then confined by nsjail (PID,
-          # mount and user namespaces, seccomp, rlimits, read-only root).
+          # privileged container. Each run gets its own PID, mount, user, IPC,
+          # UTS and cgroup namespaces, rlimits and a read-only root, and runs
+          # as uid 0 with every capability dropped. There is no seccomp filter,
+          # and the run shares the pod's network (server.py passes nsjail -N).
           securityContext:
             privileged: true
 ---

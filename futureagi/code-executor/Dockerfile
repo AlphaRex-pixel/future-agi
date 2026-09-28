@@ -30,8 +30,10 @@ WORKDIR /sandbox
 EXPOSE 8060
 
 # Runs as root (docs/images.md): nsjail needs it, with `privileged: true`, to
-# create the namespaces and cgroups of each jail. Evaluated code runs inside
-# the jail as uid 1000 (config/python.cfg uidmap), never as root.
+# create the namespaces and cgroups of each jail. server.py runs nsjail with
+# command-line flags, not config/python.cfg, so evaluated code runs inside
+# the jail as uid 0 with every capability dropped, without a seccomp filter,
+# and on the container's network (-N).
 # hadolint ignore=DL3002
 USER root
 STOPSIGNAL SIGTERM
