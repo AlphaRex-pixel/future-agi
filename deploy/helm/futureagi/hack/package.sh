@@ -262,6 +262,9 @@ annotations["artifacthub.io/images"] = dump(images)
 # "* **scope:** text ([#123](url)) ([abc1234](url))" bullets.
 kinds = {"features": "added", "bug fixes": "fixed", "security": "security", "reverts": "changed"}
 changes, contains_security = [], security == "true"
+# A fix merged twice (e.g. to dev and main) is listed twice, with different
+# commits: one entry per (kind, description), with the PR links of every copy.
+by_entry = {}
 if changes_path:
     section = ""
     with open(changes_path) as f:
@@ -290,6 +293,13 @@ if changes_path:
                 kind = "security"
             contains_security = contains_security or kind == "security"
             change = {"kind": kind, "description": f"{scope}: {text}" if scope else text}
+            seen_change = by_entry.get((kind, change["description"]))
+            if seen_change is not None:
+                for link in links:
+                    if link not in seen_change.setdefault("links", []):
+                        seen_change["links"].append(link)
+                continue
+            by_entry[(kind, change["description"])] = change
             if links:
                 change["links"] = links
             helm = scope.lower() in ("helm", "chart", "charts") or scope.lower().startswith("helm")

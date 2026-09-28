@@ -27,6 +27,7 @@ PORT_FORWARD_URLS = {
     "FRONTEND_URL": "http://localhost:3000",
     "BASE_URL": "http://localhost:8000",
     "FI_COLLECTOR_PUBLIC_URL": "http://localhost:4318",
+    "MINIO_URL": "http://localhost:9005",
 }
 INGRESS_URLS = {
     "APP_URL": "https://futureagi.example.com",
@@ -44,6 +45,8 @@ EXPECTED_URLS = {
     "overrides": {
         **PORT_FORWARD_URLS,
         "FI_COLLECTOR_PUBLIC_URL": "https://otlp.futureagi.example.com",
+        # objectStorage.bundled.service.downloadPort
+        "MINIO_URL": "http://localhost:9100",
     },
     "gateway-api": INGRESS_URLS,
     "local": PORT_FORWARD_URLS,
@@ -152,13 +155,27 @@ def check_python_env(where: str, values: dict) -> list[str]:
 
 
 def check_gateway_redis(name: str, docs: list[dict]) -> list[str]:
-    """A gateway that can run more than one replica shares its state in Redis."""
+    """A gateway that can run more than one replica shares its state in Redis,
+    never in the app's Redis over TLS (the gateway has no Redis TLS)."""
     failed = []
     scaled = {
         d["spec"]["scaleTargetRef"]["name"]
         for d in docs
         if d["kind"] == "HorizontalPodAutoscaler"
     }
+    app = next(
+        (
+            env_values(pod_spec(d)["containers"][0])
+            for d in docs
+            if d["kind"] == "Deployment" and component(d) == "backend"
+        ),
+        {},
+    )
+    app_tls_redis = (
+        f"{app.get('REDIS_HOST')}:{app.get('REDIS_PORT')}"
+        if (app.get("REDIS_URL") or "").startswith("rediss://")
+        else None
+    )
     for doc in docs:
         if doc["kind"] != "Deployment" or component(doc) != "agentcc-gateway":
             continue
@@ -166,6 +183,8 @@ def check_gateway_redis(name: str, docs: list[dict]) -> list[str]:
         multi = doc["metadata"]["name"] in scaled or doc["spec"].get("replicas", 1) > 1
         if multi and not values.get("AGENTCC_REDIS_ADDRESS"):
             failed.append(f"{name}: the gateway runs several replicas without Redis")
+        if app_tls_redis and values.get("AGENTCC_REDIS_ADDRESS") == app_tls_redis:
+            failed.append(f"{name}: the gateway, which has no Redis TLS, uses the app's Redis over TLS")
         if values.get("AGENTCC_REDIS_DB") in {"0", "1", "2", "3"}:
             failed.append(
                 f"{name}: the gateway shares Redis database {values['AGENTCC_REDIS_DB']} with the app"
@@ -239,6 +258,12 @@ def check_worker_queues(docs: list[dict]) -> list[str]:
         failed.append("worker-queues: tasks_xl is not on its own pool")
     if xl.get("priorityClassName") != "futureagi-batch":
         failed.append("worker-queues: tasks_xl ignores its priorityClassName")
+    policies = {
+        name: pod_spec(deployments[name])["containers"][0]["imagePullPolicy"]
+        for name in ("worker", "worker-tasks-xl")
+    }
+    if policies != {"worker": "IfNotPresent", "worker-tasks-xl": "Always"}:
+        failed.append(f"worker-queues: pull policies {policies}: tasks_xl sets its own, Always")
     hpa = hpas.get("worker-tasks-xl")
     metrics = {m["resource"]["name"]: m for m in (hpa or {}).get("spec", {}).get("metrics", [])}
     if not hpa or set(metrics) != {"memory"} or hpa["spec"]["maxReplicas"] != 3:
@@ -951,6 +976,19 @@ def check_overrides(bundled: list[dict], overrides: list[dict]) -> list[str]:
                 f"overrides: {doc['metadata']['name']} ignores config.extraEnv.REDIS_PASSWORD"
             )
 
+    # bootstrap.ttlSecondsAfterFinished: 0 deletes the job at once; it is not unset.
+    for render, docs, ttl in (("bundled", bundled, 86400), ("overrides", overrides, 0)):
+        job = next(d for d in docs if d["kind"] == "Job" and component(d) == "bootstrap")
+        if job["spec"].get("ttlSecondsAfterFinished") != ttl:
+            failed.append(
+                f"{render}: the bootstrap job's ttlSecondsAfterFinished is "
+                f"{job['spec'].get('ttlSecondsAfterFinished')!r}, expected {ttl}"
+            )
+    # objectStorage.bundled.service.downloadPort: the Service port MINIO_URL names.
+    minio = next(d for d in overrides if d["kind"] == "Service" and component(d) == "minio")
+    if 9100 not in {p["port"] for p in minio["spec"]["ports"] if p["name"] == "downloads"}:
+        failed.append("overrides: the MinIO Service does not publish downloadPort 9100")
+
     mounts = {
         component(d): {
             m["mountPath"] for m in pod_spec(d)["containers"][0].get("volumeMounts", [])
@@ -1072,6 +1110,80 @@ def check_datastore_pins(name: str, docs: list[dict], expected: dict) -> list[st
     return failed
 
 
+def check_token_mounts(name: str, docs: list[dict], mounted: bool) -> list[str]:
+    """serviceAccount.automountServiceAccountToken reaches the ServiceAccount
+    and the pods that run as it, but never the code sandbox; every other pod
+    (datastores, the bootstrap job, the test pod) keeps the token out."""
+    failed = []
+    accounts = {
+        d["metadata"]["name"]: d
+        for d in docs
+        if d["kind"] == "ServiceAccount"
+        and "helm.sh/hook" not in d["metadata"].get("annotations", {})
+    }
+    for account in accounts.values():
+        if account.get("automountServiceAccountToken") is not mounted:
+            failed.append(f"{name}: ServiceAccount {account['metadata']['name']} automount is not {mounted}")
+    for doc in (d for d in docs if d["kind"] in WORKLOADS):
+        spec = pod_spec(doc)
+        want = (
+            mounted
+            and spec.get("serviceAccountName") in accounts
+            and component(doc) != "code-executor"
+        )
+        if spec.get("automountServiceAccountToken") is not want:
+            failed.append(
+                f"{name}: {doc['kind']} {doc['metadata']['name']} automountServiceAccountToken "
+                f"is {spec.get('automountServiceAccountToken')!r}, expected {want}"
+            )
+    return failed
+
+
+def check_all_components(docs: list[dict]) -> list[str]:
+    """ci/all-components.yaml: the chart-wide scheduling reaches every pod, the
+    helm test pod included, and an empty bootstrap TTL leaves the field out."""
+    failed = []
+    for doc in (d for d in docs if d["kind"] in WORKLOADS):
+        spec = pod_spec(doc)
+        placed = (
+            spec.get("nodeSelector") == {"kubernetes.io/os": "linux"},
+            any(t.get("key") == "dedicated" for t in spec.get("tolerations", [])),
+            spec.get("priorityClassName") == "futureagi",
+        )
+        if not all(placed):
+            failed.append(
+                f"all-components: {doc['kind']} {doc['metadata']['name']} misses the chart-wide "
+                "nodeSelector, tolerations or priorityClassName"
+            )
+    job = next(d for d in docs if d["kind"] == "Job" and component(d) == "bootstrap")
+    if "ttlSecondsAfterFinished" in job["spec"]:
+        failed.append("all-components: an empty bootstrap.ttlSecondsAfterFinished still sets one")
+    return failed
+
+
+def check_dockerhub_mirror(docs: list[dict]) -> list[str]:
+    """ci/dockerhub-mirror.yaml: a Docker Hub pull-through cache named per
+    image; the bundled MinIO stays on ghcr.io; the digest pins stay."""
+    failed = []
+    for image in all_images(docs):
+        ref = image.partition("@")[0]
+        if ref.startswith("ghcr.io/coollabsio/minio:"):
+            continue
+        if not ref.startswith("registry.example.com/dockerhub/"):
+            failed.append(f"dockerhub-mirror: {image} does not come through the mirror")
+    if not any(i.startswith("ghcr.io/coollabsio/minio:") for i in all_images(docs)):
+        failed.append("dockerhub-mirror: the bundled MinIO left ghcr.io")
+    pins = {
+        ref.replace("docker.io/", "registry.example.com/dockerhub/"): digest
+        for ref, digest in DATASTORE_PINS.items()
+    }
+    for image in all_images(docs):
+        ref, _, digest = image.partition("@")
+        if ref in pins and digest != pins[ref]:
+            failed.append(f"dockerhub-mirror: {image} lost its digest pin")
+    return failed
+
+
 def main() -> int:
     out = Path(sys.argv[1])
     compose = Path(sys.argv[3]) if sys.argv[2:3] == ["--compose"] else None
@@ -1083,6 +1195,8 @@ def main() -> int:
     for name, docs in renders.items():
         failed += check_render(name, docs) + check_health_check_policies(name, docs)
         failed += check_alb_health_checks(name, docs)
+        # ci/all-components.yaml turns serviceAccount.automountServiceAccountToken on.
+        failed += check_token_mounts(name, docs, mounted=name == "all-components")
     # examples/cloud/gke.yaml: the UI, API and collector; ci/gateway-api.yaml
     # adds the LLM gateway.
     for render, wanted in (("cloud-gke", 3), ("gateway-api", 4)):
@@ -1114,6 +1228,10 @@ def main() -> int:
         failed += check_pooler(renders["pooler"])
     if "worker-queues" in renders:
         failed += check_worker_queues(renders["worker-queues"])
+    if "all-components" in renders:
+        failed += check_all_components(renders["all-components"])
+    if "dockerhub-mirror" in renders:
+        failed += check_dockerhub_mirror(renders["dockerhub-mirror"])
     for render in ("bundled", "external", "local"):
         if render in renders:
             failed += check_defaults_opt_in(render, renders[render])

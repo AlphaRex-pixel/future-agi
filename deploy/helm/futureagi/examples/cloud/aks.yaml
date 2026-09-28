@@ -1,10 +1,13 @@
 # Azure Kubernetes Service: Azure Database for PostgreSQL flexible server,
 # Azure Cache for Redis, S3-compatible object storage, Application Gateway for
-# Containers (Gateway API) and Premium SSD volumes. ClickHouse and Temporal
-# run in the cluster from their own charts or operators, installed separately:
+# Containers (Gateway API) and Premium SSD volumes. ClickHouse, Temporal and
+# a Redis for the LLM gateway run in the cluster from their own charts or
+# operators, installed separately:
 #   ClickHouse: the Altinity operator (or ClickHouse's own); the chart speaks
 #     plain HTTP (8123) and native (9000) to it, so keep it in the cluster.
 #   Temporal: the temporalio/temporal chart, on the flexible server or its own.
+#   Redis 6 or newer without TLS for the gateway's rate limits and budgets
+#     (below): Azure Cache for Redis is TLS-only.
 # Replace every example host and create the Secrets first:
 #
 #   kubectl create secret generic futureagi-postgres --from-literal=password='...'
@@ -15,12 +18,14 @@
 #   helm install futureagi oci://ghcr.io/future-agi/charts/futureagi --version X.Y.Z \
 #     -n futureagi --create-namespace -f aks.yaml --timeout 20m
 #
+# A size (-f sizes/medium.yaml or sizes/large.yaml after it) works as is.
+#
 # Not supported: Azure Blob Storage (it is not S3-compatible and the app has
 # no Azure backend: use AWS S3, Cloudflare R2, or a MinIO or SeaweedFS you run,
 # with backend minio as below), Microsoft Entra ID workload identity for the
 # bucket or the database (use keys and a password). Azure Cache for Redis
 # serves TLS on 6380 only: the app uses TLS (redis.external.tls), and the LLM
-# gateway, which has no Redis TLS, runs one replica.
+# gateway, which has no Redis TLS, keeps its state in its own Redis.
 global:
   storageClass: managed-csi-premium
 postgres:
@@ -56,9 +61,13 @@ urls:
   # Where browsers download files from: that storage's public URL.
   objects: https://files.futureagi.example.com
 agentccGateway:
-  replicas: 1
-  redis:
-    enabled: false
+  # Its replicas share rate limits and budgets in this Redis (the sizes
+  # autoscale the gateway); give its password, if any, as
+  # AGENTCC_REDIS_PASSWORD from a Secret in extraEnvFrom. Without such a
+  # Redis, leave extraEnv out and run one replica: after a size file,
+  # --set agentccGateway.autoscaling.enabled=false.
+  extraEnv:
+    AGENTCC_REDIS_ADDRESS: gateway-redis.futureagi.svc.cluster.local:6379
 # Application Gateway for Containers, with the Gateway created separately
 # (gatewayClassName azure-alb-external).
 gatewayApi:

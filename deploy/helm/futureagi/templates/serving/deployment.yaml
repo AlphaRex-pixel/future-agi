@@ -58,7 +58,7 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "futureagi.serviceAccountName" . }}
-      automountServiceAccountToken: false
+      automountServiceAccountToken: {{ include "futureagi.automountServiceAccountToken" . }}
       {{- include "futureagi.block" (dict "text" (include "futureagi.imagePullSecrets" .) "indent" 6) }}
       securityContext:
         {{- include "futureagi.podSecurityContext" (dict "root" $ "uid" 1000 "overrides" $s.podSecurityContext) | nindent 8 }}

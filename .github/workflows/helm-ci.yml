@@ -13,8 +13,14 @@
 #           config matches the Standalone install's and the UI's security
 #           headers the frontend image's. Then: no subchart (Chart.yaml
 #           dependencies or charts/) and no Bitnami image in any rendered
-#           manifest, and the chart's version must follow the platform
-#           release (release-please moves it).
+#           manifest, the chart's version must follow the platform release
+#           (release-please moves it), and hack/package.sh turns release
+#           notes into artifacthub.io/changes as expected.
+#   release-tools
+#           installs every tool helm-release.yml pins, with its own Install
+#           steps, versions and actions, and publishes nothing: that workflow
+#           runs only on a release tag, after the images are published, so a
+#           pin that cannot install would otherwise first fail a release.
 #   kind    builds the backend, frontend, fi-collector and agentcc-gateway
 #           images from this checkout, installs the chart with Helm 4 on kind
 #           with every datastore bundled, and runs
@@ -205,12 +211,207 @@ jobs:
           [ "$failed" = 0 ] && echo "chart $version (appVersion $app), platform release $release on $BRANCH"
           exit "$failed"
 
+      - name: Artifact Hub changelog from release notes
+        # hack/package.sh --changes, as helm-release.yml runs it on the
+        # release-please notes: a fix listed twice (merged to dev and to main)
+        # is one entry with the PR links of both, the same text under another
+        # kind stays, (helm)-scoped entries come first, and a CVE marks the
+        # release as containing security updates.
+        if: matrix.helm == 4
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/notes.md" <<'EOF'
+          ## [9.9.9](https://github.com/future-agi/future-agi/compare/v9.9.8...v9.9.9) (2026-01-01)
+
+          ### Features
+
+          * **frontend:** a new page ([#10](https://github.com/future-agi/future-agi/issues/10)) ([aaaaaaa](https://github.com/future-agi/future-agi/commit/aaaaaaa))
+          * **helm:** a chart option ([bbbbbbb](https://github.com/future-agi/future-agi/commit/bbbbbbb))
+
+          ### Bug Fixes
+
+          * **oss:** a fix merged twice ([#11](https://github.com/future-agi/future-agi/issues/11)) ([ccccccc](https://github.com/future-agi/future-agi/commit/ccccccc))
+          * **oss:** a fix merged twice ([#12](https://github.com/future-agi/future-agi/issues/12)) ([ddddddd](https://github.com/future-agi/future-agi/commit/ddddddd))
+          * **oss:** a fix merged twice ([#11](https://github.com/future-agi/future-agi/issues/11)) ([eeeeeee](https://github.com/future-agi/future-agi/commit/eeeeeee))
+          * **frontend:** a new page ([fffffff](https://github.com/future-agi/future-agi/commit/fffffff))
+          * **backend:** patch CVE-2026-1234 ([1111111](https://github.com/future-agi/future-agi/commit/1111111))
+          * **backend:** patch CVE-2026-1234 ([2222222](https://github.com/future-agi/future-agi/commit/2222222))
+          EOF
+          tgz=$(deploy/helm/futureagi/hack/package.sh --no-digests --changes "$RUNNER_TEMP/notes.md" --destination "$RUNNER_TEMP/changes")
+          tar -xzOf "$tgz" futureagi/Chart.yaml > "$RUNNER_TEMP/changes/Chart.yaml"
+          python - "$RUNNER_TEMP/changes/Chart.yaml" <<'PY'
+          import json
+          import sys
+
+          import yaml
+
+          with open(sys.argv[1]) as f:
+              annotations = yaml.safe_load(f)["annotations"]
+          issue = "https://github.com/future-agi/future-agi/issues/"
+          expected = [
+              {"kind": "added", "description": "helm: a chart option"},
+              {"kind": "added", "description": "frontend: a new page", "links": [{"name": "#10", "url": issue + "10"}]},
+              {
+                  "kind": "fixed",
+                  "description": "oss: a fix merged twice",
+                  "links": [{"name": "#11", "url": issue + "11"}, {"name": "#12", "url": issue + "12"}],
+              },
+              {"kind": "fixed", "description": "frontend: a new page"},
+              {"kind": "security", "description": "backend: patch CVE-2026-1234"},
+          ]
+          changes = yaml.safe_load(annotations["artifacthub.io/changes"])
+          failed = False
+          if changes != expected:
+              print("::error::artifacthub.io/changes is not as expected (below: what package.sh wrote, then the expected entries)")
+              print(json.dumps(changes, indent=2))
+              print(json.dumps(expected, indent=2))
+              failed = True
+          if annotations["artifacthub.io/containsSecurityUpdates"] != "true":
+              print("::error::artifacthub.io/containsSecurityUpdates must be true: the notes list a CVE")
+              failed = True
+          sys.exit(1 if failed else 0)
+          PY
+          echo "artifacthub.io/changes: as expected"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: helm-rendered-manifests-helm${{ matrix.helm }}
           path: ${{ runner.temp }}/helm-rendered
           retention-days: 7
+
+  release-tools:
+    name: install the tools helm-release.yml pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: helm-release.yml's pins and Install steps
+        # Exports its env for the steps below and writes each of its `run:`
+        # steps named "Install <tool>..." to a script. Fails when an action it
+        # installs a tool with is not used in this job with the same ref and
+        # inputs (or the reverse), or when this file's env disagrees with its
+        # env.
+        run: |
+          set -euo pipefail
+          python -m pip install PyYAML==6.0.3
+          python - <<'PY'
+          import os
+          import re
+          import sys
+
+          import yaml
+
+          release_file = ".github/workflows/helm-release.yml"
+          with open(release_file) as f:
+              release = yaml.safe_load(f)
+          with open(".github/workflows/helm-ci.yml") as f:
+              ci = yaml.safe_load(f)
+          # Actions that install no tool, or that publish.
+          not_tools = {
+              "actions/checkout",
+              "actions/upload-artifact",
+              "actions/download-artifact",
+              "actions/attest-build-provenance",
+          }
+
+
+          def steps(workflow, job_id=None):
+              for name, job in workflow["jobs"].items():
+                  if job_id is None or name == job_id:
+                      yield from job.get("steps") or []
+
+
+          def actions(workflow, job_id=None):
+              return [
+                  (step["uses"], step.get("with") or {})
+                  for step in steps(workflow, job_id)
+                  if "uses" in step and step["uses"].split("@")[0] not in not_tools
+              ]
+
+
+          errors = [
+              f"env {key} is {value} in helm-ci.yml, {release['env'][key]} here"
+              for key, value in ci["env"].items()
+              if key in release["env"] and str(value) != str(release["env"][key])
+          ]
+          wanted, installed = actions(release), actions(ci, "release-tools")
+          errors += [
+              f"{uses} (with: {inputs}) is not in helm-ci.yml's release-tools job with the same inputs"
+              for uses, inputs in wanted
+              if (uses, inputs) not in installed
+          ]
+          errors += [
+              f"helm-ci.yml's release-tools job uses {uses} (with: {inputs}), which this workflow does not"
+              for uses, inputs in installed
+              if (uses, inputs) not in wanted
+          ]
+          scripts = []
+          for step in steps(release):
+              # "Install Helm", not "Install, check and upgrade on kind".
+              if "run" not in step or not re.match(r"Install [A-Za-z]", step.get("name", "")) or step["run"] in scripts:
+                  continue
+              if "$" + "{{" in step["run"] or step.get("env"):  # split: Actions would expand it here
+                  errors.append(f"step {step['name']!r}: helm-ci.yml runs Install steps as written, so they take no expressions or step env")
+              scripts.append(step["run"])
+          if errors:
+              for error in errors:
+                  print(f"::error file={release_file}::{error}")
+              sys.exit(1)
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              for key, value in release["env"].items():
+                  f.write(f"{key}={value}\n")
+          os.makedirs(os.path.join(os.environ["RUNNER_TEMP"], "install"))
+          for i, script in enumerate(scripts):
+              with open(os.path.join(os.environ["RUNNER_TEMP"], "install", f"{i:02d}.sh"), "w") as f:
+                  f.write(script)
+          print(f"{len(wanted)} tool actions and {len(scripts)} Install steps of {release_file}")
+          PY
+
+      - name: Run helm-release.yml's Install steps
+        run: |
+          set -euo pipefail
+          for script in "$RUNNER_TEMP"/install/*.sh; do
+            echo "::group::$script"
+            cat "$script"
+            bash --noprofile --norc -eo pipefail "$script"
+            echo "::endgroup::"
+          done
+
+      # The actions helm-release.yml installs tools with, with its inputs (the
+      # first step checks that they are the same).
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+
+      - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
+        with:
+          url: https://github.com/oras-project/oras/releases/download/v${{ env.ORAS_VERSION }}/oras_${{ env.ORAS_VERSION }}_linux_amd64.tar.gz
+          checksum: ${{ env.ORAS_SHA256 }}
+
+      - name: Install kind
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          install_only: true
+
+      - name: The installed tools are the pinned versions
+        run: |
+          set -euo pipefail
+          helm version --short | grep -F "$HELM_VERSION+"
+          "$RUNNER_TEMP/helm3/helm" version --short | grep -F "$HELM3_VERSION+"
+          kubeconform -v | grep -Fx "$KUBECONFORM_VERSION"
+          cosign version 2>&1 | grep -E "^GitVersion: +$COSIGN_VERSION\$"
+          oras version | grep -E "^Version: +$ORAS_VERSION\$"
+          kind version
+          python -c 'import yaml; print("PyYAML", yaml.__version__)'
 
   kind:
     name: install on kind (bundled datastores)

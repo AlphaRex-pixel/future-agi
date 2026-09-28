@@ -18,6 +18,8 @@ worker:
   queues:
     # Long jobs on a tainted pool, with their own HPA and drain time.
     - name: tasks_xl
+      image:
+        pullPolicy: Always
       gracefulShutdownSeconds: 900
       preStopSleepSeconds: 30
       autoscaling:

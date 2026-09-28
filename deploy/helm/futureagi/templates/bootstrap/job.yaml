@@ -43,8 +43,10 @@ metadata:
 spec:
   backoffLimit: {{ $bs.backoffLimit }}
   activeDeadlineSeconds: {{ $bs.activeDeadlineSeconds }}
-  {{- if $bs.ttlSecondsAfterFinished }}
-  ttlSecondsAfterFinished: {{ $bs.ttlSecondsAfterFinished }}
+  {{- /* 0 deletes the job as soon as it finishes; empty (or null) never. */}}
+  {{- $ttl := $bs.ttlSecondsAfterFinished }}
+  {{- if not (or (kindIs "invalid" $ttl) (eq (toString $ttl) "")) }}
+  ttlSecondsAfterFinished: {{ $ttl }}
   {{- end }}
   template:
     metadata:

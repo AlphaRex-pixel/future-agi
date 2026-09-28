@@ -162,6 +162,13 @@ Service accounts and secrets
 {{- end -}}
 {{- end -}}
 
+{{/* automountServiceAccountToken of the pods that run as the chart's
+ServiceAccount (serviceAccount.automountServiceAccountToken). The code sandbox
+never mounts it: it runs untrusted code. */}}
+{{- define "futureagi.automountServiceAccountToken" -}}
+{{- if .Values.serviceAccount.automountServiceAccountToken }}true{{ else }}false{{ end -}}
+{{- end -}}
+
 {{- define "futureagi.bootstrapServiceAccountName" -}}
 {{- if .Values.bootstrap.serviceAccount.create -}}
 {{- .Values.bootstrap.serviceAccount.name | default (include "futureagi.component" (dict "root" . "component" "bootstrap")) -}}
@@ -415,8 +422,14 @@ Without a public one, the port-forward to localhost:4318 the notes print. */}}
 {{- else if and (eq .Values.objectStorage.mode "external") .Values.objectStorage.external.endpoint -}}
 {{- trimSuffix "/" .Values.objectStorage.external.endpoint -}}
 {{- else -}}
-http://localhost:9005
+{{- include "futureagi.url.objectsLocal" . -}}
 {{- end -}}
+{{- end -}}
+
+{{/* The bundled object storage on this machine: its LoadBalancer or NodePort
+download port, or the local end of the port-forward the install notes print. */}}
+{{- define "futureagi.url.objectsLocal" -}}
+{{- printf "http://localhost:%v" (dig "bundled" "service" "downloadPort" 9005 .Values.objectStorage) -}}
 {{- end -}}
 
 {{/* "true" when a URL points at this machine (a port-forward): localhost,

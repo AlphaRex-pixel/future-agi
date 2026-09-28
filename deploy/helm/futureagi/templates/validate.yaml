@@ -26,6 +26,9 @@ Renders nothing when the values are consistent.
 {{- if and (eq $v.clickhouse.mode "external") (not $v.clickhouse.external.host) -}}
 {{- $errors = append $errors "clickhouse.external.host is required: your ClickHouse 25.3+ server (or set clickhouse.mode=bundled)" -}}
 {{- end -}}
+{{- if and (eq $v.clickhouse.mode "bundled") (ne (toString $v.clickhouse.user) "default") -}}
+{{- $errors = append $errors (printf "clickhouse.user must be default with clickhouse.mode=bundled (got %q): the bundled ClickHouse has no other user" (toString $v.clickhouse.user)) -}}
+{{- end -}}
 {{- if eq $v.clickhouse.database $v.clickhouse.propertyCatalogDatabase -}}
 {{- $errors = append $errors "clickhouse.propertyCatalogDatabase must differ from clickhouse.database" -}}
 {{- end -}}
@@ -109,7 +112,7 @@ Renders nothing when the values are consistent.
 {{- $errors = append $errors (printf "agentccGateway.redis.enabled must be auto, true or false (got %q)" $gwRedis) -}}
 {{- end -}}
 {{- if and (eq $gwRedis "true") (eq $v.redis.mode "external") $v.redis.external.tls -}}
-{{- $errors = append $errors "agentccGateway.redis.enabled=true needs Redis without TLS: the gateway has no Redis TLS (point it at another Redis with AGENTCC_REDIS_ADDRESS in agentccGateway.extraEnv)" -}}
+{{- $errors = append $errors "agentccGateway.redis.enabled=true shares redis.external, which is over TLS, and the gateway has no Redis TLS: set it to auto and point the gateway at a Redis without TLS with AGENTCC_REDIS_ADDRESS in agentccGateway.extraEnv, or run one replica with agentccGateway.redis.enabled=false" -}}
 {{- end -}}
 {{- if and (eq (include "futureagi.gateway.multiReplica" .) "true") (ne (include "futureagi.gateway.redis" .) "true") (not (hasKey ($gw.extraEnv | default dict) "AGENTCC_REDIS_ADDRESS")) (not (dig "redis" "address" "" ($gw.config | default dict))) (not $gw.existingConfigMap) -}}
 {{- if and (eq $v.redis.mode "external") $v.redis.external.tls -}}
@@ -133,16 +136,21 @@ checkable against a live release: `lookup` finds nothing in `helm template`. */ 
 {{- $p := $store.bundled.persistence -}}
 {{- $had := dict -}}
 {{- range dig "spec" "volumeClaimTemplates" list $live }}{{ if eq .metadata.name "data" }}{{ $had = . }}{{ end }}{{ end -}}
-{{- $class := $p.storageClass | default $v.global.storageClass -}}
-{{- $class = ternary "" $class (eq $class "-") -}}
-{{- $hadClass := dig "spec" "storageClassName" "" $had -}}
+{{- /* Classes in the values' terms, as futureagi.storageClass renders them:
+empty is no storageClassName (the cluster default), "-" is storageClassName
+"" (no dynamic provisioning). Kubernetes tells those two apart. */ -}}
+{{- $class := $p.storageClass | default $v.global.storageClass | default "" | toString -}}
+{{- $hadClassName := dig "spec" "storageClassName" nil $had -}}
+{{- $hadClass := "" -}}
+{{- if kindIs "string" $hadClassName }}{{ $hadClass = $hadClassName | default "-" }}{{ end -}}
+{{- $classes := dict "" "no storageClassName (the cluster default)" "-" "storageClassName \"\" (\"-\")" -}}
 {{- $hadSize := dig "spec" "resources" "requests" "storage" "" $had -}}
 {{- if and (eq $component "redis") (ne (empty $had) (not $p.enabled)) -}}
 {{- $errors = append $errors (printf "redis.bundled.persistence.enabled cannot change after install (StatefulSet %s): see \"Install-time settings\" in the chart README" $name) -}}
 {{- else if and $had (ne (include "futureagi.quantityBytes" $hadSize) (include "futureagi.quantityBytes" $p.size)) -}}
 {{- $errors = append $errors (printf "%s.bundled.persistence.size is %s, but StatefulSet %s was created with %s and cannot change: keep %s, or grow the volume as \"Install-time settings\" in the chart README shows" $key (toString $p.size) $name $hadSize $hadSize) -}}
 {{- else if and $had (ne $hadClass $class) -}}
-{{- $errors = append $errors (printf "%s.bundled.persistence.storageClass (or global.storageClass) is %q, but StatefulSet %s was created with %q and cannot change" $key $class $name $hadClass) -}}
+{{- $errors = append $errors (printf "%s.bundled.persistence.storageClass (or global.storageClass) gives %s, but StatefulSet %s was created with %s and cannot change: see \"Install-time settings\" in the chart README" $key (get $classes $class | default (printf "storageClassName %q" $class)) $name (get $classes $hadClass | default (printf "storageClassName %q" $hadClass))) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

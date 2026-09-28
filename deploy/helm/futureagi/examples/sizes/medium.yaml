@@ -57,7 +57,8 @@ fiCollector:
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 70
 agentccGateway:
-  # Two or more replicas share rate limits and budgets in Redis (database 4).
+  # Two or more replicas share rate limits and budgets in Redis (database 4);
+  # with redis.external.tls, in the Redis agentccGateway.extraEnv names.
   redis:
     enabled: auto
   autoscaling:

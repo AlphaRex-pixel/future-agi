@@ -125,7 +125,7 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "futureagi.serviceAccountName" $root }}
-      automountServiceAccountToken: false
+      automountServiceAccountToken: {{ include "futureagi.automountServiceAccountToken" $root }}
       {{- include "futureagi.block" (dict "text" (include "futureagi.imagePullSecrets" $root) "indent" 6) }}
       # The preStop sleep, then the running activities finish (graceful
       # shutdown), plus a 30 s margin.
@@ -136,7 +136,7 @@ spec:
       containers:
         - name: worker
           image: {{ $image }}
-          imagePullPolicy: {{ include "futureagi.imagePullPolicy" (dict "root" $root "image" $w.image "fallback" $root.Values.backend.image) }}
+          imagePullPolicy: {{ include "futureagi.imagePullPolicy" (dict "root" $root "image" (merge (dict) $queueImage $w.image) "fallback" $root.Values.backend.image) }}
           # No HTTP endpoint: Kubernetes restarts the pod when the process exits.
           {{- if $waitForSchema }}
           command:

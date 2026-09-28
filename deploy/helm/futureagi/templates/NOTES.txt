@@ -51,8 +51,8 @@ WARNING  Bundled datastores run as single replicas with no backups, for evaluati
 {{- if not $otlpUrl }}
    kubectl -n {{ $ns }} port-forward svc/{{ $collector }} 4318:{{ $v.fiCollector.service.httpPort }}   # traces
 {{- end }}
-{{- if and (eq $v.objectStorage.mode "bundled") (eq (include "futureagi.url.objects" .) "http://localhost:9005") }}
-   kubectl -n {{ $ns }} port-forward svc/{{ include "futureagi.component" (dict "root" . "component" "minio") }} 9005:9000   # file downloads
+{{- if and (eq $v.objectStorage.mode "bundled") (eq (include "futureagi.url.objects" .) (include "futureagi.url.objectsLocal" .)) }}
+   kubectl -n {{ $ns }} port-forward svc/{{ include "futureagi.component" (dict "root" . "component" "minio") }} {{ dig "bundled" "service" "downloadPort" 9005 $v.objectStorage }}:9000   # file downloads
 {{- end }}
 
    then open http://localhost:3000 (the UI calls the API on localhost:8000).

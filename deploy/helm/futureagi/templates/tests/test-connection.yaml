@@ -29,6 +29,8 @@ spec:
   {{- include "futureagi.block" (dict "text" (include "futureagi.imagePullSecrets" .) "indent" 2) }}
   securityContext:
     {{- include "futureagi.podSecurityContext" (dict "root" $ "uid" 1000) | nindent 4 }}
+  {{- /* Placed like the bootstrap job: the backend's settings, else the chart-wide ones. */}}
+  {{- include "futureagi.block" (dict "text" (include "futureagi.scheduling" (dict "root" . "values" $b)) "indent" 2) }}
   containers:
     - name: test
       image: {{ include "futureagi.image" (dict "root" . "image" $b.image "digestKey" "backend") }}

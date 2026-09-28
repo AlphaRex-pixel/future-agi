@@ -28,7 +28,7 @@ nameOverride: ""
 fullnameOverride: ""
 
 global:
-  # -- Registry prepended to every image, Future AGI and third-party, e.g. a pull-through mirror (`registry.example.com/dockerhub`). Empty keeps each image's own registry.
+  # -- Registry that replaces every image's own, Future AGI and third-party alike (docker.io, and ghcr.io for the bundled MinIO): a mirror holding every image `hack/list-images.sh` lists, e.g. `registry.example.com/futureagi-mirror`. Not a pull-through cache of one upstream: for Docker Hub alone set `image.registry` and each Docker Hub `<datastore>.bundled.image.registry` to it instead, and leave `objectStorage.bundled.image.registry` on ghcr.io (or a ghcr.io cache). Empty keeps each image's own registry.
   imageRegistry: ""
   # -- Pull secrets added to every pod, e.g. `[{name: regcred}]`.
   imagePullSecrets: []
@@ -74,13 +74,13 @@ image:
 # the ingress hosts) as soon as anyone opens the UI from another machine.
 # -----------------------------------------------------------------------------
 urls:
-  # -- Public URL of the UI, e.g. `https://futureagi.example.com` [FRONTEND_URL, APP_URL, EXTRA_CSRF_ORIGINS]. Invite and password-reset links and app emails point here, with its scheme. Empty: derived from `ingress.app.host`, else `http://localhost:3000`.
+  # -- Public URL of the UI, e.g. `https://futureagi.example.com` [FRONTEND_URL, APP_URL, EXTRA_CSRF_ORIGINS]. Invite and password-reset links and app emails point here, with its scheme. Empty: derived from `ingress.app.host` with `ingress.enabled`, else from `gatewayApi.app.host` with `gatewayApi.enabled` (https unless `gatewayApi.tls` is false), else `http://localhost:3000`.
   app: ""
-  # -- Public URL of the API, e.g. `https://api.futureagi.example.com` [BASE_URL, and the UI's VITE_HOST_API]. Empty: derived from `ingress.api.host`, else `http://localhost:8000`.
+  # -- Public URL of the API, e.g. `https://api.futureagi.example.com` [BASE_URL, and the UI's VITE_HOST_API]. Empty: derived from `ingress.api.host` with `ingress.enabled`, else from `gatewayApi.api.host` with `gatewayApi.enabled`, else `http://localhost:8000`.
   api: ""
-  # -- [FI_COLLECTOR_PUBLIC_URL] Public OTLP/HTTP base URL of fi-collector, e.g. `https://otlp.example.com`: what SDKs outside the cluster set as FI_BASE_URL, shown in the install notes, the in-app SDK snippet and the setup screen. Set it when the collector is exposed another way (e.g. `fiCollector.service.type=LoadBalancer`). Empty: derived from `ingress.otlp`, else `http://localhost:4318` (the port-forward in the install notes).
+  # -- [FI_COLLECTOR_PUBLIC_URL] Public OTLP/HTTP base URL of fi-collector, e.g. `https://otlp.example.com`: what SDKs outside the cluster set as FI_BASE_URL, shown in the install notes, the in-app SDK snippet and the setup screen. Set it when the collector is exposed another way (e.g. `fiCollector.service.type=LoadBalancer`). Empty: derived from `ingress.otlp` with `ingress.enabled`, else from `gatewayApi.otlp` with `gatewayApi.enabled`, else `http://localhost:4318` (the port-forward in the install notes).
   otlp: ""
-  # -- Public URL browsers download stored files from [MINIO_URL]; used when `objectStorage.backend` is `minio`. Empty: derived from `ingress.objects.host`, else the external endpoint, else `http://localhost:9005`.
+  # -- Public URL browsers download stored files from [MINIO_URL]; used when `objectStorage.backend` is `minio`. Empty: derived from `ingress.objects.host` with `ingress.enabled`, else the external endpoint, else `http://localhost:<objectStorage.bundled.service.downloadPort>` (9005).
   objects: ""
 
 # -----------------------------------------------------------------------------
@@ -93,7 +93,7 @@ config:
   logLevel: INFO
   # -- [ALLOWED_HOSTS], comma-separated. `*` accepts any Host header. A list also gets localhost and the in-cluster service names, which the probes and the workers use, and the pod's own IP (`$(POD_IP)`), which load balancers that health-check pods directly send as the Host. Empty: the API host once the API has a public URL (`urls.api`, `gatewayApi.api.host` or `ingress.api.host`), else `*`.
   allowedHosts: ""
-  # -- [CORS_ALLOWED_ORIGINS] browser origins allowed to call the API with credentials, comma-separated. `*`: every origin. Empty: the UI's origin plus `extraCsrfOrigins` once the UI has a public URL (`urls.app` or `ingress.app.host`), else every origin.
+  # -- [CORS_ALLOWED_ORIGINS] browser origins allowed to call the API with credentials, comma-separated. `*`: every origin. Empty: the UI's origin plus `extraCsrfOrigins` once the UI has a public URL (`urls.app`, `gatewayApi.app.host` or `ingress.app.host`), else every origin.
   corsAllowedOrigins: ""
   # -- [EXTRA_CSRF_ORIGINS] in addition to the UI URL, comma-separated.
   extraCsrfOrigins: ""
@@ -332,7 +332,7 @@ clickhouse:
   mode: external
   # -- [CH_DATABASE, CH25_DATABASE] database of traces and analytics.
   database: default
-  # -- [CH_USERNAME] needs CREATE on the database; the bootstrap also creates the observed-attribute index (CREATE DATABASE, CREATE USER, GRANT) unless `bootstrap.propertyCatalog` is false.
+  # -- [CH_USERNAME] needs CREATE on the database; the bootstrap also creates the observed-attribute index (CREATE DATABASE, CREATE USER, GRANT) unless `bootstrap.propertyCatalog` is false. Bundled: `default`, the bundled server's only user.
   user: default
   # -- [CH_PASSWORD]. External: may be empty. Bundled: empty generates one.
   password: ""
@@ -517,7 +517,7 @@ objectStorage:
     service:
       # -- Service type of the bundled object storage. `LoadBalancer` (examples/local.yaml) also publishes `downloadPort` for browser downloads. Evaluation only: it exposes the bucket.
       type: ClusterIP
-      # -- Service port browsers download from [MINIO_URL]; only with a `LoadBalancer` or `NodePort` type.
+      # -- Local port of browser downloads [MINIO_URL `http://localhost:<port>`, unless `urls.objects` or `ingress.objects.host` is set]: the Service's download port with a `LoadBalancer` or `NodePort` type, else the local end of the install notes' port-forward.
       downloadPort: 9005
     # -- Resources of the bundled object storage.
     resources:
@@ -607,11 +607,11 @@ backend:
   extraVolumes: []
   # -- Extra volume mounts.
   extraVolumeMounts: []
-  # -- Node selector. Empty: the top-level `nodeSelector`.
+  # -- Node selector of the API pods, the bootstrap job and the `helm test` pod. Empty: the top-level `nodeSelector`.
   nodeSelector: {}
-  # -- Tolerations. Empty: the top-level `tolerations`.
+  # -- Tolerations of the API pods, the bootstrap job and the `helm test` pod. Empty: the top-level `tolerations`.
   tolerations: []
-  # -- Affinity. Empty: the top-level `affinity`.
+  # -- Affinity of the API pods, the bootstrap job and the `helm test` pod. Empty: the top-level `affinity`.
   affinity: {}
   # -- Topology spread constraints. Empty: the top-level `topologySpreadConstraints`.
   topologySpreadConstraints: []
@@ -896,7 +896,7 @@ agentccGateway:
   # -- Let org providers use base URLs on private networks, such as a local Ollama or vLLM [AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS], for the gateway and the backend. Loopback, link-local and cloud metadata addresses stay refused. Only when everyone who can add a provider is trusted: it puts every in-cluster service in reach of a provider URL. Gateway and backend images from before this setting ignore it and refuse every private URL.
   allowPrivateProviderURLs: false
   redis:
-    # -- Keep rate limits, budgets and other shared gateway state in the release's Redis [AGENTCC_REDIS_ADDRESS, AGENTCC_REDIS_PASSWORD, AGENTCC_REDIS_DB]. `auto`: on when the gateway runs more than one replica (`replicas` above 1 or autoscaling), off with `redis.external.tls` (the gateway has no Redis TLS). The chart refuses more than one replica without it.
+    # -- Keep rate limits, budgets and other shared gateway state in the release's Redis [AGENTCC_REDIS_ADDRESS, AGENTCC_REDIS_PASSWORD, AGENTCC_REDIS_DB]. `auto`: on when the gateway runs more than one replica (`replicas` above 1 or autoscaling), off with `redis.external.tls` (the gateway has no Redis TLS): give it a Redis without TLS with AGENTCC_REDIS_ADDRESS in `extraEnv` instead (examples/cloud/aks.yaml). The chart refuses more than one replica without either.
     enabled: auto
     # -- [AGENTCC_REDIS_DB] Redis database of the gateway, apart from the app's 0-3.
     db: 4
@@ -1055,7 +1055,7 @@ bootstrap:
   backoffLimit: 2
   # -- Deadline of the whole job, in seconds. Keep it below `helm install/upgrade --timeout` (20m in every documented command), so Helm reports how the job ended; raise both together for a long migration.
   activeDeadlineSeconds: 1080
-  # -- Seconds a finished job (and its logs) is kept.
+  # -- Seconds a finished job (and its logs) is kept. `0`: deleted as soon as it finishes. Empty: kept until the next install or upgrade replaces it.
   ttlSecondsAfterFinished: 86400
   # -- Resources of the bootstrap job.
   resources:
@@ -1178,7 +1178,7 @@ serviceAccount:
   name: ""
   # -- Annotations of the application pods' ServiceAccount. Object storage does not use them: it always authenticates with `objectStorage` keys.
   annotations: {}
-  # -- Mount the service account token (the application does not call the Kubernetes API).
+  # -- Mount the ServiceAccount's token in the pods that run as it: the backend, workers, UI, collector, gateway and serving (never the code sandbox). The application does not call the Kubernetes API; turn it on for a sidecar that needs the token (e.g. a Vault agent).
   automountServiceAccountToken: false
 
 # -----------------------------------------------------------------------------

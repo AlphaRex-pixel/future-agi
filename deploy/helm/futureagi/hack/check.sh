@@ -3,6 +3,8 @@
 #   * the chart's defaults, and inconsistent values, refuse to render and say
 #     what to set
 #   * helm lint --strict and helm template for every value set
+#   * upgrades that would change a bundled datastore's volume are refused
+#     (against a stand-in for the live StatefulSet)
 #   * kubeconform -strict on every rendered manifest, per Kubernetes version
 #   * invariants of the rendered manifests (hack/rendered_checks.py), and
 #     the backend's behaviour settings against docker-compose.distributed.yml
@@ -59,10 +61,14 @@ value_sets=(
   "cloud-gke|examples/cloud/gke.yaml"
   "cloud-eks|examples/cloud/eks.yaml"
   "cloud-aks|examples/cloud/aks.yaml"
+  # README "Production", step 2, with a cloud file as my-values.yaml.
+  "cloud-aks-medium|examples/cloud/aks.yaml examples/sizes/medium.yaml examples/gateway-api.yaml"
+  "cloud-aks-large|examples/cloud/aks.yaml examples/sizes/large.yaml examples/gateway-api.yaml"
   "enterprise|examples/external.yaml examples/enterprise.yaml ci/enterprise.yaml"
   "license-legacy|examples/bundled.yaml ci/license-legacy.yaml"
   "proxy-ca|examples/external.yaml ci/proxy-ca.yaml"
   "airgap|examples/external.yaml examples/airgap.yaml"
+  "dockerhub-mirror|examples/bundled.yaml ci/dockerhub-mirror.yaml"
   "external-secrets|examples/external.yaml examples/external-secrets.yaml"
   "openshift|examples/bundled.yaml ci/openshift.yaml"
 )
@@ -90,6 +96,7 @@ refused=(
   "recaptcha without its key|config.recaptcha needs secrets.extra.RECAPTCHA_SECRET_KEY|--set config.recaptcha=true"
   "gateway replicas without Redis|agentccGateway runs more than one replica without Redis|--set agentccGateway.replicas=2 --set agentccGateway.redis.enabled=false"
   "gateway Redis over TLS|the gateway has no Redis TLS|--set redis.mode=external --set redis.external.host=r --set redis.external.tls=true --set agentccGateway.redis.enabled=true"
+  "a ClickHouse user the bundled server lacks|clickhouse.user must be default with clickhouse.mode=bundled|--set clickhouse.user=fa"
   "an autoscaled gateway with Redis over TLS|to a Redis without TLS, or run one replica with agentccGateway.redis.enabled=false|--set redis.mode=external --set redis.external.host=r --set redis.external.tls=true --set agentccGateway.autoscaling.enabled=true"
   "Enterprise without a license|edition=ee needs a license|--set edition=ee"
   "an unknown edition|re:edition.*must be one of|--set edition=enterprise"
@@ -122,6 +129,49 @@ for case in "${refused[@]}"; do
   echo "ok   $name"
 done
 rm -f "$out/refused.txt"
+
+echo "== install-time settings: a change to a live StatefulSet's volume is refused"
+# `lookup` finds nothing under helm template: a copy of the chart reads the
+# live StatefulSet from live.yaml instead.
+live_chart="$out/live-chart"
+rm -rf "$live_chart"
+cp -R "$chart" "$live_chart"
+"$python" - "$live_chart/templates/validate.yaml" <<'PY' || fail "validate.yaml no longer looks up the StatefulSet: update this check"
+import sys
+path = sys.argv[1]
+lookup = 'lookup "apps/v1" "StatefulSet" $.Release.Namespace $name'
+text = open(path).read()
+assert text.count(lookup) == 1
+open(path, "w").write(text.replace(lookup, '(get ($.Files.Get "live.yaml" | fromYaml) $name | default dict)'))
+PY
+# name|storageClassName of the live claim (none: absent)|its size|helm
+# arguments (over examples/bundled.yaml)|expected message (empty: renders)
+live_cases=(
+  "the same volume|none|20Gi||"
+  "the same size in other units|none|20Gi|--set postgres.bundled.persistence.size=20480Mi|"
+  "a larger volume|none|20Gi|--set postgres.bundled.persistence.size=30Gi|postgres.bundled.persistence.size is 30Gi, but StatefulSet futureagi-postgres was created with 20Gi"
+  "the same StorageClass|fast|20Gi|--set global.storageClass=fast|"
+  "a StorageClass after the cluster default|none|20Gi|--set global.storageClass=fast|gives storageClassName \"fast\", but StatefulSet futureagi-postgres was created with no storageClassName"
+  "no StorageClass (-) after the cluster default|none|20Gi|--set postgres.bundled.persistence.storageClass=-|gives storageClassName \"\" (\"-\"), but StatefulSet futureagi-postgres was created with no storageClassName"
+  "the cluster default after no StorageClass (-)|\"\"|20Gi||gives no storageClassName (the cluster default), but StatefulSet futureagi-postgres was created with storageClassName \"\" (\"-\")"
+  "no StorageClass (-) kept|\"\"|20Gi|--set global.storageClass=-|"
+)
+for case in "${live_cases[@]}"; do
+  IFS='|' read -r name class size args expected <<<"$case"
+  class_line=""
+  [ "$class" = none ] || class_line="          storageClassName: $class"$'\n'
+  printf 'futureagi-postgres:\n  spec:\n    volumeClaimTemplates:\n      - metadata: {name: data}\n        spec:\n%s          resources: {requests: {storage: %s}}\n' \
+    "$class_line" "$size" >"$live_chart/live.yaml"
+  # shellcheck disable=SC2086 # args is a word list
+  if "$helm" template futureagi "$live_chart" -f "$chart/examples/bundled.yaml" $args >"$out/live.txt" 2>&1; then
+    [ -z "$expected" ] || fail "rendered despite: $name"
+  elif [ -z "$expected" ] || ! grep -qF -- "$expected" "$out/live.txt"; then
+    cat "$out/live.txt" >&2
+    fail "the error for \"$name\" does not mention: ${expected:-(it should render)}"
+  fi
+  echo "ok   $name"
+done
+rm -rf "$out/live.txt" "$live_chart"
 
 for set in "${value_sets[@]}"; do
   name=${set%%|*}
@@ -166,12 +216,17 @@ echo "== the install notes print the proxy's host, never its login"
 # dry run, so it is skipped there.
 if KUBECONFIG="$out/no-kubeconfig" "$helm" install futureagi "$chart" --dry-run=client --namespace futureagi \
   -f "$chart/examples/bundled.yaml" --set global.proxy.httpsProxy=http://corp:notes-123@proxy.corp.example:3128 \
-  >"$out/notes.txt" 2>&1; then
+  --set objectStorage.bundled.service.downloadPort=9100 >"$out/notes.txt" 2>&1; then
   sed -n '/^NOTES:/,$p' "$out/notes.txt" >"$out/notes-only.txt"
   if grep -q 'notes-123' "$out/notes-only.txt" || ! grep -qF 'through the proxy proxy.corp.example:3128;' "$out/notes-only.txt"; then
     cat "$out/notes-only.txt" >&2
     fail "the install notes print the proxy URL with its login"
   fi
+  # MINIO_URL is http://localhost:<downloadPort>: the port-forward matches it.
+  grep -qF 'port-forward svc/futureagi-minio 9100:9000' "$out/notes-only.txt" || {
+    cat "$out/notes-only.txt" >&2
+    fail "the install notes' MinIO port-forward ignores objectStorage.bundled.service.downloadPort"
+  }
   # A login urlParse cannot parse ('#', a stray '%') still renders.
   KUBECONFIG="$out/no-kubeconfig" "$helm" install futureagi "$chart" --dry-run=client --namespace futureagi \
     -f "$chart/examples/bundled.yaml" --set-string 'global.proxy.httpsProxy=http://corp:n#o%zz@proxy.corp.example:3128' \

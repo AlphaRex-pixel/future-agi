@@ -31,7 +31,10 @@
 # does not; fix it in the next patch release, or rerun from the tag if the
 # failure was transient. If a step fails after the push, the chart is on GHCR
 # (and stays: a version is never overwritten) but its release is incomplete;
-# rerun from the tag to finish it. The withheld job says which of the two.
+# rerun from the tag to finish it (first deleting any Release asset the run
+# names as not matching the chart). If GHCR already holds that version with
+# different content, nothing is pushed and a rerun cannot change that: ship
+# the next patch release. The withheld job says which case it is.
 #
 # One-time setup by a future-agi org owner, after the first push: make the
 # package charts/futureagi public (Packages > charts/futureagi > Package
@@ -89,7 +92,12 @@ env:
   # schemas for.
   KUBE_VERSIONS: "1.27.0 1.37.0"
   COSIGN_VERSION: v3.1.3
+  # setup-oras installs this release by URL and sha256 (the release's
+  # oras_<version>_checksums.txt, linux_amd64): by version it knows only the
+  # ORAS releases it bundles, and v2.0.1 stops at 1.3.3. helm-ci.yml's
+  # release-tools job installs every tool pinned here on each pull request.
   ORAS_VERSION: 1.3.4
+  ORAS_SHA256: f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454
 
 jobs:
   package:
@@ -331,10 +339,13 @@ jobs:
       group: helm-release-publish-${{ inputs.version }}
       cancel-in-progress: false
     outputs:
-      # For the withheld job: whether the chart is on GHCR, and which step
-      # failed after that.
+      # For the withheld job: whether this run's chart is on GHCR, whether
+      # another package already holds the version, which step failed after
+      # the push, and the Release assets a rerun would keep but must not.
       pushed: ${{ steps.push.outputs.pushed }}
+      exists: ${{ steps.push.outputs.exists }}
       failed-step: ${{ steps.failed.outputs.step }}
+      stale-assets: ${{ steps.assets.outputs.stale-assets }}
     env:
       VERSION: ${{ inputs.version }}
       CHART_VERSION: ${{ needs.package.outputs.chart-version }}
@@ -364,7 +375,8 @@ jobs:
 
       - uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
         with:
-          version: ${{ env.ORAS_VERSION }}
+          url: https://github.com/oras-project/oras/releases/download/v${{ env.ORAS_VERSION }}/oras_${{ env.ORAS_VERSION }}_linux_amd64.tar.gz
+          checksum: ${{ env.ORAS_SHA256 }}
 
       - name: Log in to ghcr.io
         # helm has its own registry config; docker's is read by oras and cosign.
@@ -398,6 +410,8 @@ jobs:
               echo "::notice::$ref is already published ($existing) with this content: not pushing again"
               echo "pushed=true" >> "$GITHUB_OUTPUT"
             else
+              # For the withheld job: the version is on GHCR, from another run.
+              echo "exists=true" >> "$GITHUB_OUTPUT"
               echo "::error::$ref is already published ($existing) with different content. A published version is never overwritten: ship the fix as the next patch release."
               exit 1
             fi
@@ -445,13 +459,16 @@ jobs:
         # Stored the classic way, as a sha256-<digest>.sig tag, which Artifact
         # Hub, Flux, Kyverno and older cosign clients all read (GHCR has no
         # OCI referrers API). The certificate identity is this workflow at the
-        # release tag.
+        # release tag. Every cosign verify of the chart here passes
+        # --new-bundle-format=false: without it, once the provenance
+        # attestation (a Sigstore bundle, same identity) is attached, cosign
+        # verifies that instead and passes with no .sig at all.
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
           identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/helm-release.yml@refs/tags/$VERSION"
-          if cosign verify "$CHART_REF@$DIGEST" --certificate-identity "$identity" \
+          if cosign verify --new-bundle-format=false "$CHART_REF@$DIGEST" --certificate-identity "$identity" \
             --certificate-oidc-issuer "$OIDC_ISSUER" >/dev/null 2>&1; then
             echo "::notice::$CHART_REF@$DIGEST is already signed by $identity"
           else
@@ -479,7 +496,9 @@ jobs:
         run: |
           set -euo pipefail
           identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/helm-release.yml@refs/tags/$VERSION"
-          cosign verify "$CHART_REF@$DIGEST" --certificate-identity "$identity" --certificate-oidc-issuer "$OIDC_ISSUER" >/dev/null
+          # The classic .sig (see Sign); gh attestation verify checks the
+          # provenance attestation.
+          cosign verify --new-bundle-format=false "$CHART_REF@$DIGEST" --certificate-identity "$identity" --certificate-oidc-issuer "$OIDC_ISSUER" >/dev/null
           cosign verify-blob "$RUNNER_TEMP/release/futureagi-$CHART_VERSION.tgz" \
             --bundle "$RUNNER_TEMP/release/futureagi-$CHART_VERSION.tgz.sigstore.json" \
             --certificate-identity "$identity" --certificate-oidc-issuer "$OIDC_ISSUER"
@@ -516,24 +535,39 @@ jobs:
               gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --pattern "$file" --clobber
             fi
           done
-          # What a previous run attached must still be the published chart
-          # and its signature.
-          cmp "$tgz" "$RUNNER_TEMP/registry.tgz" || {
-            echo "::error::the $VERSION release carries a $tgz that is not $CHART_REF:$CHART_VERSION"
+          # What a previous run attached must still be the published chart,
+          # its signature and their checksums. A rerun keeps every asset on
+          # the Release, so one that does not match fails it the same way
+          # until it is deleted; the withheld job names them too.
+          stale() { # message, then the assets to delete before a rerun
+            local message=$1 deletes="" file
+            shift
+            for file in "$@"; do
+              deletes+="${deletes:+; }gh release delete-asset $VERSION $file --repo $GITHUB_REPOSITORY --yes"
+            done
+            echo "stale-assets=$*" >> "$GITHUB_OUTPUT"
+            echo "::error::$message. Delete $* from the release ($deletes), then rerun: it attaches what is missing, from the published chart."
             exit 1
           }
+          if ! cmp "$tgz" "$RUNNER_TEMP/registry.tgz"; then
+            # Its signature bundle and the checksums describe that file too.
+            drop=("$tgz")
+            for file in "$tgz.sigstore.json" "$sums"; do
+              if on_release "$file"; then drop+=("$file"); fi
+            done
+            stale "the $VERSION release carries a $tgz that is not $CHART_REF:$CHART_VERSION" "${drop[@]}"
+          fi
           identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/helm-release.yml@refs/tags/$VERSION"
-          cosign verify-blob "$tgz" --bundle "$tgz.sigstore.json" \
-            --certificate-identity "$identity" --certificate-oidc-issuer "$OIDC_ISSUER" || {
-            echo "::error::$tgz.sigstore.json on the $VERSION release does not verify $tgz"
-            exit 1
-          }
+          if ! cosign verify-blob "$tgz" --bundle "$tgz.sigstore.json" \
+            --certificate-identity "$identity" --certificate-oidc-issuer "$OIDC_ISSUER"; then
+            # This run's own bundle passed the Verify step.
+            on_release "$tgz.sigstore.json" || exit 1
+            stale "$tgz.sigstore.json on the $VERSION release does not verify $tgz" "$tgz.sigstore.json"
+          fi
           sha256sum "${summed[@]}" > "$RUNNER_TEMP/$sums"
           if on_release "$sums"; then
-            diff "$sums" "$RUNNER_TEMP/$sums" || {
-              echo "::error::$sums on the $VERSION release does not match the assets there. Delete it (gh release delete-asset $VERSION $sums) and rerun: it is written again from the Release's assets."
-              exit 1
-            }
+            diff "$sums" "$RUNNER_TEMP/$sums" ||
+              stale "$sums on the $VERSION release does not match the assets there" "$sums"
           else
             mv "$RUNNER_TEMP/$sums" "$sums"
           fi
@@ -574,7 +608,7 @@ jobs:
           fi
           cmp "$RUNNER_TEMP/anonymous/futureagi-$CHART_VERSION.tgz" "$RUNNER_TEMP/release/futureagi-$CHART_VERSION.tgz"
           identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/helm-release.yml@refs/tags/$VERSION"
-          cosign verify "$CHART_REF:$CHART_VERSION" --certificate-identity "$identity" --certificate-oidc-issuer "$OIDC_ISSUER" >/dev/null
+          cosign verify --new-bundle-format=false "$CHART_REF:$CHART_VERSION" --certificate-identity "$identity" --certificate-oidc-issuer "$OIDC_ISSUER" >/dev/null
           gh attestation verify "oci://$CHART_REF:$CHART_VERSION" --repo "$GITHUB_REPOSITORY" \
             --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/helm-release.yml"
           {
@@ -627,16 +661,41 @@ jobs:
           SMOKE: ${{ needs.smoke.result }}
           PUBLISH: ${{ needs.publish.result }}
           PUSHED: ${{ needs.publish.outputs.pushed }}
+          EXISTS: ${{ needs.publish.outputs.exists }}
           FAILED_STEP: ${{ needs.publish.outputs.failed-step }}
+          STALE_ASSETS: ${{ needs.publish.outputs.stale-assets }}
         run: |
           FAILED_STEP=${FAILED_STEP:-a step after the push}
           rerun="rerun this workflow from the tag $VERSION (workflow_dispatch, version $VERSION)"
+          if [ "$EXISTS" = true ]; then
+            # The push step refused: another package already holds the version.
+            {
+              echo "### futureagi chart ${VERSION#v}: already on GHCR with different content"
+              echo
+              echo "package: $PACKAGE, smoke: $SMOKE, publish: $PUBLISH."
+              echo
+              echo "\`oci://$CHART_REF\` version \`${VERSION#v}\` is already published, and this run's package differs from it (the \"Push once\" step's log shows how). This run pushed, signed and attached nothing, and a rerun is refused the same way: a published version is never overwritten. The published chart stays as it is; to release this one, ship it as the next patch release."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::futureagi chart ${VERSION#v} is already on GHCR with different content: nothing was pushed, and a rerun is refused the same way; ship the next patch release"
+            exit 1
+          fi
           if [ "$PUSHED" = true ]; then
+            read -ra stale <<<"$STALE_ASSETS"
             {
               echo "### futureagi chart ${VERSION#v}: published to GHCR, but \"$FAILED_STEP\" failed"
               echo
               echo "package: $PACKAGE, smoke: $SMOKE, publish: $PUBLISH."
               echo
+              if [ "${#stale[@]}" -gt 0 ]; then
+                echo "The $VERSION release carries assets from an earlier run that do not match the published chart: ${stale[*]}. A rerun keeps every asset already on the Release and would fail the same way, so delete them first:"
+                echo
+                echo '```sh'
+                for file in "${stale[@]}"; do
+                  echo "gh release delete-asset $VERSION $file --repo $GITHUB_REPOSITORY --yes"
+                done
+                echo '```'
+                echo
+              fi
               echo "\`oci://$CHART_REF\` version \`${VERSION#v}\` is pushed and stays: a version is never overwritten. To finish the release (signature, attestation, Release assets, Artifact Hub metadata, the anonymous check), $rerun: it finds the same package on GHCR, pushes nothing and completes the rest."
               if [ "$SMOKE" = success ]; then
                 echo "The pushed chart passed the kind smoke install in this run, so the rerun can turn smoke off."
@@ -646,7 +705,11 @@ jobs:
                 echo "If anonymous pulls fail, the package is still private. One-time setup: a future-agi org owner makes charts/futureagi public (github.com/orgs/future-agi/packages > charts/futureagi > Package settings > Change visibility) before the rerun."
               fi
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::futureagi chart ${VERSION#v} is published to GHCR, but \"$FAILED_STEP\" failed; $rerun to finish"
+            if [ "${#stale[@]}" -gt 0 ]; then
+              echo "::error::futureagi chart ${VERSION#v} is published to GHCR, but its release carries assets that do not match it (${stale[*]}): delete them, then $rerun to finish"
+            else
+              echo "::error::futureagi chart ${VERSION#v} is published to GHCR, but \"$FAILED_STEP\" failed; $rerun to finish"
+            fi
             exit 1
           fi
           {

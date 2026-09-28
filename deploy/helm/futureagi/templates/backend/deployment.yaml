@@ -39,7 +39,7 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "futureagi.serviceAccountName" . }}
-      automountServiceAccountToken: false
+      automountServiceAccountToken: {{ include "futureagi.automountServiceAccountToken" . }}
       {{- include "futureagi.block" (dict "text" (include "futureagi.imagePullSecrets" .) "indent" 6) }}
       # The preStop sleep, then in-flight requests.
       terminationGracePeriodSeconds: {{ $b.terminationGracePeriodSeconds | default 30 }}

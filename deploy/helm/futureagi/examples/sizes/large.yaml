@@ -115,8 +115,10 @@ fiCollector:
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 70
 agentccGateway:
+  # Replicas share rate limits and budgets in Redis (database 4); with
+  # redis.external.tls, in the Redis agentccGateway.extraEnv names.
   redis:
-    enabled: true
+    enabled: auto
   goMemLimit: 900MiB
   resources:
     requests: {cpu: 500m, memory: 512Mi}

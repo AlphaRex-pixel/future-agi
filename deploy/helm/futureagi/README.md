@@ -417,7 +417,9 @@ fiCollector:
   ([`files/clickhouse/config.d/storage-policy.xml`](files/clickhouse/config.d/storage-policy.xml)).
 - The configured user needs CREATE on the database and, for the
   observed-attribute index, CREATE DATABASE, CREATE USER and GRANT (or set
-  `bootstrap.propertyCatalog=false` and create them yourself).
+  `bootstrap.propertyCatalog=false` and create them yourself). The bundled
+  ClickHouse has only the `default` user, so `clickhouse.user` stays
+  `default` with it.
 
 ### Redis
 
@@ -425,8 +427,12 @@ Redis 6 or newer. The app uses databases 0 to 3 and the LLM gateway
 database 4 (`agentccGateway.redis.db`) whenever it runs more than one
 replica. `redis.external.tls` turns on TLS for the app; the gateway and
 fi-collector have no Redis TLS, so with TLS on, run the gateway with one
-replica or point it at a plain Redis (`AGENTCC_REDIS_ADDRESS`). No backups
-needed: Redis holds cache, locks and live-update state.
+replica or point it at a plain Redis (`AGENTCC_REDIS_ADDRESS` in
+`agentccGateway.extraEnv`). `sizes/medium.yaml` and `large.yaml` autoscale
+the gateway, so they need the plain Redis:
+[`examples/cloud/aks.yaml`](examples/cloud/aks.yaml) (Azure Cache for Redis
+is TLS-only) sets one. No backups needed: Redis holds cache, locks and
+live-update state.
 
 ### Temporal
 
@@ -682,7 +688,10 @@ turns on the Enterprise features in the public `futureagi/future-agi` image.
   `hack/list-images.sh` for your own values; `crane copy` and
   `oras copy -r` keep the digests, and a mirror that re-pushes images needs
   `image.pinDigests=false`. Then set `global.imageRegistry` (it rewrites
-  every image, datastores included) and `global.imagePullSecrets`.
+  every image, datastores included, whichever registry they come from) and
+  `global.imagePullSecrets`. A pull-through cache of Docker Hub alone goes
+  in `image.registry` and each Docker Hub `<datastore>.bundled.image.registry`
+  instead: the bundled MinIO comes from ghcr.io.
   [`examples/airgap.yaml`](examples/airgap.yaml) covers pre-seeding the
   embedding models.
 - **OpenShift.** `global.compatibility.openshift.adaptSecurityContext: auto`
@@ -958,7 +967,10 @@ and upgrade by changing it, following [Upgrading](#upgrading).
   `secrets.extra.RECAPTCHA_SECRET_KEY` plus a frontend image built with
   `VITE_GOOGLE_SITE_KEY` (a build-time setting the published image lacks):
   without both, every login is refused.
-- No pod mounts a service account token.
+- No pod mounts a service account token, unless
+  `serviceAccount.automountServiceAccountToken` is on (for a sidecar that
+  needs one): then the backend, worker, UI, collector, gateway and serving
+  pods do. The code sandbox never does.
 - Supply chain: the chart is signed and attested ([Verify](#verify)), has
   no subcharts, and pins the Future AGI images and the bundled PostgreSQL,
   Redis and MinIO images by digest (the datastores on their default tags
@@ -1047,7 +1059,7 @@ Bracketed names are the environment variables a key sets;
 | --- | --- | --- |
 | `nameOverride` | `""` | Override the chart name used in resource names. |
 | `fullnameOverride` | `""` | Override the resource name prefix. Default: the release name, plus "-futureagi" unless the release name already contains it. |
-| `global.imageRegistry` | `""` | Registry prepended to every image, Future AGI and third-party, e.g. a pull-through mirror (`registry.example.com/dockerhub`). Empty keeps each image's own registry. |
+| `global.imageRegistry` | `""` | Registry that replaces every image's own, Future AGI and third-party alike (docker.io, and ghcr.io for the bundled MinIO): a mirror holding every image `hack/list-images.sh` lists, e.g. `registry.example.com/futureagi-mirror`. Not a pull-through cache of one upstream: for Docker Hub alone set `image.registry` and each Docker Hub `<datastore>.bundled.image.registry` to it instead, and leave `objectStorage.bundled.image.registry` on ghcr.io (or a ghcr.io cache). Empty keeps each image's own registry. |
 | `global.imagePullSecrets` | `[]` | Pull secrets added to every pod, e.g. `[{name: regcred}]`. |
 | `global.storageClass` | `""` | StorageClass of every PersistentVolumeClaim the chart creates. Empty uses the cluster default. Install-time only for the bundled datastores (see "Install-time settings" in README.md). |
 | `global.airgap` | `false` | Air-gapped install: turns off the platform's own calls to the internet. Turns telemetry off [FUTURE_AGI_TELEMETRY_DISABLED=true] (one minimal registration attempt remains; offline it fails harmlessly and is retried), the license heartbeat off unless `license.heartbeat` is `true` [FUTURE_AGI_ENTERPRISE_HEARTBEAT_DISABLED=true], sets [LITELLM_LOCAL_MODEL_COST_MAP=True] on the Python pods and serving, and [HF_HUB_OFFLINE=1, TRANSFORMERS_OFFLINE=1] on serving, whose models must then be pre-seeded on `serving.persistence` (examples/airgap.yaml). Mirror the images first (`hack/list-images.sh`) and set `global.imageRegistry` and `global.imagePullSecrets`. |
@@ -1063,14 +1075,14 @@ Bracketed names are the environment variables a key sets;
 | `image.pullPolicy` | `"IfNotPresent"` | Pull policy of every image unless a component sets its own. |
 | `image.pinDigests` | `true` | Pin each Future AGI image to the digest in `image.digests`, but only while its tag is the chart's appVersion and its repository path the published one: `--set image.tag=...` or another repository path runs that image by tag. Another registry (`image.registry`, `global.imageRegistry`) keeps the digest, which suits a mirror that copies the images with `crane copy` or `oras copy -r` (they keep the digests). Set `false` for a mirror that re-pushes images, or for your own build under the same repository path (or give that component its own `image.digest`): the published digest does not exist there and the pull fails. The bundled PostgreSQL, Redis and MinIO images are pinned the same way, on their default tags only. |
 | `image.digests` | `{}` | Digests (`sha256:...`) of the release's images, by component: backend (also the workers and the bootstrap job), frontend, fiCollector, agentccGateway, serving, codeExecutor. Empty in git; the published chart carries the digests of its own release. A component's own `image.digest` wins. |
-| `urls.app` | `""` | Public URL of the UI, e.g. `https://futureagi.example.com` [FRONTEND_URL, APP_URL, EXTRA_CSRF_ORIGINS]. Invite and password-reset links and app emails point here, with its scheme. Empty: derived from `ingress.app.host`, else `http://localhost:3000`. |
-| `urls.api` | `""` | Public URL of the API, e.g. `https://api.futureagi.example.com` [BASE_URL, and the UI's VITE_HOST_API]. Empty: derived from `ingress.api.host`, else `http://localhost:8000`. |
-| `urls.otlp` | `""` | [FI_COLLECTOR_PUBLIC_URL] Public OTLP/HTTP base URL of fi-collector, e.g. `https://otlp.example.com`: what SDKs outside the cluster set as FI_BASE_URL, shown in the install notes, the in-app SDK snippet and the setup screen. Set it when the collector is exposed another way (e.g. `fiCollector.service.type=LoadBalancer`). Empty: derived from `ingress.otlp`, else `http://localhost:4318` (the port-forward in the install notes). |
-| `urls.objects` | `""` | Public URL browsers download stored files from [MINIO_URL]; used when `objectStorage.backend` is `minio`. Empty: derived from `ingress.objects.host`, else the external endpoint, else `http://localhost:9005`. |
+| `urls.app` | `""` | Public URL of the UI, e.g. `https://futureagi.example.com` [FRONTEND_URL, APP_URL, EXTRA_CSRF_ORIGINS]. Invite and password-reset links and app emails point here, with its scheme. Empty: derived from `ingress.app.host` with `ingress.enabled`, else from `gatewayApi.app.host` with `gatewayApi.enabled` (https unless `gatewayApi.tls` is false), else `http://localhost:3000`. |
+| `urls.api` | `""` | Public URL of the API, e.g. `https://api.futureagi.example.com` [BASE_URL, and the UI's VITE_HOST_API]. Empty: derived from `ingress.api.host` with `ingress.enabled`, else from `gatewayApi.api.host` with `gatewayApi.enabled`, else `http://localhost:8000`. |
+| `urls.otlp` | `""` | [FI_COLLECTOR_PUBLIC_URL] Public OTLP/HTTP base URL of fi-collector, e.g. `https://otlp.example.com`: what SDKs outside the cluster set as FI_BASE_URL, shown in the install notes, the in-app SDK snippet and the setup screen. Set it when the collector is exposed another way (e.g. `fiCollector.service.type=LoadBalancer`). Empty: derived from `ingress.otlp` with `ingress.enabled`, else from `gatewayApi.otlp` with `gatewayApi.enabled`, else `http://localhost:4318` (the port-forward in the install notes). |
+| `urls.objects` | `""` | Public URL browsers download stored files from [MINIO_URL]; used when `objectStorage.backend` is `minio`. Empty: derived from `ingress.objects.host` with `ingress.enabled`, else the external endpoint, else `http://localhost:<objectStorage.bundled.service.downloadPort>` (9005). |
 | `config.envType` | `"production"` | [ENV_TYPE] `production`: JSON logs, DEBUG off, refuses published default secrets. `local`: colored console logs. |
 | `config.logLevel` | `"INFO"` | [LOG_LEVEL] of the backend, workers and bootstrap job. |
 | `config.allowedHosts` | `""` | [ALLOWED_HOSTS], comma-separated. `*` accepts any Host header. A list also gets localhost and the in-cluster service names, which the probes and the workers use, and the pod's own IP (`$(POD_IP)`), which load balancers that health-check pods directly send as the Host. Empty: the API host once the API has a public URL (`urls.api`, `gatewayApi.api.host` or `ingress.api.host`), else `*`. |
-| `config.corsAllowedOrigins` | `""` | [CORS_ALLOWED_ORIGINS] browser origins allowed to call the API with credentials, comma-separated. `*`: every origin. Empty: the UI's origin plus `extraCsrfOrigins` once the UI has a public URL (`urls.app` or `ingress.app.host`), else every origin. |
+| `config.corsAllowedOrigins` | `""` | [CORS_ALLOWED_ORIGINS] browser origins allowed to call the API with credentials, comma-separated. `*`: every origin. Empty: the UI's origin plus `extraCsrfOrigins` once the UI has a public URL (`urls.app`, `gatewayApi.app.host` or `ingress.app.host`), else every origin. |
 | `config.extraCsrfOrigins` | `""` | [EXTRA_CSRF_ORIGINS] in addition to the UI URL, comma-separated. |
 | `config.telemetry` | `true` | Deployment telemetry: an instance id, the version, admin emails and usage counts every 6 hours, never traces, prompts or other content. `false` sets FUTURE_AGI_TELEMETRY_DISABLED=true (one minimal ping remains). |
 | `config.recaptcha` | `false` | [RECAPTCHA_ENABLED] reCAPTCHA on sign-up, login and token refresh, for every Host but localhost. Needs `secrets.extra.RECAPTCHA_SECRET_KEY` (without it every such login is refused) and a frontend image built with VITE_GOOGLE_SITE_KEY (a build-time setting: the published image has none, so its logins fail). |
@@ -1159,7 +1171,7 @@ Bracketed names are the environment variables a key sets;
 | `postgres.bundled.containerSecurityContext` | `{}` | Container securityContext merged over the chart's (no privilege escalation, all capabilities dropped). |
 | `clickhouse.mode` | `"external"` | `external` or `bundled`. ClickHouse 25.3 or newer. |
 | `clickhouse.database` | `"default"` | [CH_DATABASE, CH25_DATABASE] database of traces and analytics. |
-| `clickhouse.user` | `"default"` | [CH_USERNAME] needs CREATE on the database; the bootstrap also creates the observed-attribute index (CREATE DATABASE, CREATE USER, GRANT) unless `bootstrap.propertyCatalog` is false. |
+| `clickhouse.user` | `"default"` | [CH_USERNAME] needs CREATE on the database; the bootstrap also creates the observed-attribute index (CREATE DATABASE, CREATE USER, GRANT) unless `bootstrap.propertyCatalog` is false. Bundled: `default`, the bundled server's only user. |
 | `clickhouse.password` | `""` | [CH_PASSWORD]. External: may be empty. Bundled: empty generates one. |
 | `clickhouse.existingSecret` | `""` | Existing Secret holding the password. |
 | `clickhouse.existingSecretPasswordKey` | `"password"` | Key of the password in `existingSecret`. |
@@ -1237,7 +1249,7 @@ Bracketed names are the environment variables a key sets;
 | `objectStorage.bundled.persistence.storageClass` | `""` | StorageClass of the data volume. Empty: `global.storageClass`, else the cluster default. Install-time only. |
 | `objectStorage.bundled.goMemLimit` | `"384MiB"` | [GOMEMLIMIT] soft memory limit; keep it below the memory limit. |
 | `objectStorage.bundled.service.type` | `"ClusterIP"` | Service type of the bundled object storage. `LoadBalancer` (examples/local.yaml) also publishes `downloadPort` for browser downloads. Evaluation only: it exposes the bucket. |
-| `objectStorage.bundled.service.downloadPort` | `9005` | Service port browsers download from [MINIO_URL]; only with a `LoadBalancer` or `NodePort` type. |
+| `objectStorage.bundled.service.downloadPort` | `9005` | Local port of browser downloads [MINIO_URL `http://localhost:<port>`, unless `urls.objects` or `ingress.objects.host` is set]: the Service's download port with a `LoadBalancer` or `NodePort` type, else the local end of the install notes' port-forward. |
 | `objectStorage.bundled.resources` | see values.yaml | Resources of the bundled object storage. |
 | `objectStorage.bundled.nodeSelector` | `{}` | Node selector of the bundled object storage. Empty: the top-level `nodeSelector`. |
 | `objectStorage.bundled.tolerations` | `[]` | Tolerations of the bundled object storage. Empty: the top-level `tolerations`. |
@@ -1275,9 +1287,9 @@ Bracketed names are the environment variables a key sets;
 | `backend.containerSecurityContext` | `{}` | Merged over the chart's container security context (read-only root filesystem, no privilege escalation, all capabilities dropped). |
 | `backend.extraVolumes` | `[]` | Extra volumes. |
 | `backend.extraVolumeMounts` | `[]` | Extra volume mounts. |
-| `backend.nodeSelector` | `{}` | Node selector. Empty: the top-level `nodeSelector`. |
-| `backend.tolerations` | `[]` | Tolerations. Empty: the top-level `tolerations`. |
-| `backend.affinity` | `{}` | Affinity. Empty: the top-level `affinity`. |
+| `backend.nodeSelector` | `{}` | Node selector of the API pods, the bootstrap job and the `helm test` pod. Empty: the top-level `nodeSelector`. |
+| `backend.tolerations` | `[]` | Tolerations of the API pods, the bootstrap job and the `helm test` pod. Empty: the top-level `tolerations`. |
+| `backend.affinity` | `{}` | Affinity of the API pods, the bootstrap job and the `helm test` pod. Empty: the top-level `affinity`. |
 | `backend.topologySpreadConstraints` | `[]` | Topology spread constraints. Empty: the top-level `topologySpreadConstraints`. |
 | `worker.image.registry` | `""` | Registry. Empty: `backend.image.registry`, else `image.registry`. |
 | `worker.image.repository` | `""` | Repository. Empty: `backend.image.repository` (workers run the backend image). |
@@ -1389,7 +1401,7 @@ Bracketed names are the environment variables a key sets;
 | `agentccGateway.config` | see values.yaml | Gateway configuration (agentcc-gateway/config.example.yaml documents every field). `${VAR}` expands from the environment: provider keys come from `secrets.llm`. `server.port` is also the container port: the chart pins it with the AGENTCC_PORT variable, which wins over an `existingConfigMap` too. |
 | `agentccGateway.controlPlaneSync` | `true` | Pull keys and org settings from the backend on start [AGENTCC_CONTROL_PLANE_URL, AGENTCC_SYNC_ON_STARTUP], so every replica and a restarted pod serve the same keys. |
 | `agentccGateway.allowPrivateProviderURLs` | `false` | Let org providers use base URLs on private networks, such as a local Ollama or vLLM [AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS], for the gateway and the backend. Loopback, link-local and cloud metadata addresses stay refused. Only when everyone who can add a provider is trusted: it puts every in-cluster service in reach of a provider URL. Gateway and backend images from before this setting ignore it and refuse every private URL. |
-| `agentccGateway.redis.enabled` | `"auto"` | Keep rate limits, budgets and other shared gateway state in the release's Redis [AGENTCC_REDIS_ADDRESS, AGENTCC_REDIS_PASSWORD, AGENTCC_REDIS_DB]. `auto`: on when the gateway runs more than one replica (`replicas` above 1 or autoscaling), off with `redis.external.tls` (the gateway has no Redis TLS). The chart refuses more than one replica without it. |
+| `agentccGateway.redis.enabled` | `"auto"` | Keep rate limits, budgets and other shared gateway state in the release's Redis [AGENTCC_REDIS_ADDRESS, AGENTCC_REDIS_PASSWORD, AGENTCC_REDIS_DB]. `auto`: on when the gateway runs more than one replica (`replicas` above 1 or autoscaling), off with `redis.external.tls` (the gateway has no Redis TLS): give it a Redis without TLS with AGENTCC_REDIS_ADDRESS in `extraEnv` instead (examples/cloud/aks.yaml). The chart refuses more than one replica without either. |
 | `agentccGateway.redis.db` | `4` | [AGENTCC_REDIS_DB] Redis database of the gateway, apart from the app's 0-3. |
 | `agentccGateway.gcpCredentials.existingSecret` | `""` | Existing Secret with a GCP service-account JSON for Vertex AI, mounted read-only [GOOGLE_APPLICATION_CREDENTIALS]. |
 | `agentccGateway.gcpCredentials.key` | `"credentials.json"` | Key of the JSON in `existingSecret`. |
@@ -1457,7 +1469,7 @@ Bracketed names are the environment variables a key sets;
 | `bootstrap.clickhouseTimeoutSeconds` | `600` | Deadline of the ClickHouse schema step, in seconds. |
 | `bootstrap.backoffLimit` | `2` | Retries of a failed job. |
 | `bootstrap.activeDeadlineSeconds` | `1080` | Deadline of the whole job, in seconds. Keep it below `helm install/upgrade --timeout` (20m in every documented command), so Helm reports how the job ended; raise both together for a long migration. |
-| `bootstrap.ttlSecondsAfterFinished` | `86400` | Seconds a finished job (and its logs) is kept. |
+| `bootstrap.ttlSecondsAfterFinished` | `86400` | Seconds a finished job (and its logs) is kept. `0`: deleted as soon as it finishes. Empty: kept until the next install or upgrade replaces it. |
 | `bootstrap.resources` | see values.yaml | Resources of the bootstrap job. |
 | `bootstrap.serviceAccount.create` | `true` | Create a dedicated ServiceAccount for the job (it exists before any other resource on install). |
 | `bootstrap.serviceAccount.name` | `""` | Name of the job's ServiceAccount. Empty: <fullname>-bootstrap when created, else the namespace default. |
@@ -1501,7 +1513,7 @@ Bracketed names are the environment variables a key sets;
 | `serviceAccount.create` | `true` | Create a ServiceAccount for the application pods. |
 | `serviceAccount.name` | `""` | Name. Empty: <fullname> when created, else the namespace default. |
 | `serviceAccount.annotations` | `{}` | Annotations of the application pods' ServiceAccount. Object storage does not use them: it always authenticates with `objectStorage` keys. |
-| `serviceAccount.automountServiceAccountToken` | `false` | Mount the service account token (the application does not call the Kubernetes API). |
+| `serviceAccount.automountServiceAccountToken` | `false` | Mount the ServiceAccount's token in the pods that run as it: the backend, workers, UI, collector, gateway and serving (never the code sandbox). The application does not call the Kubernetes API; turn it on for a sidecar that needs the token (e.g. a Vault agent). |
 | `nodeSelector` | `{}` | Default node selector. |
 | `tolerations` | `[]` | Default tolerations. |
 | `affinity` | `{}` | Default affinity. |

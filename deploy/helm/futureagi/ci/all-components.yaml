@@ -107,6 +107,8 @@ codeExecutor:
   enabled: true
 bootstrap:
   propertyCatalog: false
+  # Empty: no TTL.
+  ttlSecondsAfterFinished: ""
   serviceAccount:
     create: false
     name: futureagi-migrator
@@ -119,6 +121,7 @@ networkPolicy:
 serviceAccount:
   annotations:
     example.com/owner: platform
+  automountServiceAccountToken: true
 nodeSelector:
   kubernetes.io/os: linux
 tolerations:
