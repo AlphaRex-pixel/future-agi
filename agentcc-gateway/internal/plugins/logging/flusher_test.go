@@ -3,6 +3,7 @@ package logging
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -344,6 +345,19 @@ func TestLogFlusherClose_IsBoundedWhenTheWebhookHangs(t *testing.T) {
 				t.Errorf("logged undelivered = %d (logged: %v), want 2", n, ok)
 			}
 		})
+	}
+}
+
+// After a send cut off at Close's deadline, the last flush gives up before
+// it encodes the batch, which can hold four times maxBuffer records.
+func TestLogFlusherDeliver_DoesNotEncodeAfterTheDeadline(t *testing.T) {
+	f := NewLogFlusher("http://127.0.0.1:1", "secret", time.Hour, 100)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	// Encoding this record fails, so any other error means deliver encoded it.
+	records := []TraceRecord{{RequestID: "req-1", RequestBodyJSON: json.RawMessage("{")}}
+	if err := f.deliver(ctx, records); !errors.Is(err, context.Canceled) {
+		t.Errorf("deliver after the deadline returned %v, want %v before encoding", err, context.Canceled)
 	}
 }
 

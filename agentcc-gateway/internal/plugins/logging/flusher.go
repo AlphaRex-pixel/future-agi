@@ -365,6 +365,9 @@ func (f *LogFlusher) Close(ctx context.Context) {
 // deliver sends records, trying again after a failed send or a server error,
 // up to finalFlushAttempts sends in all while ctx lasts.
 func (f *LogFlusher) deliver(ctx context.Context, records []TraceRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err // a send cut off at the deadline left these: don't encode them
+	}
 	body, err := encodeLogs(records)
 	if err != nil {
 		return err
