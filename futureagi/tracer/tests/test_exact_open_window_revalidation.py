@@ -520,6 +520,26 @@ def test_default_floor_is_the_documented_five_minutes():
     assert eac._revalidation_floor_seconds() == 300
 
 
+def test_floor_is_a_registered_runtime_setting_documented_for_operators():
+    # Declared once in runtime_setting_specs.py like every numeric knob, so
+    # a blank value means the default (not a crash at settings import) and an
+    # out-of-range one is refused with a named error.
+    from pathlib import Path
+
+    from tfc.settings.runtime_setting_specs import RUNTIME_NUMERIC_SETTING_SPECS
+
+    spec = RUNTIME_NUMERIC_SETTING_SPECS["EXACT_AGGREGATION_REVALIDATE_AFTER_SECONDS"]
+    name = "EXACT_AGGREGATION_REVALIDATE_AFTER_SECONDS"
+    assert spec.parse(name) == eac._DEFAULT_REVALIDATE_AFTER_SECONDS
+    assert spec.parse(name, "") == eac._DEFAULT_REVALIDATE_AFTER_SECONDS
+    assert spec.parse(name, "  ") == eac._DEFAULT_REVALIDATE_AFTER_SECONDS
+    assert spec.parse(name, "0") == 0  # off
+    with pytest.raises(ValueError, match=name):
+        spec.parse(name, "-1")
+    env_example = Path(__file__).resolve().parents[2] / ".env.example"
+    assert f"\n{name}=300\n" in env_example.read_text()
+
+
 def test_explicit_refresh_is_unchanged(queue):
     identity = _identity()
     _seed(SESSION_NS, identity, age=YOUNG)

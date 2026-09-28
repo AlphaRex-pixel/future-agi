@@ -352,6 +352,13 @@ INTERACTIVE_READ_SETTING_SPECS = {
             ("MONITOR_GRAPH_CH_TIMEOUT_CAP_MS", 6_000, 100, 60_000),
             ("MONITOR_GRAPH_METADATA_PG_TIMEOUT_CAP_MS", 1_000, 100, 10_000),
             ("GRAPH_BACKGROUND_WALL_MS", 180_000, 1_000, 180_000),
+            # Age after which a revisited Observe chart whose exact snapshot
+            # ran while its window was open refreshes that snapshot in the
+            # background (0 = off; values 1-59 are raised to 60 in code). The
+            # default and its load arithmetic are documented at
+            # _DEFAULT_REVALIDATE_AFTER_SECONDS in
+            # tracer/services/exact_aggregation_cache.py.
+            ("EXACT_AGGREGATION_REVALIDATE_AFTER_SECONDS", 300, 0, 86_400),
             ("GRAPH_EVENT_LIMIT", 2_000, 1, 100_000),
             ("GRAPH_TRACE_DECORATION_CANDIDATE_LIMIT", 40, 1, 4_096),
             ("GRAPH_SPAN_METRIC_BATCH_SIZE", 1_024, 1, 4_096),
