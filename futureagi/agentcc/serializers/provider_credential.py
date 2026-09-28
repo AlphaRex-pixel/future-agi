@@ -82,7 +82,8 @@ class ProviderBaseURLField(serializers.URLField):
         if (
             parts.scheme.lower() not in ("http", "https")
             or not parts.hostname
-            or any(ch.isspace() for ch in value)
+            # The gateway's url.Parse refuses control characters.
+            or any(ch.isspace() or not ch.isprintable() for ch in value)
         ):
             self.fail("invalid")
         return value

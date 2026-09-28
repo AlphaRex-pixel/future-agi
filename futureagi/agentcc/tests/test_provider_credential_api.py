@@ -908,6 +908,11 @@ class TestProviderBaseURLIsCheckedOnSave:
             "ftp://mock-llm/v1",
             "http://:8080",
             "http://mock llm:8080",
+            # The gateway's url.Parse refuses control characters, so a saved
+            # one would fail every request through the provider.
+            "http://mock\x01llm:8080",
+            "\x01http://mock-llm:8080",
+            "http://mock-llm:8080/v1\x7f",
             "http://mock-llm:80a",
             "http://mock-llm:65536",
         ],
