@@ -11,6 +11,7 @@ from agentcc.services.url_safety import (
     PROVIDER_PRIVATE_URL_ERROR,
     PROVIDER_URL_ERROR,
     WEBHOOK_PRIVATE_URL_ERROR,
+    ensure_provider_base_url_allowed,
     ensure_public_http_url,
     private_provider_urls_allowed,
 )
@@ -118,6 +119,17 @@ def test_loopback_metadata_and_unusable_urls_never_pass(url):
 
 def test_private_url_error_names_the_opt_in():
     assert f"{ALLOW_PRIVATE_PROVIDER_URLS_ENV}=true" in PROVIDER_PRIVATE_URL_ERROR
+
+
+def test_save_error_does_not_ask_for_a_resolvable_host(monkeypatch):
+    # Saving accepts a host that does not resolve here, so its error must not
+    # say the host has to resolve.
+    monkeypatch.delenv(ALLOW_PRIVATE_PROVIDER_URLS_ENV, raising=False)
+    ensure_provider_base_url_allowed("http://no-such-host.invalid")
+    with pytest.raises(ValueError) as refused:
+        ensure_provider_base_url_allowed("http://127.0.0.1:8080")
+    assert "never allowed" in str(refused.value)
+    assert "resolve" not in str(refused.value)
 
 
 def test_metadata_host_is_refused_before_any_lookup(_stub_dns):

@@ -915,7 +915,7 @@ type ControlPlaneConfig struct {
 
 // EnvAllowPrivateProviderURLs names the env var behind
 // OrgProvidersConfig.AllowPrivateURLs. The Django backend reads the same name
-// for its model-discovery calls, so one setting covers both.
+// for model discovery and saving providers, so one setting covers both.
 const EnvAllowPrivateProviderURLs = "AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS"
 
 // OrgProvidersConfig governs the providers orgs configure through the control
