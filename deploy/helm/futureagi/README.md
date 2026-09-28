@@ -315,7 +315,7 @@ Bundled datastores get generated passwords in the same Secret. A bundled
 PostgreSQL keeps the password it was initialized with: set
 `postgres.password` before the first install if you want a specific one.
 
-To manage the application keys yourself (required with Argo CD and Flux),
+To manage the application keys yourself (required with Argo CD),
 create a Secret with all seven keys and set `secrets.existingSecret`
 (`secrets.agentccWebhookSecret`, when set, takes the place of
 `AGENTCC_WEBHOOK_SECRET`). Moving an existing install over? Copy the seven
@@ -426,7 +426,9 @@ Scaling notes:
 Helm's `lookup` returns nothing under Argo CD, so generated secrets would
 change on every sync. Set `secrets.existingSecret` (with all seven keys,
 `AGENTCC_WEBHOOK_SECRET` included), and give bundled datastores explicit
-passwords (`postgres.password`, ...) or existing Secrets.
+passwords (`postgres.password`, ...) or existing Secrets. Flux's
+helm-controller runs Helm against the cluster, where `lookup` works, so there
+the generated keys and passwords persist without these settings.
 Argo CD maps the chart's hooks to sync phases: the Secret and the bootstrap
 job to PreSync (PostSync for the job when a datastore is bundled).
 
@@ -496,7 +498,7 @@ Bracketed names are the environment variables a key sets;
 | `config.email.serverEmail` | `""` | [SERVER_EMAIL] sender of error emails. |
 | `config.extraEnv` | `{}` | Extra environment variables for the backend, workers and bootstrap job, as `NAME: value`. Every supported key is in docs/configuration.md. |
 | `config.extraEnvFrom` | `[]` | Extra `envFrom` sources for the backend, workers and bootstrap job, e.g. `[{secretRef: {name: my-env}}]`. |
-| `secrets.existingSecret` | `""` | Existing Secret with the application keys: SECRET_KEY, INTEGRATION_ENCRYPTION_KEY, AGENTCC_INTERNAL_API_KEY, AGENTCC_ADMIN_TOKEN, PROPERTY_CATALOG_API_PASSWORD, PROPERTY_CATALOG_CONSUMER_PASSWORD and AGENTCC_WEBHOOK_SECRET (unless `agentccWebhookSecret` is set). Empty: generated. Required with Argo CD or Flux, which cannot `lookup` the generated Secret. |
+| `secrets.existingSecret` | `""` | Existing Secret with the application keys: SECRET_KEY, INTEGRATION_ENCRYPTION_KEY, AGENTCC_INTERNAL_API_KEY, AGENTCC_ADMIN_TOKEN, PROPERTY_CATALOG_API_PASSWORD, PROPERTY_CATALOG_CONSUMER_PASSWORD and AGENTCC_WEBHOOK_SECRET (unless `agentccWebhookSecret` is set). Empty: generated. Required with Argo CD, which cannot `lookup` the generated Secret. |
 | `secrets.llm.existingSecret` | `""` | Existing Secret with any of OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (missing keys are fine). Overrides the values below. |
 | `secrets.llm.openaiApiKey` | `""` | [OPENAI_API_KEY] server-wide key for built-in evals and the gateway. Workspaces can also add their own in the UI. |
 | `secrets.llm.anthropicApiKey` | `""` | [ANTHROPIC_API_KEY] |

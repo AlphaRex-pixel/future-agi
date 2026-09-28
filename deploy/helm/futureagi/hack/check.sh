@@ -95,7 +95,7 @@ for set in "${value_sets[@]}"; do
 done
 
 echo "== GitOps: rendering again changes nothing"
-# Argo CD and Flux render on every sync, where `lookup` finds nothing: with the
+# Argo CD renders on every sync, where `lookup` finds nothing: with the
 # keys in secrets.existingSecret, nothing may be generated anew.
 "$helm" template futureagi "$chart" --namespace futureagi \
   -f "$chart/examples/external.yaml" -f "$chart/ci/gitops.yaml" >"$out/gitops.again.txt"

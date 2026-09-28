@@ -284,7 +284,7 @@ def check_overrides(bundled: list[dict], overrides: list[dict]) -> list[str]:
 def check_gitops(docs: list[dict]) -> list[str]:
     """ci/gitops.yaml: the application keys in secrets.existingSecret.
 
-    Argo CD and Flux render without `lookup`, so a generated value would change
+    Argo CD renders without `lookup`, so a generated value would change
     on every sync: every pod reads AGENTCC_WEBHOOK_SECRET from the existing
     Secret, and no Secret the chart renders holds one.
     """
