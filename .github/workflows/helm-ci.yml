@@ -24,11 +24,12 @@
 #   kind    builds the backend, frontend, fi-collector and agentcc-gateway
 #           images from this checkout, installs the chart with Helm 4 on kind
 #           with every datastore bundled, and runs
-#           deploy/helm/futureagi/hack/kind-smoke.sh: rollout, /health/, helm
-#           test, the bootstrap job's schema, CDC and schedules, a first
-#           account, a refused volume resize, an in-place upgrade that must
-#           keep the generated keys, and a rollback that must put the previous
-#           Secret back.
+#           deploy/helm/futureagi/hack/kind-smoke.sh: rollout, /health/, the
+#           first admin (bootstrap.admin) signing in, helm test, the bootstrap
+#           job's schema, CDC and schedules, a second account from
+#           manage.py create_user, a refused volume resize, an in-place
+#           upgrade that must keep the generated keys and the first admin, and
+#           a rollback that must put the previous Secret back.
 name: Helm chart CI
 
 on:
@@ -39,6 +40,8 @@ on:
       - "deploy/standalone/clickhouse/**"
       - "futureagi/.ci/clickhouse-storage-policy.xml"
       - "frontend/security-headers.conf"
+      - "futureagi/accounts/management/commands/create_user.py"
+      - "futureagi/accounts/utils.py"
       - "futureagi/tfc/management/commands/bootstrap_install.py"
       - "futureagi/model_hub/apps.py"
       - ".github/workflows/helm-ci.yml"
@@ -53,6 +56,8 @@ on:
       - "deploy/standalone/clickhouse/**"
       - "futureagi/.ci/clickhouse-storage-policy.xml"
       - "frontend/security-headers.conf"
+      - "futureagi/accounts/management/commands/create_user.py"
+      - "futureagi/accounts/utils.py"
       - "futureagi/tfc/management/commands/bootstrap_install.py"
       - "futureagi/model_hub/apps.py"
       - ".github/workflows/helm-ci.yml"

@@ -156,9 +156,10 @@ pre-commit formatter off the templates and the files `values_docs.py` writes.
 `KUBE_VERSIONS` picks the Kubernetes versions kubeconform validates against
 (CI: `1.27.0 1.37.0`), and `CRD_SCHEMAS` a mirror of the CRD schema catalog
 for the Gateway API, GKE, External Secrets, Argo CD and Flux kinds when CI has
-no network. `kind-smoke.sh` also checks
-that a resize of a bundled datastore's volume is refused and that
-`helm rollback` restores the chart's Secret.
+no network. `kind-smoke.sh` also checks that the first admin from
+`bootstrap.admin.existingSecret` signs in, that a resize of a bundled
+datastore's volume is refused and that `helm rollback` restores the chart's
+Secret.
 
 The chart is published by `helm-release.yml`, not by hand: at a `vX.Y.Z` tag,
 after the images exist, it packages the chart with the images' digests
@@ -272,7 +273,7 @@ CI covers frontend, sharded backend pytest, Go collector tests/builds, deploymen
 | `images-ci.yml`                   | PR changes and pushes on `dev`/`main` to Dockerfiles, image scripts, the build and release workflows or `docs/images.md`; merge queue, manual | Image conventions (`test_image_standards.py`) and size budgets (`test_image_size_budget.py`), no image built |
 | `e2e-ci.yml`                       | PRs into and pushes on `dev`/`main`, merge queue                                 | Builds the changed images from PR code, boots the `futureagi-e2e` stack, runs the Playwright flows |
 | `standalone-ci.yml`                | PRs into and pushes on `dev`/`main` that touch the Standalone setup or the backend | Builds the five Standalone images, the backend as its slim variant (amd64; arm64 when dependencies or Dockerfiles change), checks their size budgets, runs `./bin/install` and smoke-tests the Standalone stack |
-| `helm-ci.yml`                      | PRs into and pushes on `dev`/`main` that touch `deploy/helm/**`, the bootstrap command or the release-please files | `hack/check.sh` (lint, template, kubeconform on Kubernetes 1.27 and 1.37, rendered invariants, values docs and schema) with Helm 3.22 and Helm 4.3, on the chart and on its package (`hack/package.sh`); fails on a subchart or a Bitnami image, and when the chart's `version` or `appVersion` drifts from the release manifest; then installs the chart on kind with bundled datastores and runs `hack/kind-smoke.sh`, including an in-place upgrade and a rollback |
+| `helm-ci.yml`                      | PRs into and pushes on `dev`/`main` that touch `deploy/helm/**`, the bootstrap or `create_user` command or the release-please files | `hack/check.sh` (lint, template, kubeconform on Kubernetes 1.27 and 1.37, rendered invariants, values docs and schema) with Helm 3.22 and Helm 4.3, on the chart and on its package (`hack/package.sh`); fails on a subchart or a Bitnami image, and when the chart's `version` or `appVersion` drifts from the release manifest; then installs the chart on kind with bundled datastores and runs `hack/kind-smoke.sh`, including an in-place upgrade and a rollback |
 | `release-images.yml`               | a `vX.Y.Z` tag                                                                   | Builds every image natively for amd64 and arm64 (the backend in both variants: the default tags and `-slim`), checks each against its size budget, then tags it; publishes the pinned code-executor base when it is new; then calls `helm-release.yml` for the chart |
 | `helm-release.yml`                 | called by `release-images.yml` at a `vX.Y.Z` tag once its images exist; manual retry from the tag | Packages the chart with the images' digests, checks the package with Helm 3 and 4, installs it on kind with the published images, pushes it to GHCR (never over a published version), signs it with cosign, attests its provenance, attaches it to the GitHub Release with the images lock, the Hauler manifest and `support-bundle.sh`, and pushes the Artifact Hub metadata |
 | `base-digest-check.yml`            | weekly, manual                                                                   | Fails when a digest-pinned base image (e.g. `python:3.11-slim-bookworm`) has moved, listing the new digest |

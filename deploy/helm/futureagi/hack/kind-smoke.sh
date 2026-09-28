@@ -40,6 +40,9 @@ release=futureagi
 timeout=${HELM_TIMEOUT:-25m}
 pod_security=${POD_SECURITY:-restricted}
 images=(futureagi/future-agi futureagi/frontend futureagi/fi-collector futureagi/agentcc-gateway)
+# The first admin, created by the bootstrap job from bootstrap.admin.
+admin_email=smoke-admin@example.com
+admin_password='Smoke-Test-2026!x'
 
 work=$(mktemp -d)
 
@@ -105,11 +108,17 @@ if [ "$published" = 1 ] && [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB
   image_args+=(--set "global.imagePullSecrets[0].name=dockerhub")
 fi
 
+kubectl -n "$ns" create secret generic smoke-admin \
+  --from-literal=email="$admin_email" --from-literal=name="Smoke Admin" \
+  --from-literal=password="$admin_password" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
 say "install (bundled datastores)"
 helm upgrade --install "$release" "$chart" --namespace "$ns" \
   -f "$values_dir/examples/bundled.yaml" \
   ${image_args[@]+"${image_args[@]}"} \
   --set config.telemetry=false \
+  --set bootstrap.admin.existingSecret=smoke-admin \
   --wait --timeout "$timeout"
 kubectl -n "$ns" get pods -o wide
 kubectl -n "$ns" logs "job/$release-bootstrap" --tail=40
@@ -119,7 +128,7 @@ for workload in $(kubectl -n "$ns" get deployments,statefulsets -o name); do
   kubectl -n "$ns" rollout status "$workload" --timeout=5m
 done
 
-say "API health through a port-forward"
+say "API health, and the first admin (bootstrap.admin) signs in, through a port-forward"
 kubectl -n "$ns" port-forward "svc/$release-backend" 18000:8000 >/dev/null 2>&1 &
 forward=$!
 for _ in $(seq 1 30); do
@@ -128,7 +137,16 @@ for _ in $(seq 1 30); do
 done
 curl -fsS http://127.0.0.1:18000/health/
 echo
+signed_in=0
+curl -sS --fail-with-body -H 'Content-Type: application/json' \
+  -d "{\"email\": \"$admin_email\", \"password\": \"$admin_password\"}" \
+  http://127.0.0.1:18000/accounts/token/ >"$work/token.json" && signed_in=1
 kill "$forward" 2>/dev/null || true
+if [ "$signed_in" != 1 ] || ! grep -q '"access"' "$work/token.json"; then
+  cat "$work/token.json" >&2
+  fail "the first admin cannot sign in with the password from bootstrap.admin.existingSecret"
+fi
+echo "ok   $admin_email signed in"
 
 say "helm test"
 helm test "$release" --namespace "$ns" --logs --timeout 5m
@@ -145,9 +163,9 @@ kubectl -n "$ns" exec "statefulset/$release-temporal" -- \
   fail "the outbox CDC drain schedule is not registered"
 echo "ok   ClickHouse schema, $triggers CDC triggers, Temporal schedules"
 
-say "first account"
+say "a second account with manage.py create_user (install notes, step 3)"
 kubectl -n "$ns" exec "deploy/$release-backend" -c backend -- python manage.py create_user \
-  --email "smoke-$(date +%s)@example.com" --name "Smoke Test" --password 'Smoke-Test-2026!x'
+  --email "smoke-$(date +%s)@example.com" --name "Smoke Test" --password "$admin_password"
 
 say "a bundled volume cannot be resized by an upgrade: refused before anything changes"
 installed=$(helm history "$release" --namespace "$ns" --max 1 | awk 'NR == 2 {print $1}')
@@ -172,6 +190,8 @@ after=$(kubectl -n "$ns" get secret "$release-secrets" -o jsonpath='{.data.SECRE
 [ -n "$before" ] && [ "$before" = "$after" ] || fail "SECRET_KEY changed on upgrade"
 kubectl -n "$ns" get "job/$release-bootstrap" -o jsonpath='{.status.succeeded}' | grep -qx 1 ||
   fail "the pre-upgrade bootstrap job did not succeed"
+kubectl -n "$ns" logs "job/$release-bootstrap" | grep -qF "first admin $admin_email already exists: left unchanged" ||
+  fail "the pre-upgrade bootstrap job did not leave the first admin as it was"
 kubectl -n "$ns" rollout status "deploy/$release-backend" --timeout=5m
 helm test "$release" --namespace "$ns" --timeout 5m
 
