@@ -67,6 +67,18 @@ def test_standalone_compose_is_three_containers_plus_two_profiles() -> None:
     assert "rabbitmq" not in STANDALONE_COMPOSE.read_text(encoding="utf-8").lower()
 
 
+def test_no_privileged_service_is_published_beyond_the_host() -> None:
+    """code-executor runs whatever code it is sent, without authentication."""
+    for compose in (STANDALONE_COMPOSE, DISTRIBUTED_COMPOSE):
+        for name, service in _compose(compose)["services"].items():
+            if not service.get("privileged"):
+                continue
+            for mapping in service.get("ports", []):
+                assert mapping.startswith("127.0.0.1:"), (
+                    f"{compose.name}: {name} publishes {mapping}"
+                )
+
+
 def test_standalone_app_service_contract() -> None:
     app = _compose(STANDALONE_COMPOSE)["services"]["app"]
     env = app["environment"]

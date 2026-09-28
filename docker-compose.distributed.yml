@@ -560,11 +560,13 @@ services:
     restart: unless-stopped
 
   # Requires privileged: true for nsjail namespaces — won't run on Fargate /
-  # managed platforms that disallow privileged containers.
+  # managed platforms that disallow privileged containers. It runs whatever
+  # code it is sent, without authentication, so only this host reaches it
+  # (the backend and workers use the compose network).
   code-executor:
     image: futureagi/code-executor:${CODE_EXECUTOR_VERSION:-latest}
     ports:
-      - "${CODE_EXECUTOR_PORT:-8060}:8060"
+      - "127.0.0.1:${CODE_EXECUTOR_PORT:-8060}:8060"
     privileged: true
     deploy:
       resources:

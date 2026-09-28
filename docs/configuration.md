@@ -396,7 +396,7 @@ listen on all interfaces too.
 | `MINIO_API_PORT` | `9005` | S D dev | Object storage API, `127.0.0.1`. `MINIO_URL` follows it. |
 | `FI_COLLECTOR_ADMIN_PORT` | `9464` | D | Collector health and metrics, `127.0.0.1`. |
 | `SERVING_PORT` | `8080` | D | Embedding model server. |
-| `CODE_EXECUTOR_PORT` | `8060` | D | Code executor. |
+| `CODE_EXECUTOR_PORT` | `8060` | D | Code executor, `127.0.0.1`: it runs any code it is sent, without authentication. |
 | `PG_PORT` | `5432` | D dev | Postgres, `127.0.0.1`. |
 | `CH_HTTP_PORT`, `CH_PORT` | `8123`, `9000` | D dev | ClickHouse HTTP and native, `127.0.0.1`. |
 | `REDIS_PORT` | `6379` | D dev | Redis, `127.0.0.1`. |
