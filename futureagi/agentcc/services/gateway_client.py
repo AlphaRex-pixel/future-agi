@@ -122,6 +122,10 @@ class GatewayClient:
     def revoke_key(self, key_id):
         return self._request("DELETE", f"/-/keys/{key_id}")
 
+    def import_keys(self, keys):
+        """Load keys the gateway lacks, by hash; see gateway_key_payload."""
+        return self._request("POST", "/-/keys/sync", json_body={"keys": keys})
+
     def update_key(self, key_id, **kwargs):
         body = {}
         for field in ("name", "owner", "models", "providers", "metadata"):

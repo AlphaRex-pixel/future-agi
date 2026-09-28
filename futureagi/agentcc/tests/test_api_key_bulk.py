@@ -76,3 +76,22 @@ class TestAPIKeyBulkExpiresAt:
 
         assert "gw-expired" not in ids  # filtered at the query level
         assert "gw-live" in ids
+
+
+class TestAPIKeyBulkPayload:
+    def test_restored_keys_keep_their_id_prefix_and_org(
+        self, admin_client, organization, workspace
+    ):
+        key = _make_key(organization, workspace, "key_2", "e" * 64, None)
+        key.key_prefix = "sk-agentcc-e..."
+        key.save(update_fields=["key_prefix"])
+
+        (item,) = [
+            item
+            for item in admin_client.get("/agentcc/api-keys/bulk/").json()["result"]
+            if item["id"] == "key_2"
+        ]
+
+        assert item["key_hash"] == "e" * 64
+        assert item["key_prefix"] == "sk-agentcc-e..."
+        assert item["metadata"]["org_id"] == str(organization.id)

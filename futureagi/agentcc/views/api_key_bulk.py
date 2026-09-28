@@ -11,7 +11,7 @@ from agentcc.serializers.contracts import (
     AgentccErrorResponseSerializer,
     APIKeyBulkResponseSerializer,
 )
-from agentcc.services.gateway_client import _stringify_metadata
+from agentcc.services.auth_bridge import gateway_key_payload
 from tfc.utils.general_methods import GeneralMethods
 
 logger = structlog.get_logger(__name__)
@@ -47,24 +47,7 @@ class APIKeyBulkView(APIView):
                 deleted=False,
             ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
 
-            result = []
-            for key in keys:
-                if not key.key_hash:
-                    continue
-                metadata = _stringify_metadata(key.metadata or {})
-                metadata.setdefault("org_id", str(key.organization_id))
-                result.append(
-                    {
-                        "id": key.gateway_key_id,
-                        "name": key.name,
-                        "owner": key.owner,
-                        "key_hash": key.key_hash,
-                        "models": key.allowed_models or [],
-                        "providers": key.allowed_providers or [],
-                        "metadata": metadata,
-                        "expires_at": key.expires_at,
-                    }
-                )
+            result = [gateway_key_payload(key) for key in keys if key.key_hash]
 
             return self._gm.success_response(result)
         except Exception as e:

@@ -4,9 +4,13 @@ Agentcc Services Tests
 Tests for GatewayClient, auth_bridge, and log_ingestion services.
 """
 
+import hashlib
+import json
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.utils import timezone
 
 from accounts.models import Organization
 from accounts.models.workspace import Workspace
@@ -256,6 +260,193 @@ class TestAuthBridge:
         result, gateway_failed = auth_bridge.revoke_key(key)
         assert result.status == AgentccAPIKey.REVOKED
         assert gateway_failed is True
+
+
+class TestAuthBridgeKeyIdsAndSync:
+    """Gateway key IDs that repeat across restarts, and Sync restoring keys."""
+
+    @staticmethod
+    def _gateway_key(key_id, raw_key):
+        return {
+            "id": key_id,
+            "key": raw_key,
+            "key_prefix": raw_key[:12] + "...",
+            "name": "new-key",
+            "owner": "",
+            "status": "active",
+            "models": [],
+            "providers": [],
+        }
+
+    @patch("agentcc.services.auth_bridge.get_gateway_client")
+    def test_provision_key_never_overwrites_another_keys_row(
+        self, mock_get_client, organization, workspace, user
+    ):
+        older = AgentccAPIKey.objects.create(
+            gateway_key_id="key_2",
+            name="older-key",
+            organization=organization,
+            workspace=workspace,
+            key_hash="a" * 64,
+            key_prefix="sk-agentcc-a...",
+        )
+        mock_client = MagicMock()
+        # A gateway whose ID counter restarted hands out key_2 again.
+        mock_client.create_key.return_value = self._gateway_key(
+            "key_2", "sk-agentcc-b" + "0" * 47
+        )
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(auth_bridge.GatewayKeyIdCollision):
+            auth_bridge.provision_key(name="new-key", user=user)
+
+        older.refresh_from_db()
+        assert older.name == "older-key"
+        assert older.key_hash == "a" * 64
+        assert (
+            AgentccAPIKey.no_workspace_objects.filter(gateway_key_id="key_2").count()
+            == 1
+        )
+        # The key the gateway just minted is discarded, not left orphaned.
+        mock_client.revoke_key.assert_called_once_with("key_2")
+
+    @patch("agentcc.services.auth_bridge.get_gateway_client")
+    def test_provision_key_completes_a_row_a_racing_sync_stored(
+        self, mock_get_client, organization, workspace, user
+    ):
+        raw_key = "sk-agentcc-c" + "0" * 47
+        AgentccAPIKey.objects.create(
+            gateway_key_id="key_raced",
+            name="new-key",
+            organization=organization,
+            workspace=workspace,
+            key_prefix=raw_key[:12] + "...",
+        )
+        mock_client = MagicMock()
+        mock_client.create_key.return_value = self._gateway_key("key_raced", raw_key)
+        mock_get_client.return_value = mock_client
+
+        api_key, _ = auth_bridge.provision_key(name="new-key", user=user)
+
+        assert api_key.gateway_key_id == "key_raced"
+        assert api_key.key_hash == hashlib.sha256(raw_key.encode()).hexdigest()
+        mock_client.revoke_key.assert_not_called()
+
+    @patch("agentcc.services.auth_bridge.get_gateway_client")
+    def test_sync_pushes_keys_the_gateway_lost(
+        self, mock_get_client, organization, workspace
+    ):
+        lost = AgentccAPIKey.objects.create(
+            gateway_key_id="key_lost",
+            name="lost-on-restart",
+            organization=organization,
+            workspace=workspace,
+            key_hash="d" * 64,
+            key_prefix="sk-agentcc-d...",
+            allowed_models=["mock-gw"],
+        )
+        AgentccAPIKey.objects.create(
+            gateway_key_id="key_expired",
+            name="expired",
+            organization=organization,
+            workspace=workspace,
+            key_hash="e" * 64,
+            expires_at=timezone.now() - timedelta(days=1),
+        )
+        AgentccAPIKey.objects.create(
+            gateway_key_id="key_revoked",
+            name="revoked",
+            organization=organization,
+            workspace=workspace,
+            key_hash="f" * 64,
+            status=AgentccAPIKey.REVOKED,
+        )
+        AgentccAPIKey.objects.create(
+            gateway_key_id="key_no_hash",
+            name="imported-without-hash",
+            organization=organization,
+            workspace=workspace,
+        )
+        mock_client = MagicMock()
+        mock_client.list_keys.return_value = {"data": []}
+        mock_client.import_keys.return_value = {"received": 1, "loaded": 1}
+        mock_get_client.return_value = mock_client
+
+        synced = auth_bridge.sync_keys(org=organization)
+
+        assert synced == 1
+        (pushed,), _ = mock_client.import_keys.call_args
+        assert [k["id"] for k in pushed] == ["key_lost"]
+        assert pushed[0]["key_hash"] == lost.key_hash
+        assert pushed[0]["key_prefix"] == "sk-agentcc-d..."
+        assert pushed[0]["models"] == ["mock-gw"]
+        assert pushed[0]["metadata"]["org_id"] == str(organization.id)
+        # What goes over the wire must be JSON, never the raw key.
+        json.dumps(pushed)
+        assert "key" not in pushed[0]
+
+    @patch("agentcc.services.auth_bridge.get_gateway_client")
+    def test_sync_revokes_on_the_gateway_what_django_revoked(
+        self, mock_get_client, organization, workspace
+    ):
+        AgentccAPIKey.objects.create(
+            gateway_key_id="key_missed_revoke",
+            name="revoked-while-gateway-down",
+            organization=organization,
+            workspace=workspace,
+            key_hash="1" * 64,
+            key_prefix="sk-agentcc-1...",
+            status=AgentccAPIKey.REVOKED,
+        )
+        mock_client = MagicMock()
+        mock_client.list_keys.return_value = {
+            "data": [
+                {
+                    "id": "key_missed_revoke",
+                    "key_prefix": "sk-agentcc-1...",
+                    "status": "active",
+                    "metadata": {"org_id": str(organization.id)},
+                }
+            ]
+        }
+        mock_get_client.return_value = mock_client
+
+        auth_bridge.sync_keys(org=organization)
+
+        mock_client.revoke_key.assert_called_once_with("key_missed_revoke")
+        mock_client.import_keys.assert_not_called()
+
+    @patch("agentcc.services.auth_bridge.get_gateway_client")
+    def test_sync_leaves_a_row_alone_when_its_id_was_reissued(
+        self, mock_get_client, organization, workspace
+    ):
+        other_org = Organization.objects.create(name="Other Organization")
+        row = AgentccAPIKey.objects.create(
+            gateway_key_id="key_2",
+            name="other-orgs-key",
+            organization=other_org,
+            workspace=None,
+            key_hash="2" * 64,
+            key_prefix="sk-agentcc-2...",
+        )
+        mock_client = MagicMock()
+        mock_client.list_keys.return_value = {
+            "data": [
+                {
+                    "id": "key_2",
+                    "key_prefix": "sk-agentcc-9...",
+                    "status": "active",
+                    "metadata": {"org_id": str(organization.id)},
+                }
+            ]
+        }
+        mock_get_client.return_value = mock_client
+
+        auth_bridge.sync_keys(org=organization)
+
+        row.refresh_from_db()
+        assert row.organization_id == other_org.id
+        assert row.name == "other-orgs-key"
 
 
 @pytest.mark.integration
