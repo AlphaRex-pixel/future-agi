@@ -506,6 +506,68 @@ class BackendVariants(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Backend images built FROM futureagi/future-agi-base (docker-compose
+# .distributed.dev.yml builds the root Dockerfile)
+# ---------------------------------------------------------------------------
+
+FUTURE_AGI_BASE_DOCKERFILES = ("Dockerfile", "futureagi/Dockerfile")
+
+
+def _normalized(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def project_pins() -> dict[str, set[str]]:
+    """Package -> the exact versions requirements.txt and the extras pin."""
+    pins: dict[str, set[str]] = {}
+    requirements = (ROOT / "futureagi" / "requirements.txt").read_text("utf-8")
+    for name, version in re.findall(
+        r"(?m)^([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?==(\S+)", requirements
+    ):
+        pins.setdefault(_normalized(name), set()).add(version)
+    pyproject = (ROOT / "futureagi" / "pyproject.toml").read_text("utf-8")
+    for name, version in re.findall(
+        r'"([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?==([^";\s]+)', pyproject
+    ):
+        pins.setdefault(_normalized(name), set()).add(version)
+    return pins
+
+
+class FutureAgiBaseDockerfiles(unittest.TestCase):
+    """The packages these Dockerfiles install over future-agi-base v1.0.4
+    until a base rebuilt from requirements.txt replaces it."""
+
+    def pip_install(self, name: str) -> tuple[int, str]:
+        steps = instructions(ROOT / name)
+        ((index, rest),) = [
+            (index, rest)
+            for index, (keyword, rest) in enumerate(steps)
+            if keyword == "RUN" and rest.startswith("pip install")
+        ]
+        return index, rest
+
+    def test_the_pins_are_installed_before_the_source_copy(self):
+        for name in FUTURE_AGI_BASE_DOCKERFILES:
+            with self.subTest(dockerfile=name):
+                index, _ = self.pip_install(name)
+                steps = instructions(ROOT / name)
+                first_copy = next(
+                    i for i, (keyword, _) in enumerate(steps) if keyword == "COPY"
+                )
+                self.assertLess(index, first_copy)
+
+    def test_the_pins_match_the_project(self):
+        pins = project_pins()
+        for name in FUTURE_AGI_BASE_DOCKERFILES:
+            _, rest = self.pip_install(name)
+            mirrored = re.findall(r'"([A-Za-z0-9_.-]+)(?:\[[^\]]*\])?==([^"]+)"', rest)
+            self.assertTrue(mirrored)
+            for package, version in mirrored:
+                with self.subTest(dockerfile=name, package=package):
+                    self.assertEqual(pins.get(_normalized(package)), {version})
+
+
+# ---------------------------------------------------------------------------
 # Build-time scripts of the backend image (futureagi/docker)
 # ---------------------------------------------------------------------------
 
