@@ -541,6 +541,45 @@ def _revalidation_admission_limit() -> int:
     return max(1, _max_inflight_per_scope() - 1)
 
 
+def _scope_admission_has_capacity(identity: Any, *, limit: int) -> bool:
+    """Read-only: whether the scope has fewer than ``limit`` live jobs now.
+
+    A cheap pre-check, not the admission itself: the atomic claim still
+    decides. On any cache error it answers True and lets that claim decide
+    (and fail closed).
+    """
+
+    admission_key = _scope_admission_key(identity)
+    if admission_key is None:
+        return True
+    max_inflight = max(1, min(_max_inflight_per_scope(), int(limit)))
+    now_ms = int(time.time() * 1000)
+    try:
+        redis_client = _redis_cache_client()
+        if redis_client is not None:
+            raw_client = redis_client.get_client(write=True)
+            # Live members have an expiry score later than now (the claim
+            # script drops scores <= now before counting).
+            live = raw_client.zcount(
+                redis_client.make_key(admission_key), f"({now_ms}", "+inf"
+            )
+            return int(live) < max_inflight
+        raw_members = cache.get(admission_key)
+        members = raw_members if isinstance(raw_members, dict) else {}
+        live = sum(
+            1
+            for expiry in members.values()
+            if isinstance(expiry, int) and expiry > now_ms
+        )
+        return live < max_inflight
+    except Exception:
+        logger.warning(
+            "exact_aggregation_scope_admission_probe_failed",
+            exc_info=True,
+        )
+        return True
+
+
 def _claim_exact_refresh_admission(
     identity: Any,
     token: str,
@@ -1707,6 +1746,14 @@ def _revalidate_open_window_hit(
     task_queue = _configured_exact_aggregation_task_queue()
     if task_queue is None:
         return _decorate_refresh_state(previous, None)
+    admission_limit = _revalidation_admission_limit()
+    if not _scope_admission_has_capacity(identity, limit=admission_limit):
+        # The scope's spare slot is taken: serve the hit plain WITHOUT
+        # claiming. Claiming first would publish a "running" state for a job
+        # that is then refused, which concurrent polls report as refreshing
+        # and which makes an explicit Reload in that window find the claim
+        # taken and enqueue nothing.
+        return _decorate_refresh_state(previous, None)
     token = begin_exact_refresh(namespace, identity)
     if token is None:
         # A concurrent visit won the claim (or the cache is impaired): report
@@ -1721,8 +1768,9 @@ def _revalidate_open_window_hit(
         identity,
         token,
         lease_seconds=_refresh_dispatch_seconds(),
-        limit=_revalidation_admission_limit(),
+        limit=admission_limit,
     ):
+        # A job took the slot between the pre-check and this claim (rare).
         # Foreground work holds the scope's spare slot. The hit is still exact
         # for its window as of its completed_at, and is served plain: nothing
         # retries until a later visit finds a slot free (see the admission

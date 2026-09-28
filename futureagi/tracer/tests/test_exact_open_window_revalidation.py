@@ -366,6 +366,40 @@ def test_revalidation_never_takes_the_last_admission_slot(queue):
     assert cache.get(eac._refresh_lock_key(SESSION_NS, frozen)) is None
 
 
+def test_full_scope_never_writes_a_running_state_for_a_refused_revalidation(
+    monkeypatch, queue
+):
+    # Capacity is checked BEFORE the claim: a refused revalidation must not
+    # write a "running" state, even for the few ms before the refusal, or a
+    # concurrent poll reports refreshing for a job that never exists and an
+    # explicit Reload in that window finds the claim taken and is dropped.
+    identity = _identity()
+    _seed(SESSION_NS, identity, age=OLD)
+    frozen = eac.normalize_exact_observe_identity(identity)
+    assert eac._claim_exact_refresh_admission(
+        {**frozen, "metric_id": "tokens"}, "foreground", lease_seconds=600
+    )
+    claims: list[str] = []
+    real_begin = eac.begin_exact_refresh
+
+    def spy(namespace, identity):
+        claims.append(namespace)
+        return real_begin(namespace, identity)
+
+    monkeypatch.setattr(eac, "begin_exact_refresh", spy)
+
+    served = _read(SESSION_NS, identity)
+
+    assert served["query_refreshing"] is False
+    assert claims == []
+    assert queue == []
+
+    # The explicit Reload right after still takes the free foreground slot.
+    reloaded = _read(SESSION_NS, identity, refresh=True)
+    assert reloaded["query_refreshing"] is True
+    assert len(queue) == 1
+
+
 def test_foreground_cold_miss_still_gets_the_slot_revalidation_left(queue):
     revalidated = _identity()
     _seed(SESSION_NS, revalidated, age=OLD)
