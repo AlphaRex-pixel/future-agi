@@ -1,0 +1,33 @@
+import pytest
+
+from tfc.utils.redaction import redact_url_credentials
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("redis://:s3cret@redis:6379/2", "redis://:***@redis:6379/2"),
+        ("rediss://default:s3cret@redis:6380/0", "rediss://default:***@redis:6380/0"),
+        ("amqp://user:p%40ss:w0rd@rabbitmq:5672//", "amqp://user:***@rabbitmq:5672//"),
+        (
+            "connected to redis://:a@redis:6379/2 and postgres://u:b@db/x",
+            "connected to redis://:***@redis:6379/2 and postgres://u:***@db/x",
+        ),
+    ],
+)
+def test_masks_the_password(raw, expected):
+    assert redact_url_credentials(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "redis://redis:6379/0",
+        "amqp://guest@rabbitmq:5672//",
+        "http://clickhouse:8123/?query=a@b",
+        "https://example.com:443/users/someone@example.com",
+        "no url here: user:pass@host",
+    ],
+)
+def test_leaves_urls_without_a_password_alone(raw):
+    assert redact_url_credentials(raw) == raw
