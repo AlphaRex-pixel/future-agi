@@ -541,14 +541,17 @@ catalog, boots the stack with `bin/e2e up`, runs `bin/e2e test`, and always uplo
 HTML report (7-day retention); on failure it dumps `bin/e2e ps` and the last 200 log lines. The
 `E2E Tests Pass` gate fails closed unless every dependency succeeded or was legitimately skipped.
 
-The same job runs the suite against the Standalone stack as a nightly schedule and on demand, never
-per PR: run the workflow by hand with `stack: standalone`. That leg builds the four component
-images with the layer cache, assembles the app image with `bin/e2e build standalone-app`, and
-boots with `E2E_STACK=standalone`. The `upgrade` job in `.github/workflows/standalone-ci.yml` runs
-weekly and on demand. It installs v1.41.1 with its own `./bin/install` and sends a trace. Then it
-re-runs `./bin/install` at the head commit and checks three things: the install stays on the
-Distributed setup (`COMPOSE_FILE=docker-compose.distributed.yml` in `.env`), the first account still
-signs in, and the trace is still there.
+The same job runs the suite against the Standalone stack as a nightly schedule and on demand (run
+the workflow by hand with `stack: standalone`). A pull request that carries the `e2e-standalone`
+label runs it next to the Distributed leg, and `E2E Tests Pass` waits for both. The label counts
+only if the PR has it when the run starts, so add it and then push: a re-run keeps the labels of
+the run it repeats. The Standalone leg builds the four component images with the layer cache,
+assembles the app image with `bin/e2e build standalone-app`, and boots with `E2E_STACK=standalone`.
+The `upgrade` job in `.github/workflows/standalone-ci.yml` runs weekly and on demand. It installs
+v1.41.1 with its own `./bin/install` and sends a trace. Then it re-runs `./bin/install` at the head
+commit and checks three things: the install stays on the Distributed setup
+(`COMPOSE_FILE=docker-compose.distributed.yml` in `.env`), the first account still signs in, and the
+trace is still there.
 
 **Wall time in CI has not been measured yet** — the job has never run on a real PR. Record it on the
 first run and put the number here; the hard timeout is 90 minutes and the boot budgets above are the

@@ -6,7 +6,8 @@ on:
   push:
     branches: [dev, main]
   merge_group:
-  # The Standalone leg (E2E_STACK=standalone): nightly and on demand, never per PR.
+  # The Standalone leg (E2E_STACK=standalone): nightly, on demand, and next to
+  # the Distributed leg on a PR that carries the e2e-standalone label.
   schedule:
     - cron: "37 2 * * *"
   workflow_dispatch:
@@ -86,19 +87,30 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           DISPATCHED: ${{ inputs.stack }}
+          # The labels the PR had when this run started: a re-run keeps them,
+          # so add the label, then push.
+          STANDALONE_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'e2e-standalone') }}
         run: |
           case "$EVENT" in
-            schedule) stack=standalone ;;
-            workflow_dispatch) stack=$DISPATCHED ;;
-            *) stack=distributed ;;
+            schedule) stacks='["standalone"]' ;;
+            workflow_dispatch) stacks="[\"$DISPATCHED\"]" ;;
+            pull_request)
+              if [ "$STANDALONE_LABEL" = true ]; then
+                stacks='["distributed","standalone"]'
+              else
+                stacks='["distributed"]'
+              fi ;;
+            *) stacks='["distributed"]' ;;
           esac
-          echo "stacks=[\"$stack\"]" >> "$GITHUB_OUTPUT"
+          echo "stacks=$stacks" >> "$GITHUB_OUTPUT"
 
   e2e:
     name: e2e (${{ matrix.stack }})
     needs: changes
     if: needs.changes.outputs.any == 'true'
     strategy:
+      # A labelled PR runs both legs; one failing must not cancel the other.
+      fail-fast: false
       matrix:
         stack: ${{ fromJSON(needs.changes.outputs.stacks) }}
     runs-on: ubuntu-latest
