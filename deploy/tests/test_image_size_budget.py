@@ -373,6 +373,45 @@ class BudgetFileTests(unittest.TestCase):
                 with self.subTest(compose_file=compose_file, image=image):
                     self.assertIn((image, ""), self.entries())
 
+    def test_docs_images_md_states_these_budgets(self):
+        docs = (ROOT / "docs" / "images.md").read_text()
+        # "Images at a glance": image -> its last cell, the size budget.
+        documented = {
+            (image, suffix): row.rstrip().rstrip("|").rsplit("|", 1)[1].strip()
+            for row, image, suffix in re.findall(
+                r"(?m)^(\| `(futureagi/[a-z0-9-]+)(?::\*(-[a-z0-9]+))?` \|.*)$", docs
+            )
+        }
+        expected = {}
+        for entry in self.config["images"]:
+            mb = entry["budget_mb"]
+            if isinstance(mb, dict):
+                text = ", ".join(f"{mb[arch]:g} {arch}" for arch in mb)
+            else:
+                text = f"{mb:g}"
+            if not entry.get("enforce", True):
+                text += ", reported only"
+            expected[(entry["image"], entry.get("tag_suffix", ""))] = text
+        self.assertEqual({key: documented.get(key) for key in expected}, expected)
+        # The one row without a budget of its own.
+        self.assertEqual(
+            documented.keys() - expected.keys(), {("futureagi/code-executor-base", "")}
+        )
+        # The fresh-install total, and the slim variant's row in its own table.
+        (slim,) = [e for e in self.config["images"] if e.get("tag_suffix") == "-slim"]
+        for pattern, entry in (
+            (
+                r"([\d.]+) MB at most \(measured ([\d.]+)\)",
+                self.config["default_install"],
+            ),
+            (r"budget ([\d.]+) MB compressed \(measured ([\d.]+)\)", slim),
+        ):
+            with self.subTest(pattern=pattern):
+                self.assertEqual(
+                    re.search(pattern, docs).groups(),
+                    (f"{entry['budget_mb']:g}", f"{entry['measured_mb']:g}"),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
