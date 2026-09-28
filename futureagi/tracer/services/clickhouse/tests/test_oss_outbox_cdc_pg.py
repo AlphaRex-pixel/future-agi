@@ -679,6 +679,20 @@ def test_truncate_is_tombstoned_by_the_requested_reconcile(pg, ch, config):
 # ---------------------------------------------------------------------------
 
 
+class _OnePagePerTick:
+    """cdc's ``time``: a tick's budget runs out after one snapshot page, so a
+    snapshot has to resume from its stored cursor on the next tick."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    def monotonic(self):
+        return self.now
+
+
 def test_existing_rows_snapshot_resumably_without_looking_like_new_arrivals(
     pg, ch, config, monkeypatch
 ):
@@ -688,14 +702,44 @@ def test_existing_rows_snapshot_resumably_without_looking_like_new_arrivals(
         "SELECT gen_random_uuid(), 'old', %s FROM generate_series(1, 25)",
         (old,),
     )
-    monkeypatch.setattr(cdc, "SNAPSHOT_PAGE", 10)
+    # A page of 10: snapshot_page binds its default page size at import, so it
+    # is passed here, and every page ends the tick it runs in.
+    clock = _OnePagePerTick()
+    pages = []
+    snapshot_page = cdc.snapshot_page
+
+    def one_page(pg, ch, spec, version_clock, stats):
+        before = stats[f"{spec.name}.snapshot"]
+        done = snapshot_page(pg, ch, spec, version_clock, stats, page=10)
+        pages.append((spec.name, stats[f"{spec.name}.snapshot"] - before, done))
+        clock.now += 3600
+        return done
+
+    monkeypatch.setattr(cdc, "time", clock)
+    monkeypatch.setattr(cdc, "snapshot_page", one_page)
     result = _install(pg, ch, config, snapshot_budget_s=0)
     assert "tracer_trace" in result["pending_snapshots"] and not ch.live("tracer_trace")
     racing = _trace(pg, name="written during the snapshot")
 
-    tick = _drain(pg, ch, config)
+    copied = 0
+    for _ in range(len(TABLES) + 3):
+        tick = _drain(pg, ch, config)
+        copied += tick.get("tracer_trace.snapshot", 0)
+        if not tick["pending_snapshots"]:
+            break
+        if [p for p in pages if p[0] == "tracer_trace"] == [
+            ("tracer_trace", 10, False)
+        ]:
+            # Interrupted after its first page: the rest is still to come.
+            assert "tracer_trace" in cdc.status(pg, tables=TABLES)["pending_snapshots"]
 
-    assert tick["tracer_trace.snapshot"] == 25 + 1
+    # Three ticks resumed where the last stopped: every row copied once.
+    assert [p for p in pages if p[0] == "tracer_trace"] == [
+        ("tracer_trace", 10, False),
+        ("tracer_trace", 10, False),
+        ("tracer_trace", 6, True),
+    ]
+    assert copied == 25 + 1
     _assert_parity(pg, ch, ("tracer_trace",))
     live = ch.live("tracer_trace")
     olds = [r for k, r in live.items() if k != racing]
