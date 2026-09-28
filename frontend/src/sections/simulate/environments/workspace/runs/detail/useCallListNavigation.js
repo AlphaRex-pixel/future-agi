@@ -8,6 +8,13 @@ import {
   useRunCalls,
 } from "src/api/simulate-environments/runCalls";
 
+// A call can sit in several groups (one per sub-goal); prev/next visits it
+// once, where it first appears.
+function uniqueById(rows) {
+  const seen = new Set();
+  return rows.filter((row) => !seen.has(row.id) && seen.add(row.id));
+}
+
 // A fetched page's raw rows in on-screen order: each group's result ids, in
 // group order, the same way the table lays them out.
 function onScreenRows(data) {
@@ -15,10 +22,12 @@ function onScreenRows(data) {
   const groups = data?.groups ?? [];
   if (!groups.length) return results;
   const byId = new Map(results.map((row) => [row.id, row]));
-  const ids = new Set(groups.flatMap((group) => group.result_ids ?? []));
-  return [...ids]
-    .map((id) => byId.get(id))
-    .filter(Boolean);
+  return uniqueById(
+    groups
+      .flatMap((group) => group.result_ids ?? [])
+      .map((id) => byId.get(id))
+      .filter(Boolean),
+  );
 }
 
 /**
@@ -58,7 +67,8 @@ export default function useCallListNavigation({
   // The rows as they appear on screen: the table always groups, but fall back
   // to the results order if a response has no groups.
   const onScreen = useMemo(
-    () => (groups.length ? groups.flatMap((group) => group.rows) : tasks),
+    () =>
+      groups.length ? uniqueById(groups.flatMap((group) => group.rows)) : tasks,
     [groups, tasks],
   );
   const page = tableQuery?.page ?? 1;

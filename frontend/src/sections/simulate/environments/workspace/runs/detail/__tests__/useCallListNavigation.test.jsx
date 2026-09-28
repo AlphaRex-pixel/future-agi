@@ -114,6 +114,37 @@ describe("useCallListNavigation", () => {
     );
   });
 
+  it("visits a call once when it sits in several groups, and still reaches the rest", async () => {
+    // Sub-goal groups overlap: a is in both. On screen [a b] [a c] reads a b c.
+    axios.get.mockImplementation((_url, { params }) =>
+      Promise.resolve({
+        data: {
+          ...pageData(params.page),
+          count: 3,
+          total_pages: 1,
+          results: ["a", "b", "c"].map(row),
+          groups: [
+            { key: "g0", label: "Group 0", result_ids: ["a", "b"], total: 2 },
+            { key: "g1", label: "Group 1", result_ids: ["a", "c"], total: 2 },
+          ],
+        },
+      }),
+    );
+    const { result, onStep } = setup({ callId: "b" });
+    await waitFor(() => expect(result.current.hasNext).toBe(true));
+    expect(result.current.hasPrev).toBe(true);
+
+    act(() => result.current.onNext());
+    expect(onStep).toHaveBeenLastCalledWith(
+      expect.objectContaining({ task: expect.objectContaining({ id: "c" }) }),
+    );
+    onStep.mockClear();
+    act(() => result.current.onPrev());
+    expect(onStep).toHaveBeenLastCalledWith(
+      expect.objectContaining({ task: expect.objectContaining({ id: "a" }) }),
+    );
+  });
+
   it("crosses from the last row on screen to the next page's first row on screen", async () => {
     const { result, onStep } = setup({ callId: "c3" });
     await waitFor(() => expect(result.current.hasNext).toBe(true));
