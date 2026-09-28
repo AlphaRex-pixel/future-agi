@@ -337,6 +337,30 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnv_AllowPrivateProviderURLs(t *testing.T) {
+	for _, tt := range []struct {
+		env  string
+		want bool
+	}{
+		{"", false},
+		{"true", true},
+		{"1", true},
+		{"false", false},
+		{"yes-please", false}, // unparseable keeps the safe default
+	} {
+		t.Run(tt.env, func(t *testing.T) {
+			t.Setenv(EnvAllowPrivateProviderURLs, tt.env)
+			cfg, err := Load("")
+			if err != nil {
+				t.Fatalf("Load error: %v", err)
+			}
+			if cfg.OrgProviders.AllowPrivateURLs != tt.want {
+				t.Errorf("AllowPrivateURLs = %v, want %v", cfg.OrgProviders.AllowPrivateURLs, tt.want)
+			}
+		})
+	}
+}
+
 func testLicensePublicKey(t *testing.T) string {
 	t.Helper()
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
