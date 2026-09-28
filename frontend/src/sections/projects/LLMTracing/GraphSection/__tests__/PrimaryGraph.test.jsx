@@ -911,6 +911,71 @@ describe("PrimaryGraph", () => {
     );
   });
 
+  it("publishes a revalidating snapshot's age while its refresh runs", async () => {
+    // A revisit is served the cached exact snapshot marked refreshing while
+    // the same window is re-read. The header must show how old that snapshot
+    // is, not only a spinner, and move on once the new one lands.
+    vi.useFakeTimers();
+    const exactCompletion = vi.fn();
+    const refreshState = vi.fn();
+    window.addEventListener("observe-aggregation-completed", exactCompletion);
+    window.addEventListener("observe-aggregation-refresh-state", refreshState);
+    const snapshot = (completedAt, refreshing) => ({
+      data: {
+        result: {
+          metric_name: "latency",
+          data: [
+            {
+              timestamp: "2026-08-03T00:00:00Z",
+              value: 12,
+              primary_traffic: 1,
+            },
+          ],
+          query_complete: true,
+          query_status: "complete",
+          query_sampled: false,
+          query_cached: true,
+          query_refreshing: refreshing,
+          query_refresh_failed: false,
+          query_completed_at: completedAt,
+        },
+      },
+    });
+    axios.post
+      .mockResolvedValueOnce(snapshot("2026-08-03T02:00:00Z", true))
+      .mockResolvedValueOnce(snapshot("2026-08-03T03:30:00Z", false));
+
+    renderWithQueryClient(
+      <PrimaryGraph observeIdOverride="project-override" />,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(10));
+
+    expect(screen.getByTestId("apex-chart")).toBeInTheDocument();
+    expect(exactCompletion).toHaveBeenCalled();
+    expect(exactCompletion.mock.calls.at(-1)[0].detail).toEqual({
+      observeId: "project-override",
+      queryCompletedAt: "2026-08-03T02:00:00.000Z",
+    });
+    expect(refreshState.mock.calls.at(-1)[0].detail.refreshing).toBe(true);
+
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    await act(async () => vi.advanceTimersByTimeAsync(10));
+
+    expect(axios.post).toHaveBeenCalledTimes(2);
+    expect(exactCompletion.mock.calls.at(-1)[0].detail.queryCompletedAt).toBe(
+      "2026-08-03T03:30:00.000Z",
+    );
+    expect(refreshState.mock.calls.at(-1)[0].detail.refreshing).toBe(false);
+    window.removeEventListener(
+      "observe-aggregation-completed",
+      exactCompletion,
+    );
+    window.removeEventListener(
+      "observe-aggregation-refresh-state",
+      refreshState,
+    );
+  });
+
   it("terminalizes a failed exact refresh instead of polling forever", async () => {
     vi.useFakeTimers();
     axios.post.mockResolvedValue({

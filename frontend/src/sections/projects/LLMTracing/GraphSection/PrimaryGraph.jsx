@@ -811,6 +811,17 @@ const PrimaryGraph = ({
         updatedAt: completedAt,
       });
     }
+    const publishSnapshotAge = () => {
+      if (!completedAt) return;
+      window.dispatchEvent(
+        new CustomEvent("observe-aggregation-completed", {
+          detail: {
+            observeId: effectiveObserveId,
+            queryCompletedAt: completedAt.toISOString(),
+          },
+        }),
+      );
+    };
     if (
       isRefreshing &&
       !refreshFailed &&
@@ -818,6 +829,10 @@ const PrimaryGraph = ({
     ) {
       setRefreshUnavailable(graphReadState !== "complete");
       notifyAggregationRefresh(true);
+      // A cached exact snapshot served while its window is re-read (a
+      // revisit's background revalidation, or an explicit Reload) is shown
+      // now: publish its age so the header says how old it is.
+      if (graphReadState === "complete") publishSnapshotAge();
       return;
     }
     notifyAggregationRefresh(false);
@@ -830,16 +845,7 @@ const PrimaryGraph = ({
       return;
     }
     setRefreshUnavailable(false);
-    if (completedAt) {
-      window.dispatchEvent(
-        new CustomEvent("observe-aggregation-completed", {
-          detail: {
-            observeId: effectiveObserveId,
-            queryCompletedAt: completedAt.toISOString(),
-          },
-        }),
-      );
-    }
+    publishSnapshotAge();
   }, [
     effectiveObserveId,
     graphData,
