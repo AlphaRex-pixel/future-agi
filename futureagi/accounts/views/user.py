@@ -5,9 +5,12 @@ import requests
 import structlog
 from django.contrib.auth.hashers import check_password
 from django.core.cache import cache
+from django.db import DatabaseError, InterfaceError
 from django.db.models import Q
 from django.utils import timezone
+from django_redis.exceptions import ConnectionInterrupted
 from drf_yasg.utils import swagger_auto_schema
+from redis.exceptions import RedisError
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -64,6 +67,15 @@ from tfc.utils.general_methods import GeneralMethods
 from tracer.models.project import Project
 
 logger = structlog.get_logger(__name__)
+
+# Postgres or Redis being slow or down says nothing about the password, so a
+# login that fails with one of these must not count towards the lockout.
+LOGIN_INFRASTRUCTURE_ERRORS = (
+    DatabaseError,
+    InterfaceError,
+    ConnectionInterrupted,
+    RedisError,
+)
 
 
 @swagger_auto_schema(
@@ -436,6 +448,22 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             track_mixpanel_event(MixpanelEvents.LOGIN_CLICK.value, properties)
 
             return response
+
+        except LOGIN_INFRASTRUCTURE_ERRORS as exc:
+            # The cache may be what is down, so don't touch the attempt counter.
+            logger.exception(
+                "login_infrastructure_unavailable",
+                email=request.data.get("email", "").lower(),
+                error_type=type(exc).__name__,
+            )
+            return self._gm.custom_error_response(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                {
+                    "error": "Login temporarily unavailable",
+                    "error_code": "LOGIN_SERVICE_UNAVAILABLE",
+                    "message": "Sign-in is temporarily unavailable. Please try again in a moment.",
+                },
+            )
 
         except Exception:
             # Log the full traceback so masked login errors are debuggable.
