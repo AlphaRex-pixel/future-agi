@@ -68,6 +68,18 @@ func recordLogs(t *testing.T) *logRecorder {
 	return rec
 }
 
+// waitFor fails the test unless cond becomes true within 5 seconds.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // shortenStartupSync runs the startup sync on a test-sized schedule.
 func shortenStartupSync(t *testing.T, firstRetry, maxRetry, warnAfter, warnEvery time.Duration) {
 	t.Helper()
@@ -80,15 +92,33 @@ func shortenStartupSync(t *testing.T, firstRetry, maxRetry, warnAfter, warnEvery
 
 // fakeControlPlane answers 503 on both bulk endpoints while down reports true,
 // then serves one org and one API key (sk-agentcc-ui-key, as key_7). Setting
-// orgsBroken or keysBroken makes that endpoint answer 500 regardless; setting
-// noKeys makes the keys endpoint answer an empty key set, as on a fresh install.
+// orgsBroken or keysBroken makes that endpoint answer 500 regardless, and
+// orgsFailNext or keysFailNext makes it answer 500 to that many more requests;
+// setting noKeys makes the keys endpoint answer an empty key set, as on a
+// fresh install.
 type fakeControlPlane struct {
 	*httptest.Server
-	orgRequests atomic.Int32
-	keyRequests atomic.Int32
-	orgsBroken  atomic.Bool
-	keysBroken  atomic.Bool
-	noKeys      atomic.Bool
+	orgRequests  atomic.Int32
+	keyRequests  atomic.Int32
+	orgsBroken   atomic.Bool
+	keysBroken   atomic.Bool
+	orgsFailNext atomic.Int32
+	keysFailNext atomic.Int32
+	noKeys       atomic.Bool
+}
+
+// takeFailure reports whether a request should fail because n asked for more
+// failures, and counts this one off.
+func takeFailure(n *atomic.Int32) bool {
+	for {
+		left := n.Load()
+		if left <= 0 {
+			return false
+		}
+		if n.CompareAndSwap(left, left-1) {
+			return true
+		}
+	}
 }
 
 func newFakeControlPlane(t *testing.T, down func() bool) *fakeControlPlane {
@@ -98,7 +128,7 @@ func newFakeControlPlane(t *testing.T, down func() bool) *fakeControlPlane {
 		switch r.URL.Path {
 		case "/agentcc/org-configs/bulk/":
 			cp.orgRequests.Add(1)
-			if cp.orgsBroken.Load() {
+			if cp.orgsBroken.Load() || takeFailure(&cp.orgsFailNext) {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -112,7 +142,7 @@ func newFakeControlPlane(t *testing.T, down func() bool) *fakeControlPlane {
 			})
 		case "/agentcc/api-keys/bulk/":
 			cp.keyRequests.Add(1)
-			if cp.keysBroken.Load() {
+			if cp.keysBroken.Load() || takeFailure(&cp.keysFailNext) {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -377,18 +407,7 @@ func TestRunControlPlaneSync_PeriodicSyncIsQuietUntilItLoads(t *testing.T) {
 		<-done
 	}()
 
-	waitFor := func(what string, cond func() bool) {
-		t.Helper()
-		deadline := time.Now().Add(5 * time.Second)
-		for !cond() {
-			if time.Now().After(deadline) {
-				t.Fatalf("timed out waiting for %s", what)
-			}
-			time.Sleep(time.Millisecond)
-		}
-	}
-
-	waitFor("periodic failures while the control plane starts", func() bool {
+	waitFor(t, "periodic failures while the control plane starts", func() bool {
 		return logs.count(slog.LevelInfo, "periodic sync failed") >= 2 &&
 			logs.count(slog.LevelInfo, "periodic key sync failed") >= 2
 	})
@@ -397,14 +416,14 @@ func TestRunControlPlaneSync_PeriodicSyncIsQuietUntilItLoads(t *testing.T) {
 	}
 
 	down.Store(false)
-	waitFor("the startup and periodic syncs to load", func() bool {
+	waitFor(t, "the startup and periodic syncs to load", func() bool {
 		return logs.count(slog.LevelInfo, "control plane startup sync succeeded") == 1 &&
 			logs.count(slog.LevelDebug, "periodic sync completed") >= 1
 	})
 	assertSynced(t, store, ks)
 
 	cp.orgsBroken.Store(true)
-	waitFor("a WARN for a periodic failure after loading", func() bool {
+	waitFor(t, "a WARN for a periodic failure after loading", func() bool {
 		return logs.count(slog.LevelWarn, "periodic sync failed") >= 1
 	})
 }
@@ -431,29 +450,91 @@ func TestRunControlPlaneSync_NoKeysYetIsNotAWarning(t *testing.T) {
 		<-done
 	}()
 
-	waitFor := func(what string, cond func() bool) {
-		t.Helper()
-		deadline := time.Now().Add(5 * time.Second)
-		for !cond() {
-			if time.Now().After(deadline) {
-				t.Fatalf("timed out waiting for %s", what)
-			}
-			time.Sleep(time.Millisecond)
-		}
-	}
-
-	waitFor("periodic key syncs of the empty key set", func() bool { return cp.keyRequests.Load() >= 5 })
+	waitFor(t, "periodic key syncs of the empty key set", func() bool { return cp.keyRequests.Load() >= 5 })
 	if warns := logs.messages(slog.LevelWarn); len(warns) != 0 {
 		t.Fatalf("logged WARN records %q for an empty key set", warns)
 	}
 
 	cp.keysBroken.Store(true)
-	waitFor("a WARN for a periodic key sync failure", func() bool {
+	waitFor(t, "a WARN for a periodic key sync failure", func() bool {
 		return logs.count(slog.LevelWarn, "periodic key sync failed") >= 1
 	})
 
 	cp.keysBroken.Store(false)
 	cp.noKeys.Store(false)
-	waitFor("the first key to load", func() bool { return ks.Authenticate("sk-agentcc-ui-key") != nil })
+	waitFor(t, "the first key to load", func() bool { return ks.Authenticate("sk-agentcc-ui-key") != nil })
 	assertSynced(t, store, ks)
+}
+
+// One missed periodic sync is INFO: a backend restart (Standalone stops the API
+// before the gateway; a Distributed or Helm rollout) misses a tick. A second
+// failure in a row warns, and a success starts the count again.
+func TestRunControlPlaneSync_OneMissedPeriodicSyncIsNotAWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		startup bool
+	}{
+		{"after a startup sync", true},
+		{"periodic sync only", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := recordLogs(t)
+			shortenStartupSync(t, time.Hour, time.Hour, time.Hour, time.Hour)
+			cp := newFakeControlPlane(t, func() bool { return false })
+			store, ks := NewStore(), auth.NewKeyStore(config.AuthConfig{})
+
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan struct{})
+			go func() {
+				RunControlPlaneSync(ctx, tc.startup, 5*time.Millisecond, cp.URL, "token", store, ks)
+				close(done)
+			}()
+			defer func() {
+				cancel()
+				<-done
+			}()
+
+			// Two periodic org syncs mean a periodic key sync has run in between.
+			synced := func() int { return logs.count(slog.LevelDebug, "periodic sync completed") }
+			waitFor(t, "the periodic sync to load", func() bool {
+				return synced() >= 2 &&
+					(!tc.startup || logs.count(slog.LevelInfo, "control plane startup sync succeeded") == 1)
+			})
+			assertSynced(t, store, ks)
+
+			// failTimes makes both halves fail n periodic syncs in a row, then
+			// waits for a periodic sync of each to succeed again.
+			failTimes := func(n int32) {
+				t.Helper()
+				cp.orgsFailNext.Store(n)
+				cp.keysFailNext.Store(n)
+				waitFor(t, "the failures to be served", func() bool {
+					return cp.orgsFailNext.Load() == 0 && cp.keysFailNext.Load() == 0
+				})
+				after := synced()
+				waitFor(t, "the periodic sync to recover", func() bool { return synced() >= after+2 })
+			}
+			levels := func(msg string) (info, warn int) {
+				return logs.count(slog.LevelInfo, msg), logs.count(slog.LevelWarn, msg)
+			}
+			check := func(when string, wantInfo, wantWarn int) {
+				t.Helper()
+				for _, msg := range []string{"periodic sync failed", "periodic key sync failed"} {
+					if info, warn := levels(msg); info != wantInfo || warn != wantWarn {
+						t.Fatalf("%s: %q logged %d INFO and %d WARN, want %d and %d (WARN records %q)",
+							when, msg, info, warn, wantInfo, wantWarn, logs.messages(slog.LevelWarn))
+					}
+				}
+			}
+
+			failTimes(1)
+			check("after one missed sync", 1, 0)
+
+			failTimes(2)
+			check("after two failures in a row", 2, 1)
+
+			failTimes(1)
+			check("after a success and one more missed sync", 3, 1)
+		})
+	}
 }

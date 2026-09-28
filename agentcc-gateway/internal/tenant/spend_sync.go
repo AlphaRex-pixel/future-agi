@@ -79,14 +79,17 @@ func StartPeriodicSync(ctx context.Context, interval time.Duration, baseURL, adm
 	runPeriodicSync(ctx, interval, baseURL, adminToken, store, keyStore, false)
 }
 
-// runPeriodicSync is StartPeriodicSync. With quietUntilLoaded, the org and key
-// syncs each log their failures at INFO until they first succeed here, and at
-// WARN after that.
+// runPeriodicSync is StartPeriodicSync. The org and key syncs each log a
+// failure at INFO unless it is the second or later in a row, when it is WARN:
+// one missed tick is a backend restart (Standalone stops the API before the
+// gateway; a Distributed or Helm rollout), two are an outage. With
+// quietUntilLoaded, every failure is INFO until that sync first succeeds here.
 func runPeriodicSync(ctx context.Context, interval time.Duration, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore, quietUntilLoaded bool) {
 	if interval <= 0 || baseURL == "" {
 		return
 	}
-	orgsLoaded, keysLoaded := !quietUntilLoaded, !quietUntilLoaded
+	orgs := periodicFailures{loaded: !quietUntilLoaded}
+	keys := periodicFailures{loaded: !quietUntilLoaded}
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -101,16 +104,16 @@ func runPeriodicSync(ctx context.Context, interval time.Duration, baseURL, admin
 		case <-ticker.C:
 			syncCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			if err := SyncFromControlPlane(syncCtx, baseURL, adminToken, store); err != nil {
-				slog.Log(ctx, periodicFailureLevel(orgsLoaded), "periodic sync failed", "error", err)
+				slog.Log(ctx, orgs.failed(), "periodic sync failed", "error", err)
 			} else {
-				orgsLoaded = true
+				orgs.succeeded()
 				slog.Debug("periodic sync completed", "orgs", store.Count())
 			}
 			if keyStore != nil {
 				if err := auth.SyncKeysFromControlPlane(syncCtx, baseURL, adminToken, keyStore); err != nil {
-					slog.Log(ctx, periodicFailureLevel(keysLoaded), "periodic key sync failed", "error", err)
+					slog.Log(ctx, keys.failed(), "periodic key sync failed", "error", err)
 				} else {
-					keysLoaded = true
+					keys.succeeded()
 				}
 			}
 			cancel()
@@ -118,9 +121,23 @@ func runPeriodicSync(ctx context.Context, interval time.Duration, baseURL, admin
 	}
 }
 
-func periodicFailureLevel(loaded bool) slog.Level {
-	if loaded {
+// periodicFailures tracks one half of the periodic sync: whether it has
+// loaded, and how many times in a row it has failed.
+type periodicFailures struct {
+	loaded bool
+	inARow int
+}
+
+// failed counts a failure and returns the level to log it at.
+func (f *periodicFailures) failed() slog.Level {
+	f.inARow++
+	if f.loaded && f.inARow >= 2 {
 		return slog.LevelWarn
 	}
 	return slog.LevelInfo
+}
+
+func (f *periodicFailures) succeeded() {
+	f.loaded = true
+	f.inARow = 0
 }
