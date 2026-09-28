@@ -12,6 +12,7 @@ import ContactInformation from "./ContactInformation";
 import ScenarioCount from "./ScenarioCount";
 import { DEFAULT_SCENARIOS, isValidScenarioCount } from "./scenarioCountRules";
 import RuntimePreflight from "./RuntimePreflight";
+import { CreditExhaustionBanner } from "src/components/CreditExhaustionBanner";
 import ParallelismField from "./ParallelismField";
 import usePanelBuild from "../hooks/usePanelBuild";
 import { ENTRY_AGENT_TYPES } from "../agentTypes";
@@ -225,6 +226,11 @@ export default function PanelHostedPlatform() {
         onRun={() => build.runPreflight(buildSource())}
         result={build.result}
         error={build.error}
+      />
+      <CreditExhaustionBanner
+        error={build.creditExhaustion.error}
+        onUpgrade={build.creditExhaustion.onUpgrade}
+        onDismiss={build.creditExhaustion.onDismiss}
       />
       <ContinueRow
         disabled={!build.readyToSubmit || !isValidScenarioCount(scenarioCount)}

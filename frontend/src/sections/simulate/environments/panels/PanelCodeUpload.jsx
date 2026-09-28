@@ -13,6 +13,7 @@ import EnvironmentValues from "./EnvironmentValues";
 import ScenarioCount from "./ScenarioCount";
 import { DEFAULT_SCENARIOS, isValidScenarioCount } from "./scenarioCountRules";
 import RuntimePreflight from "./RuntimePreflight";
+import { CreditExhaustionBanner } from "src/components/CreditExhaustionBanner";
 import ParallelismField from "./ParallelismField";
 import usePanelBuild from "../hooks/usePanelBuild";
 import { CODE_UPLOAD_COPY } from "../codeUpload.constants";
@@ -302,6 +303,11 @@ export default function PanelCodeUpload() {
         onRun={() => build.runPreflight(buildSource())}
         result={build.result}
         error={build.error}
+      />
+      <CreditExhaustionBanner
+        error={build.creditExhaustion.error}
+        onUpgrade={build.creditExhaustion.onUpgrade}
+        onDismiss={build.creditExhaustion.onDismiss}
       />
       <ContinueRow
         disabled={!build.readyToSubmit || !isValidScenarioCount(scenarioCount)}

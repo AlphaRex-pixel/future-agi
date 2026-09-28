@@ -8,6 +8,7 @@ import { useBuildEnvironment } from "src/api/simulate-environments/environments"
 import { useEnvironmentsStore } from "../store/useEnvironmentsStore";
 import { prepareSourceForBuild } from "./prepareSourceForBuild";
 import { clampParallelism } from "../parallelism.constants";
+import { useCreditExhaustion } from "src/hooks/use-credit-exhaustion";
 
 /**
  * The inline build machine shared by every source panel. A panel calls:
@@ -26,6 +27,12 @@ export default function usePanelBuild() {
   const setDraft = useEnvironmentsStore((s) => s.setDraft);
   const preflight = useRuntimePreflight();
   const build = useBuildEnvironment();
+  const {
+    exhaustionError,
+    handleError: handleCreditError,
+    handleUpgradeClick,
+    handleDismiss,
+  } = useCreditExhaustion({ feature: "hosted_harness" });
   // The create POST is a real network step, so the CTA shows a pending state
   // through it and the guard blocks a second submit until it resolves.
   const [committing, setCommitting] = useState(false);
@@ -108,10 +115,12 @@ export default function usePanelBuild() {
       // silently strand the user on the form.
       onError: (error) => {
         setCommitting(false);
-        enqueueSnackbar(errorMessage(error), { variant: "error" });
+        if (!handleCreditError(error)) {
+          enqueueSnackbar(errorMessage(error), { variant: "error" });
+        }
       },
     });
-  }, [prepared, preflight.data, committing, parallelismEnabled, setDraft, build, navigate]);
+  }, [prepared, preflight.data, committing, parallelismEnabled, setDraft, build, navigate, handleCreditError]);
 
   const status = preparing || preflight.isPending
     ? "running"
@@ -135,5 +144,10 @@ export default function usePanelBuild() {
     runPreflight,
     resetPreflight,
     commitBuild,
+    creditExhaustion: {
+      error: exhaustionError,
+      onUpgrade: handleUpgradeClick,
+      onDismiss: handleDismiss,
+    },
   };
 }
