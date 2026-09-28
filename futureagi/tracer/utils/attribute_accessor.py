@@ -19,7 +19,11 @@ Usage:
 import json
 from typing import Any, Optional
 
+import structlog
+
 from tracer.models.observation_span import ObservationSpan
+
+logger = structlog.get_logger(__name__)
 
 
 class SpanAttributeAccessor:
@@ -138,17 +142,20 @@ def get_span_attribute(span: ObservationSpan, key: str, default: Any = None) -> 
     return SpanAttributeAccessor(span).get(key, default)
 
 
-def span_raw_log(attrs) -> dict:
+def span_raw_log(attrs, *, span_id=None) -> dict:
     """The provider call payload (``raw_log``) in a voice span's attributes.
 
     ClickHouse keeps it as a JSON string in ``attrs_string`` (collector
     ingest) or as an object in ``attributes_extra`` (PG-era rows); return a
-    dict either way, ``{}`` when absent or unparseable.
+    dict either way, ``{}`` when absent, unparseable or not an object. An
+    unparseable payload is logged with *span_id*, never its content (it
+    carries phone numbers).
     """
     raw_log = attrs.get("raw_log")
-    if isinstance(raw_log, str):
+    if isinstance(raw_log, str) and raw_log:
         try:
             raw_log = json.loads(raw_log)
         except json.JSONDecodeError:
+            logger.warning("raw_log_unparseable", span_id=span_id, exc_info=True)
             return {}
     return raw_log if isinstance(raw_log, dict) else {}

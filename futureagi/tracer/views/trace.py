@@ -173,6 +173,7 @@ from tracer.services.users_list_manager import USER_EXPORT_PAGE_SIZE, UsersListM
 from tracer.utils.annotations import (
     build_annotation_subqueries as _build_annotation_subqueries_impl,
 )
+from tracer.utils.attribute_accessor import span_raw_log
 from tracer.utils.bounded_csv import (
     BOUNDED_EXPORT_PAGE_SIZE,
     bounded_page_csv_response,
@@ -2146,18 +2147,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             or mono.get("assistant_url")
         )
 
-    @staticmethod
-    def _coerce_raw_log(value):
-        """raw_log rides in span attributes as a JSON string (collector path) or a
-        dict (legacy PG+CDC). Return a dict either way so process_raw_logs can
-        recompute status/duration/recording_available/transcript from it."""
-        if isinstance(value, str):
-            try:
-                return json.loads(value) or {}
-            except (json.JSONDecodeError, TypeError):
-                return {}
-        return value or {}
-
     def populate_call_logs_result(
         self, qs, eval_configs, annotation_labels=None, *, detail_mode=False
     ):
@@ -2209,7 +2198,7 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             recording = self._build_recording_dict(attrs)
 
             # Raw provider payload if present (collector ships it as JSON string)
-            raw_log = self._coerce_raw_log(attrs.get("raw_log"))
+            raw_log = span_raw_log(attrs)
             provider = trace.provider or "vapi"
 
             processed_log = ObservabilityService.process_raw_logs(
@@ -4031,7 +4020,8 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
         # fi.simulator.call_execution_id and similar keys.
         eval_attrs = span_attrs.get("eval_attributes", {}) or {}
 
-        raw_log = self._coerce_raw_log(span_attrs.get("raw_log"))
+        root_span_id = str(row.get("span_id", row.get("id", "")))
+        raw_log = span_raw_log(span_attrs, span_id=root_span_id)
         metadata_raw = row.get("metadata_json") or "{}"
         try:
             metadata = (
@@ -4066,7 +4056,6 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
         recording = self._build_recording_dict(attr_str)
 
         # Build observation_span array — root span first
-        root_span_id = str(row.get("span_id", row.get("id", "")))
         observation_span = [
             {
                 "id": root_span_id,
@@ -6212,13 +6201,13 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             span_attrs = attr_row.get("span_attributes") or {}
             provider = attr_row.get("provider") or provider
 
+            raw_log = span_raw_log(span_attrs, span_id=span_id)
             # Post-filter simulator calls in Python (can't do in CH without OOM)
             if sim_flag and VoiceCallListQueryBuilderV2.is_simulator_call(
-                span_attrs, provider
+                raw_log, provider
             ):
                 continue
 
-            raw_log = self._coerce_raw_log(span_attrs.get("raw_log"))
             voice_metrics = self._extract_voice_turn_and_talk_metrics(
                 span_attrs, raw_log
             )

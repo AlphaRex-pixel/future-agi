@@ -667,7 +667,7 @@ def _get_first_voice_span_raw_log(trace_query: QuerySet) -> dict | None:
         return None
 
     attrs = merge_span_attrs(_chspan_to_legacy_dict(conversation_span))
-    return span_raw_log(attrs) or None
+    return span_raw_log(attrs, span_id=str(conversation_span.id)) or None
 
 
 def _find_message_by_role(messages: list, role: str) -> str:

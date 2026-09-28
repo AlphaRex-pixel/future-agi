@@ -37,6 +37,7 @@ from tracer.models.observation_span import (
 )
 from tracer.models.trace import Trace
 from tracer.models.trace_session import TraceSession
+from tracer.utils.attribute_accessor import span_raw_log
 from tracer.utils.helper import (
     FieldConfig,
     get_default_project_version_config,
@@ -153,26 +154,16 @@ def _walk_raw_log(raw_log: dict, path: str):
 _MISSING = object()
 
 
-def _coerce_raw_log(value) -> dict:
-    """``raw_log`` is a dict on PG spans and a JSON string on spans loaded
-    from ClickHouse (``attrs_string``); return a dict either way."""
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except (json.JSONDecodeError, TypeError):
-            return {}
-    return value if isinstance(value, dict) else {}
-
-
 def _voice_call_log(span, raw_log: dict, span_attrs: dict) -> dict:
     """The call fields the voice call list and detail show for ``span``.
 
     Built by the same ``process_raw_logs`` those endpoints use, so a field
     mapped from the call preview (``call_summary``, ``ended_reason``, …)
     resolves to the value the user saw there. A fallback, never a gate:
-    returns ``{}`` when the payload cannot be processed. The builder rewrites
-    ``raw_log["messages"]`` in place, so it gets a copy and the raw_log walk
-    in ``_process_mapping`` keeps reading the stored payload.
+    returns ``{}`` when the builder cannot read the payload; any other error
+    fails the eval. The builder rewrites ``raw_log["messages"]`` in place, so
+    it gets a copy and the raw_log walk in ``_process_mapping`` keeps reading
+    the stored payload.
     """
     from tracer.services.observability_providers import ObservabilityService
 
@@ -182,11 +173,25 @@ def _voice_call_log(span, raw_log: dict, span_attrs: dict) -> dict:
             getattr(span, "provider", None),
             span_attributes=span_attrs,
         )
-    except Exception as e:
+    # What the builder raises on a payload it cannot read: a field of another
+    # type or shape, a value it cannot parse or validate (pydantic's
+    # ValidationError is a ValueError), or a timestamp past what datetime
+    # (OverflowError) or the platform's gmtime (OSError) can represent.
+    except (
+        AttributeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        OverflowError,
+        OSError,
+    ) as e:
+        # The payload carries phone numbers and a message can echo it: log the
+        # type as a field, and leave the message to the traceback.
         logger.warning(
             "voice_call_log_unavailable",
             span_id=str(getattr(span, "id", "")),
-            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True,
         )
         return {}
     return processed if isinstance(processed, dict) else {}
@@ -806,7 +811,7 @@ def _process_mapping(
             and span.observation_type == ObservationType.CONVERSATION
         ):
             if voice_raw_log is None:
-                voice_raw_log = _coerce_raw_log(span_attrs.get("raw_log"))
+                voice_raw_log = span_raw_log(span_attrs, span_id=str(span.id))
             walked = _walk_raw_log(voice_raw_log, attribute)
             if walked is _MISSING:
                 if voice_call_log is None:

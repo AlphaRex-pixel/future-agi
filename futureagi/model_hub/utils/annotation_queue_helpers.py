@@ -926,15 +926,16 @@ def _batch_ch_spans(
                 dedup_via_limit_by=True,  # see _batch_ch_trace_roots (TH-7226)
             )
     except Exception as exc:
+        if raise_on_error:
+            raise  # the write fails; its request boundary logs it once
         logger.warning(
             "ch_bulk_resolve_failed",
             source_type="span",
             count=len(span_ids),
-            error=str(exc),
+            error_type=type(exc).__name__,
             caller=caller,
+            exc_info=True,
         )
-        if raise_on_error:
-            raise
         return {}
     if not reject_ambiguous_ids:
         return {str(span.id): span for span in spans}
@@ -1012,15 +1013,16 @@ def _batch_ch_trace_roots(
                 ):
                     roots_by_trace.setdefault(str(span.trace_id), []).append(span)
     except Exception as exc:
+        if raise_on_error:
+            raise  # the write fails; its request boundary logs it once
         logger.warning(
             "ch_bulk_resolve_failed",
             source_type="trace",
             count=len(ids),
-            error=str(exc),
+            error_type=type(exc).__name__,
             caller=caller,
+            exc_info=True,
         )
-        if raise_on_error:
-            raise
         return {}
     return {
         trace_id: _pick_conversation_root(spans)
@@ -1047,15 +1049,16 @@ def _batch_ch_session_fields(
             or {}
         )
     except Exception as exc:
+        if raise_on_error:
+            raise  # the write fails; its request boundary logs it once
         logger.warning(
             "ch_bulk_resolve_failed",
             source_type="session",
             count=len(session_ids),
-            error=str(exc),
+            error_type=type(exc).__name__,
             caller=caller,
+            exc_info=True,
         )
-        if raise_on_error:
-            raise
         return {}
 
 
@@ -1093,15 +1096,16 @@ def _newest_ch_source_projects(
                     )
                 )
     except Exception as exc:
+        if raise_on_error:
+            raise  # the write fails; its request boundary logs it once
         logger.warning(
             "ch_bulk_resolve_failed",
             source_type="project",
             count=len(span_ids) + len(trace_ids),
-            error=str(exc),
+            error_type=type(exc).__name__,
             caller=caller,
+            exc_info=True,
         )
-        if raise_on_error:
-            raise
         return {}, {}
     return span_projects, trace_projects
 

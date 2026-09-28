@@ -493,6 +493,79 @@ def test_call_log_falsy_value_still_resolves(ch_voice_span, missing_eval_templat
     assert out == {"n": "0"}
 
 
+# The call-log fallback reads a payload the builder may not understand. That is
+# a logged miss; a builder bug is not, and must fail the eval where it is logged.
+
+from types import SimpleNamespace  # noqa: E402
+
+from structlog.testing import capture_logs  # noqa: E402
+
+from tracer.services.observability_providers import (  # noqa: E402
+    ObservabilityService,
+)
+from tracer.utils.eval import _voice_call_log  # noqa: E402
+
+_CALLER = "+15551234567"
+
+
+@pytest.mark.parametrize(
+    "provider,raw_log,error_type",
+    [
+        ("vapi", {"startedAt": _CALLER, "endedAt": "2026-01-01"}, "ValueError"),
+        ("vapi", {"startedAt": 1, "endedAt": 2}, "TypeError"),
+        ("vapi", {"messages": [{}, _CALLER]}, "AttributeError"),
+        ("retell", {"transcript_with_tool_calls": [{"words": {"w": 1}}]}, "KeyError"),
+        # A message time (ms) past any datetime, and past what gmtime handles.
+        ("vapi", {"messages": [{}, {"role": "user", "time": 1e25}]}, "OverflowError"),
+        ("vapi", {"messages": [{}, {"role": "user", "time": 1e20}]}, "OSError"),
+    ],
+)
+def test_call_log_payload_error_is_a_logged_miss(provider, raw_log, error_type):
+    span = SimpleNamespace(id="span-1", provider=provider)
+
+    with capture_logs() as logs:
+        assert _voice_call_log(span, raw_log, {}) == {}
+
+    [warning] = logs
+    assert warning["event"] == "voice_call_log_unavailable"
+    assert warning["log_level"] == "warning"
+    assert warning["span_id"] == "span-1"
+    assert warning["error_type"] == error_type
+    assert warning["exc_info"] is True
+    # The payload carries phone numbers; the message can echo them.
+    assert "error" not in warning
+
+
+def test_call_log_builder_bug_fails_the_eval(mocker):
+    mocker.patch.object(
+        ObservabilityService, "process_raw_logs", side_effect=RuntimeError("bug")
+    )
+
+    with pytest.raises(RuntimeError, match="bug"):
+        _voice_call_log(
+            SimpleNamespace(id="span-1", provider="vapi"), {"id": "call-1"}, {}
+        )
+
+
+def test_unparseable_raw_log_is_a_miss_logged_with_the_span(
+    ch_voice_span, missing_eval_template_id
+):
+    span = ch_voice_span(_VAPI_RAW_LOG)
+    span.span_attributes["raw_log"] = '{"id": "call-abc", "messages": ['
+    span.save(update_fields=["span_attributes"])
+
+    with capture_logs() as logs:
+        with pytest.raises(EvalSkippedMissingAttribute):
+            _process_mapping(
+                {"role": "messages.0.role"},
+                span,
+                eval_template_id=missing_eval_template_id,
+            )
+
+    unparseable = [log for log in logs if log["event"] == "raw_log_unparseable"]
+    assert [log["span_id"] for log in unparseable] == [str(span.id)]
+
+
 # ───────────────────────────────────────────────────────────────────────────
 # Non-string mapping values
 #
