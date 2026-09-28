@@ -2,7 +2,15 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-// (react-apexcharts is stubbed globally in setupTests.js — jsdom can't lay it out.)
+// jsdom can't lay the chart out; capture what it's handed instead.
+const chartProps = vi.fn();
+vi.mock("react-apexcharts", () => ({
+  default: (props) => {
+    chartProps(props);
+    return null;
+  },
+}));
+const lastChart = () => chartProps.mock.calls.at(-1)[0];
 
 // Feed the summary a fixed run list with inline scores (a mock run), so
 // useRunsSummary reads scores directly and makes no kpis fetch.
@@ -34,8 +42,8 @@ const RUNS = [
 const env = { id: "env-1", name: "Refund Support", version: "v3" };
 const envState = { scenarios: Array.from({ length: 20 }, (_, i) => ({ id: `s${i}` })) };
 
-function renderSummary(props = {}) {
-  useEnvironmentRuns.mockReturnValue({ runs: RUNS, isLoading: false });
+function renderSummary(props = {}, runs = RUNS) {
+  useEnvironmentRuns.mockReturnValue({ runs, isLoading: false });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
@@ -167,5 +175,27 @@ describe("RunsSummary", () => {
     expect(screen.getByText("Cancelling")).toBeInTheDocument();
     expect(screen.queryByText("Running")).toBeNull();
     expect(screen.queryByRole("button", { name: "Stop simulation" })).toBeNull();
+  });
+
+  it("marks the newest run on the graph's axis", () => {
+    renderSummary();
+    expect(lastChart().options.xaxis.categories).toEqual(["Run 1", "Run 2 · latest"]);
+  });
+
+  it("draws a one-run environment as a column per eval, not a single stacked point", () => {
+    renderSummary({}, [RUNS[1]]);
+    expect(lastChart().type).toBe("bar");
+    expect(lastChart().options.xaxis.categories).toEqual(["Run 1 · latest"]);
+    expect(lastChart().series).toEqual([
+      { name: "Task success", data: [49] },
+      { name: "Policy adherence", data: [28] },
+    ]);
+  });
+
+  it("pins the runs table's header, since the table scrolls under a fixed graph", () => {
+    renderSummary();
+    const heads = document.querySelectorAll("thead th");
+    expect(heads.length).toBeGreaterThan(0);
+    heads.forEach((th) => expect(th).toHaveClass("MuiTableCell-stickyHeader"));
   });
 });
