@@ -2,9 +2,7 @@
 AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS opt-in."""
 
 import json
-import socket
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -25,26 +23,11 @@ _POLICY = json.loads(
         / "api_contracts/gateway/provider-url-policy.json"
     ).read_text()
 )
-_DNS = _POLICY["dns"]
-
-
-def _fake_getaddrinfo(host, *args, **kwargs):
-    try:
-        addrs = [host] if host[0].isdigit() or ":" in host else _DNS[host]
-    except KeyError:
-        raise socket.gaierror(socket.EAI_NONAME, "no such host") from None
-    return [
-        (socket.AF_INET6 if ":" in a else socket.AF_INET, 0, 0, "", (a, 0))
-        for a in addrs
-    ]
 
 
 @pytest.fixture(autouse=True)
-def _stub_dns():
-    with patch(
-        "agentcc.services.url_safety.socket.getaddrinfo", side_effect=_fake_getaddrinfo
-    ) as stub:
-        yield stub
+def dns(provider_dns):
+    return provider_dns(_POLICY["dns"])
 
 
 def _check(url, allow_private):
@@ -94,9 +77,9 @@ def test_save_error_does_not_ask_for_a_resolvable_host(monkeypatch):
     assert "resolve" not in str(refused.value)
 
 
-def test_metadata_host_is_refused_before_any_lookup(_stub_dns):
+def test_metadata_host_is_refused_before_any_lookup(dns):
     assert _check("http://metadata.google.internal", allow_private=True)
-    _stub_dns.assert_not_called()
+    dns.assert_not_called()
 
 
 def test_webhook_urls_stay_strict():

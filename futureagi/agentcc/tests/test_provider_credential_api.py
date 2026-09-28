@@ -1,5 +1,3 @@
-import ipaddress
-import socket
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -545,15 +543,6 @@ class TestFetchModelsHonoursThePathPrefix:
         assert called_url == "https://provider.example/openai/v1/models"
 
 
-def _resolve(answers):
-    """getaddrinfo stub: host name -> list of addresses."""
-
-    def fake_getaddrinfo(host, *args, **kwargs):
-        return [(2, 1, 6, "", (addr, 0)) for addr in answers[host]]
-
-    return fake_getaddrinfo
-
-
 @pytest.mark.integration
 @pytest.mark.api
 class TestFetchModelsPrivateProviderURLs:
@@ -566,15 +555,15 @@ class TestFetchModelsPrivateProviderURLs:
             format="json",
         )
 
+    @pytest.fixture(autouse=True)
+    def dns(self, provider_dns):
+        return provider_dns({"mock-llm": ["172.20.0.5"]}, passthrough=True)
+
     def test_private_base_url_is_refused_with_the_opt_in_to_set(
         self, monkeypatch, secondary_org_client
     ):
         monkeypatch.delenv("AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS", raising=False)
-        with patch(
-            "agentcc.services.url_safety.socket.getaddrinfo",
-            side_effect=_resolve({"mock-llm": ["172.20.0.5"]}),
-        ):
-            response = self._fetch(secondary_org_client, "http://mock-llm:8080")
+        response = self._fetch(secondary_org_client, "http://mock-llm:8080")
 
         assert response.status_code == 400
         assert "AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS=true" in str(response.json())
@@ -586,16 +575,10 @@ class TestFetchModelsPrivateProviderURLs:
         session = MagicMock()
         session.get.return_value.json.return_value = {"data": [{"id": "mock-custom"}]}
 
-        with (
-            patch(
-                "agentcc.services.url_safety.socket.getaddrinfo",
-                side_effect=_resolve({"mock-llm": ["172.20.0.5"]}),
-            ),
-            patch(
-                "agentcc.views.provider_credential.build_ssrf_safe_session",
-                return_value=session,
-            ) as build_session,
-        ):
+        with patch(
+            "agentcc.views.provider_credential.build_ssrf_safe_session",
+            return_value=session,
+        ) as build_session:
             response = self._fetch(secondary_org_client, "http://mock-llm:8080")
 
         assert response.status_code == 200, response.json()
@@ -607,11 +590,7 @@ class TestFetchModelsPrivateProviderURLs:
         self, monkeypatch, secondary_org_client
     ):
         monkeypatch.setenv("AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS", "true")
-        with patch(
-            "agentcc.services.url_safety.socket.getaddrinfo",
-            side_effect=_resolve({"169.254.169.254": ["169.254.169.254"]}),
-        ):
-            response = self._fetch(secondary_org_client, "http://169.254.169.254")
+        response = self._fetch(secondary_org_client, "http://169.254.169.254")
 
         assert response.status_code == 400
         assert "never allowed" in str(response.json())
@@ -667,48 +646,24 @@ class TestFetchModelsKeepsTheSavedKeyOnItsBaseURL:
             assert mock_fetch.call_args[0][2] == "sk-typed"
 
 
-@pytest.fixture
-def provider_dns():
-    """getaddrinfo stub: IP literals resolve to themselves, the names below to
-    fixed answers, and *.invalid fails. Any other name (localhost, the test
-    services) goes to the real resolver. Yields a mock of the lookups the stub
-    answered, which leaves out the ones it passed on."""
-    answers = {
-        "mock-llm": ["172.20.0.5"],
-        "host.docker.internal": ["192.168.65.254"],
-        "api.openai.com": ["104.18.6.192"],
-    }
-    real_getaddrinfo = socket.getaddrinfo
-    answered = MagicMock()
-
-    def fake_getaddrinfo(host, *args, **kwargs):
-        try:
-            addrs = [str(ipaddress.ip_address(host))]
-        except ValueError:
-            if isinstance(host, str) and host.endswith(".invalid"):
-                answered(host, *args, **kwargs)
-                raise socket.gaierror(socket.EAI_NONAME, "no such host") from None
-            if host not in answers:
-                return real_getaddrinfo(host, *args, **kwargs)
-            addrs = answers[host]
-        answered(host, *args, **kwargs)
-        return [
-            (socket.AF_INET6 if ":" in a else socket.AF_INET, 1, 6, "", (a, 0))
-            for a in addrs
-        ]
-
-    with patch("agentcc.services.url_safety.socket.getaddrinfo", fake_getaddrinfo):
-        yield answered
-
-
 @pytest.mark.integration
 @pytest.mark.api
-@pytest.mark.usefixtures("provider_dns")
 class TestProviderBaseURLIsCheckedOnSave:
     """A base URL the gateway refuses is refused when the provider is saved,
     rather than saved and then answered with an error on every request."""
 
     OPT_IN = "AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS"
+
+    @pytest.fixture(autouse=True)
+    def dns(self, provider_dns):
+        return provider_dns(
+            {
+                "mock-llm": ["172.20.0.5"],
+                "host.docker.internal": ["192.168.65.254"],
+                "api.openai.com": ["104.18.6.192"],
+            },
+            passthrough=True,
+        )
 
     @pytest.fixture(autouse=True)
     def _no_gateway_push(self):
@@ -807,7 +762,7 @@ class TestProviderBaseURLIsCheckedOnSave:
         assert self._saved(org_b) is None
 
     def test_gateway_ui_leaves_default_and_unresolvable_urls_to_the_gateway(
-        self, monkeypatch, secondary_org_context, secondary_org_client, provider_dns
+        self, monkeypatch, secondary_org_context, secondary_org_client, dns
     ):
         monkeypatch.delenv(self.OPT_IN, raising=False)
         org_b, _ = secondary_org_context
@@ -815,7 +770,7 @@ class TestProviderBaseURLIsCheckedOnSave:
         # No base_url: the provider's default endpoint (config.yaml or built in).
         response = self._update_provider(secondary_org_client, "", name="openai")
         assert response.status_code == 200, response.json()
-        provider_dns.assert_not_called()
+        dns.assert_not_called()
 
         # Not resolvable from the backend: the gateway checks it on each request.
         response = self._update_provider(
