@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from simulate.models import HostedHarnessAttempt, HostedHarnessJob
+from simulate.services.harness_environment import _VOICE_CONNECTORS
 from simulate.services.hosted_harness import HostedHarnessError
 from tfc.ee_gating import is_oss
 
@@ -69,6 +70,15 @@ def require_harness_authoring(organization_id: str) -> None:
     _require_harness_action(organization_id, "harness_authoring")
 
 
+def require_harness_call_usage(job: HostedHarnessJob) -> None:
+    from simulate.services.hosted_harness import _resolve_scenario_modality
+
+    action = (
+        "voice_call" if _resolve_scenario_modality(job, {}) == "voice" else "text_call"
+    )
+    _require_harness_action(str(job.organization_id), action)
+
+
 def require_harness_run_usage(organization_id: str, payload: dict) -> None:
     """Check authoring and any call rail that the submitted connector identifies."""
 
@@ -80,7 +90,7 @@ def require_harness_run_usage(organization_id: str, payload: dict) -> None:
     connector = str(agent.get("connector") or "").lower()
     if modality == "text" or connector == "retell_chat":
         actions = ("text_call",)
-    elif modality == "voice" or connector in {"livekit", "vapi", "retell"}:
+    elif modality == "voice" or connector in _VOICE_CONNECTORS:
         actions = ("voice_call",)
     else:
         # ``auto`` can resolve to either lane only after the authored contract is available.
@@ -88,6 +98,22 @@ def require_harness_run_usage(organization_id: str, payload: dict) -> None:
         actions = ()
     for action in actions:
         _require_harness_action(organization_id, action)
+
+
+def require_harness_source_call_usage(
+    organization_id: str, payload: dict, detected_connectors
+) -> None:
+    """Check the voice rail for an ``auto`` source whose scan found a voice provider."""
+
+    agent = payload.get("agent") or {}
+    config = agent.get("config") or {}
+    metadata = payload.get("metadata") or {}
+    modality = str(metadata.get("modality") or config.get("modality") or "").lower()
+    connector = str(agent.get("connector") or "").lower()
+    if connector != "auto" or modality in {"text", "voice"}:
+        return
+    if _VOICE_CONNECTORS & set(detected_connectors):
+        _require_harness_action(organization_id, "voice_call")
 
 
 def record_harness_usage(attempt: HostedHarnessAttempt, report: dict) -> dict:

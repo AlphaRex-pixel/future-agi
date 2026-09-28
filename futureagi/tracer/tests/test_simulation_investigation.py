@@ -374,7 +374,11 @@ def test_debug_evidence_carries_the_runs_live_eval_verdicts(
     ]
 
 
-@override_settings(INTERNAL_API_SECRET="test-secret")
+@override_settings(
+    INTERNAL_API_SECRET="test-secret",
+    ERROR_FEED_GROUPING_ENABLED=True,
+    ERROR_FEED_GROUPING_BUDGET_ENFORCED=False,
+)
 def test_debug_reports_of_sibling_calls_stay_current_for_grouping(
     auth_client, organization, workspace
 ):
@@ -772,9 +776,6 @@ def test_debug_diagnosis_counts_broken_goals_from_the_evals(
     )
     url = f"/simulate/test-executions/{execution.id}/debug-analysis/"
     auth_client.post(url)
-    claims = claim_due_investigations(
-        worker_id="test-worker", engine_version="omega-v1", limit=3
-    )["claims"]
     statements = {
         greeted.id: [
             ("exact_greeting", "It opened with 'This call is being recorded' first."),
@@ -793,32 +794,39 @@ def test_debug_diagnosis_counts_broken_goals_from_the_evals(
             ),
         ],
     }
-    for claim in claims:
-        call = TraceInvestigationJob.no_workspace_objects.get(
-            id=claim["job_id"]
-        ).call_execution
-        result = _failure_result(claim, call)
-        template = result["findings"][0]
-        result["findings"] = [
-            {
-                **deepcopy(template),
-                "finding_id": f"f{i}",
-                "requirement_id": goal,
-                "statement": statement,
-            }
-            for i, (goal, statement) in enumerate(statements[call.id])
-        ]
-        result["requirement_checks"] = [
-            {**result["requirement_checks"][0], "requirement_id": goal}
-            for goal in dict(statements[call.id])
-        ]
-        result["result_digest"] = canonical_wire_result_digest(result)
-        publish_investigation(
-            idempotency_key=str(claim["attempt_id"]),
-            lease_token=claim["lease_token"],
-            result=result,
-            wire_result_digest=result["result_digest"],
-        )
+    published = 0
+    while published < len(statements):
+        claims = claim_due_investigations(
+            worker_id="test-worker", engine_version="omega-v1", limit=3
+        )["claims"]
+        assert claims
+        for claim in claims:
+            call = TraceInvestigationJob.no_workspace_objects.get(
+                id=claim["job_id"]
+            ).call_execution
+            result = _failure_result(claim, call)
+            template = result["findings"][0]
+            result["findings"] = [
+                {
+                    **deepcopy(template),
+                    "finding_id": f"f{i}",
+                    "requirement_id": goal,
+                    "statement": statement,
+                }
+                for i, (goal, statement) in enumerate(statements[call.id])
+            ]
+            result["requirement_checks"] = [
+                {**result["requirement_checks"][0], "requirement_id": goal}
+                for goal in dict(statements[call.id])
+            ]
+            result["result_digest"] = canonical_wire_result_digest(result)
+            publish_investigation(
+                idempotency_key=str(claim["attempt_id"]),
+                lease_token=claim["lease_token"],
+                result=result,
+                wire_result_digest=result["result_digest"],
+            )
+            published += 1
 
     # A call the run page shows as errored never counts, analysed or not.
     errored = CallExecution.objects.create(

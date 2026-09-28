@@ -13,9 +13,8 @@ vi.mock("src/utils/axios", async (importOriginal) => {
 const axiosMod = await import("src/utils/axios");
 const axios = axiosMod.default;
 const { endpoints } = axiosMod;
-const { mapCallRow, buildTraceColumns, useRunCalls } = await import(
-  "../runCalls"
-);
+const { mapCallRow, buildTraceColumns, useRunCalls, runCallsQueryOptions } =
+  await import("../runCalls");
 
 // A real-shaped executions payload: two evaluation columns (one Pass/Fail, one
 // score), two completed calls and one failed call.
@@ -112,6 +111,31 @@ const payload = () => ({
 
 describe("mapCallRow", () => {
   const evalCols = columnOrder();
+
+  it("renders a live choices verdict by its label and inner score", () => {
+    const row = {
+      id: "c9",
+      evaluations: [{ id: "e-choice", name: "clarification", type: "choices", score: null,
+        value: { score: 1.0, choice: "always" } }],
+    };
+    const [cell] = mapCallRow(row, [{ id: "e-choice", name: "clarification" }]).evalResults;
+    expect(cell.label).toBe("always");
+    expect(cell.score).toBe(1);
+  });
+
+  it("keeps the server's verdict on a choice and the score of a label-less object", () => {
+    const row = {
+      id: "c9",
+      evaluations: [
+        { id: "e-choice", type: "choices", score: null, passed: true, value: { score: 1.0, choice: "always" } },
+        { id: "e-score", type: "score", score: null, value: { score: 0.4 } },
+      ],
+    };
+    const [choice, scored] = mapCallRow(row, [{ id: "e-choice" }, { id: "e-score" }]).evalResults;
+    expect(choice.passed).toBe(true);
+    expect(choice.label).toBe("always");
+    expect(scored.score).toBe(0.4);
+  });
 
   it("maps a passing completed call: real metrics, CSAT on the 0–10 scale, ms duration", () => {
     const t = mapCallRow(payload().results[0], evalCols);
@@ -350,5 +374,49 @@ describe("useRunCalls", () => {
     });
     expect(query.options.refetchInterval(query)).toBe(false);
     unmount();
+  });
+});
+
+describe("runCallsQueryOptions", () => {
+  beforeEach(() => {
+    axios.get.mockReset();
+    axios.get.mockResolvedValue({ data: payload() });
+  });
+
+  it("is the one key + request the table hook and page fetches share", async () => {
+    const options = runCallsQueryOptions("ex1", {
+      page: 2,
+      limit: 50,
+      search: "",
+      filters: { goal: ["Refunds"] },
+      groupBy: "goal",
+    });
+
+    expect(options.queryKey).toEqual([
+      "simulation-run-results-v3",
+      "ex1",
+      2,
+      50,
+      "",
+      { goal: ["Refunds"] },
+      "goal",
+    ]);
+    await options.queryFn();
+    expect(axios.get).toHaveBeenCalledWith(endpoints.runResultsV3.calls("ex1"), {
+      params: {
+        page: 2,
+        page_size: 50,
+        search: "",
+        filters: JSON.stringify({ goal: ["Refunds"] }),
+        group_by: "goal",
+      },
+    });
+  });
+
+  it("lets a reader switch the table hook off", () => {
+    renderHook(() => useRunCalls("ex1", { enabled: false }), {
+      wrapper: makeWrapper(),
+    });
+    expect(axios.get).not.toHaveBeenCalled();
   });
 });

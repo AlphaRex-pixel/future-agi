@@ -17,7 +17,7 @@ export default function WorkspaceExecutionDetail() {
   // does (see EnvironmentWorkspace's executionMatch branch) — RunDetail needs
   // `backed` to decide which "Add evals" drawer a non-backed env gets, and
   // `onStartRun` to launch a re-run from the run view.
-  const { env, envState, backed, onStartRun } = useOutletContext() || {};
+  const { env, envState, backed, onStartRun, creditBanner } = useOutletContext() || {};
   const { testId, executionId } = useParams();
 
   if (!env) return null;
@@ -30,6 +30,7 @@ export default function WorkspaceExecutionDetail() {
       testId={testId}
       executionId={executionId}
       onStartRun={onStartRun}
+      creditBanner={creditBanner}
     />
   );
 }

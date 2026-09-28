@@ -25,6 +25,7 @@ const {
   mapCallDetail,
   callTranscript,
   useCallDetail,
+  useCallExecutionV3Detail,
 } = await import("../runDetail");
 const { RUN_COLORS } = await import(
   "src/sections/simulate/environments/workspace/runs/runs.constants"
@@ -292,6 +293,54 @@ const callDetailPayload = () => ({
 });
 
 describe("mapCallDetail", () => {
+  it.each([
+    ["a plain string (voice, older chat)", "hello there", "hello there"],
+    ["null", null, ""],
+    ["undefined", undefined, ""],
+    ["a number", 42, "42"],
+    ["an OpenAI-style part list", [{ role: "user", content: "hi" }], "hi"],
+    ["a list of strings", ["a", "b"], "a\nb"],
+    ["a {text} part", { text: "from text" }, "from text"],
+    ["a single {content} object", { content: "from content" }, "from content"],
+    ["a nested list", [[{ content: "deep" }], "flat"], "deep\nflat"],
+    ["an empty list", [], ""],
+  ])("turns %s into transcript text without crashing", (_label, content, text) => {
+    const d = mapCallDetail({
+      id: "c",
+      simulation_call_type: "text",
+      transcript: [{ role: "user", content }],
+    });
+    expect(d.turns[0].text).toBe(text);
+    expect(typeof d.stats.words).toBe("number");
+  });
+
+  it("reads a hosted chat's message content lists as text (real Retell chat shape)", () => {
+    // Each transcript row is one chat message whose content is a list of
+    // OpenAI-style {role, content} items, not a string.
+    const d = mapCallDetail({
+      id: "chat-1",
+      simulation_call_type: "text",
+      transcript: [
+        {
+          role: "user",
+          content: [{ role: "user", content: "Hi there, pricing please" }],
+        },
+        {
+          role: "assistant",
+          content: [{ role: "assistant", content: "Sure — two plans." }],
+        },
+        { role: "user", content: ["plain", { text: "text part" }] },
+      ],
+    });
+
+    expect(d.turns.map((t) => t.text)).toEqual([
+      "Hi there, pricing please",
+      "Sure — two plans.",
+      "plain\ntext part",
+    ]);
+    expect(d.stats.words).toBe(11);
+  });
+
   it("maps a real voice call-detail payload to the CallDetail view-model", () => {
     const d = mapCallDetail(callDetailPayload());
     expect(d.id).toBe("call-1");
@@ -595,6 +644,45 @@ describe("useCallDetail", () => {
     expect(result.current.isLoading).toBe(false);
     expect(axios.get).not.toHaveBeenCalled();
   });
+
+  it("polls while error localization is active and stops after it completes", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const Wrapper = ({ children }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    Wrapper.propTypes = { children: PropTypes.node };
+    axios.get.mockResolvedValue({
+      data: {
+        ...callDetailPayload(),
+        eval_metrics: {
+          "eval-1": { error_localizer_status: "running" },
+        },
+      },
+    });
+
+    const { unmount } = renderHook(
+      () => useCallExecutionV3Detail("call-localizing"),
+      { wrapper: Wrapper },
+    );
+    const queryKey = ["simulation-call-detail-v3", "call-localizing"];
+    await waitFor(() =>
+      expect(queryClient.getQueryData(queryKey)?.eval_metrics?.["eval-1"])
+        .toMatchObject({ error_localizer_status: "running" }),
+    );
+    const query = queryClient.getQueryCache().find({ queryKey });
+
+    expect(query.options.refetchInterval(query)).toBe(3000);
+    queryClient.setQueryData(queryKey, {
+      ...callDetailPayload(),
+      eval_metrics: {
+        "eval-1": { error_localizer_status: "completed" },
+      },
+    });
+    expect(query.options.refetchInterval(query)).toBe(false);
+    unmount();
+  });
 });
 
 describe("useRunDetail", () => {
@@ -696,6 +784,35 @@ describe("useRunDetail", () => {
     expect(result.current.identity.status).toBe("failed");
     expect(result.current.stats.passed).toBe(8);
     expect(result.current.stats.failed).toBe(4);
+  });
+
+  it("marks a running Run stoppable and a cancelling one not", async () => {
+    const identityFor = async (status) => {
+      axios.get.mockResolvedValueOnce({
+        data: { execution: { id: `ex-${status}`, status, summary: { total: 4, outcomes: {} } } },
+      });
+      const { result } = renderHook(() => useRunDetail("rt1", `ex-${status}`), {
+        wrapper: makeWrapper(),
+      });
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      return result.current.identity;
+    };
+
+    expect((await identityFor("running")).stoppable).toBe(true);
+    expect((await identityFor("pending")).stoppable).toBe(true);
+    expect((await identityFor("cancelling")).stoppable).toBe(false);
+    expect((await identityFor("completed")).stoppable).toBe(false);
+  });
+
+  it("reports a cancelling Run as cancelling, not running", async () => {
+    axios.get.mockResolvedValueOnce({
+      data: { execution: { id: "ex-c", status: "cancelling", summary: { total: 4, outcomes: {} } } },
+    });
+    const { result } = renderHook(() => useRunDetail("rt1", "ex-c"), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.identity.status).toBe("cancelling");
   });
 
   it("polls the Run summary while active and stops when it completes", async () => {

@@ -133,11 +133,28 @@ describe("PanelHostedPlatform", () => {
     expect(screen.getByRole("button", { name: "Run preflight" })).toBeDisabled();
   });
 
+  it("Others: a letters-only contact number never unlocks preflight", () => {
+    render(<PanelHostedPlatform />);
+    fireEvent.click(screen.getByText("Others"));
+    fireEvent.change(screen.getByPlaceholderText("You are a friendly returns agent for Acme…"), {
+      target: { value: "You are a returns agent." },
+    });
+    const number = screen.getByPlaceholderText("Number to call for the simulation");
+
+    fireEvent.change(number, { target: { value: "abc e" } });
+    expect(number).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Run preflight" })).toBeDisabled();
+
+    fireEvent.change(number, { target: { value: "9258565747" } });
+    expect(number).toHaveValue("9258565747");
+    expect(screen.getByRole("button", { name: "Run preflight" })).toBeEnabled();
+  });
+
   it("gates both actions until both credential fields are filled", () => {
     render(<PanelHostedPlatform />);
     expect(screen.getByRole("button", { name: "Run preflight" })).toBeDisabled();
     expect(buildBtn()).toBeDisabled();
-    expect(screen.getByText("Run preflight to continue")).toBeInTheDocument();
+    expect(screen.getByText("Run preflight to check your setup before building")).toBeInTheDocument();
 
     fillCreds();
     expect(screen.getByRole("button", { name: "Run preflight" })).toBeEnabled();

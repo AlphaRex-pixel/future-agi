@@ -7,8 +7,8 @@ import tarfile
 from contextlib import nullcontext
 from datetime import timedelta
 from types import SimpleNamespace
-from urllib.parse import urlparse
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import pytest
 from django.test import override_settings
@@ -97,6 +97,8 @@ def test_platform_simulator_material_uses_deployment_credentials_only(
     monkeypatch.setenv("LIVEKIT_API_SECRET", "platform-livekit-secret")
     monkeypatch.setenv("LIVEKIT_OUTBOUND_TRUNK_ID", "ST_platform-outbound")
     monkeypatch.setenv("PSTN_CALLER_NUMBER", "+14155550123")
+    monkeypatch.setenv("ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER", "+15551234567")
+    monkeypatch.setenv("ALK_UBER_GUEST_POC_PIN", "7682")
 
     values, credential_bytes = _platform_simulator_material()
 
@@ -110,6 +112,8 @@ def test_platform_simulator_material_uses_deployment_credentials_only(
     assert values["LIVEKIT_API_SECRET"] == "platform-livekit-secret"
     assert values["SIP_OUTBOUND_TRUNK_ID"] == "ST_platform-outbound"
     assert values["SIP_OUTBOUND_FROM_NUMBER"] == "+14155550123"
+    assert values["ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER"] == "+15551234567"
+    assert values["ALK_UBER_GUEST_POC_PIN"] == "7682"
     assert values["ALK_HARNESS"] == "claude"
     assert values["ALK_HARNESS_MODEL"] == "vertex_ai/gemini-3.7-flash"
     assert values["ALK_CLAUDE_GATEWAY_URL"] == "https://gateway.futureagi.test"
@@ -182,7 +186,9 @@ def test_claude_authoring_prefers_platform_owned_harness_key(monkeypatch):
 
 
 def test_platform_ambience_clips_reach_the_harness_and_its_egress(monkeypatch):
-    monkeypatch.delenv("ALK_HOSTED_SIMULATOR_GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.delenv(
+        "ALK_HOSTED_SIMULATOR_GOOGLE_APPLICATION_CREDENTIALS", raising=False
+    )
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.setenv("ALK_HARNESS", "claude")
     monkeypatch.setenv("AGENTCC_INTERNAL_API_KEY", "internal-service-key")
@@ -192,7 +198,9 @@ def test_platform_ambience_clips_reach_the_harness_and_its_egress(monkeypatch):
     values, _ = _platform_simulator_material()
 
     clips = json.loads(values["ALK_BACKGROUND_NOISE_CATALOG"])
-    assert clips and all(clip["environment"] and clip["url"].startswith("https://") for clip in clips)
+    assert clips and all(
+        clip["environment"] and clip["url"].startswith("https://") for clip in clips
+    )
     domains = _resolved_egress_domains(
         {"agent": {"connector": "auto"}, "security": {"allowed_egress_domains": []}},
         {},
@@ -203,7 +211,9 @@ def test_platform_ambience_clips_reach_the_harness_and_its_egress(monkeypatch):
 
 
 def test_a_deployment_catalogue_overrides_the_platform_clips(monkeypatch, tmp_path):
-    monkeypatch.delenv("ALK_HOSTED_SIMULATOR_GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.delenv(
+        "ALK_HOSTED_SIMULATOR_GOOGLE_APPLICATION_CREDENTIALS", raising=False
+    )
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.setenv("ALK_HARNESS", "claude")
     monkeypatch.setenv("AGENTCC_INTERNAL_API_KEY", "internal-service-key")
@@ -225,20 +235,28 @@ def test_a_deployment_catalogue_overrides_the_platform_clips(monkeypatch, tmp_pa
 
 
 def test_admission_counts_the_ambience_hosts_that_launch_adds(monkeypatch):
-    monkeypatch.delenv("ALK_HOSTED_SIMULATOR_GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.delenv(
+        "ALK_HOSTED_SIMULATOR_GOOGLE_APPLICATION_CREDENTIALS", raising=False
+    )
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.setenv("ALK_HARNESS", "claude")
     monkeypatch.setenv("AGENTCC_INTERNAL_API_KEY", "internal-service-key")
     monkeypatch.setenv("AGENTCC_BASE_URL", "https://gateway.example.test")
     monkeypatch.delenv("ALK_BACKGROUND_NOISE_CATALOG", raising=False)
-    payload = {"agent": {"connector": "auto"}, "security": {"allowed_egress_domains": []}}
+    payload = {
+        "agent": {"connector": "auto"},
+        "security": {"allowed_egress_domains": []},
+    }
 
     launched, _ = _platform_simulator_material()
     clip_hosts = {
-        urlparse(clip["url"]).hostname for clip in json.loads(launched["ALK_BACKGROUND_NOISE_CATALOG"])
+        urlparse(clip["url"]).hostname
+        for clip in json.loads(launched["ALK_BACKGROUND_NOISE_CATALOG"])
     }
 
-    assert clip_hosts <= _resolved_egress_domains(payload, {}, _known_simulator_egress_inputs(), None)
+    assert clip_hosts <= _resolved_egress_domains(
+        payload, {}, _known_simulator_egress_inputs(), None
+    )
 
 
 def test_claude_authoring_uses_separate_remote_gateway_key(monkeypatch):
@@ -1961,7 +1979,19 @@ def test_cancel_signals_guest_before_provider_delete(organization, monkeypatch):
         return_value=(b"archive", ""),
     ):
         gateway.launch(job, endpoint_base_url="https://platform.example.com")
-    monkeypatch.setattr(gateway, "_delete_and_record", lambda _: job)
+    cleanup_order = []
+    monkeypatch.setattr(
+        "simulate.services.phone_telephony.cleanup_hosted_phone_rooms",
+        lambda _: cleanup_order.append("livekit"),
+    )
+
+    def delete_and_record(_attempt, *, after_provider_cleanup=None):
+        cleanup_order.append("sandbox")
+        if after_provider_cleanup is not None:
+            after_provider_cleanup()
+        return job
+
+    monkeypatch.setattr(gateway, "_delete_and_record", delete_and_record)
 
     gateway.cancel(job, reason="user_canceled")
 
@@ -1977,6 +2007,7 @@ def test_cancel_signals_guest_before_provider_delete(organization, monkeypatch):
     assert attempt.terminal_stage == "canceled"
     assert attempt.terminal_reason == "user_canceled"
     assert attempt.terminal_failure is None
+    assert cleanup_order == ["livekit", "sandbox", "livekit"]
 
 
 @pytest.mark.django_db
@@ -2010,6 +2041,56 @@ def test_cancel_deletes_when_guest_signal_fails(organization, monkeypatch):
 
     assert client.deleted is True
     assert canceled.state == HostedHarnessJob.State.CANCELED
+
+
+@pytest.mark.django_db
+def test_cancel_retries_room_cleanup_after_sandbox_is_already_deleted(
+    organization, monkeypatch
+):
+    payload = _payload()
+    payload["source"] = {
+        "kind": "remote",
+        "endpoint": "https://agent.example.com",
+        "visibility": "public",
+    }
+    job, _ = create_hosted_job(
+        organization, payload, idempotency_key="cancel-room-cleanup-retry"
+    )
+    client = _Daytona()
+    gateway = object.__new__(HostedHarnessGateway)
+    gateway.client = client
+    gateway.snapshot = "alk-hosted-v1"
+    gateway.snapshot_digest = ""
+    with patch(
+        "simulate.services.hosted_harness_gateway.HostedSourceAcquirer.acquire",
+        return_value=(b"archive", ""),
+    ):
+        gateway.launch(job, endpoint_base_url="https://platform.example.com")
+
+    cleanup_attempts = []
+
+    def cleanup(_job):
+        cleanup_attempts.append(str(_job.id))
+        if len(cleanup_attempts) == 1:
+            raise RuntimeError("LiveKit temporarily unavailable")
+
+    monkeypatch.setattr(
+        "simulate.services.phone_telephony.cleanup_hosted_phone_rooms", cleanup
+    )
+
+    with pytest.raises(RuntimeError, match="LiveKit temporarily unavailable"):
+        gateway.cancel(job, reason="user_canceled")
+
+    attempt = HostedHarnessAttempt.no_workspace_objects.get(job=job)
+    assert client.deleted is True
+    assert attempt.cleanup_verified_at is None
+
+    canceled = gateway.cancel(job, reason="user_canceled")
+
+    assert cleanup_attempts == [str(job.id), str(job.id)]
+    assert canceled.state == HostedHarnessJob.State.CANCELED
+    attempt.refresh_from_db()
+    assert attempt.cleanup_verified_at is not None
 
 
 @pytest.mark.django_db
@@ -2369,10 +2450,7 @@ def test_fresh_lease_starts_chat_once_for_concurrent_messages(
 
     from django.db import close_old_connections
 
-    from simulate.services.hosted_harness_conversation import (
-        ensure_conversation,
-        issue_conversation_capability,
-    )
+    from simulate.services.hosted_harness_conversation import ensure_conversation
     from simulate.services.hosted_harness_gateway import _CHAT_SESSION
 
     job, _ = create_hosted_job(organization, _payload(), idempotency_key="fresh-chat")
@@ -2384,14 +2462,6 @@ def test_fresh_lease_starts_chat_once_for_concurrent_messages(
     attempt.save()
     job.refresh_from_db()
     conversation = ensure_conversation(job)
-    issue_conversation_capability(
-        conversation,
-        endpoint_base_url="https://platform.example",
-        provider_ref=attempt.provider_ref,
-        attempt=attempt,
-        ttl_seconds=600,
-        control_only=True,
-    )
     client = _Daytona()
     gateway = object.__new__(HostedHarnessGateway)
     gateway.client = client
@@ -2415,7 +2485,10 @@ def test_fresh_lease_starts_chat_once_for_concurrent_messages(
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(start) for _ in range(2)]
-        assert [future.result(timeout=30) for future in futures] == ["active", "active"]
+        states = [future.result(timeout=30) for future in futures]
+    # The loser of the start claim waits on it instead of launching a second process; the
+    # lease stays starting until the launched process polls.
+    assert states == ["starting", "starting"]
     assert client.sandbox.process.sessions == [_CHAT_SESSION]
     assert "hosted_chat_entrypoint" in client.sandbox.process.session_request.command
     assert client.deleted is False
@@ -2448,3 +2521,20 @@ def test_hosted_execution_cancel_signals_workflow_without_deleting_sandbox(
     job.refresh_from_db()
     assert job.state == HostedHarnessJob.State.CLEANING_UP
     assert job.cancel_reason == "user_canceled"
+
+
+def test_platform_simulator_material_carries_observe_credentials(monkeypatch):
+    for name, value in {
+        "HARNESS_OBSERVABILITY": "on",
+        "FI_API_KEY": "observe-key",
+        "FI_SECRET_KEY": "observe-secret",
+        "FI_HARNESS_PROJECT": "hosted-harness",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    values, _credentials = _platform_simulator_material()
+
+    assert values["FI_API_KEY"] == "observe-key"
+    assert values["FI_SECRET_KEY"] == "observe-secret"
+    assert values["FI_HARNESS_PROJECT"] == "hosted-harness"
+    assert values["HARNESS_OBSERVABILITY"] == "on"

@@ -2,7 +2,7 @@ import { BUILD_TONES } from "../../buildEnvironment/buildTones";
 
 // The statuses whose dot animates — a run in one of these phases is still
 // moving, so the chip breathes.
-export const LIVE_STATUSES = ["running", "booting", "grading"];
+export const LIVE_STATUSES = ["running", "booting", "grading", "cancelling"];
 
 // TestExecution lifecycle states that can still advance and need polling.
 export const ACTIVE_EXECUTION_STATUSES = new Set([
@@ -11,6 +11,9 @@ export const ACTIVE_EXECUTION_STATUSES = new Set([
   "cancelling",
   "evaluating",
 ]);
+
+// The subset a user can still stop — `cancelling` is already on its way out.
+export const STOPPABLE_EXECUTION_STATUSES = new Set(["pending", "running", "evaluating"]);
 
 // Stable hook for the pulsing dot so callers (and tests) can target it without
 // depending on emotion's generated class name.
@@ -30,8 +33,13 @@ export const STATUS_META = {
   flaky: { color: BUILD_TONES.amberBright, label: "Flaky" },
   unmeasured: { color: BUILD_TONES.ash, label: "Not measured" },
   completed: { color: BUILD_TONES.zinc, label: "Completed" },
+  // The runs table's lifecycle "Completed" — green like the design. Kept apart from
+  // `completed` above, which the run header uses for "finished with findings".
+  finished: { color: BUILD_TONES.green, label: "Completed" },
   failed: { color: BUILD_TONES.red, label: "Failed" },
   error: { color: BUILD_TONES.orange, label: "Error" },
+  // A stopped run until the backend confirms its sandbox is gone.
+  cancelling: { color: BUILD_TONES.zinc, label: "Cancelling" },
   cancelled: { color: BUILD_TONES.zinc, label: "Cancelled" },
 };
 

@@ -20,6 +20,7 @@ import {
   clearScenarioSelection,
 } from "../../buildEnvironment/console/scenarioSelectionBus";
 import { SCENARIOS_COPY } from "./scenarios.constants";
+import { withServedLabels } from "./scenarioEditor.constants";
 import { ENV_SHAPE, ENV_STATE_SHAPE } from "./scenarios.shapes";
 import useScenarioPage, { PAGE_SIZE } from "./useScenarioPage";
 import { isScenarioSampleMode, SAMPLE_PAGE_SIZE } from "src/api/simulate-environments/scenariosSampleMode";
@@ -174,13 +175,14 @@ export default function ScenariosStep({ env, envState, patch, locked = false, on
   // The filter catalogue comes straight from the server (`fields`), counted
   // over the searched suite so an OR stays buildable; it drops into the shared
   // FilterPanel unchanged.
-  const filterFields = pageData.fields;
-  // The editor's background-noise choices come from the server field catalogue
-  // (the values the agent actually uses), not a hardcoded list — so the picker
-  // matches the suite and follows any backend vocabulary change automatically.
+  const filterFields = useMemo(
+    () => withServedLabels(pageData.fields || [], pageData.levelLabels),
+    [pageData.fields, pageData.levelLabels],
+  );
+  // The editor offers every noise bed the backend serves, not only the ones the suite already uses.
   const noiseOptions = useMemo(
-    () => (pageData.fields || []).find((f) => f.value === "background_noise")?.choices ?? [],
-    [pageData.fields],
+    () => pageData.scenarioEditing?.noise_choices ?? [],
+    [pageData.scenarioEditing],
   );
 
   const filterCount = Object.values(filters).reduce(
@@ -253,7 +255,7 @@ export default function ScenariosStep({ env, envState, patch, locked = false, on
     try {
       keys = await resolveSelection((r) => r.scenario_key);
     } catch {
-      enqueueSnackbar("Couldn't start the run — try again", { variant: "error" });
+      enqueueSnackbar("Couldn't start the run. Try again", { variant: "error" });
       return;
     }
     if (keys.length) onStartRun?.(keys, k || trials);
@@ -297,7 +299,7 @@ export default function ScenariosStep({ env, envState, patch, locked = false, on
     try {
       names = await pending.resolve();
     } catch {
-      enqueueSnackbar("Couldn't delete — try again", { variant: "error" });
+      enqueueSnackbar("Couldn't delete. Try again", { variant: "error" });
       return;
     }
     if (!names.length) return;
@@ -311,7 +313,7 @@ export default function ScenariosStep({ env, envState, patch, locked = false, on
             names.length === 1 ? "Deleted 1 scenario" : `Deleted ${names.length} scenarios`,
           );
         },
-        onError: () => enqueueSnackbar("Couldn't delete — try again", { variant: "error" }),
+        onError: () => enqueueSnackbar("Couldn't delete. Try again", { variant: "error" }),
       },
     );
   };
@@ -333,7 +335,7 @@ export default function ScenariosStep({ env, envState, patch, locked = false, on
       { rework, changes },
       {
         onSuccess: (data) => surfaceReceipts(data, "Saved"),
-        onError: () => enqueueSnackbar("Couldn't save — try again", { variant: "error" }),
+        onError: () => enqueueSnackbar("Couldn't save. Try again", { variant: "error" }),
       },
     );
   };
@@ -486,6 +488,7 @@ export default function ScenariosStep({ env, envState, patch, locked = false, on
         onSave={saveScenario}
         scenarioEditing={pageData.scenarioEditing}
         noiseOptions={noiseOptions}
+        levelLabels={pageData.levelLabels}
       />
       <ConfirmDialog
         open={!!pendingDelete}

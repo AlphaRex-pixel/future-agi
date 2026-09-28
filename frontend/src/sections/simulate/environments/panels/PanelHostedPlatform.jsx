@@ -9,9 +9,11 @@ import PlatformLogo from "../components/PlatformLogo";
 import { PLATFORM_LOGOS } from "../components/platformLogos";
 import { COUNTRY_BY_ISO } from "../components/countryCodes";
 import ContactInformation from "./ContactInformation";
+import { isValidPhoneNumber } from "../components/phoneNumber";
 import ScenarioCount from "./ScenarioCount";
 import { DEFAULT_SCENARIOS, isValidScenarioCount } from "./scenarioCountRules";
 import RuntimePreflight from "./RuntimePreflight";
+import { CreditExhaustionBanner } from "src/components/CreditExhaustionBanner";
 import ParallelismField from "./ParallelismField";
 import usePanelBuild from "../hooks/usePanelBuild";
 import { ENTRY_AGENT_TYPES } from "../agentTypes";
@@ -81,7 +83,8 @@ export default function PanelHostedPlatform() {
   // Others has no WebRTC path, so it requires a number regardless of simMode;
   // other voice envs only require it in Phone mode.
   const phoneRequired = agentType === AGENT_TYPES.VOICE && (isOther || simMode === "phone");
-  const phoneOk = !phoneRequired || !!contactNumber.trim();
+  const phoneOk =
+    !phoneRequired || isValidPhoneNumber(COUNTRY_BY_ISO[countryIso]?.dial, contactNumber);
   const credsOk = isOther ? !!otherPrompt.trim() : (!!id.trim() && !!key.trim());
   const canGo = !!chosen && credsOk && phoneOk;
 
@@ -224,10 +227,15 @@ export default function PanelHostedPlatform() {
         result={build.result}
         error={build.error}
       />
+      <CreditExhaustionBanner
+        error={build.creditExhaustion.error}
+        onUpgrade={build.creditExhaustion.onUpgrade}
+        onDismiss={build.creditExhaustion.onDismiss}
+      />
       <ContinueRow
         disabled={!build.readyToSubmit || !isValidScenarioCount(scenarioCount)}
         busy={build.committing}
-        hint={build.status === "done" ? "Resolve the checks above" : "Run preflight to continue"}
+        hint={build.status === "done" ? "Resolve the failed preflight checks above to continue" : "Run preflight to check your setup before building"}
         onClick={build.commitBuild}
       />
     </Stack>

@@ -12,12 +12,14 @@ const to01 = (n) => (n == null ? null : n <= 1 ? n : n / 100);
 // One cell from a live `evaluations[]` entry — the array shape the isolated
 // v3 run-results contract sends, where the server has already scored the eval.
 function liveEvalCell(col, data) {
+  const stored =
+    data.value && typeof data.value === "object" ? storedEvalCell(col, data) : null;
   return {
     id: col.id,
     name: data.name || col.name || col.column_name || col.id,
-    score: data.score ?? null,
-    passed: data.passed ?? null,
-    label: typeof data.value === "string" ? data.value : null,
+    score: data.score ?? stored?.score ?? to01(data.value?.score) ?? null,
+    passed: data.passed ?? stored?.passed ?? null,
+    label: typeof data.value === "string" ? data.value : (stored?.label ?? null),
     reason: data.reason || "",
     threshold: 0.5,
     removed: data.removed === true,
@@ -161,15 +163,13 @@ export function buildTraceColumns(columnOrder = []) {
 }
 
 /**
- * The per-call table hook. Reads the product's real executions list and adapts
- * it to `{ tasks, columns, count }`. `opts` mirror the product grid's params.
+ * The calls-list request for one page, as react-query options. The table hook
+ * and the call drawer's page-crossing fetch both build it here, so they always
+ * share one cache entry per page.
  * @param {string} executionId
- * @param {{ page?: number, limit?: number, search?: string, filters?: Object }} [opts]
- * @returns {{ tasks: import("./runDetail").RunTask[],
- *   columns: import("./runDetail").TraceColumn[], count: number,
- *   isLoading: boolean }}
+ * @param {{ page?: number, limit?: number, search?: string, filters?: Object, groupBy?: string }} [opts]
  */
-export function useRunCalls(executionId, opts = {}) {
+export function runCallsQueryOptions(executionId, opts = {}) {
   const {
     page = 1,
     limit = 100,
@@ -177,7 +177,7 @@ export function useRunCalls(executionId, opts = {}) {
     filters = {},
     groupBy = "goal",
   } = opts;
-  const query = useQuery({
+  return {
     queryKey: [
       "simulation-run-results-v3",
       executionId,
@@ -199,12 +199,28 @@ export function useRunCalls(executionId, opts = {}) {
           },
         })
         .then((response) => response.data),
-    enabled: !!executionId,
+    staleTime: 1000 * 60,
+  };
+}
+
+/**
+ * The per-call table hook. Reads the product's real executions list and adapts
+ * it to `{ tasks, columns, count }`. `opts` mirror the product grid's params.
+ * @param {string} executionId
+ * @param {{ page?: number, limit?: number, search?: string, filters?: Object, groupBy?: string, enabled?: boolean }} [opts]
+ * @returns {{ tasks: import("./runDetail").RunTask[],
+ *   columns: import("./runDetail").TraceColumn[], count: number,
+ *   isLoading: boolean }}
+ */
+export function useRunCalls(executionId, opts = {}) {
+  const { enabled = true, ...listOpts } = opts;
+  const query = useQuery({
+    ...runCallsQueryOptions(executionId, listOpts),
+    enabled: !!executionId && enabled,
     refetchInterval: (query) =>
       ACTIVE_EXECUTION_STATUSES.has(query.state.data?.execution?.status)
         ? 3000
         : false,
-    staleTime: 1000 * 60,
   });
 
   const data = query.data;

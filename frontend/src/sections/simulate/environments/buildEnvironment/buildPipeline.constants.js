@@ -77,7 +77,7 @@ export const BUILD_PIPELINE = [
     phase: "setup",
     milestone: "scenarios",
     label: "Validating scenarios",
-    detail: "Three gates: ready, solvable, not vacuous — kept only if all three pass",
+    detail: "Three gates: ready, solvable, not vacuous. Kept only if all three pass",
   },
   {
     id: "connect-agent",
@@ -119,21 +119,9 @@ export const BUILD_PIPELINE = [
 export const STAGE_ORDER = ["understand", "build", "scenarios"];
 
 export const PIPELINE_PHASES = [
-  { id: "setup", label: "Setup — building the environment" },
-  { id: "run", label: "First run — putting the agent through it" },
+  { id: "setup", label: "Setup: building the environment" },
+  { id: "run", label: "First run: putting the agent through it" },
 ];
-
-// A gentle, deterministic "duration" per step, so completed rows have a real
-// number to show on the loading screen. Not persisted anywhere.
-export const STEP_DURATION = {
-  understand: 2.4,
-  "generate-env": 1.6,
-  "build-env": 3.2,
-  "validate-env": 1.8,
-  "generate-data": 2.9,
-  "generate-scenarios": 3.6,
-  "validate-scenarios": 2.1,
-};
 
 // Compute the pipeline's live status. `done` is the builder's own set of
 // milestone ids, so the mapping is direct: a milestone being complete implies

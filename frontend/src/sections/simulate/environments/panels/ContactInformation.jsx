@@ -1,8 +1,16 @@
+import { useState } from "react";
 import PropTypes from "prop-types";
 import { alpha } from "@mui/material/styles";
 import { Box, Stack, Typography, Switch } from "@mui/material";
 import Field from "../components/Field";
 import CountryCodeSelect from "../components/CountryCodeSelect";
+import { COUNTRY_BY_ISO } from "../components/countryCodes";
+import { phoneNumberError } from "../components/phoneNumber";
+
+// E.164 caps a full number at 15 digits; the country code has its own select,
+// so the number field only ever holds digits.
+const MAX_CONTACT_DIGITS = 15;
+const toContactDigits = (value) => value.replace(/\D/g, "").slice(0, MAX_CONTACT_DIGITS);
 
 /*
   Voice contact details — how the test call reaches the agent. `mode` is web
@@ -30,11 +38,15 @@ export default function ContactInformation({
   phoneOnly = false,
 }) {
   const effectiveMode = phoneOnly ? "phone" : mode;
+  const [contactTouched, setContactTouched] = useState(false);
+  const contactError = contactTouched
+    ? phoneNumberError(COUNTRY_BY_ISO[countryIso]?.dial, contactNumber)
+    : null;
   const header =
     effectiveMode === "phone"
       ? {
           title: "Telephony simulation (PSTN)",
-          body: "A real phone call is placed over PSTN — requires a configured telephony provider.",
+          body: "A real phone call is placed over PSTN (requires a configured telephony provider).",
         }
       : {
           title: "Web simulation (WebRTC)",
@@ -79,7 +91,9 @@ export default function ContactInformation({
               required
               placeholder="Number to call for the simulation"
               value={contactNumber}
-              onChange={onContactNumber}
+              onChange={(value) => onContactNumber(toContactDigits(value))}
+              inputProps={{ inputMode: "numeric", onBlur: () => setContactTouched(true) }}
+              error={contactError}
               mono
             />
           </Box>

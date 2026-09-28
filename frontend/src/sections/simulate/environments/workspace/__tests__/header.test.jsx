@@ -26,16 +26,16 @@ const withRouter = (ui) => (
 );
 
 describe("LivePill", () => {
-  it("shows Live for a ready environment", () => {
+  it("shows Ready for a ready environment", () => {
     render(<LivePill env={{ buildStatus: "ready" }} />);
-    expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(screen.getByText("Ready")).toBeInTheDocument();
     expect(screen.queryByText("Building")).toBeNull();
   });
 
   it("shows Building while the environment is still deriving", () => {
     render(<LivePill env={{ buildStatus: "building" }} />);
     expect(screen.getByText("Building")).toBeInTheDocument();
-    expect(screen.queryByText("Live")).toBeNull();
+    expect(screen.queryByText("Ready")).toBeNull();
   });
 
   it("honours an explicit building override", () => {
@@ -43,11 +43,22 @@ describe("LivePill", () => {
     expect(screen.getByText("Building")).toBeInTheDocument();
   });
 
-  it("shows a static Failed for a terminal-failed build (not Building/Live)", () => {
+  it("shows a static Failed for a terminal-failed build (not Building/Ready)", () => {
     render(<LivePill env={{ buildStatus: "failed" }} />);
     expect(screen.getByText("Failed")).toBeInTheDocument();
-    expect(screen.queryByText("Live")).toBeNull();
+    expect(screen.queryByText("Ready")).toBeNull();
     expect(screen.queryByText("Building")).toBeNull();
+  });
+
+  it.each([
+    [{ buildStatus: "building", status: "finalizing" }, "Finalizing"],
+    [{ buildStatus: "building", status: "cancelling" }, "Cancelling"],
+    [{ buildStatus: "failed", status: "cancelled" }, "Cancelled"],
+  ])("labels %o as %s, not Building or Failed", (env, label) => {
+    render(<LivePill env={env} />);
+    expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.queryByText("Building")).toBeNull();
+    expect(screen.queryByText("Failed")).toBeNull();
   });
 });
 
@@ -161,6 +172,20 @@ describe("WorkspaceHeader", () => {
       ),
     );
     expect(screen.getByRole("button", { name: /Cancel build/ })).toBeInTheDocument();
+  });
+
+  it("hides Cancel build once a cancel is in flight", () => {
+    render(
+      withRouter(
+        <WorkspaceHeader
+          {...baseProps}
+          env={{ ...ENV, buildStatus: "building", status: "cancelling" }}
+          canRun={false}
+          locked
+        />,
+      ),
+    );
+    expect(screen.queryByRole("button", { name: /Cancel build/ })).toBeNull();
   });
 
   it("does not render the mock env-version pin (hidden until the contract has a real version)", () => {

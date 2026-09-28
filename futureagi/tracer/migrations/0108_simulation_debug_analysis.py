@@ -51,7 +51,7 @@ class Migration(migrations.Migration):
             model_name="traceinvestigationjob",
             name="workload_type",
             field=models.CharField(
-                choices=[("trace", "Trace"), ("simulation_test_execution", "Simulation test execution")],
+                choices=[("trace", "Trace"), ("simulation_test_execution", "Simulation Test Execution")],
                 default="trace",
                 max_length=40,
             ),
@@ -94,12 +94,23 @@ class Migration(migrations.Migration):
                 name="unique_trace_investigation_job",
             ),
         ),
+        migrations.AddField(
+            model_name="traceinvestigationjob",
+            name="call_execution",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="debug_analysis_jobs",
+                to="simulate.callexecution",
+            ),
+        ),
         migrations.AddConstraint(
             model_name="traceinvestigationjob",
             constraint=models.UniqueConstraint(
-                condition=models.Q(("test_execution__isnull", False)),
-                fields=("project", "test_execution"),
-                name="unique_simulation_investigation_job",
+                condition=models.Q(("call_execution__isnull", False)),
+                fields=("project", "call_execution"),
+                name="unique_simulation_call_investigation_job",
             ),
         ),
         migrations.AddConstraint(
@@ -107,14 +118,16 @@ class Migration(migrations.Migration):
             constraint=models.CheckConstraint(
                 condition=(
                     models.Q(
-                        ("workload_type", "trace"),
-                        ("trace_id__isnull", False),
-                        ("test_execution__isnull", True),
+                        workload_type="trace",
+                        trace_id__isnull=False,
+                        test_execution__isnull=True,
+                        call_execution__isnull=True,
                     )
                     | models.Q(
-                        ("workload_type", "simulation_test_execution"),
-                        ("trace_id__isnull", True),
-                        ("test_execution__isnull", False),
+                        workload_type="simulation_test_execution",
+                        trace_id__isnull=True,
+                        test_execution__isnull=False,
+                        call_execution__isnull=False,
                     )
                 ),
                 name="valid_trace_investigation_workload",
@@ -135,7 +148,7 @@ class Migration(migrations.Migration):
             model_name="traceinvestigationreport",
             name="workload_type",
             field=models.CharField(
-                choices=[("trace", "Trace"), ("simulation_test_execution", "Simulation test execution")],
+                choices=[("trace", "Trace"), ("simulation_test_execution", "Simulation Test Execution")],
                 default="trace",
                 max_length=40,
             ),
@@ -159,45 +172,45 @@ class Migration(migrations.Migration):
             constraint=models.CheckConstraint(
                 condition=(
                     models.Q(
-                        ("source", "legacy_scan"),
-                        ("source_record_id__isnull", False),
-                        ("job__isnull", True),
-                        ("attempt__isnull", True),
+                        source="legacy_scan",
+                        source_record_id__isnull=False,
+                        job__isnull=True,
+                        attempt__isnull=True,
                     )
                     | (
                         models.Q(
-                            ("source", "omega"),
-                            ("source_record_id__isnull", True),
-                            ("job__isnull", False),
-                            ("attempt__isnull", False),
-                            ("idempotency_key__isnull", False),
-                            ("result_digest__isnull", False),
-                            ("contract_version__isnull", False),
-                            ("evidence_digest__isnull", False),
-                            ("outcome__isnull", False),
-                            ("coverage_scope__isnull", False),
-                            ("read_complete__isnull", False),
-                            ("model_calls__isnull", False),
-                            ("input_tokens__isnull", False),
-                            ("output_tokens__isnull", False),
-                            ("cost_status__isnull", False),
+                            source="omega",
+                            source_record_id__isnull=True,
+                            job__isnull=False,
+                            attempt__isnull=False,
+                            idempotency_key__isnull=False,
+                            result_digest__isnull=False,
+                            contract_version__isnull=False,
+                            evidence_digest__isnull=False,
+                            outcome__isnull=False,
+                            coverage_scope__isnull=False,
+                            read_complete__isnull=False,
+                            model_calls__isnull=False,
+                            input_tokens__isnull=False,
+                            output_tokens__isnull=False,
+                            cost_status__isnull=False,
                         )
                         & (
                             models.Q(
-                                ("workload_type", "trace"),
-                                ("test_execution__isnull", True),
-                                ("trace_id__isnull", False),
-                                ("observed_span_count__isnull", False),
-                                ("observed_call_count__isnull", True),
-                                ("future_arrivals_known__isnull", False),
+                                workload_type="trace",
+                                test_execution__isnull=True,
+                                trace_id__isnull=False,
+                                observed_span_count__isnull=False,
+                                observed_call_count__isnull=True,
+                                future_arrivals_known__isnull=False,
                             )
                             | models.Q(
-                                ("workload_type", "simulation_test_execution"),
-                                ("test_execution__isnull", False),
-                                ("trace_id__isnull", True),
-                                ("observed_span_count__isnull", True),
-                                ("observed_call_count__isnull", False),
-                                ("future_arrivals_known__isnull", True),
+                                workload_type="simulation_test_execution",
+                                test_execution__isnull=False,
+                                trace_id__isnull=True,
+                                observed_span_count__isnull=True,
+                                observed_call_count__isnull=False,
+                                future_arrivals_known__isnull=True,
                             )
                         )
                     )
@@ -246,11 +259,11 @@ class Migration(migrations.Migration):
             model_name="traceinvestigationreport",
             constraint=models.UniqueConstraint(
                 condition=models.Q(
-                    ("is_current", True),
-                    ("deleted", False),
-                    ("test_execution__isnull", False),
+                    is_current=True,
+                    deleted=False,
+                    test_execution__isnull=False,
                 ),
-                fields=("project", "test_execution"),
+                fields=("project", "job"),
                 name="unique_current_simulation_investigation",
             ),
         ),

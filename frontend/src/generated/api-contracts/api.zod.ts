@@ -9504,13 +9504,15 @@ export const ApiSetupChecksListResponse = zod.object({
  * GET /api/traces/span-attribute-detail/?project_id=<uuid>&key=<attr_key>
  * @summary Serve the last complete exact attribute snapshot and refresh out of band.
  */
-export const apiTracesSpanAttributeDetailListQueryKeyMax = 512;
-
 export const apiTracesSpanAttributeDetailListQueryRefreshDefault = false;
 
 export const ApiTracesSpanAttributeDetailListQueryParams = zod.object({
   project_id: zod.string().uuid(),
-  key: zod.string().min(1).max(apiTracesSpanAttributeDetailListQueryKeyMax),
+  key: zod
+    .string()
+    .describe(
+      "Nonempty exact attribute key, at most 4096 UTF-8 bytes. Whitespace, controls and case are preserved.",
+    ),
   refresh: zod
     .boolean()
     .default(apiTracesSpanAttributeDetailListQueryRefreshDefault),
@@ -9605,8 +9607,6 @@ GET /api/traces/span-attribute-keys/?project_id=<uuid>&page_size=10
  */
 export const apiTracesSpanAttributeKeysListQueryWorkspaceScopeDefault = false;
 export const apiTracesSpanAttributeKeysListQueryDiscoveryModeDefault = `filter`;
-export const apiTracesSpanAttributeKeysListQueryQMax = 512;
-
 export const apiTracesSpanAttributeKeysListQueryPageSizeMax = 50;
 
 export const apiTracesSpanAttributeKeysListQueryCursorMax = 8192;
@@ -9624,9 +9624,10 @@ export const ApiTracesSpanAttributeKeysListQueryParams = zod.object({
     ),
   q: zod
     .string()
-    .min(1)
-    .max(apiTracesSpanAttributeKeysListQueryQMax)
-    .optional(),
+    .optional()
+    .describe(
+      "Nonempty exact attribute key, at most 4096 UTF-8 bytes. Whitespace, controls and case are preserved.",
+    ),
   page_size: zod
     .number()
     .min(1)
@@ -9697,15 +9698,17 @@ with optional prefix search filtering.
 GET /api/traces/span-attribute-values/?project_id=<uuid>&key=<attr_key>[&q=<search>][&limit=50]
  * @summary Get top values for a specific span attribute key.
  */
-export const apiTracesSpanAttributeValuesListQueryKeyMax = 512;
-
 export const apiTracesSpanAttributeValuesListQueryQMax = 512;
 
 export const apiTracesSpanAttributeValuesListQueryLimitMax = 500;
 
 export const ApiTracesSpanAttributeValuesListQueryParams = zod.object({
   project_id: zod.string().uuid(),
-  key: zod.string().min(1).max(apiTracesSpanAttributeValuesListQueryKeyMax),
+  key: zod
+    .string()
+    .describe(
+      "Nonempty exact attribute key, at most 4096 UTF-8 bytes. Whitespace, controls and case are preserved.",
+    ),
   q: zod.string().max(apiTracesSpanAttributeValuesListQueryQMax).optional(),
   limit: zod
     .number()
@@ -48382,7 +48385,7 @@ export const TracerDashboardCreateBody = zod.object({
 /**
  * Return distinct values for a given metric/attribute, for filter value picker.
  */
-export const tracerDashboardFilterValuesQueryPropertyIdMax = 1024;
+export const tracerDashboardFilterValuesQueryPropertyIdMax = 4113;
 
 export const tracerDashboardFilterValuesQuerySourceDefault = `traces`;
 export const tracerDashboardFilterValuesQueryProjectIdsDefault = ``;
@@ -48391,7 +48394,7 @@ export const tracerDashboardFilterValuesQuerySearchMax = 512;
 
 export const tracerDashboardFilterValuesQueryPageSizeMax = 50;
 
-export const tracerDashboardFilterValuesQueryCursorMax = 16384;
+export const tracerDashboardFilterValuesQueryCursorMax = 262144;
 
 export const TracerDashboardFilterValuesQueryParams = zod.object({
   property_id: zod
@@ -48464,6 +48467,7 @@ export const TracerDashboardFilterValuesResponse = zod.object({
     .boolean()
     .default(tracerDashboardFilterValuesResponseStatusDefault),
   result: zod.object({
+    query_exact: zod.boolean().optional(),
     values: zod.array(
       zod.object({
         value: jsonValueSchema.describe("Any valid JSON value."),
@@ -48476,8 +48480,15 @@ export const TracerDashboardFilterValuesResponse = zod.object({
         description: zod.string().min(1).optional(),
       }),
     ),
-    query_complete: zod.boolean().optional(),
-    query_status: zod.enum(["complete", "sampled", "degraded"]).optional(),
+    query_complete: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether this page read completed, not whether all source history is indexed.",
+      ),
+    query_status: zod
+      .enum(["complete", "sampled", "degraded", "partial"])
+      .optional(),
     query_error_code: zod
       .enum(["sample_limit", "read_budget_exceeded", "query_failed"])
       .optional(),
@@ -48513,15 +48524,95 @@ export const TracerDashboardFilterValuesResponse = zod.object({
         tracerDashboardFilterValuesResponseResultActivationFingerprintRegExp,
       )
       .optional(),
-    query_provenance: zod.enum(["activated_property_catalog"]).optional(),
+    query_provenance: zod
+      .enum(["activated_property_catalog", "current_property_catalog"])
+      .optional(),
   }),
 });
 
 /**
- * Backward compat: if ``workflow`` param is provided, return only
-that source's metrics in the old grouped format.
- * @summary Return all available metrics across traces and datasets.
+ * Return distinct values for a given metric/attribute, for filter value picker.
  */
+export const tracerDashboardFilterValuesCreateBodyPropertyIdMax = 4113;
+
+export const tracerDashboardFilterValuesCreateBodySourceDefault = `traces`;
+export const tracerDashboardFilterValuesCreateBodyProjectIdsDefault = ``;
+export const tracerDashboardFilterValuesCreateBodySearchDefault = ``;
+export const tracerDashboardFilterValuesCreateBodySearchMax = 512;
+
+export const tracerDashboardFilterValuesCreateBodyPageSizeMax = 50;
+
+export const tracerDashboardFilterValuesCreateBodyCursorMax = 262144;
+
+export const TracerDashboardFilterValuesCreateBody = zod.object({
+  property_id: zod
+    .string()
+    .min(1)
+    .max(tracerDashboardFilterValuesCreateBodyPropertyIdMax)
+    .optional()
+    .describe(
+      "Stable namespaced property identity returned by the metrics catalog. Legacy metric_name/metric_type remain accepted during migration.",
+    ),
+  metric_name: zod.string().min(1).optional(),
+  metric_type: zod
+    .enum([
+      "system_metric",
+      "eval_metric",
+      "annotation_metric",
+      "custom_attribute",
+      "custom_column",
+    ])
+    .optional(),
+  source: zod
+    .enum([
+      "traces",
+      "spans",
+      "sessions",
+      "users",
+      "voice_calls",
+      "prompts",
+      "datasets",
+      "dataset_column",
+      "simulation",
+      "both",
+      "all",
+    ])
+    .default(tracerDashboardFilterValuesCreateBodySourceDefault),
+  project_ids: zod
+    .string()
+    .default(tracerDashboardFilterValuesCreateBodyProjectIdsDefault),
+  dataset_id: zod.string().uuid().optional(),
+  search: zod
+    .string()
+    .max(tracerDashboardFilterValuesCreateBodySearchMax)
+    .default(tracerDashboardFilterValuesCreateBodySearchDefault),
+  page_size: zod
+    .number()
+    .min(1)
+    .max(tracerDashboardFilterValuesCreateBodyPageSizeMax)
+    .optional(),
+  cursor: zod
+    .string()
+    .min(1)
+    .max(tracerDashboardFilterValuesCreateBodyCursorMax)
+    .optional(),
+  attribute_type: zod
+    .enum(["string", "number", "boolean", "array", "map", "json"])
+    .optional(),
+});
+
+export const tracerDashboardFilterValuesCreateResponseStatusDefault = true;
+
+export const tracerDashboardFilterValuesCreateResponseResultQueryCountMin = 0;
+
+export const tracerDashboardFilterValuesCreateResponseResultCatalogEpochMax = 65535;
+
+export const tracerDashboardFilterValuesCreateResponseResultActivationFingerprintRegExp =
+  new RegExp("^[0-9a-f]{64}$");
+
+export const TracerDashboardFilterValuesCreateResponse =
+  TracerDashboardFilterValuesResponse;
+
 export const tracerDashboardMetricsQueryProjectIdsDefault = [];
 export const tracerDashboardMetricsQueryPerEvalConfigDefault = false;
 export const tracerDashboardMetricsQueryExcludeCustomAttributesDefault = false;
@@ -48534,7 +48625,7 @@ export const tracerDashboardMetricsQuerySourceDefault = ``;
 export const tracerDashboardMetricsQueryPageSizeMax = 200;
 
 export const tracerDashboardMetricsQueryCursorModeDefault = false;
-export const tracerDashboardMetricsQueryCursorMax = 16384;
+export const tracerDashboardMetricsQueryCursorMax = 262144;
 
 export const TracerDashboardMetricsQueryParams = zod.object({
   workflow: zod.enum(["observability", "dataset", "simulation"]).optional(),
@@ -48602,7 +48693,7 @@ export const tracerDashboardMetricsResponseResultCategoryCountsMinOne = 0;
 
 export const tracerDashboardMetricsResponseResultPageSizeMax = 200;
 
-export const tracerDashboardMetricsResponseResultNextCursorMax = 16384;
+export const tracerDashboardMetricsResponseResultNextCursorMax = 262144;
 
 export const tracerDashboardMetricsResponseResultCatalogEpochMax = 65535;
 
@@ -48686,22 +48777,116 @@ export const TracerDashboardMetricsResponse = zod.object({
       .min(1)
       .regex(tracerDashboardMetricsResponseResultActivationFingerprintRegExp)
       .optional(),
-    query_complete: zod.boolean().optional(),
+    query_complete: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Whether this page read completed, not whether all source history is indexed.",
+      ),
     query_exact: zod.boolean().optional(),
-    query_status: zod.enum(["complete"]).optional(),
-    query_provenance: zod.enum(["activated_property_catalog"]).optional(),
+    query_status: zod.enum(["complete", "partial"]).optional(),
+    query_provenance: zod
+      .enum(["activated_property_catalog", "current_property_catalog"])
+      .optional(),
   }),
 });
 
 /**
- * Each metric carries a ``source`` field ("traces" or "datasets").
-Metrics are partitioned by source and dispatched to the appropriate
-query builder.  Results are merged into a single response.
-
-Each metric is validated against the canonical query contract before
-it reaches any query builder.
- * @summary Execute a widget query and return chart data.
+ * Backward compat: if ``workflow`` param is provided, return only
+that source's metrics in the old grouped format.
+ * @summary Return all available metrics across traces and datasets.
  */
+export const tracerDashboardMetricsCreateBodyProjectIdsDefault = ``;
+export const tracerDashboardMetricsCreateBodyPerEvalConfigDefault = false;
+export const tracerDashboardMetricsCreateBodyExcludeCustomAttributesDefault =
+  false;
+export const tracerDashboardMetricsCreateBodySearchDefault = ``;
+export const tracerDashboardMetricsCreateBodySearchMax = 256;
+
+export const tracerDashboardMetricsCreateBodyCategoryDefault = ``;
+export const tracerDashboardMetricsCreateBodyRoleDefault = ``;
+export const tracerDashboardMetricsCreateBodySourceDefault = ``;
+export const tracerDashboardMetricsCreateBodyPageSizeMax = 200;
+
+export const tracerDashboardMetricsCreateBodyCursorModeDefault = false;
+export const tracerDashboardMetricsCreateBodyCursorMax = 262144;
+
+export const TracerDashboardMetricsCreateBody = zod.object({
+  workflow: zod.enum(["observability", "dataset", "simulation"]).optional(),
+  project_ids: zod
+    .string()
+    .default(tracerDashboardMetricsCreateBodyProjectIdsDefault),
+  agent_definition_id: zod.string().uuid().optional(),
+  per_eval_config: zod
+    .boolean()
+    .default(tracerDashboardMetricsCreateBodyPerEvalConfigDefault),
+  exclude_custom_attributes: zod
+    .boolean()
+    .default(tracerDashboardMetricsCreateBodyExcludeCustomAttributesDefault),
+  search: zod
+    .string()
+    .max(tracerDashboardMetricsCreateBodySearchMax)
+    .default(tracerDashboardMetricsCreateBodySearchDefault),
+  category: zod
+    .enum([
+      "system_metric",
+      "eval_metric",
+      "annotation_metric",
+      "custom_attribute",
+      "custom_column",
+    ])
+    .default(tracerDashboardMetricsCreateBodyCategoryDefault),
+  role: zod
+    .enum(["metric", "dimension"])
+    .default(tracerDashboardMetricsCreateBodyRoleDefault),
+  source: zod
+    .enum([
+      "traces",
+      "spans",
+      "sessions",
+      "users",
+      "voice_calls",
+      "prompts",
+      "datasets",
+      "simulation",
+      "both",
+      "all",
+    ])
+    .default(tracerDashboardMetricsCreateBodySourceDefault),
+  page: zod.number().min(1).optional(),
+  page_size: zod
+    .number()
+    .min(1)
+    .max(tracerDashboardMetricsCreateBodyPageSizeMax)
+    .optional(),
+  cursor_mode: zod
+    .boolean()
+    .default(tracerDashboardMetricsCreateBodyCursorModeDefault),
+  cursor: zod
+    .string()
+    .min(1)
+    .max(tracerDashboardMetricsCreateBodyCursorMax)
+    .optional(),
+});
+
+export const tracerDashboardMetricsCreateResponseStatusDefault = true;
+
+export const tracerDashboardMetricsCreateResponseResultTotalMin = 0;
+
+export const tracerDashboardMetricsCreateResponseResultCategoryCountsMinOne = 0;
+
+export const tracerDashboardMetricsCreateResponseResultPageSizeMax = 200;
+
+export const tracerDashboardMetricsCreateResponseResultNextCursorMax = 262144;
+
+export const tracerDashboardMetricsCreateResponseResultCatalogEpochMax = 65535;
+
+export const tracerDashboardMetricsCreateResponseResultActivationFingerprintRegExp =
+  new RegExp("^[0-9a-f]{64}$");
+
+export const TracerDashboardMetricsCreateResponse =
+  TracerDashboardMetricsResponse;
+
 export const tracerDashboardQueryQueryRefreshDefault = false;
 
 export const TracerDashboardQueryQueryParams = zod.object({
@@ -48993,6 +49178,7 @@ export const TracerDashboardQueryBody = zod.object({
 });
 
 export const tracerDashboardQueryResponseStatusDefault = true;
+export const tracerDashboardQueryResponseResultMetricsItemSeriesTotalMin = 0;
 
 export const tracerDashboardQueryResponseResultQueryCountMin = 0;
 export const tracerDashboardQueryResponseResultQueryCountMax = 256;
@@ -49044,6 +49230,11 @@ export const TracerDashboardQueryResponse = zod.object({
             ),
           }),
         ),
+        series_total: zod
+          .number()
+          .min(tracerDashboardQueryResponseResultMetricsItemSeriesTotalMin)
+          .optional(),
+        series_truncated: zod.boolean().optional(),
         query_complete: zod.boolean().optional(),
         query_sampled: zod.boolean().optional(),
         query_status: zod.enum(["complete", "degraded"]).optional(),
@@ -49818,6 +50009,7 @@ export const TracerDashboardWidgetsPreviewQueryBody = zod.object({
 });
 
 export const tracerDashboardWidgetsPreviewQueryResponseStatusDefault = true;
+export const tracerDashboardWidgetsPreviewQueryResponseResultMetricsItemSeriesTotalMin = 0;
 
 export const tracerDashboardWidgetsPreviewQueryResponseResultQueryCountMin = 0;
 export const tracerDashboardWidgetsPreviewQueryResponseResultQueryCountMax = 256;
@@ -49871,6 +50063,13 @@ export const TracerDashboardWidgetsPreviewQueryResponse = zod.object({
             ),
           }),
         ),
+        series_total: zod
+          .number()
+          .min(
+            tracerDashboardWidgetsPreviewQueryResponseResultMetricsItemSeriesTotalMin,
+          )
+          .optional(),
+        series_truncated: zod.boolean().optional(),
         query_complete: zod.boolean().optional(),
         query_sampled: zod.boolean().optional(),
         query_status: zod.enum(["complete", "degraded"]).optional(),
@@ -50379,6 +50578,7 @@ export const TracerDashboardWidgetsExecuteQueryBody = zod.object({
 });
 
 export const tracerDashboardWidgetsExecuteQueryResponseStatusDefault = true;
+export const tracerDashboardWidgetsExecuteQueryResponseResultMetricsItemSeriesTotalMin = 0;
 
 export const tracerDashboardWidgetsExecuteQueryResponseResultQueryCountMin = 0;
 export const tracerDashboardWidgetsExecuteQueryResponseResultQueryCountMax = 256;
@@ -50432,6 +50632,13 @@ export const TracerDashboardWidgetsExecuteQueryResponse = zod.object({
             ),
           }),
         ),
+        series_total: zod
+          .number()
+          .min(
+            tracerDashboardWidgetsExecuteQueryResponseResultMetricsItemSeriesTotalMin,
+          )
+          .optional(),
+        series_truncated: zod.boolean().optional(),
         query_complete: zod.boolean().optional(),
         query_sampled: zod.boolean().optional(),
         query_status: zod.enum(["complete", "degraded"]).optional(),
@@ -56903,7 +57110,6 @@ export const TracerObservationSpanCreateOtelSpanBody = zod.object({
  */
 
 export const tracerObservationSpanGetEvalAttributesListQueryRowTypeDefault = `spans`;
-export const tracerObservationSpanGetEvalAttributesListQueryQMax = 512;
 
 export const TracerObservationSpanGetEvalAttributesListQueryParams = zod.object(
   {
@@ -56921,9 +57127,10 @@ export const TracerObservationSpanGetEvalAttributesListQueryParams = zod.object(
       .default(tracerObservationSpanGetEvalAttributesListQueryRowTypeDefault),
     q: zod
       .string()
-      .min(1)
-      .max(tracerObservationSpanGetEvalAttributesListQueryQMax)
-      .optional(),
+      .optional()
+      .describe(
+        "Nonempty exact attribute key, at most 4096 UTF-8 bytes. Whitespace, controls and case are preserved.",
+      ),
   },
 );
 
@@ -57536,7 +57743,6 @@ export const TracerObservationSpanGetObservationSpanFieldsResponse = zod.object(
  */
 
 export const tracerObservationSpanGetSpanAttributesListQueryRowTypeDefault = `spans`;
-export const tracerObservationSpanGetSpanAttributesListQueryQMax = 512;
 
 export const TracerObservationSpanGetSpanAttributesListQueryParams = zod.object(
   {
@@ -57554,9 +57760,10 @@ export const TracerObservationSpanGetSpanAttributesListQueryParams = zod.object(
       .default(tracerObservationSpanGetSpanAttributesListQueryRowTypeDefault),
     q: zod
       .string()
-      .min(1)
-      .max(tracerObservationSpanGetSpanAttributesListQueryQMax)
-      .optional(),
+      .optional()
+      .describe(
+        "Nonempty exact attribute key, at most 4096 UTF-8 bytes. Whitespace, controls and case are preserved.",
+      ),
   },
 );
 
@@ -57862,6 +58069,8 @@ export const TracerObservationSpanListSpansResponse = zod.object({
           tracerObservationSpanListSpansResponseResultMetadataQueryAppliedFilterCountMin,
         )
         .optional(),
+      query_exact: zod.boolean().optional(),
+      ordering_exact: zod.boolean().optional(),
     }),
     table: zod.array(
       zod.record(
@@ -58072,6 +58281,8 @@ export const TracerObservationSpanListSpansObserveResponse = zod.object({
           tracerObservationSpanListSpansObserveResponseResultMetadataQueryAppliedFilterCountMin,
         )
         .optional(),
+      query_exact: zod.boolean().optional(),
+      ordering_exact: zod.boolean().optional(),
     }),
     table: zod.array(
       zod.record(
@@ -62735,8 +62946,8 @@ export const TracerTraceSessionListSessionsResponse = zod.object({
         )
         .optional(),
       query_exact: zod.boolean().optional(),
-      query_provenance: zod.enum(["spans_per_session_candidate"]).optional(),
       ordering_exact: zod.boolean().optional(),
+      query_provenance: zod.enum(["spans_per_session_candidate"]).optional(),
     }),
     table: zod.array(
       zod
@@ -63972,6 +64183,8 @@ export const TracerTraceListTracesResponse = zod.object({
           tracerTraceListTracesResponseResultMetadataQueryAppliedFilterCountMin,
         )
         .optional(),
+      query_exact: zod.boolean().optional(),
+      ordering_exact: zod.boolean().optional(),
     }),
     table: zod.array(
       zod.record(
@@ -64172,6 +64385,8 @@ export const TracerTraceListTracesOfSessionResponse = zod.object({
           tracerTraceListTracesOfSessionResponseResultMetadataQueryAppliedFilterCountMin,
         )
         .optional(),
+      query_exact: zod.boolean().optional(),
+      ordering_exact: zod.boolean().optional(),
     }),
     table: zod.array(
       zod.record(
@@ -64352,6 +64567,8 @@ export const tracerTraceListVoiceCallsResponseTotalPagesMin = 0;
 export const tracerTraceListVoiceCallsResponseNextCursorFingerprintRegExp =
   new RegExp("^[0-9a-f]{64}$");
 
+export const tracerTraceListVoiceCallsResponseQueryCountMin = 0;
+
 export const tracerTraceListVoiceCallsResponseQueryAppliedFilterSha256RegExp =
   new RegExp("^[0-9a-f]{64}$");
 export const tracerTraceListVoiceCallsResponseQueryAppliedFilterCountMin = 0;
@@ -64396,7 +64613,13 @@ export const TracerTraceListVoiceCallsResponse = zod.object({
     .nullish(),
   query_complete: zod.boolean(),
   query_status: zod.enum(["complete", "degraded"]),
+  query_exact: zod.boolean().optional(),
+  ordering_exact: zod.boolean().optional(),
   query_error_code: zod.string().min(1).optional(),
+  query_count: zod
+    .number()
+    .min(tracerTraceListVoiceCallsResponseQueryCountMin)
+    .optional(),
   query_applied_filter_version: zod
     .enum(["canonical-json-sha256-v1"])
     .optional(),
@@ -64486,6 +64709,8 @@ export const tracerTraceListVoiceCallsCreateResponseTotalPagesMin = 0;
 
 export const tracerTraceListVoiceCallsCreateResponseNextCursorFingerprintRegExp =
   new RegExp("^[0-9a-f]{64}$");
+
+export const tracerTraceListVoiceCallsCreateResponseQueryCountMin = 0;
 
 export const tracerTraceListVoiceCallsCreateResponseQueryAppliedFilterSha256RegExp =
   new RegExp("^[0-9a-f]{64}$");
@@ -66868,9 +67093,14 @@ export const TracerUsersListResponse = zod.object({
     query_status: zod.enum(["complete", "degraded"]).optional(),
     query_exact: zod.boolean().optional(),
     query_provenance: zod
-      .enum(["span_user_rollup_end_users_candidate", "physical_latest_users"])
+      .enum([
+        "span_user_rollup_end_users_candidate",
+        "physical_latest_users",
+        "matching_activity_walk",
+      ])
       .optional(),
     ordering_exact: zod.boolean().optional(),
+    ordering: zod.enum(["latest_matching_activity"]).optional(),
     approximate_fields: zod.array(zod.enum(["num_sessions"])).optional(),
   }),
 });

@@ -22,12 +22,12 @@ import {
   getScenarioSelection,
   clearScenarioSelection,
 } from "src/sections/simulate/environments/buildEnvironment/console/scenarioSelectionBus";
-import { terminalStages } from "src/pages/dashboard/harness/harnessShared";
 import { harnessJobQuery } from "./environment";
-import { projectConversation, conversationInFlight } from "./conversationProjection";
+import {
+  projectConversation,
+  conversationInFlight,
+} from "./conversationProjection";
 
-const RUNTIME_WARMING =
-  "The agent runtime is warming up — chat opens once it's ready.";
 const NO_WORKSPACE =
   "This run has no saved workspace to restore, so chat isn't available.";
 const NOT_A_HARNESS_ENV = "Chat connects once this environment is built.";
@@ -41,7 +41,9 @@ export function useWorkspaceChat(env, { source } = {}) {
   const jobId = jobIdFor(env, source);
   const queryClient = useQueryClient();
 
-  const jobQuery = useQuery(harnessJobQuery(jobId, { enabled: Boolean(jobId) }));
+  const jobQuery = useQuery(
+    harnessJobQuery(jobId, { enabled: Boolean(jobId) }),
+  );
   const conversation = jobQuery.data?.conversation ?? null;
 
   // Keep the latest conversation/jobId in refs so `send` stays referentially
@@ -58,7 +60,8 @@ export function useWorkspaceChat(env, { source } = {}) {
   const [pending, setPending] = useState([]);
 
   const mutation = useMutation({
-    mutationFn: ({ id, payload }) => sendHarnessConversationMessage(id, payload),
+    mutationFn: ({ id, payload }) =>
+      sendHarnessConversationMessage(id, payload),
     onSuccess: async (value, { id, requestId }) => {
       setPending((prev) => prev.filter((p) => p.id !== requestId));
       if (!value) return;
@@ -106,7 +109,8 @@ export function useWorkspaceChat(env, { source } = {}) {
       const conv = conversationRef.current;
       const blocking = conv?.blocking_input || null;
       const answered =
-        blocking && (conv?.messages || []).some((m) => m.reply_to === blocking.message_id);
+        blocking &&
+        (conv?.messages || []).some((m) => m.reply_to === blocking.message_id);
       const open = blocking && !answered ? blocking : null;
       const kind = open
         ? open.kind === "confirmation_requested"
@@ -140,7 +144,10 @@ export function useWorkspaceChat(env, { source } = {}) {
           },
         },
       };
-      setPending((prev) => [...prev, { id: requestId, text: content, variables }]);
+      setPending((prev) => [
+        ...prev,
+        { id: requestId, text: content, variables },
+      ]);
       mutate(variables);
     },
     [mutate],
@@ -180,7 +187,10 @@ export function useWorkspaceChat(env, { source } = {}) {
         ...turn,
         steps: turn.steps.map((step) =>
           step.kind === "ask" && !step.resolved
-            ? { ...step, onSubmit: (answers) => send((answers || []).join(", ")) }
+            ? {
+                ...step,
+                onSubmit: (answers) => send((answers || []).join(", ")),
+              }
             : step,
         ),
       };
@@ -195,7 +205,12 @@ export function useWorkspaceChat(env, { source } = {}) {
       setPending((prev) =>
         prev.map((p) =>
           p.id === marker.id
-            ? { ...p, failed: false, errorMessage: undefined, retryable: undefined }
+            ? {
+                ...p,
+                failed: false,
+                errorMessage: undefined,
+                retryable: undefined,
+              }
             : p,
         ),
       );
@@ -234,19 +249,16 @@ export function useWorkspaceChat(env, { source } = {}) {
   // the persistent cue).
   const running = mutation.isPending;
 
+  // A live job always accepts messages (they queue until its sandbox can run chat), so
+  // only a finished run with no saved workspace is unavailable; its send 409s for good.
   const runtimeUnavailable = conversation
     ? conversation.runtime?.available === false
     : false;
-  // A terminal run with no saved workspace is permanently unavailable (send 409s
-  // retryable:false); a live run that's merely cold is still warming up.
-  const terminal = terminalStages.has(jobQuery.data?.status?.stage);
   const frozen = !jobId || runtimeUnavailable;
   const frozenReason = !jobId
     ? NOT_A_HARNESS_ENV
     : runtimeUnavailable
-      ? terminal
-        ? NO_WORKSPACE
-        : RUNTIME_WARMING
+      ? NO_WORKSPACE
       : undefined;
 
   return {

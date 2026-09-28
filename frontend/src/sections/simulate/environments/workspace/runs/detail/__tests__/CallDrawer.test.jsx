@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // The chat drawer's data hook is mocked so the render asserts the drawer wiring
 // against a fixed CallDetail rather than the network. `isVoiceCall` (the routing
@@ -20,15 +21,23 @@ vi.mock("src/api/simulate-environments/runDetail", async (importOriginal) => {
 // test proves the routing without mounting the heavy component (imagine store,
 // saved views, share dialog).
 vi.mock("src/components/VoiceDetailDrawerV2", () => ({
-  default: ({ data }) => (
+  default: ({ data, onPrev, onNext, hasPrev, hasNext }) => (
     <div data-testid="voice-drawer">
       voice:{data?.id}:{data?.transcript?.map((turn) => turn.content).join("|")}
+      <button type="button" onClick={onPrev} disabled={!hasPrev}>
+        prev
+      </button>
+      <button type="button" onClick={onNext} disabled={!hasNext}>
+        next
+      </button>
     </div>
   ),
 }));
 
 const { default: CallDrawer } = await import("../CallDrawer");
-const { mapCallDetail } = await import("src/api/simulate-environments/runDetail");
+const { mapCallDetail } = await import(
+  "src/api/simulate-environments/runDetail"
+);
 const { mapCallRow } = await import("src/api/simulate-environments/runCalls");
 const { isVoiceCall } = await import("../callRouting");
 
@@ -139,8 +148,60 @@ describe("CallDrawer — chat branch", () => {
     // The reason shows once in the failed-eval banner already.
     expect(screen.getAllByText("wrong amount")).toHaveLength(1);
     await user.click(screen.getByRole("tab", { name: /Evals \(2\)/ }));
-    // The Evals tab adds its own row — banner + tab = two occurrences.
+    expect(screen.getAllByText("Failed")).toHaveLength(2);
+    expect(screen.queryByText("0%")).not.toBeInTheDocument();
+    expect(screen.queryByText("Fix with Falcon")).not.toBeInTheDocument();
+    expect(screen.queryByText("Add Evals")).not.toBeInTheDocument();
+    await user.click(screen.getByText("Refund correctness"));
+    // The expanded eval adds its explanation — banner + drawer = two.
     expect(screen.getAllByText("wrong amount")).toHaveLength(2);
+  });
+
+  it("shows utterance-level error localization when a chat eval is expanded", async () => {
+    const callDetail = mapCallDetail({
+      ...RAW_CHAT_PAYLOAD,
+      eval_metrics: {
+        e1: {
+          name: "Conversation quality",
+          value: "Failed",
+          type: "Pass/Fail",
+          reason: "The assistant contradicted itself.",
+          error_localizer: true,
+          error_localizer_status: "completed",
+          selected_input_key: "conversation",
+          input_data: {
+            conversation:
+              "Customer: Can you refund it?\nAgent: I cannot.\nAgent: Your refund is complete.",
+          },
+          input_types: { conversation: "text" },
+          error_analysis: {
+            conversation: [
+              {
+                orgSen: { startIdx: 51, endIdx: 81 },
+                reason: "This utterance contradicts the prior response.",
+              },
+            ],
+          },
+        },
+      },
+    });
+    useCallDetail.mockReturnValue({ callDetail, isLoading: false });
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CallDrawer task={chatTask} agentType="text" onClose={() => {}} />
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole("tab", { name: /Evals \(1\)/ }));
+    await user.click(screen.getByText("Conversation quality"));
+
+    expect(screen.getByText("Possible Error")).toBeInTheDocument();
+    expect(screen.getByText(": Your refund is complete.")).toBeInTheDocument();
   });
 
   it("does not mount the product voice drawer for a chat call", () => {
@@ -153,7 +214,10 @@ describe("CallDrawer — chat branch", () => {
   });
 
   it("still lists the verdict of an eval that was removed, marked, everywhere call details render it", async () => {
-    useCallDetail.mockReturnValue({ callDetail: CHAT_DETAIL, isLoading: false });
+    useCallDetail.mockReturnValue({
+      callDetail: CHAT_DETAIL,
+      isLoading: false,
+    });
     const user = userEvent.setup();
     render(<CallDrawer task={chatTask} agentType="text" onClose={() => {}} />);
 
@@ -206,6 +270,82 @@ describe("CallDrawer — chat branch", () => {
 // change this fixture is shaped after. Everything below the fixture is the
 // production path: the same column filter `useRunCalls` applies, the real
 // `mapCallRow`, the real drawer.
+describe("CallDrawer — chat prev/next", () => {
+  const renderChat = (props = {}) => {
+    useCallDetail.mockReturnValue({ callDetail: CHAT_DETAIL, isLoading: false });
+    return render(
+      <CallDrawer task={chatTask} agentType="text" onClose={() => {}} {...props} />,
+    );
+  };
+
+  it("steps with the header arrows, like the voice drawer", async () => {
+    const user = userEvent.setup();
+    const onPrev = vi.fn();
+    const onNext = vi.fn();
+    renderChat({ hasPrev: true, hasNext: false, onPrev, onNext });
+
+    expect(screen.getByRole("button", { name: "Next conversation (↓)" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Previous conversation (↑)" }));
+    expect(onPrev).toHaveBeenCalledTimes(1);
+    expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it("steps with the arrow keys, but not while typing", async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    const onPrev = vi.fn();
+    renderChat({ hasPrev: true, hasNext: true, onPrev, onNext });
+
+    await user.keyboard("{ArrowDown}");
+    expect(onNext).toHaveBeenCalledTimes(1);
+    await user.keyboard("{ArrowUp}");
+    expect(onPrev).toHaveBeenCalledTimes(1);
+
+    // A key typed into a field (the drawer traps focus, so dispatch on it).
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(onNext).toHaveBeenCalledTimes(1);
+    input.remove();
+  });
+
+  it.each([
+    ["the transcript", () => screen.getByText("Refund issued.")],
+    ["the analytics pane", () => screen.getByText("Words")],
+  ])(
+    "leaves ↑/↓ to scroll %s instead of stepping",
+    (_pane, target) => {
+      const onNext = vi.fn();
+      const onPrev = vi.fn();
+      renderChat({ hasPrev: true, hasNext: true, onPrev, onNext });
+
+      // fireEvent returns false when the default (the browser's scroll) was
+      // prevented.
+      expect(fireEvent.keyDown(target(), { key: "ArrowDown" })).toBe(true);
+      expect(fireEvent.keyDown(target(), { key: "ArrowUp" })).toBe(true);
+      expect(onNext).not.toHaveBeenCalled();
+      expect(onPrev).not.toHaveBeenCalled();
+    },
+  );
+
+  it("says conversation, not call — this is a chat", () => {
+    useCallDetail.mockReturnValue({
+      callDetail: { ...CHAT_DETAIL, turns: [] },
+      isLoading: false,
+    });
+    render(<CallDrawer task={chatTask} agentType="text" onClose={() => {}} />);
+    expect(
+      screen.getByText("No messages captured for this conversation."),
+    ).toBeInTheDocument();
+  });
+
+  it("disables both arrows when nothing is passed", () => {
+    renderChat();
+    expect(screen.getByRole("button", { name: "Previous conversation (↑)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next conversation (↓)" })).toBeDisabled();
+  });
+});
+
 describe("CallDrawer — the run-detail endpoint's removed verdicts, through to the drawer", () => {
   // One page of `GET /simulate/test-executions/{id}/`, exactly as the widened
   // endpoint sends it: the removed evaluation keeps its column in
@@ -259,7 +399,9 @@ describe("CallDrawer — the run-detail endpoint's removed verdicts, through to 
 
   // The same derivation `useRunCalls` performs on that payload.
   const taskFromPage = (page) => {
-    const evalColumns = page.column_order.filter((c) => c.type === "evaluation");
+    const evalColumns = page.column_order.filter(
+      (c) => c.type === "evaluation",
+    );
     return mapCallRow(page.results[0], evalColumns);
   };
 
@@ -268,7 +410,13 @@ describe("CallDrawer — the run-detail endpoint's removed verdicts, through to 
     // where the only verdicts it has are the list's.
     useCallDetail.mockReturnValue({ callDetail: null, isLoading: true });
     const user = userEvent.setup();
-    render(<CallDrawer task={taskFromPage(RUN_DETAIL_PAGE)} agentType="text" onClose={() => {}} />);
+    render(
+      <CallDrawer
+        task={taskFromPage(RUN_DETAIL_PAGE)}
+        agentType="text"
+        onClose={() => {}}
+      />,
+    );
 
     // The removed eval also failed, so it reaches the banner as well as the
     // Evals tab — marked in both, by the test id an e2e flow locates.
@@ -278,7 +426,8 @@ describe("CallDrawer — the run-detail endpoint's removed verdicts, through to 
     await user.click(screen.getByRole("tab", { name: /Evals \(2\)/ }));
 
     expect(screen.getByText("no_misselling")).toBeInTheDocument();
-    // The stored reason, in the banner and in the tab row.
+    await user.click(screen.getByText("no_misselling"));
+    // The stored reason is shown in the banner and expanded eval row.
     expect(screen.getAllByText("flagged upsell")).toHaveLength(2);
     expect(screen.getAllByTestId("removed-eval-marker")).toHaveLength(2);
     // The live failing eval is listed too, and never marked — the total stays
@@ -293,9 +442,17 @@ describe("CallDrawer — the run-detail endpoint's removed verdicts, through to 
     useCallDetail.mockReturnValue({ callDetail: null, isLoading: true });
     const withoutColumn = {
       ...RUN_DETAIL_PAGE,
-      column_order: RUN_DETAIL_PAGE.column_order.filter((c) => c.id !== "eval-removed"),
+      column_order: RUN_DETAIL_PAGE.column_order.filter(
+        (c) => c.id !== "eval-removed",
+      ),
     };
-    render(<CallDrawer task={taskFromPage(withoutColumn)} agentType="text" onClose={() => {}} />);
+    render(
+      <CallDrawer
+        task={taskFromPage(withoutColumn)}
+        agentType="text"
+        onClose={() => {}}
+      />,
+    );
 
     expect(screen.queryByText(/no_misselling failed/)).toBeNull();
     expect(screen.queryByTestId("removed-eval-marker")).toBeNull();
@@ -356,5 +513,48 @@ describe("CallDrawer — voice branch", () => {
     expect(timeline.indexOf("Found it.")).toBeLessThan(
       timeline.indexOf("untimed_tool"),
     );
+  });
+
+  it("hands prev/next to the product voice drawer", async () => {
+    const user = userEvent.setup();
+    useCallExecutionV3Detail.mockReturnValue({
+      data: { id: "voice-2", transcript: [] },
+      isPending: false,
+    });
+    const onPrev = vi.fn();
+    const onNext = vi.fn();
+    render(
+      <CallDrawer
+        task={{ id: "voice-2", simulationCallType: "voice" }}
+        agentType="voice"
+        hasPrev
+        hasNext={false}
+        onPrev={onPrev}
+        onNext={onNext}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "next" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "prev" }));
+    expect(onPrev).toHaveBeenCalledTimes(1);
+    expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it("disables both arrows when nothing is passed (the header defaults them on)", () => {
+    useCallExecutionV3Detail.mockReturnValue({
+      data: { id: "voice-3", transcript: [] },
+      isPending: false,
+    });
+    render(
+      <CallDrawer
+        task={{ id: "voice-3", simulationCallType: "voice" }}
+        agentType="voice"
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "prev" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "next" })).toBeDisabled();
   });
 });

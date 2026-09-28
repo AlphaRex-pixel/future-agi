@@ -70,4 +70,32 @@ describe("ContactInformation", () => {
     fireEvent.click(screen.getByText("Phone"));
     expect(onMode).toHaveBeenCalledWith("phone");
   });
+
+  it("keeps only digits in the contact number, capped at 15", () => {
+    const onContactNumber = vi.fn();
+    render(<ContactInformation {...base} mode="phone" onContactNumber={onContactNumber} />);
+    const input = screen.getByPlaceholderText("Number to call for the simulation");
+    expect(input).toHaveAttribute("inputmode", "numeric");
+
+    fireEvent.change(input, { target: { value: "+1 (925) 8e5a-6" } });
+    expect(onContactNumber).toHaveBeenLastCalledWith("1925856");
+
+    fireEvent.change(input, { target: { value: "abc e" } });
+    expect(onContactNumber).toHaveBeenLastCalledWith("");
+
+    // A pasted formatted number keeps all its digits.
+    fireEvent.change(input, { target: { value: "+1 (925) 856-5747" } });
+    expect(onContactNumber).toHaveBeenLastCalledWith("19258565747");
+
+    fireEvent.change(input, { target: { value: "12345678901234567890" } });
+    expect(onContactNumber).toHaveBeenLastCalledWith("123456789012345");
+  });
+
+  it("shows a wrong-length number only after the field loses focus", () => {
+    render(<ContactInformation {...base} mode="phone" contactNumber="41555512345" />);
+    const input = screen.getByPlaceholderText("Number to call for the simulation");
+    expect(screen.queryByText("Enter exactly 10 digits after +1")).toBeNull();
+    fireEvent.blur(input);
+    expect(screen.getByText("Enter exactly 10 digits after +1")).toBeInTheDocument();
+  });
 });

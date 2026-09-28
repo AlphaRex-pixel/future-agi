@@ -5,6 +5,7 @@ import { extractKpis } from "src/sections/test-detail/common";
 import { normalizeEvalResult } from "src/sections/develop-detail/DataTab/common";
 import {
   ACTIVE_EXECUTION_STATUSES,
+  STOPPABLE_EXECUTION_STATUSES,
   runColor,
 } from "src/sections/simulate/environments/workspace/runs/runs.constants";
 import useKpis from "src/hooks/useKpis";
@@ -29,7 +30,7 @@ import useKpis from "src/hooks/useKpis";
  * @property {?string} startedAt    ISO start time.
  * @property {?string} finishedAt   ISO finish time — GAP: the executions row
  *                                   carries no end time, so this is null.
- * @property {"passed"|"failed"|"running"|"cancelled"} status  Run-level outcome.
+ * @property {"passed"|"failed"|"running"|"cancelling"|"cancelled"} status  Run-level outcome.
  */
 
 /**
@@ -196,15 +197,19 @@ export function useRunDetail(runTestId, executionId, { envName } = {}) {
       name: envName ?? null,
       agentVersion: execution.agent_version ?? null,
       startedAt: execution.started_at ?? null,
-      status: ACTIVE_EXECUTION_STATUSES.has(execution.status)
-        ? "running"
-        : execution.status === "failed"
-          ? "failed"
-          : execution.status === "cancelled"
-            ? "cancelled"
-            : summary?.outcomes?.passed > 0
-              ? "passed"
-              : "failed",
+      status:
+        execution.status === "cancelling"
+          ? "cancelling"
+          : ACTIVE_EXECUTION_STATUSES.has(execution.status)
+            ? "running"
+            : execution.status === "failed"
+              ? "failed"
+              : execution.status === "cancelled"
+                ? "cancelled"
+                : summary?.outcomes?.passed > 0
+                  ? "passed"
+                  : "failed",
+      stoppable: STOPPABLE_EXECUTION_STATUSES.has(execution.status),
       scenarioIds: execution.selected_scenario_keys?.length
         ? execution.selected_scenario_keys
         : undefined,
@@ -437,14 +442,48 @@ function callEvalResult(evalId, data) {
 
   return {
     id: evalId,
+    eval_config_id: data.id || evalId,
     name: data.name || evalId,
     score,
     passed,
     reason: data.reason || "",
+    output_type: data.type,
+    status: data.status,
+    error: data.error === true,
+    skipped: data.skipped === true || data.status === "skipped",
+    template_type: data.template_type,
+    error_localizer: data.error_localizer === true,
+    error_analysis: data.error_analysis,
+    error_localizer_status: data.error_localizer_status,
+    error_localizer_message: data.error_localizer_message,
+    selected_input_key: data.selected_input_key,
+    datapoint: {
+      selectedInputKey: data.selected_input_key,
+      selected_input_key: data.selected_input_key,
+      inputData: data.input_data,
+      input_data: data.input_data,
+      inputTypes: data.input_types,
+      input_types: data.input_types,
+    },
     // A removed eval's verdict is still returned, carrying `removed: true` —
     // never hidden or rewritten; the drawer marks it.
     removed: data.removed === true,
   };
+}
+
+// A transcript row's text. Voice rows carry a string; a hosted chat row's
+// `content` is a list of OpenAI-style `{role, content}` parts (strings or
+// `{text}` also occur). Always returns a string.
+function messageText(content) {
+  if (content == null) return "";
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map(messageText).filter(Boolean).join("\n");
+  }
+  if (typeof content === "object") {
+    return messageText(content.content ?? content.text ?? "");
+  }
+  return String(content);
 }
 
 /**
@@ -459,7 +498,7 @@ export function mapCallDetail(raw) {
   const isChat = raw.simulation_call_type === "text";
   const turns = callTranscript(raw).map((t) => ({
     role: normalizeRole(t.speaker_role ?? t.role),
-    text: t.content ?? "",
+    text: messageText(t.content),
     at: t.start_time_seconds ?? null,
     toolCalls: t.tool_calls ?? null,
   }));
@@ -528,6 +567,14 @@ export function useCallExecutionV3Detail(callExecId, enabled = true) {
         .then((response) => response.data),
     enabled: enabled && !!callExecId,
     staleTime: 1000 * 60 * 5,
+    refetchInterval: (query) => {
+      const evalMetrics = query.state.data?.eval_metrics;
+      if (!evalMetrics || typeof evalMetrics !== "object") return false;
+      const isLocalizing = Object.values(evalMetrics).some((metric) =>
+        ["pending", "running"].includes(metric?.error_localizer_status),
+      );
+      return isLocalizing ? 3000 : false;
+    },
   });
 }
 

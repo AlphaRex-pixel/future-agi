@@ -2,10 +2,21 @@ export const ENV_STATUS = {
   BUILDING: "building",
   NOT_RUN: "not_run",
   RUNNING: "running",
+  FINALIZING: "finalizing",
+  CANCELLING: "cancelling",
+  CANCELLED: "cancelled",
   PASSED: "passed",
   FAILED: "failed",
-  COMPLETED: "completed",
+  READY: "ready",
 };
+
+// The unfinished values of the list endpoint's own status (building | running |
+// completed | failed, from harness_environment.status_for). A cancel in flight
+// stays building/running until it lands as failed, so these two cover it.
+export const LIVE_ENV_STATUSES = new Set([
+  ENV_STATUS.BUILDING,
+  ENV_STATUS.RUNNING,
+]);
 
 // An environment's build lifecycle, distinct from the run-state pill (ENV_STATUS
 // above): "ready" once authoring finished, "failed" on a terminal build failure
@@ -25,9 +36,13 @@ export const STATUS_META = {
   building: { label: "Building", color: "#7857FC" },
   not_run: { label: "Not run yet", color: "#9CA3AF" },
   running: { label: "Running…", color: "#2563EB" },
+  finalizing: { label: "Finalizing", color: "#7857FC" },
+  cancelling: { label: "Cancelling", color: "#DC2626" },
+  cancelled: { label: "Cancelled", color: "#9CA3AF" },
   passed: { label: "Passed", color: "#16A34A" },
   failed: { label: "Failed", color: "#DC2626" },
-  completed: { label: "Completed", color: "#CA8A04" },
+  // Built and runnable. Green like the workspace's Live pill.
+  ready: { label: "Ready", color: "#16A34A" },
   // Preflight checks that don't apply to the current source (e.g. a repo source
   // has no hosted provider to reach). Same muted grey as an un-run row.
   skipped: { label: "Skipped", color: "#9CA3AF" },
