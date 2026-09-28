@@ -83,6 +83,7 @@ const handleError = (error, variable, context, mutation) => {
     const message = getSafeActionErrorMessage(
       {
         statusCode: error?.statusCode,
+        code: error?.code,
         result: extractErrorMessage(error.result),
       },
       "Something went wrong",
