@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import uuid
 from collections import Counter
 from contextlib import nullcontext
@@ -662,8 +663,9 @@ def test_reconcile_errors_raise_the_attention_alert(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("command", ["uninstall", "resync", "requeue"])
-def test_state_changing_commands_require_apply(monkeypatch, capsys, command):
+@pytest.fixture
+def cli(monkeypatch):
+    """main() with its config and connections doubled; returns what closed."""
     closed = []
     monkeypatch.setattr(
         cdc, "load_config", lambda env=None: SimpleNamespace(include_usage_schema=True)
@@ -676,8 +678,86 @@ def test_state_changing_commands_require_apply(monkeypatch, capsys, command):
             SimpleNamespace(close=lambda: closed.append("ch")),
         ),
     )
+    return closed
+
+
+@pytest.mark.parametrize(
+    "command, action",
+    [
+        ("uninstall", "uninstall_capture"),
+        ("resync", "resync"),
+        ("requeue", "requeue_deadletter"),
+    ],
+)
+def test_state_changing_commands_require_apply(
+    cli, monkeypatch, capsys, command, action
+):
+    monkeypatch.setattr(cdc, action, pytest.fail)
     assert cdc.main([command]) == 1
-    assert "--apply" in capsys.readouterr().err and closed == ["pg", "ch"]
+    assert "--apply" in capsys.readouterr().err and cli == ["pg", "ch"]
+
+
+def test_uninstall_with_apply_prints_the_removed_triggers(cli, monkeypatch, capsys):
+    monkeypatch.setattr(
+        cdc, "uninstall_capture", lambda pg: ["tracer_trace.fi_cdc_ins"]
+    )
+    assert cdc.main(["uninstall", "--apply"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "removed_triggers": ["tracer_trace.fi_cdc_ins"]
+    }
+
+
+def test_status_prints_json(cli, monkeypatch, capsys):
+    state = {
+        "installed": True,
+        "capture_broken": {},
+        "outbox_depth": 3,
+        "lag_seconds": 1.5,
+        "pending_snapshots": {"tracer_trace": ""},
+        "reconcile_requested": [],
+        "parked_keys": 0,
+    }
+    monkeypatch.setattr(cdc, "status", lambda pg, *, tables: state)
+    assert cdc.main(["status"]) == 0
+    assert json.loads(capsys.readouterr().out) == state
+    assert cli == ["pg", "ch"]
+
+
+@pytest.mark.parametrize("ready, code", [(True, 0), (False, 1)])
+def test_install_without_apply_is_a_check_whose_exit_code_is_readiness(
+    cli, monkeypatch, capsys, ready, code
+):
+    applied = []
+
+    def install(pg, ch, *, config, apply, takeover_peerdb, snapshot_budget_s):
+        applied.append(apply)
+        return {
+            "installed": True,
+            "ready": ready,
+            "applied": False,
+            "problems": [] if ready else ["1 keys are parked in fi_cdc_deadletter"],
+        }
+
+    monkeypatch.setattr(cdc, "install", install)
+    assert cdc.main(["install"]) == code
+    assert applied == [False]
+    assert json.loads(capsys.readouterr().out)["ready"] is ready
+
+
+def test_resync_refuses_tables_that_are_not_landing_tables(cli, monkeypatch, capsys):
+    monkeypatch.setattr(cdc, "resync", pytest.fail)
+    assert cdc.main(["resync", "auth_user", "--apply"]) == 1
+    assert "not landing tables: ['auth_user']" in capsys.readouterr().err
+
+
+def test_resync_defaults_to_every_landing_table(cli, monkeypatch, capsys):
+    seen = []
+    monkeypatch.setattr(
+        cdc, "resync", lambda pg, *, tables: seen.append(tables) or list(tables)
+    )
+    assert cdc.main(["resync", "--apply"]) == 0
+    assert seen == [core.landing_tables(include_usage_schema=True)]
+    assert json.loads(capsys.readouterr().out)["pending_snapshots"] == list(seen[0])
 
 
 def test_cli_hides_driver_messages(monkeypatch, capsys):
