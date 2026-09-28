@@ -77,6 +77,10 @@ class ExactGraphRowPredicatePlan:
     # excluded range and then incorrectly aggregate the excluded sibling too.
     contribution_predicates: tuple[str, ...]
     params: dict[str, Any]
+    # The private trace-root leaf (a voice call) restricts contributions to the
+    # trace's root. Until ClickHouse merges them, a re-polled root has several
+    # live physical versions, and a raw read must count that call once.
+    root_contribution: bool = False
 
 
 def _filter_parts(item: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
@@ -646,6 +650,7 @@ def compile_exact_graph_row_predicates(
     required_matches: list[bool] = []
     match_condition_groups: list[tuple[tuple[int, bool], ...]] = []
     contribution_predicates: list[str] = []
+    root_contribution = False
     bound_params: dict[str, Any] = {}
     for filter_index, original_item in enumerate(filters or []):
         column_id, config_key, config = _filter_parts(original_item)
@@ -860,6 +865,7 @@ def compile_exact_graph_row_predicates(
             # contributes, so traffic counts calls and latency/cost/tokens/
             # errors are the call's own, as list_voice_calls reports them.
             contribution_predicates.append(predicate)
+            root_contribution = True
         predicates.append(predicate)
         output_window_only.append(structured_attribute)
         required_matches.append(True)
@@ -886,6 +892,7 @@ def compile_exact_graph_row_predicates(
         match_condition_groups=tuple(match_condition_groups),
         contribution_predicates=tuple(contribution_predicates),
         params=bound_params,
+        root_contribution=root_contribution,
     )
 
 

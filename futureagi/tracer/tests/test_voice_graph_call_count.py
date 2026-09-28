@@ -10,6 +10,11 @@ the Voice chart equalled the call count only while each call was one span.
 The Voice list also honours ``remove_simulation_calls`` (simulator phone
 numbers on VAPI/Retell roots), but the Voice chart had no such parameter.
 
+Real-data verification then found the chart one call above the list on two
+dev projects: a re-polled call's conversation root is rewritten, and until
+ClickHouse merges the parts both versions are live rows. The list reads each
+root at its newest version; the chart's raw read added every version.
+
 These tests seed the real CH25 ``spans`` table of the test database and ask
 both endpoints for the same window and toggle.
 """
@@ -35,7 +40,7 @@ from tracer.services.clickhouse.query_builders.voice_call_list import (
 )
 from tracer.services.clickhouse.v2.query_service import V2AnalyticsQueryService
 from tracer.services.exact_aggregation_cache import normalize_exact_observe_identity
-from tracer.tests._ch_seed import seed_ch_spans
+from tracer.tests._ch_seed import _get_ch_client, seed_ch_spans
 
 pytestmark = [pytest.mark.integration, pytest.mark.django_db]
 
@@ -56,6 +61,37 @@ _FIXTURE = (
 CALLS = {False: {"voice-call": 60_000, "simulator-call": 30_000}}
 CALLS[True] = {"voice-call": 60_000}
 
+# A re-polled call (dev traces 7dfd84bf and d9c98588): the collector rewrote the
+# call's conversation root, so until ClickHouse merges the parts the root has
+# two live physical versions, the older stored under 'vapi' and the newer under
+# 'openai', each with its own latency. The list shows the call once, at its
+# newest version.
+_REPOLLED_VERSIONS = (("vapi", 20_000), ("openai", 40_000))
+
+
+def _span_row(project, trace_id, span_id, parent_span_id, fields, started, written):
+    """One physical ``spans`` row; ``written`` is when this version arrived."""
+
+    name, kind, provider, latency, raw_log = fields
+    return {
+        "id": span_id,
+        "trace_id": trace_id,
+        "project_id": str(project.id),
+        "org_id": str(project.organization_id),
+        "parent_span_id": parent_span_id,
+        "name": name,
+        "observation_type": kind,
+        "status": "OK",
+        "start_time": started,
+        "end_time": started + timedelta(milliseconds=latency),
+        "latency_ms": latency,
+        "provider": provider,
+        "cost": 0.01,
+        "span_attributes": {"raw_log": raw_log} if raw_log else {},
+        "created_at": written,
+        "updated_at": written,
+    }
+
 
 @pytest.fixture()
 def voice_fixture(observe_project):
@@ -67,29 +103,18 @@ def voice_fixture(observe_project):
     trace_ids = {trace: str(uuid.uuid4()) for trace, *_ in _FIXTURE}
     span_ids = {span: uuid.uuid4().hex[:16] for _, span, *_ in _FIXTURE}
     rows = []
-    for index, (trace, span, parent, kind, provider, latency, raw_log) in enumerate(
-        _FIXTURE
-    ):
+    for index, (trace, span, parent, *fields) in enumerate(_FIXTURE):
         started = start + timedelta(minutes=index)
         rows.append(
-            {
-                "id": span_ids[span],
-                "trace_id": trace_ids[trace],
-                "project_id": str(observe_project.id),
-                "org_id": str(observe_project.organization_id),
-                "parent_span_id": span_ids[parent] if parent else None,
-                "name": span,
-                "observation_type": kind,
-                "status": "OK",
-                "start_time": started,
-                "end_time": started + timedelta(milliseconds=latency),
-                "latency_ms": latency,
-                "provider": provider,
-                "cost": 0.01,
-                "span_attributes": {"raw_log": raw_log} if raw_log else {},
-                "created_at": started,
-                "updated_at": started,
-            }
+            _span_row(
+                observe_project,
+                trace_ids[trace],
+                span_ids[span],
+                span_ids[parent] if parent else None,
+                (span, *fields),
+                started,
+                started,
+            )
         )
     seed_ch_spans(rows)
     cache.clear()
@@ -99,6 +124,72 @@ def voice_fixture(observe_project):
         "window": (start - timedelta(days=2), start + timedelta(days=1)),
     }
     cache.clear()
+
+
+@pytest.fixture()
+def repolled_fixture(observe_project):
+    """A plain call and a re-polled call whose root has two live versions."""
+
+    start = (datetime.now(UTC) - timedelta(days=1)).replace(
+        minute=0, second=0, microsecond=0
+    )
+    trace_ids = {"voice-call": str(uuid.uuid4()), "re-polled-call": str(uuid.uuid4())}
+    client = _get_ch_client()
+    # Both versions must stay physical rows until the chart has read them.
+    client.command("SYSTEM STOP MERGES spans")
+    try:
+        seed_ch_spans(
+            [
+                _span_row(
+                    observe_project,
+                    trace_ids["voice-call"],
+                    uuid.uuid4().hex[:16],
+                    None,
+                    ("voice-root", "conversation", "vapi", 60_000, _CUSTOMER),
+                    start,
+                    start,
+                )
+            ]
+        )
+        root_id = uuid.uuid4().hex[:16]
+        for minute, (provider, latency) in enumerate(_REPOLLED_VERSIONS, start=1):
+            # One insert per version: ClickHouse collapses versions written
+            # in one insert block.
+            seed_ch_spans(
+                [
+                    _span_row(
+                        observe_project,
+                        trace_ids["re-polled-call"],
+                        root_id,
+                        None,
+                        (
+                            "re-polled-root",
+                            "conversation",
+                            provider,
+                            latency,
+                            _CUSTOMER,
+                        ),
+                        start + timedelta(minutes=1),
+                        start + timedelta(minutes=minute),
+                    )
+                ],
+                version_from_created_at=True,
+            )
+        live_versions = client.query(
+            "SELECT count() FROM spans WHERE trace_id = %(trace_id)s AND is_deleted = 0",
+            parameters={"trace_id": trace_ids["re-polled-call"]},
+        ).result_rows[0][0]
+        assert live_versions == len(_REPOLLED_VERSIONS)
+        cache.clear()
+        yield {
+            "project_id": str(observe_project.id),
+            "trace_ids": trace_ids,
+            "window": (start - timedelta(days=2), start + timedelta(days=1)),
+        }
+    finally:
+        client.command("SYSTEM START MERGES spans")
+        client.close()
+        cache.clear()
 
 
 def _window_filter(window):
@@ -203,6 +294,36 @@ def test_voice_chart_latency_is_the_call_latency(
     calls = CALLS[remove_simulation_calls]
     assert [point["value"] for point in latency] == [
         round(sum(calls.values()) / len(calls), 2)
+    ]
+
+
+@pytest.mark.parametrize("remove_simulation_calls", [False, True])
+def test_voice_chart_counts_a_re_polled_call_once(
+    auth_client, repolled_fixture, remove_simulation_calls
+):
+    listed = _voice_list(auth_client, repolled_fixture, remove_simulation_calls)
+    assert listed == set(repolled_fixture["trace_ids"].values())
+
+    traffic = _graph(
+        auth_client,
+        repolled_fixture,
+        "traffic",
+        **_voice_scope(remove_simulation_calls),
+    )
+
+    # One per listed call, however many unmerged versions its root has.
+    assert sum(point["value"] for point in traffic) == len(listed)
+
+
+def test_voice_chart_reads_a_re_polled_call_at_its_newest_version(
+    auth_client, repolled_fixture
+):
+    latency = _graph(auth_client, repolled_fixture, "latency", **_voice_scope(False))
+
+    # The re-polled call averages in once, with its newest version's latency.
+    newest_latency = _REPOLLED_VERSIONS[-1][1]
+    assert [point["value"] for point in latency] == [
+        round((60_000 + newest_latency) / 2, 2)
     ]
 
 
