@@ -97,9 +97,7 @@ def test_platform_simulator_material_uses_deployment_credentials_only(
     monkeypatch.setenv("LIVEKIT_API_SECRET", "platform-livekit-secret")
     monkeypatch.setenv("LIVEKIT_OUTBOUND_TRUNK_ID", "ST_platform-outbound")
     monkeypatch.setenv("PSTN_CALLER_NUMBER", "+14155550123")
-    monkeypatch.setenv(
-        "ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER", "+15551234567"
-    )
+    monkeypatch.setenv("ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER", "+15551234567")
     monkeypatch.setenv("ALK_UBER_GUEST_POC_PIN", "7682")
 
     values, credential_bytes = _platform_simulator_material()
@@ -188,7 +186,9 @@ def test_claude_authoring_prefers_platform_owned_harness_key(monkeypatch):
 
 
 def test_platform_ambience_clips_reach_the_harness_and_its_egress(monkeypatch):
-    monkeypatch.delenv("ALK_HOSTED_SIMULATOR_GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.delenv(
+        "ALK_HOSTED_SIMULATOR_GOOGLE_APPLICATION_CREDENTIALS", raising=False
+    )
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.setenv("ALK_HARNESS", "claude")
     monkeypatch.setenv("AGENTCC_INTERNAL_API_KEY", "internal-service-key")
@@ -198,7 +198,9 @@ def test_platform_ambience_clips_reach_the_harness_and_its_egress(monkeypatch):
     values, _ = _platform_simulator_material()
 
     clips = json.loads(values["ALK_BACKGROUND_NOISE_CATALOG"])
-    assert clips and all(clip["environment"] and clip["url"].startswith("https://") for clip in clips)
+    assert clips and all(
+        clip["environment"] and clip["url"].startswith("https://") for clip in clips
+    )
     domains = _resolved_egress_domains(
         {"agent": {"connector": "auto"}, "security": {"allowed_egress_domains": []}},
         {},
@@ -209,7 +211,9 @@ def test_platform_ambience_clips_reach_the_harness_and_its_egress(monkeypatch):
 
 
 def test_a_deployment_catalogue_overrides_the_platform_clips(monkeypatch, tmp_path):
-    monkeypatch.delenv("ALK_HOSTED_SIMULATOR_GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.delenv(
+        "ALK_HOSTED_SIMULATOR_GOOGLE_APPLICATION_CREDENTIALS", raising=False
+    )
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.setenv("ALK_HARNESS", "claude")
     monkeypatch.setenv("AGENTCC_INTERNAL_API_KEY", "internal-service-key")
@@ -231,20 +235,28 @@ def test_a_deployment_catalogue_overrides_the_platform_clips(monkeypatch, tmp_pa
 
 
 def test_admission_counts_the_ambience_hosts_that_launch_adds(monkeypatch):
-    monkeypatch.delenv("ALK_HOSTED_SIMULATOR_GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.delenv(
+        "ALK_HOSTED_SIMULATOR_GOOGLE_APPLICATION_CREDENTIALS", raising=False
+    )
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.setenv("ALK_HARNESS", "claude")
     monkeypatch.setenv("AGENTCC_INTERNAL_API_KEY", "internal-service-key")
     monkeypatch.setenv("AGENTCC_BASE_URL", "https://gateway.example.test")
     monkeypatch.delenv("ALK_BACKGROUND_NOISE_CATALOG", raising=False)
-    payload = {"agent": {"connector": "auto"}, "security": {"allowed_egress_domains": []}}
+    payload = {
+        "agent": {"connector": "auto"},
+        "security": {"allowed_egress_domains": []},
+    }
 
     launched, _ = _platform_simulator_material()
     clip_hosts = {
-        urlparse(clip["url"]).hostname for clip in json.loads(launched["ALK_BACKGROUND_NOISE_CATALOG"])
+        urlparse(clip["url"]).hostname
+        for clip in json.loads(launched["ALK_BACKGROUND_NOISE_CATALOG"])
     }
 
-    assert clip_hosts <= _resolved_egress_domains(payload, {}, _known_simulator_egress_inputs(), None)
+    assert clip_hosts <= _resolved_egress_domains(
+        payload, {}, _known_simulator_egress_inputs(), None
+    )
 
 
 def test_claude_authoring_uses_separate_remote_gateway_key(monkeypatch):

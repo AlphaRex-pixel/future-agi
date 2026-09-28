@@ -24,7 +24,10 @@ import {
 } from "src/sections/simulate/environments/buildEnvironment/console/scenarioSelectionBus";
 import { terminalStages } from "src/pages/dashboard/harness/harnessShared";
 import { harnessJobQuery } from "./environment";
-import { projectConversation, conversationInFlight } from "./conversationProjection";
+import {
+  projectConversation,
+  conversationInFlight,
+} from "./conversationProjection";
 
 const RUNTIME_WARMING =
   "The agent runtime is warming up. Chat opens once it's ready.";
@@ -41,7 +44,9 @@ export function useWorkspaceChat(env, { source } = {}) {
   const jobId = jobIdFor(env, source);
   const queryClient = useQueryClient();
 
-  const jobQuery = useQuery(harnessJobQuery(jobId, { enabled: Boolean(jobId) }));
+  const jobQuery = useQuery(
+    harnessJobQuery(jobId, { enabled: Boolean(jobId) }),
+  );
   const conversation = jobQuery.data?.conversation ?? null;
 
   // Keep the latest conversation/jobId in refs so `send` stays referentially
@@ -58,7 +63,8 @@ export function useWorkspaceChat(env, { source } = {}) {
   const [pending, setPending] = useState([]);
 
   const mutation = useMutation({
-    mutationFn: ({ id, payload }) => sendHarnessConversationMessage(id, payload),
+    mutationFn: ({ id, payload }) =>
+      sendHarnessConversationMessage(id, payload),
     onSuccess: async (value, { id, requestId }) => {
       setPending((prev) => prev.filter((p) => p.id !== requestId));
       if (!value) return;
@@ -106,7 +112,8 @@ export function useWorkspaceChat(env, { source } = {}) {
       const conv = conversationRef.current;
       const blocking = conv?.blocking_input || null;
       const answered =
-        blocking && (conv?.messages || []).some((m) => m.reply_to === blocking.message_id);
+        blocking &&
+        (conv?.messages || []).some((m) => m.reply_to === blocking.message_id);
       const open = blocking && !answered ? blocking : null;
       const kind = open
         ? open.kind === "confirmation_requested"
@@ -140,7 +147,10 @@ export function useWorkspaceChat(env, { source } = {}) {
           },
         },
       };
-      setPending((prev) => [...prev, { id: requestId, text: content, variables }]);
+      setPending((prev) => [
+        ...prev,
+        { id: requestId, text: content, variables },
+      ]);
       mutate(variables);
     },
     [mutate],
@@ -180,7 +190,10 @@ export function useWorkspaceChat(env, { source } = {}) {
         ...turn,
         steps: turn.steps.map((step) =>
           step.kind === "ask" && !step.resolved
-            ? { ...step, onSubmit: (answers) => send((answers || []).join(", ")) }
+            ? {
+                ...step,
+                onSubmit: (answers) => send((answers || []).join(", ")),
+              }
             : step,
         ),
       };
@@ -195,7 +208,12 @@ export function useWorkspaceChat(env, { source } = {}) {
       setPending((prev) =>
         prev.map((p) =>
           p.id === marker.id
-            ? { ...p, failed: false, errorMessage: undefined, retryable: undefined }
+            ? {
+                ...p,
+                failed: false,
+                errorMessage: undefined,
+                retryable: undefined,
+              }
             : p,
         ),
       );

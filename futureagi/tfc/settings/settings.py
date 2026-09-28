@@ -1024,9 +1024,7 @@ ALK_HOSTED_SANDBOX_TTL_SECONDS = int(
 )
 # Conversational sandboxes are replaceable warm caches. Their persistent ADK session and
 # workspace checkpoint survive deletion; this only controls the cost/latency window.
-ALK_HOSTED_CHAT_TTL_SECONDS = int(
-    os.getenv("ALK_HOSTED_CHAT_TTL_SECONDS", "1800")
-)
+ALK_HOSTED_CHAT_TTL_SECONDS = int(os.getenv("ALK_HOSTED_CHAT_TTL_SECONDS", "1800"))
 DAYTONA_API_KEY = os.getenv("DAYTONA_API_KEY", "")
 DAYTONA_API_URL = os.getenv("DAYTONA_API_URL") or None
 DAYTONA_TARGET = os.getenv("DAYTONA_TARGET") or None

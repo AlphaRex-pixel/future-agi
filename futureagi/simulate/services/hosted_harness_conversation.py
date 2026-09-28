@@ -111,7 +111,6 @@ def serialize_conversation(
     }
 
 
-
 def ensure_conversation(job: HostedHarnessJob) -> HostedHarnessConversation:
     conversation, _created = (
         HostedHarnessConversation.no_workspace_objects.get_or_create(
