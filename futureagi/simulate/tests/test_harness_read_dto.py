@@ -340,9 +340,14 @@ def test_terminal_failure_copied_to_job(organization):
 
 @pytest.mark.django_db
 def test_terminal_completed_clears_failure(organization):
+    environment, _ = create_hosted_job(
+        organization, _v1_payload(), idempotency_key="terminal-ok-environment"
+    )
     job, _ = create_hosted_job(
         organization, _v1_payload(), idempotency_key="terminal-ok"
     )
+    job.environment = environment
+    job.save(update_fields=["environment", "updated_at"])
     cap = register_attempt(job.id, endpoint_base_url="https://platform.example.com")
     attempt = cap.attempt
     attempt.provider_ref = "sandbox-2"

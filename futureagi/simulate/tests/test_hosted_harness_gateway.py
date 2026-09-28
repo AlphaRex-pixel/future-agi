@@ -59,9 +59,19 @@ from simulate.services.hosted_sandbox import (
 
 
 @pytest.fixture(autouse=True)
-def _isolate_platform_simulator_environment(settings):
+def _isolate_platform_simulator_environment(settings, monkeypatch):
     """Tests opt in explicitly instead of reading the developer machine's provider keys."""
     settings.ALK_HOSTED_SIMULATOR_SECRET_ENV = {}
+    for name in (
+        "AGENTCC_BASE_URL",
+        "ALK_HOSTED_AGENTCC_BASE_URL",
+        "AGENTCC_INTERNAL_API_KEY",
+        "AGENTCC_HARNESS_API_KEY",
+        "ALK_HOSTED_AGENTCC_MODEL",
+        "ALK_HARNESS",
+        "ALK_HARNESS_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 def test_guest_failure_cause_preserves_legacy_runnable_entrypoint_blocker() -> None:
@@ -2057,9 +2067,11 @@ def test_cancel_retries_room_cleanup_after_sandbox_is_already_deleted(
 
     cleanup_attempts = []
 
+    # The pre-delete hangup is best effort; the verified pass after the sandbox
+    # is gone is the one whose failure must be retried.
     def cleanup(_job):
         cleanup_attempts.append(str(_job.id))
-        if len(cleanup_attempts) == 1:
+        if len(cleanup_attempts) == 2:
             raise RuntimeError("LiveKit temporarily unavailable")
 
     monkeypatch.setattr(
@@ -2075,7 +2087,7 @@ def test_cancel_retries_room_cleanup_after_sandbox_is_already_deleted(
 
     canceled = gateway.cancel(job, reason="user_canceled")
 
-    assert cleanup_attempts == [str(job.id), str(job.id)]
+    assert cleanup_attempts == [str(job.id)] * 4
     assert canceled.state == HostedHarnessJob.State.CANCELED
     attempt.refresh_from_db()
     assert attempt.cleanup_verified_at is not None
