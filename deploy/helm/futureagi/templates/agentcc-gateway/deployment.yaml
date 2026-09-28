@@ -40,7 +40,9 @@ spec:
       serviceAccountName: {{ include "futureagi.serviceAccountName" . }}
       automountServiceAccountToken: {{ include "futureagi.automountServiceAccountToken" . }}
       {{- include "futureagi.block" (dict "text" (include "futureagi.imagePullSecrets" .) "indent" 6) }}
-      # The preStop sleep, then server.shutdown_timeout (30 s) for in-flight streams.
+      # At least the preStop sleep + server.shutdown_timeout (30 s, in-flight
+      # streams) + 5 s to send the buffered request logs; with
+      # config.otel.exporter otlp, up to 15 s more for its last flush.
       terminationGracePeriodSeconds: {{ $g.terminationGracePeriodSeconds | default 45 }}
       securityContext:
         {{- include "futureagi.podSecurityContext" (dict "root" $ "uid" 65532 "overrides" $g.podSecurityContext) | nindent 8 }}

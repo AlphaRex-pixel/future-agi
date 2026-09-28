@@ -856,7 +856,7 @@ agentccGateway:
   replicas: 1
   # -- Seconds each gateway pod waits before it stops (preStop, the kubelet's sleep action: Kubernetes 1.30 or newer, skipped on older clusters), so Services stop sending it requests first. 0: none.
   preStopSleepSeconds: 10
-  # -- Seconds a stopping gateway gets: the preStop sleep, then `config.server.shutdown_timeout` (30 s) for in-flight streams.
+  # -- Seconds a stopping gateway gets. Keep it at least the preStop sleep + `config.server.shutdown_timeout` (30 s, for in-flight streams) + 5 s (the gateway then sends its buffered request logs): 10 + 30 + 5 = 45. With `config.otel.exporter: otlp`, add up to 15 s for the exporter's last flush.
   terminationGracePeriodSeconds: 45
   # -- Existing ConfigMap with the gateway configuration under the key `config.yaml`. Empty: rendered from `config`.
   existingConfigMap: ""

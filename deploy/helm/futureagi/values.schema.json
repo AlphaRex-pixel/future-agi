@@ -2425,7 +2425,7 @@
         "terminationGracePeriodSeconds": {
           "type": "integer",
           "minimum": 1,
-          "description": "Seconds a stopping gateway gets: the preStop sleep, then `config.server.shutdown_timeout` (30 s) for in-flight streams."
+          "description": "Seconds a stopping gateway gets. Keep it at least the preStop sleep + `config.server.shutdown_timeout` (30 s, for in-flight streams) + 5 s (the gateway then sends its buffered request logs): 10 + 30 + 5 = 45. With `config.otel.exporter: otlp`, add up to 15 s for the exporter's last flush."
         },
         "existingConfigMap": {
           "type": "string",
