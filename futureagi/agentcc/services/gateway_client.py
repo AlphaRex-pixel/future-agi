@@ -6,9 +6,12 @@ import structlog
 
 from agentcc.contracts.gateway_admin import (
     CreateKeyRequest,
-    OrgConfig as GatewayOrgConfig,
     UpdateKeyRequest,
 )
+from agentcc.contracts.gateway_admin import (
+    OrgConfig as GatewayOrgConfig,
+)
+from tfc.ee_loader import is_cloud_env
 
 logger = structlog.get_logger(__name__)
 
@@ -37,20 +40,18 @@ AGENTCC_GATEWAY_INTERNAL_URL = resolve_gateway_internal_url()
 AGENTCC_ADMIN_TOKEN = os.environ.get("AGENTCC_ADMIN_TOKEN", "")
 
 
-def _note_missing_admin_token(token, cloud):
+def _note_missing_admin_token(token):
     """Runs on import, so it fires in every process that loads the module,
     one-off commands included. The compose files and the Helm chart always
     set the token; only on Future AGI Cloud (CLOUD_DEPLOYMENT) is its absence
     worth a warning."""
     if token:
         return
-    log = logger.warning if cloud else logger.debug
+    log = logger.warning if is_cloud_env() else logger.debug
     log("AGENTCC_ADMIN_TOKEN not set — gateway admin API calls will be unauthenticated")
 
 
-_note_missing_admin_token(
-    AGENTCC_ADMIN_TOKEN, os.environ.get("CLOUD_DEPLOYMENT", "").strip()
-)
+_note_missing_admin_token(AGENTCC_ADMIN_TOKEN)
 
 
 class GatewayClientError(Exception):

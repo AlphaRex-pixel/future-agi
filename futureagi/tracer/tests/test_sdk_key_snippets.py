@@ -37,6 +37,14 @@ class TestSdkKeySnippets:
         assert os.environ["FI_BASE_URL"] == COLLECTOR
         assert os.environ["FI_API_KEY"] == "YOUR_FI_API_KEY"
 
+    @pytest.mark.parametrize("deployment", ["false", "self-hosted"])
+    def test_only_a_cloud_region_counts_as_cloud(
+        self, self_hosted, settings, deployment
+    ):
+        settings.CLOUD_DEPLOYMENT = deployment
+
+        assert "FI_BASE_URL" in sdk_key_snippets()["Python"]
+
     def test_cloud_leaves_the_sdk_default(self, settings):
         settings.CLOUD_DEPLOYMENT = "US"
 

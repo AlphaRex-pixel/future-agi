@@ -275,7 +275,7 @@ INSTALLED_APPS = [
 # EE apps.
 #   - ee.usage: gated on presence only — it implements DeploymentMode.
 #   - ee feature modules: gated on presence AND deployment mode (EE/Cloud).
-from tfc.ee_loader import ee_feature_enabled, has_ee  # noqa: E402
+from tfc.ee_loader import ee_feature_enabled, has_ee, is_cloud_env  # noqa: E402
 
 if ee_feature_enabled("ee.falcon_ai"):
     INSTALLED_APPS.append("ee.falcon_ai.apps.FalconAIConfig")
@@ -1258,19 +1258,22 @@ MICROSOFT_GRAPH_API = "https://graph.microsoft.com/v1.0"
 # only once RECAPTCHA_SECRET_KEY is set, so a fresh install never calls Google
 # and never rejects a login it has no key to check. A non-empty
 # RECAPTCHA_ENABLED wins either way.
-def _recaptcha_enabled(explicit, env_type, cloud_deployment, secret_key):
+def _recaptcha_enabled(explicit, env_type, cloud, secret_key):
     if (explicit or "").strip():
         return explicit.strip().lower() in ("true", "1", "yes")
     if env_type in {"local", "development"}:
         return False
-    if cloud_deployment:
+    if cloud:
         return True
     return bool(secret_key)
 
 
 RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY", "").strip()
 RECAPTCHA_ENABLED = _recaptcha_enabled(
-    os.getenv("RECAPTCHA_ENABLED"), env_type, CLOUD_DEPLOYMENT, RECAPTCHA_SECRET_KEY
+    os.getenv("RECAPTCHA_ENABLED"),
+    env_type,
+    is_cloud_env(CLOUD_DEPLOYMENT),
+    RECAPTCHA_SECRET_KEY,
 )
 
 # Integration encryption key (Fernet) for storing external platform credentials
@@ -1314,7 +1317,7 @@ USAGE_EVENTS_MAX_LEN = env_int("USAGE_EVENTS_MAX_LEN", 1_000_000, minimum=1)
 from tfc.channel_layers import channel_layer_settings  # noqa: E402
 
 CHANNEL_LAYER_BACKEND, CHANNEL_LAYERS = channel_layer_settings(
-    os.environ, redis_url=REDIS_URL, cloud=bool(CLOUD_DEPLOYMENT)
+    os.environ, redis_url=REDIS_URL, cloud=is_cloud_env(CLOUD_DEPLOYMENT)
 )
 
 

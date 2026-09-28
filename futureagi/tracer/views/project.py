@@ -12,6 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.viewsets import ModelViewSet
 
 from accounts.utils import get_request_organization
+from tfc.ee_loader import is_cloud_env
 from tfc.middleware.db_health_check import db_connection_required
 from tfc.middleware.query_timeout import monitor_query_performance
 from tfc.routers import uses_db
@@ -110,7 +111,7 @@ def sdk_key_snippets():
         lang: code.format("YOUR_FI_API_KEY", "YOUR_FI_SECRET_KEY")
         for lang, code in ORG_KEYS.items()
     }
-    if not settings.CLOUD_DEPLOYMENT:
+    if not is_cloud_env(settings.CLOUD_DEPLOYMENT):
         for lang, line in ORG_BASE_URL.items():
             snippets[lang] += line.format(settings.FI_COLLECTOR_PUBLIC_URL)
     return snippets

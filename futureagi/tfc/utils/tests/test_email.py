@@ -62,6 +62,18 @@ class TestSender:
         with override_settings(CLOUD_DEPLOYMENT="US", DEFAULT_FROM_EMAIL=configured):
             assert _send().from_email == DEFAULT_FROM_EMAIL
 
+    @pytest.mark.parametrize("deployment", ["false", "self-hosted"])
+    def test_only_a_cloud_region_sends_as_future_agi(self, deployment):
+        with override_settings(
+            CLOUD_DEPLOYMENT=deployment,
+            DEFAULT_FROM_EMAIL="Acme AI <noreply@mg.example.com>",
+            DEFAULT_REPLY_TO_EMAIL="",
+        ):
+            message = _send()
+
+        assert message.from_email == "Acme AI <noreply@mg.example.com>"
+        assert message.reply_to == []
+
     @override_settings(**SELF_HOSTED, DEFAULT_FROM_EMAIL="noreply@mg.example.com")
     def test_an_explicit_sender_wins(self):
         assert _send(from_email="billing@example.com").from_email == (

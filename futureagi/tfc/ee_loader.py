@@ -20,6 +20,22 @@ def usage_event_consumer_available() -> bool:
     return any(has_ee(module) for module in USAGE_TEMPORAL_MODULES)
 
 
+# The CLOUD_DEPLOYMENT values of Future AGI Cloud's regions.
+CLOUD_DEPLOYMENTS = ("US", "EU", "DEV")
+
+
+def is_cloud_env(deployment: str | None = None) -> bool:
+    """Whether CLOUD_DEPLOYMENT names a Future AGI Cloud region.
+
+    ``deployment`` defaults to the environment variable; runtime code passes
+    ``settings.CLOUD_DEPLOYMENT``. Any other value, "false" included, means a
+    self-hosted install.
+    """
+    if deployment is None:
+        deployment = os.environ.get("CLOUD_DEPLOYMENT", "")
+    return deployment in CLOUD_DEPLOYMENTS
+
+
 def _is_oss_mode() -> bool:
     """Env-var-based OSS detection for use during Django settings load.
 
@@ -28,7 +44,7 @@ def _is_oss_mode() -> bool:
     settings.py is still executing). Runtime code should use
     DeploymentMode.is_oss() instead — this is for the app-registration gate.
     """
-    if os.environ.get("CLOUD_DEPLOYMENT", "") in ("US", "EU", "DEV"):
+    if is_cloud_env():
         return False
     if os.environ.get("EE_LICENSE_KEY", ""):
         return False

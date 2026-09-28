@@ -30,18 +30,25 @@ class TestMissingAdminTokenNotice:
     commands included."""
 
     @pytest.mark.parametrize(
-        "cloud, level, quiet", [("", "debug", "warning"), ("US", "warning", "debug")]
+        "deployment, level, quiet",
+        [
+            ("", "debug", "warning"),
+            ("false", "debug", "warning"),
+            ("US", "warning", "debug"),
+        ],
     )
-    def test_only_cloud_warns(self, cloud, level, quiet):
+    def test_only_cloud_warns(self, monkeypatch, deployment, level, quiet):
+        monkeypatch.setenv("CLOUD_DEPLOYMENT", deployment)
         with patch("agentcc.services.gateway_client.logger") as logger:
-            _note_missing_admin_token("", cloud)
+            _note_missing_admin_token("")
 
         getattr(logger, level).assert_called_once()
         getattr(logger, quiet).assert_not_called()
 
-    def test_a_set_token_logs_nothing(self):
+    def test_a_set_token_logs_nothing(self, monkeypatch):
+        monkeypatch.setenv("CLOUD_DEPLOYMENT", "US")
         with patch("agentcc.services.gateway_client.logger") as logger:
-            _note_missing_admin_token("admin-token", "US")
+            _note_missing_admin_token("admin-token")
 
         assert logger.method_calls == []
 

@@ -6,6 +6,8 @@ from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 
+from tfc.ee_loader import is_cloud_env
+
 # Future AGI Cloud's sender and support inbox. A self-hosted install uses
 # neither: its mail leaves through the operator's own domain, where a
 # futureagi.com sender fails DMARC, and a reply would carry the recipient's
@@ -58,7 +60,7 @@ def _default_from_email():
     sets it to the bare address; mail keeps the "Future AGI" display name).
     Self-hosted: DEFAULT_FROM_EMAIL; else noreply on the Mailgun sending
     domain, the one sender Mailgun accepts there."""
-    if settings.CLOUD_DEPLOYMENT:
+    if is_cloud_env(settings.CLOUD_DEPLOYMENT):
         return DEFAULT_FROM_EMAIL
     configured = (getattr(settings, "DEFAULT_FROM_EMAIL", "") or "").strip()
     if configured:
@@ -73,7 +75,7 @@ def _default_reply_to():
     configured = (getattr(settings, "DEFAULT_REPLY_TO_EMAIL", "") or "").strip()
     if configured:
         return [configured]
-    if settings.CLOUD_DEPLOYMENT:
+    if is_cloud_env(settings.CLOUD_DEPLOYMENT):
         return [DEFAULT_REPLY_TO]
     return None
 

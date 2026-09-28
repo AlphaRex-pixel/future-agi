@@ -542,22 +542,22 @@ class TestRecaptchaDefault:
         ("explicit", "env_type", "cloud", "secret", "expected"),
         [
             # Self-hosted, no key: never call Google, never block a login.
-            (None, "production", "", "", False),
-            ("", "prod", "", "", False),
-            ("   ", "staging", "", "", False),
+            (None, "production", False, "", False),
+            ("", "prod", False, "", False),
+            ("   ", "staging", False, "", False),
             # Self-hosted with a key: verify.
-            (None, "production", "", "secret", True),
+            (None, "production", False, "secret", True),
             # Managed cloud: verify, and fail closed if the key is missing.
-            (None, "prod", "US", "", True),
-            (None, "prod", "EU", "secret", True),
+            (None, "prod", True, "", True),
+            (None, "prod", True, "secret", True),
             # Local development: off.
-            (None, "local", "US", "secret", False),
-            (None, "development", "", "secret", False),
+            (None, "local", True, "secret", False),
+            (None, "development", False, "secret", False),
             # An explicit value always wins.
-            ("true", "local", "", "", True),
-            ("1", "production", "", "", True),
-            ("false", "prod", "US", "secret", False),
-            ("no", "prod", "US", "secret", False),
+            ("true", "local", False, "", True),
+            ("1", "production", False, "", True),
+            ("false", "prod", True, "secret", False),
+            ("no", "prod", True, "secret", False),
         ],
     )
     def test_default(self, explicit, env_type, cloud, secret, expected):
