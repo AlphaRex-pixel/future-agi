@@ -40,6 +40,7 @@ value_sets=(
   "bundled-ingress|examples/bundled.yaml examples/ingress.yaml ci/bundled-ingress.yaml"
   "all-components|examples/external.yaml examples/ingress.yaml ci/all-components.yaml"
   "overrides|examples/bundled.yaml ci/overrides.yaml"
+  "gitops|examples/external.yaml ci/gitops.yaml"
 )
 
 echo "== chart defaults: refuse to render, with guidance"
@@ -92,6 +93,15 @@ for set in "${value_sets[@]}"; do
       fail "kubeconform ($name, Kubernetes $version)"
   done
 done
+
+echo "== GitOps: rendering again changes nothing"
+# Argo CD and Flux render on every sync, where `lookup` finds nothing: with the
+# keys in secrets.existingSecret, nothing may be generated anew.
+"$helm" template futureagi "$chart" --namespace futureagi \
+  -f "$chart/examples/external.yaml" -f "$chart/ci/gitops.yaml" >"$out/gitops.again.txt"
+diff -u "$out/gitops.yaml" "$out/gitops.again.txt" || fail "a second render of gitops differs"
+rm -f "$out/gitops.again.txt"
+echo "ok   identical"
 
 echo "== rendered invariants"
 # No manifest may carry an unexpanded template or an empty image.

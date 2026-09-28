@@ -184,7 +184,7 @@
       "properties": {
         "existingSecret": {
           "type": "string",
-          "description": "Existing Secret with the application keys: SECRET_KEY, INTEGRATION_ENCRYPTION_KEY, AGENTCC_INTERNAL_API_KEY, AGENTCC_ADMIN_TOKEN, PROPERTY_CATALOG_API_PASSWORD and PROPERTY_CATALOG_CONSUMER_PASSWORD. Empty: generated. Required with Argo CD or Flux, which cannot `lookup` the generated Secret."
+          "description": "Existing Secret with the application keys: SECRET_KEY, INTEGRATION_ENCRYPTION_KEY, AGENTCC_INTERNAL_API_KEY, AGENTCC_ADMIN_TOKEN, PROPERTY_CATALOG_API_PASSWORD, PROPERTY_CATALOG_CONSUMER_PASSWORD and AGENTCC_WEBHOOK_SECRET (unless `agentccWebhookSecret` is set). Empty: generated. Required with Argo CD or Flux, which cannot `lookup` the generated Secret."
         },
         "llm": {
           "type": "object",
@@ -230,7 +230,7 @@
         },
         "agentccWebhookSecret": {
           "type": "string",
-          "description": "[AGENTCC_WEBHOOK_SECRET] shared secret the gateway sends its request logs to the backend with. Empty generates one."
+          "description": "[AGENTCC_WEBHOOK_SECRET] shared secret the gateway sends its request logs to the backend with. Empty: read from `existingSecret` when that is set, else generated."
         },
         "extra": {
           "type": "object",

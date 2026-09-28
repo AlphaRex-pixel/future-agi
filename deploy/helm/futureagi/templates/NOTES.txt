@@ -107,4 +107,9 @@ NOTE     Deployment telemetry is on: an instance id, the version, the emails of
 NOTE     The generated keys are in the Secret {{ include "futureagi.secretName" . }}. Back it up:
          INTEGRATION_ENCRYPTION_KEY decrypts stored integration credentials. It is kept
          on `helm uninstall` so a reinstall can still read your data.
+{{- else if not $v.secrets.agentccWebhookSecret }}
+
+NOTE     The application keys, AGENTCC_WEBHOOK_SECRET included, come from the Secret
+         {{ $v.secrets.existingSecret }}: a pod does not start while one of the seven is missing.
+         (secrets.agentccWebhookSecret, when set, provides the webhook secret instead.)
 {{- end }}

@@ -92,7 +92,7 @@ config:
 # uninstall, so a reinstall can still read encrypted data).
 # -----------------------------------------------------------------------------
 secrets:
-  # -- Existing Secret with the application keys: SECRET_KEY, INTEGRATION_ENCRYPTION_KEY, AGENTCC_INTERNAL_API_KEY, AGENTCC_ADMIN_TOKEN, PROPERTY_CATALOG_API_PASSWORD and PROPERTY_CATALOG_CONSUMER_PASSWORD. Empty: generated. Required with Argo CD or Flux, which cannot `lookup` the generated Secret.
+  # -- Existing Secret with the application keys: SECRET_KEY, INTEGRATION_ENCRYPTION_KEY, AGENTCC_INTERNAL_API_KEY, AGENTCC_ADMIN_TOKEN, PROPERTY_CATALOG_API_PASSWORD, PROPERTY_CATALOG_CONSUMER_PASSWORD and AGENTCC_WEBHOOK_SECRET (unless `agentccWebhookSecret` is set). Empty: generated. Required with Argo CD or Flux, which cannot `lookup` the generated Secret.
   existingSecret: ""
   llm:
     # -- Existing Secret with any of OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (missing keys are fine). Overrides the values below.
@@ -113,7 +113,7 @@ secrets:
   eeLicenseKey: ""
   # -- [MAILGUN_API_KEY] turns email on, with `config.email`.
   mailgunApiKey: ""
-  # -- [AGENTCC_WEBHOOK_SECRET] shared secret the gateway sends its request logs to the backend with. Empty generates one.
+  # -- [AGENTCC_WEBHOOK_SECRET] shared secret the gateway sends its request logs to the backend with. Empty: read from `existingSecret` when that is set, else generated.
   agentccWebhookSecret: ""
   # -- Any other secret environment variables for the backend, workers and bootstrap job, as `NAME: value` (e.g. SENTRY_DSN, DAYTONA_API_KEY). Stored in <fullname>-secrets.
   extra: {}

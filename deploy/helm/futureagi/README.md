@@ -309,15 +309,18 @@ puts back the target revision's copy), reading them back on every upgrade:
 | `AGENTCC_INTERNAL_API_KEY` | the backend's key on the LLM gateway | the pods pick up the new one on restart |
 | `AGENTCC_ADMIN_TOKEN` | the gateway's admin API and control-plane sync | as above |
 | `PROPERTY_CATALOG_API_PASSWORD`, `PROPERTY_CATALOG_CONSUMER_PASSWORD` | ClickHouse users of the observed-attribute index (the API reads it, fi-collector writes it) | the bootstrap job resets them |
+| `AGENTCC_WEBHOOK_SECRET` | the gateway sends its request logs to the backend with it | the gateway's request logs are refused until it and the backend restart |
 
 Bundled datastores get generated passwords in the same Secret. A bundled
 PostgreSQL keeps the password it was initialized with: set
 `postgres.password` before the first install if you want a specific one.
 
 To manage the application keys yourself (required with Argo CD and Flux),
-create a Secret with all six keys and set `secrets.existingSecret`. Moving an
-existing install over? Copy the six values out of `<release>-secrets` first:
-new keys sign everyone out and cannot decrypt stored credentials.
+create a Secret with all seven keys and set `secrets.existingSecret`
+(`secrets.agentccWebhookSecret`, when set, takes the place of
+`AGENTCC_WEBHOOK_SECRET`). Moving an existing install over? Copy the seven
+values out of `<release>-secrets` first: new keys sign everyone out and cannot
+decrypt stored credentials.
 
 ```sh
 kubectl -n futureagi create secret generic futureagi-app \
@@ -326,7 +329,8 @@ kubectl -n futureagi create secret generic futureagi-app \
   --from-literal=AGENTCC_INTERNAL_API_KEY="$(openssl rand -hex 32)" \
   --from-literal=AGENTCC_ADMIN_TOKEN="$(openssl rand -hex 32)" \
   --from-literal=PROPERTY_CATALOG_API_PASSWORD="$(openssl rand -hex 16)" \
-  --from-literal=PROPERTY_CATALOG_CONSUMER_PASSWORD="$(openssl rand -hex 16)"
+  --from-literal=PROPERTY_CATALOG_CONSUMER_PASSWORD="$(openssl rand -hex 16)" \
+  --from-literal=AGENTCC_WEBHOOK_SECRET="$(openssl rand -hex 24)"
 ```
 
 LLM provider keys: `secrets.llm.*` inline, or `secrets.llm.existingSecret`
@@ -420,8 +424,9 @@ Scaling notes:
 ## GitOps (Argo CD, Flux)
 
 Helm's `lookup` returns nothing under Argo CD, so generated secrets would
-change on every sync. Set `secrets.existingSecret`, and give bundled
-datastores explicit passwords (`postgres.password`, ...) or existing Secrets.
+change on every sync. Set `secrets.existingSecret` (with all seven keys,
+`AGENTCC_WEBHOOK_SECRET` included), and give bundled datastores explicit
+passwords (`postgres.password`, ...) or existing Secrets.
 Argo CD maps the chart's hooks to sync phases: the Secret and the bootstrap
 job to PreSync (PostSync for the job when a datastore is bundled).
 
@@ -491,7 +496,7 @@ Bracketed names are the environment variables a key sets;
 | `config.email.serverEmail` | `""` | [SERVER_EMAIL] sender of error emails. |
 | `config.extraEnv` | `{}` | Extra environment variables for the backend, workers and bootstrap job, as `NAME: value`. Every supported key is in docs/configuration.md. |
 | `config.extraEnvFrom` | `[]` | Extra `envFrom` sources for the backend, workers and bootstrap job, e.g. `[{secretRef: {name: my-env}}]`. |
-| `secrets.existingSecret` | `""` | Existing Secret with the application keys: SECRET_KEY, INTEGRATION_ENCRYPTION_KEY, AGENTCC_INTERNAL_API_KEY, AGENTCC_ADMIN_TOKEN, PROPERTY_CATALOG_API_PASSWORD and PROPERTY_CATALOG_CONSUMER_PASSWORD. Empty: generated. Required with Argo CD or Flux, which cannot `lookup` the generated Secret. |
+| `secrets.existingSecret` | `""` | Existing Secret with the application keys: SECRET_KEY, INTEGRATION_ENCRYPTION_KEY, AGENTCC_INTERNAL_API_KEY, AGENTCC_ADMIN_TOKEN, PROPERTY_CATALOG_API_PASSWORD, PROPERTY_CATALOG_CONSUMER_PASSWORD and AGENTCC_WEBHOOK_SECRET (unless `agentccWebhookSecret` is set). Empty: generated. Required with Argo CD or Flux, which cannot `lookup` the generated Secret. |
 | `secrets.llm.existingSecret` | `""` | Existing Secret with any of OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (missing keys are fine). Overrides the values below. |
 | `secrets.llm.openaiApiKey` | `""` | [OPENAI_API_KEY] server-wide key for built-in evals and the gateway. Workspaces can also add their own in the UI. |
 | `secrets.llm.anthropicApiKey` | `""` | [ANTHROPIC_API_KEY] |
@@ -501,7 +506,7 @@ Bracketed names are the environment variables a key sets;
 | `secrets.llm.awsRegion` | `"us-east-1"` | [AWS_REGION] AWS Bedrock region (not secret). |
 | `secrets.eeLicenseKey` | `""` | [EE_LICENSE_KEY] Enterprise Edition license. |
 | `secrets.mailgunApiKey` | `""` | [MAILGUN_API_KEY] turns email on, with `config.email`. |
-| `secrets.agentccWebhookSecret` | `""` | [AGENTCC_WEBHOOK_SECRET] shared secret the gateway sends its request logs to the backend with. Empty generates one. |
+| `secrets.agentccWebhookSecret` | `""` | [AGENTCC_WEBHOOK_SECRET] shared secret the gateway sends its request logs to the backend with. Empty: read from `existingSecret` when that is set, else generated. |
 | `secrets.extra` | `{}` | Any other secret environment variables for the backend, workers and bootstrap job, as `NAME: value` (e.g. SENTRY_DSN, DAYTONA_API_KEY). Stored in <fullname>-secrets. |
 | `postgres.mode` | `"external"` | `external` or `bundled`. |
 | `postgres.database` | `"futureagi"` | [PG_DB] database name. |

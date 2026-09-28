@@ -134,6 +134,16 @@ secrets given inline in the values. */}}
 {{- .Values.secrets.existingSecret | default (include "futureagi.secretName" .) -}}
 {{- end -}}
 
+{{/* Where AGENTCC_WEBHOOK_SECRET lives: the chart's Secret when it is given
+inline, else with the application keys. */}}
+{{- define "futureagi.webhookSecretName" -}}
+{{- if .Values.secrets.agentccWebhookSecret -}}
+{{- include "futureagi.secretName" . -}}
+{{- else -}}
+{{- include "futureagi.appSecretName" . -}}
+{{- end -}}
+{{- end -}}
+
 {{/* env entry reading a Secret key: dict "name" "secret" "key" ["optional"]. */}}
 {{- define "futureagi.secretEnv" -}}
 - name: {{ .name }}

@@ -216,8 +216,10 @@ def check_render(name: str, docs: list[dict]) -> list[str]:
         if d["kind"] == "Secret"
         for key in d.get("data") or {}
     }
+    rendered_secrets = {d["metadata"]["name"] for d in docs if d["kind"] == "Secret"}
     for ref in set(webhook.values()):
-        if ref not in secret_keys:
+        # A Secret the chart does not render is secrets.existingSecret.
+        if ref[0] in rendered_secrets and ref not in secret_keys:
             failed.append(f"{name}: no Secret holds AGENTCC_WEBHOOK_SECRET {ref}")
 
     # The Secret comes back with `helm rollback`.
@@ -277,6 +279,36 @@ def check_overrides(bundled: list[dict], overrides: list[dict]) -> list[str]:
     return failed
 
 
+def check_gitops(docs: list[dict]) -> list[str]:
+    """ci/gitops.yaml: the application keys in secrets.existingSecret.
+
+    Argo CD and Flux render without `lookup`, so a generated value would change
+    on every sync: every pod reads AGENTCC_WEBHOOK_SECRET from the existing
+    Secret, and no Secret the chart renders holds one.
+    """
+    failed = []
+    for doc in (d for d in docs if d["kind"] in WORKLOADS):
+        for container in containers(doc):
+            for entry in container.get("env", []):
+                if entry["name"] != "AGENTCC_WEBHOOK_SECRET":
+                    continue
+                ref = entry.get("valueFrom", {}).get("secretKeyRef", {})
+                if (ref.get("name"), ref.get("key")) != (
+                    "futureagi-app",
+                    "AGENTCC_WEBHOOK_SECRET",
+                ):
+                    failed.append(
+                        f"gitops: {doc['kind']} {doc['metadata']['name']} reads "
+                        f"AGENTCC_WEBHOOK_SECRET from {ref}, not secrets.existingSecret"
+                    )
+    for secret in (d for d in docs if d["kind"] == "Secret"):
+        if "AGENTCC_WEBHOOK_SECRET" in (secret.get("data") or {}):
+            failed.append(
+                f"gitops: Secret {secret['metadata']['name']} generates AGENTCC_WEBHOOK_SECRET"
+            )
+    return failed
+
+
 def main() -> int:
     out = Path(sys.argv[1])
     renders = {
@@ -288,6 +320,8 @@ def main() -> int:
         failed += check_render(name, docs)
     if "bundled" in renders and "overrides" in renders:
         failed += check_overrides(renders["bundled"], renders["overrides"])
+    if "gitops" in renders:
+        failed += check_gitops(renders["gitops"])
     if failed:
         print("rendered manifests break the chart's invariants:", file=sys.stderr)
         for line in failed:

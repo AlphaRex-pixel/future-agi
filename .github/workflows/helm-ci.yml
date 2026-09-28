@@ -3,7 +3,8 @@
 #   static  deploy/helm/futureagi/hack/check.sh: the chart's defaults and
 #           inconsistent values refuse to render with guidance; helm lint
 #           --strict and helm template for the bundled, external, ingress,
-#           all-components and overrides value sets; kubeconform -strict against
+#           all-components, overrides and gitops value sets (gitops rendered
+#           twice, identically); kubeconform -strict against
 #           the oldest and newest supported Kubernetes; the rendered manifests'
 #           invariants (hack/rendered_checks.py); values.yaml,
 #           values.schema.json and the README table agree; the ClickHouse
