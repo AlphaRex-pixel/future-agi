@@ -441,6 +441,31 @@ class TestCustomModelsCreateView(CustomModelsAPITestCase):
         self.assertEqual(model.user_model_id, "gpt-4-turbo")
         self.assertEqual(model.provider, "openai")
 
+    @patch("model_hub.views.custom_model.validate_model_working")
+    def test_create_model_with_zero_token_cost(self, mock_validate):
+        """Self-hosted models are free, so a cost of 0 must be stored as 0."""
+        mock_validate.return_value = True
+
+        response = self.client.post(
+            f"{BASE_URL}/custom_models/create/",
+            {
+                "model_provider": "openai",
+                "model_name": "llama-3-local",
+                "input_token_cost": 0,
+                "output_token_cost": 0,
+                "config_json": {
+                    "key": "sk-local",
+                    "api_base": "http://llm.internal:8000/v1",
+                },
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        model = CustomAIModel.objects.get(id=response.data["result"]["data"]["id"])
+        self.assertEqual(model.input_token_cost, 0)
+        self.assertEqual(model.output_token_cost, 0)
+
     def test_create_model_missing_provider(self):
         """Test creating model without provider returns error."""
         data = {
