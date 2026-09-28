@@ -52,15 +52,21 @@ func NewTraceEmitter(cfg config.RequestLoggingConfig) *TraceEmitter {
 // or the emitter is closed.
 func (e *TraceEmitter) Emit(record TraceRecord) {
 	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if e.closed {
-		e.dropped.Add(1)
+	closed, sent := e.closed, false
+	if !closed {
+		select {
+		case e.ch <- record:
+			sent = true
+		default:
+		}
+	}
+	e.mu.RUnlock()
+	if sent {
 		return
 	}
-	select {
-	case e.ch <- record:
-	default:
-		e.dropped.Add(1)
+	// Outside mu, so a slow log write does not hold up Close.
+	e.dropped.Add(1)
+	if !closed {
 		slog.Warn("request.trace.dropped",
 			"request_id", record.RequestID,
 		)

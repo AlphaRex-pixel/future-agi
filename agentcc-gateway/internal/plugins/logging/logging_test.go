@@ -818,6 +818,32 @@ func TestEmitter_EmitDuringAndAfterClose(t *testing.T) {
 	}
 }
 
+// Emit warns of a dropped record after it lets go of the emitter, so a slow
+// log write does not hold up Close.
+func TestEmitter_CloseDoesNotWaitOnADropWarning(t *testing.T) {
+	warning := make(chan struct{}, 1)
+	release := make(chan struct{})
+	defer close(release)
+	prev := slog.Default()
+	slog.SetDefault(slog.New(blockingLogHandler{msg: "request.trace.dropped", started: warning, release: release}))
+	defer slog.SetDefault(prev)
+	// No workers read the channel, so the record is dropped.
+	e := &TraceEmitter{ch: make(chan TraceRecord)}
+	go e.Emit(TraceRecord{RequestID: "r1"})
+	<-warning
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		e.Close()
+	}()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close waited for the log write of a dropped record")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Integration
 // ---------------------------------------------------------------------------
