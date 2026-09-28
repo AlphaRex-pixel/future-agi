@@ -7,7 +7,9 @@ those models and custom-model creation refuses them with a clear message.
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
+import sys
 
 import pytest
 
@@ -24,6 +26,10 @@ EXTRA_NAMES = [
     "vertex_ai/deepseek-ai/deepseek-r1-0528-maas",
     "vertex_ai/qwen/qwen3-coder-480b-a35b-instruct-maas",
     "vertex_ai/gemini-2.5-pro",
+    # Routes litellm serves without the SDK despite a non-Gemini name.
+    "vertex_ai/agent_engine/1234567890",
+    "vertex_ai/bge-large-en-v1.5",
+    "vertex_ai/bge/1234567890",
 ]
 
 
@@ -107,3 +113,55 @@ def test_custom_model_refuses_sdk_only_vertex_models(monkeypatch):
 
     monkeypatch.setattr(custom_model, "vertex_ai_sdk_available", lambda: True)
     assert not custom_model._vertex_sdk_missing("vertex_ai", "vertex_ai/claude-x")
+
+
+@pytest.mark.parametrize(
+    "model_name, provider, mode",
+    [
+        ("claude-3-5-sonnet-20241022", "anthropic", "chat"),
+        ("meta/llama3-405b-instruct-maas", None, None),
+        (None, None, None),
+        ("vertex_ai/claude-3-5-sonnet-v2@20241022", "vertex_ai", "embedding"),
+        ("vertex_ai/text-bison", "vertex_ai", "image_generation"),
+    ],
+)
+def test_only_vertex_chat_and_completion_models_can_need_the_sdk(
+    model_name, provider, mode
+):
+    assert catalog.vertex_model_requires_sdk(model_name, provider, mode) is False
+
+
+def test_a_provider_of_vertex_ai_counts_without_the_name_prefix():
+    assert catalog.vertex_model_requires_sdk("claude-3-7-sonnet@x", "vertex_ai")
+    assert catalog.vertex_model_requires_sdk("chat-bison", "vertex_ai", "completion")
+
+
+def test_the_catalog_drops_sdk_only_models_when_vertexai_cannot_import(monkeypatch):
+    """The module-level filter runs at import on an image without the gcp extra."""
+    real_find_spec = importlib.util.find_spec
+
+    def with_sdk(name, *args, **kwargs):
+        if name == "vertexai":
+            return object()
+        return real_find_spec(name, *args, **kwargs)
+
+    try:
+        monkeypatch.setattr(importlib.util, "find_spec", with_sdk)
+        full = importlib.reload(catalog).AVAILABLE_MODELS
+        monkeypatch.undo()
+        # `import vertexai` fails: find_spec reports it missing.
+        monkeypatch.setitem(sys.modules, "vertexai", None)
+
+        without = importlib.reload(catalog)
+
+        assert without.vertex_ai_sdk_available() is False
+        assert without.AVAILABLE_MODELS == without.without_vertex_sdk_models(full)
+        names = {model["model_name"] for model in without.AVAILABLE_MODELS}
+        dropped = {model["model_name"] for model in full} - names
+        assert "vertex_ai/claude-3-5-sonnet-v2@20241022" in dropped
+        assert "vertex_ai/meta/llama3-405b-instruct-maas" in dropped
+        assert "vertex_ai/gemini-2.0-flash-001" in names
+        assert all(name.startswith("vertex_ai/") for name in dropped)
+    finally:
+        monkeypatch.undo()
+        importlib.reload(catalog)
