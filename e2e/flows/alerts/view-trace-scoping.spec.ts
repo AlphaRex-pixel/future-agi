@@ -7,6 +7,7 @@ import { flowAnnotation } from '../../lib/flow-meta';
 
 // Alert surfaces, pinned off frontend/src/utils/axios.js (endpoints.project.*).
 const MONITOR_PATH = '/tracer/user-alerts/';
+const MONITOR_LIST_PATH = `${MONITOR_PATH}list_monitors/`;
 const MONITOR_LOG_PATH = '/tracer/user-alert-logs/';
 const monitorDetailsPath = (id: string) => `/tracer/user-alerts/${id}/details/`;
 
@@ -243,9 +244,6 @@ test(
       expect(narrowed.result.window_start).toBe(details.result.window_start);
       expect(narrowed.result.window_end).toBe(details.result.window_end);
     });
-
-    // The alerts list, pinned off utils/axios.js (endpoints.project.getMonitorList).
-    const MONITOR_LIST_PATH = '/tracer/user-alerts/list_monitors/';
 
     // Open the sheet from whatever page we are on. Only the first call pays for
     // a full document load; the later ones come back through history, because
