@@ -75,6 +75,8 @@ FROM ${NGINX_IMAGE}
 COPY --from=build /app/dist /usr/share/nginx/html
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Also included by futureagi/standalone's nginx.conf, which copies it from here.
+COPY security-headers.conf /etc/nginx/security-headers.conf
 
 COPY --chmod=755 docker-entrypoint.sh /docker-entrypoint.sh
 

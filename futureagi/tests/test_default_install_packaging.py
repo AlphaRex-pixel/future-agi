@@ -378,19 +378,6 @@ def test_a_fatal_program_stops_the_container() -> None:
     assert "redirect_stderr" not in listener
 
 
-def test_every_nginx_location_with_headers_repeats_the_security_headers() -> None:
-    nginx = (STANDALONE / "nginx.conf").read_text(encoding="utf-8")
-    include = "include /etc/nginx/security-headers.conf;"
-    locations = re.findall(r"location [^{]*\{([^}]*)\}", nginx)
-    assert locations
-    for body in locations:
-        if "add_header" in body:
-            assert include in body, body
-    headers = (STANDALONE / "security-headers.conf").read_text(encoding="utf-8")
-    for header in ("X-Frame-Options", "X-Content-Type-Options", "Referrer-Policy"):
-        assert f"add_header {header}" in headers
-
-
 def _dockerfile_args(dockerfile: Path = STANDALONE / "Dockerfile") -> set[str]:
     text = dockerfile.read_text(encoding="utf-8")
     return set(re.findall(r"^ARG ([A-Za-z_][A-Za-z0-9_]*)", text, re.M))

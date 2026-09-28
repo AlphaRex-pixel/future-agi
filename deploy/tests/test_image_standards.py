@@ -1112,6 +1112,99 @@ class GoProbe(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# The UI's nginx security headers (frontend image, Standalone, Helm)
+# ---------------------------------------------------------------------------
+
+SECURITY_HEADERS = ROOT / "frontend" / "security-headers.conf"
+CHART_UI_CONFIGMAP = "deploy/helm/futureagi/templates/frontend/configmap.yaml"
+# Each nginx config of the UI -> where it includes the headers from.
+UI_NGINX_CONFIGS = {
+    "frontend/nginx.conf": "/etc/nginx/security-headers.conf",
+    "deploy/standalone/nginx.conf": "/etc/nginx/security-headers.conf",
+    CHART_UI_CONFIGMAP: "/etc/nginx/futureagi/security-headers.conf",
+}
+
+
+def nginx_blocks(text: str, keyword: str) -> list[str]:
+    """The body of every `<keyword> ... { ... }` block, nested braces included."""
+    bodies = []
+    for match in re.finditer(rf"(?m)^\s*{keyword}\b[^{{;]*\{{", text):
+        depth, start = 1, match.end()
+        for index in range(start, len(text)):
+            depth += {"{": 1, "}": -1}.get(text[index], 0)
+            if depth == 0:
+                bodies.append(text[start:index])
+                break
+    return bodies
+
+
+class NginxSecurityHeaders(unittest.TestCase):
+    """nginx drops the server-level add_header directives in a location that
+    sets a header of its own, so each such location includes them again."""
+
+    def test_every_location_with_headers_of_its_own_includes_them(self):
+        for name, path in UI_NGINX_CONFIGS.items():
+            with self.subTest(config=name):
+                text = "\n".join(
+                    line.split("#", 1)[0]
+                    for line in (ROOT / name).read_text(encoding="utf-8").splitlines()
+                )
+                include = f"include {path};"
+                (server,) = nginx_blocks(text, "server")
+                self.assertIn(include, server.split("location", 1)[0])
+                locations = nginx_blocks(server, "location")
+                self.assertGreaterEqual(len(locations), 5)
+                for body in locations:
+                    if "add_header" in body:
+                        self.assertIn(include, body)
+                # One file holds them; no config spells a header out again.
+                self.assertNotRegex(
+                    text, r"add_header (X-Frame-Options|X-Content-Type-Options)"
+                )
+
+    def test_the_frontend_image_ships_them_and_standalone_copies_them_from_it(self):
+        self.assertIn(
+            ("COPY", "security-headers.conf /etc/nginx/security-headers.conf"),
+            final_stage(ROOT / "frontend" / "Dockerfile"),
+        )
+        self.assertIn(
+            (
+                "COPY",
+                "--from=frontend /etc/nginx/security-headers.conf"
+                " /etc/nginx/security-headers.conf",
+            ),
+            final_stage(ROOT / "deploy" / "standalone" / "Dockerfile"),
+        )
+        self.assertFalse((ROOT / "deploy/standalone/security-headers.conf").exists())
+        # The chart cannot read frontend/: it loads a copy that hack/check.sh
+        # diffs against this file.
+        configmap = (ROOT / CHART_UI_CONFIGMAP).read_text(encoding="utf-8")
+        self.assertIn('.Files.Get "files/frontend/security-headers.conf"', configmap)
+
+    def test_the_headers(self):
+        directives = [
+            line.strip()
+            for line in SECURITY_HEADERS.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        names = [
+            match.group(1)
+            if (match := re.fullmatch(r'add_header ([A-Za-z-]+) "[^"]+" always;', line))
+            else line
+            for line in directives
+        ]
+        self.assertEqual(
+            names,
+            [
+                "X-Content-Type-Options",
+                "X-Frame-Options",
+                "Referrer-Policy",
+                "Permissions-Policy",
+            ],
+        )
+
+
+# ---------------------------------------------------------------------------
 # Workflows and docs
 # ---------------------------------------------------------------------------
 

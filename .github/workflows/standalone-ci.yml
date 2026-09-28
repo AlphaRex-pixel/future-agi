@@ -47,6 +47,7 @@ on:
       - "futureagi/**"
       - "frontend/Dockerfile"
       - "frontend/.dockerignore"
+      - "frontend/security-headers.conf"
       - "fi-collector/Dockerfile"
       - "agentcc-gateway/Dockerfile"
       - "scripts/image_size_budget.*"
@@ -131,6 +132,7 @@ jobs:
               - 'futureagi/**'
               - 'frontend/Dockerfile'
               - 'frontend/.dockerignore'
+              - 'frontend/security-headers.conf'
               - 'fi-collector/Dockerfile'
               - 'agentcc-gateway/Dockerfile'
               - 'scripts/image_size_budget.*'

@@ -555,7 +555,15 @@ class NginxStartingPageTest(unittest.TestCase):
         self.assertIn("/etc/nginx/starting.html", paths)
 
         dockerfile = (STANDALONE / "Dockerfile").read_text()
-        copied = set(re.findall(r"^COPY [^-\s]\S* (/etc/nginx/\S+)$", dockerfile, re.M))
+        # From the build context, or from the frontend image (the security
+        # headers are that image's own file).
+        copied = set(
+            re.findall(
+                r"^COPY (?:--from=frontend )?[^-\s]\S* (/etc/nginx/\S+)$",
+                dockerfile,
+                re.M,
+            )
+        )
         # A Windows checkout's CRLF line endings are stripped from each one.
         crlf = dockerfile.split("RUN sed -i 's/\\r$//'", 1)[1].split("&&", 1)[0]
         for path in sorted(paths):

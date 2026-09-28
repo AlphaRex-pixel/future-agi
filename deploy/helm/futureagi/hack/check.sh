@@ -8,6 +8,7 @@
 #   * values.yaml, values.schema.json and the README values table agree
 #   * the pre-commit Prettier run skips the templates and those generated files
 #   * the ClickHouse config files match the ones the Standalone install uses
+#   * the UI's security headers match the frontend image's
 #
 #   deploy/helm/futureagi/hack/check.sh
 #
@@ -165,6 +166,14 @@ if [ -d "$repo/deploy/standalone/clickhouse" ]; then
   diff -u "$repo/deploy/standalone/clickhouse/config.d/zz-small-host.xml" "$chart/files/clickhouse/config.d/zz-small-host.xml"
   diff -u "$repo/deploy/standalone/clickhouse/users.d/zz-small-host.xml" "$chart/files/clickhouse/users.d/zz-small-host.xml"
   diff -u "$repo/futureagi/.ci/clickhouse-storage-policy.xml" "$chart/files/clickhouse/config.d/storage-policy.xml"
+  echo "ok   identical"
+else
+  echo "skip (not in the repository)"
+fi
+
+echo "== the UI's security headers match the frontend image's"
+if [ -f "$repo/frontend/security-headers.conf" ]; then
+  diff -u "$repo/frontend/security-headers.conf" "$chart/files/frontend/security-headers.conf"
   echo "ok   identical"
 else
   echo "skip (not in the repository)"

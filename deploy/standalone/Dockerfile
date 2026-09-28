@@ -89,6 +89,7 @@ COPY --from=temporal /usr/local/bin/temporal /usr/local/bin/temporal
 COPY --from=minio /usr/bin/minio /usr/local/bin/minio
 COPY --from=frontend /usr/share/nginx/html /srv/frontend
 COPY --from=frontend /docker-entrypoint.sh /opt/futureagi/bin/frontend-config
+COPY --from=frontend /etc/nginx/security-headers.conf /etc/nginx/security-headers.conf
 
 # Static files for /admin and /docs with DEBUG off. Build-time settings need no
 # services; if this fails, bin/bootstrap.py collects them on first boot (the
@@ -100,7 +101,6 @@ RUN if ENV_TYPE=local timeout 600 python manage.py collectstatic --noinput --cle
     fi
 
 COPY nginx.conf /etc/nginx/nginx.conf
-COPY security-headers.conf /etc/nginx/security-headers.conf
 COPY starting.html /etc/nginx/starting.html
 COPY supervisord.conf /etc/futureagi/supervisord.conf
 COPY bin/ /opt/futureagi/bin/

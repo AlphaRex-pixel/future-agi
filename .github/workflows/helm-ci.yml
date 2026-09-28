@@ -8,7 +8,8 @@
 #           the oldest and newest supported Kubernetes; the rendered manifests'
 #           invariants (hack/rendered_checks.py); values.yaml,
 #           values.schema.json and the README table agree; the ClickHouse
-#           config matches the Standalone install's. Then the chart's version
+#           config matches the Standalone install's and the UI's security
+#           headers the frontend image's. Then the chart's version
 #           must follow the platform release (release-please moves it).
 #   kind    builds the backend, frontend, fi-collector and agentcc-gateway
 #           images from this checkout, installs the chart on kind with every
@@ -26,6 +27,7 @@ on:
       - "deploy/helm/**"
       - "deploy/standalone/clickhouse/**"
       - "futureagi/.ci/clickhouse-storage-policy.xml"
+      - "frontend/security-headers.conf"
       - "futureagi/tfc/management/commands/bootstrap_install.py"
       - "futureagi/model_hub/apps.py"
       - ".github/workflows/helm-ci.yml"
@@ -38,6 +40,7 @@ on:
       - "deploy/helm/**"
       - "deploy/standalone/clickhouse/**"
       - "futureagi/.ci/clickhouse-storage-policy.xml"
+      - "frontend/security-headers.conf"
       - "futureagi/tfc/management/commands/bootstrap_install.py"
       - "futureagi/model_hub/apps.py"
       - ".github/workflows/helm-ci.yml"
