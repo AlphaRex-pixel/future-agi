@@ -100,3 +100,25 @@ def test_a_blocked_command_still_fails_before_it_runs(transactional_db):
 
     assert result.returncode != 0
     assert "flush is disabled during mutation-free startup" in result.stderr
+
+
+@pytest.mark.parametrize("line_end", ["\n", "\r\n"], ids=["bash", "powershell"])
+def test_create_user_reads_the_password_the_installers_pipe_in(
+    transactional_db, line_end
+):
+    """bin/install and bin/install.ps1 pipe the first account's password in,
+    so it never shows on a command line: without a terminal, getpass reads
+    it from stdin. Windows PowerShell ends the line with \\r\\n, which the
+    signup serializer trims."""
+    result = _manage_py(
+        "create_user",
+        "--email",
+        "first-owner@futureagi.com",
+        "--name",
+        "First Owner",
+        stdin=f"Piped-Passw0rd!{line_end}",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    user = User.objects.get(email="first-owner@futureagi.com")
+    assert user.check_password("Piped-Passw0rd!")

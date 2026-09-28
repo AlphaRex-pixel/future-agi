@@ -365,6 +365,7 @@ if [ "$1" = "compose" ]; then
       exit 0 ;;
     exec)
       printf '%s\n' "$@" > "$state/create_user.argv"
+      [ -t 0 ] || cat > "$state/create_user.stdin"
       case "$FAGI_STUB_CREATE_USER" in
         exists) printf 'IntegrityError: a user with that email already exists\n'; exit 1 ;;
         fail) printf 'OperationalError: FATAL: password authentication failed\n'; exit 1 ;;
@@ -667,6 +668,97 @@ def test_installer_rejects_a_control_character_in_the_typed_email_before_create_
     ) in stdout
     argv = (state / "create_user.argv").read_text(encoding="utf-8").splitlines()
     assert argv[argv.index("--email") + 1] == "abhijai+test123@futureagi.com"
+
+
+ADMIN_PASSWORD = "correct-horse-battery"
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["FAGI_ADMIN_PASSWORD", "typed"])
+def test_the_admin_password_reaches_create_user_on_stdin_only(
+    tmp_path: Path, typed: bool
+) -> None:
+    """In Standalone create_user runs in the app container, where eval code
+    can read every process's command line."""
+    if typed:
+        script, environment, state = _installer_sandbox(tmp_path)
+        answers = ["abhijai@futureagi.com", "Abhijai", ADMIN_PASSWORD, ADMIN_PASSWORD]
+        code, _, stderr = _run_installer(
+            script, environment, typed="\n".join(answers + [""]).encode(), timeout=120
+        )
+    else:
+        script, environment, state = _installer_sandbox(
+            tmp_path,
+            CI="1",
+            FAGI_ADMIN_EMAIL="abhijai@futureagi.com",
+            FAGI_ADMIN_NAME="Abhijai",
+            FAGI_ADMIN_PASSWORD=ADMIN_PASSWORD,
+        )
+        code, _, stderr = _run_installer(script, environment)
+
+    assert code == 0, stderr
+    argv = _lines(state / "create_user.argv")
+    assert "create_user" in argv
+    assert "--password" not in argv
+    assert not [arg for arg in argv if ADMIN_PASSWORD in arg]
+    assert _read(state / "create_user.stdin") == ADMIN_PASSWORD + "\n"
+
+
+def _power_shell_section(text: str, header: str) -> str:
+    """install.ps1 from a `# ---- <header> ----` line to the next one."""
+    start = text.index(f"# ---- {header} ----")
+    return text[start : text.index("\n# ---- ", start + 1)]
+
+
+def test_power_shell_installer_pipes_the_admin_password_to_create_user(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("pwsh is unavailable")
+    stub = tmp_path / "docker"
+    stub.write_text(
+        '#!/bin/bash\nprintf \'%s\\n\' "$@" > "$FAGI_STUB_STATE/argv"\n'
+        'cat > "$FAGI_STUB_STATE/stdin"\n'
+        "echo 'Warning: Password input may be echoed.' >&2\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    script = "\n".join(
+        [
+            "$ErrorActionPreference = 'Stop'",
+            "$DcCmd = 'docker'; $DcArgs = @('compose'); $AppService = 'app'",
+            "function Invoke-Compose { & $DcCmd @DcArgs @args }",
+            "$UserEmail = 'abhijai@futureagi.com'; $UserName = 'Abhijai'",
+            f"$UserPass = '{ADMIN_PASSWORD}'",
+            "$AccountCreated = 'created'; $AccountExists = 'exists'",
+            "$AccountFailed = 'failed'; $AccountState = 'skipped'",
+            "function Get-EnvValue { param($n) '' }",
+            "function Step { param($m) }",
+            "function Ok { param($m) Write-Output $m }",
+            "function Warn { param($m) Write-Output $m }",
+            "function Say { param($m) }",
+            _power_shell_section(_read(INSTALL_PS1), "create user"),
+        ]
+    )
+
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", script],
+        env={
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "HOME": str(tmp_path),
+            "FAGI_STUB_STATE": str(tmp_path),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Account created for abhijai@futureagi.com" in result.stdout
+    argv = _lines(tmp_path / "argv")
+    assert "--password" not in argv
+    assert not [arg for arg in argv if ADMIN_PASSWORD in arg]
+    assert _read(tmp_path / "stdin").rstrip("\r\n") == ADMIN_PASSWORD
 
 
 def test_installer_extends_the_readiness_window_while_migrations_are_applying(

@@ -1358,9 +1358,11 @@ if [[ -n "$USER_EMAIL" ]]; then
   # at 2 s, so blocked egress costs seconds instead of half a minute; the
   # scheduled telemetry job retries a registration that failed here.
   telemetry_timeout="${FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS:-$(env_value FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS 2)}"
-  if cu_out=$($DC exec -T -e "FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS=${telemetry_timeout}" \
+  # The password goes on stdin, never on a command line: in Standalone this
+  # runs in the app container, where eval code can read /proc/*/cmdline.
+  if cu_out=$(printf '%s\n' "$USER_PASS" | $DC exec -T -e "FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS=${telemetry_timeout}" \
                 "$APP_SVC" python manage.py create_user \
-                --email "$USER_EMAIL" --name "$USER_NAME" --password "$USER_PASS" 2>&1); then
+                --email "$USER_EMAIL" --name "$USER_NAME" 2>&1); then
     cu_rc=0
   else
     cu_rc=$?

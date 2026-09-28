@@ -1185,9 +1185,22 @@ if ($UserEmail) {
   $telemetryTimeout = $env:FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS
   if (-not $telemetryTimeout) { $telemetryTimeout = Get-EnvValue 'FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS' }
   if (-not $telemetryTimeout) { $telemetryTimeout = 2 }
-  $cuOut = Invoke-Compose exec -T -e "FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS=$telemetryTimeout" $AppService python manage.py create_user `
-    --email $UserEmail --name $UserName --password $UserPass 2>&1
-  $cuRc = $LASTEXITCODE
+  # The password goes on stdin, never on a command line: in Standalone this
+  # runs in the app container, where eval code can read /proc/*/cmdline.
+  # Piped as UTF-8 (Windows PowerShell 5.1 pipes ASCII); stderr is output
+  # here, not an error.
+  $savedEncoding = $OutputEncoding
+  $savedPreference = $ErrorActionPreference
+  $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+  $ErrorActionPreference = 'Continue'
+  try {
+    $cuOut = $UserPass | & $DcCmd @DcArgs exec -T -e "FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS=$telemetryTimeout" $AppService python manage.py create_user `
+      --email $UserEmail --name $UserName 2>&1
+    $cuRc = $LASTEXITCODE
+  } finally {
+    $OutputEncoding = $savedEncoding
+    $ErrorActionPreference = $savedPreference
+  }
   if ($cuRc -eq 0) {
     $AccountState = $AccountCreated
     Ok "Account created for $UserEmail"
