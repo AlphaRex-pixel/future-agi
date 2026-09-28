@@ -10,6 +10,12 @@ from rest_framework.viewsets import ModelViewSet
 
 from accounts.models.user import User
 from accounts.utils import get_request_organization
+from tfc.middleware.workspace_context import (
+    get_current_organization,
+    get_current_user,
+    get_current_workspace,
+    set_workspace_context,
+)
 from tfc.utils.base_viewset import BaseModelViewSetMixin
 from tfc.utils.general_methods import GeneralMethods
 from tracer.models.shared_link import (
@@ -36,6 +42,7 @@ SUPPORTED_SHARED_RESOURCE_TYPES = {
     ResourceType.TRACE.value,
     ResourceType.DASHBOARD.value,
     ResourceType.PROJECT.value,
+    ResourceType.CALL_EXECUTION.value,
 }
 
 
@@ -338,6 +345,9 @@ def _resolve_resource(link):
                 return None
             return _serialize_shared_project(project)
 
+        elif link.resource_type == ResourceType.CALL_EXECUTION.value:
+            return _in_link_workspace(link, _resolve_shared_call_execution, link)
+
         # Extend for other resource types as needed
         return None
 
@@ -346,8 +356,39 @@ def _resolve_resource(link):
         return None
 
 
+def _resolve_shared_call_execution(link):
+    from simulate.views.run_results_v3 import build_call_execution_detail
+
+    call = _get_shared_call_execution(
+        link.resource_id,
+        link.organization,
+        link.workspace,
+    )
+    if not call:
+        return None
+    return build_call_execution_detail(call, workspace=link.workspace)
+
+
+def _in_link_workspace(link, build, *args):
+    """Run ``build`` scoped to the link's workspace, not the viewer's."""
+    previous = (
+        get_current_workspace(),
+        get_current_organization(),
+        get_current_user(),
+    )
+    set_workspace_context(workspace=link.workspace, organization=link.organization)
+    try:
+        return build(*args)
+    finally:
+        set_workspace_context(
+            workspace=previous[0], organization=previous[1], user=previous[2]
+        )
+
+
 def _get_shared_link_by_token(token):
-    return SharedLink.objects.get(token=token, deleted=False)
+    # The token alone identifies the link; the viewer's own workspace must not
+    # hide it (access is checked after lookup).
+    return SharedLink.no_workspace_objects.get(token=token, deleted=False)
 
 
 def _shared_resource_exists(resource_type, resource_id, organization, workspace):
@@ -360,6 +401,11 @@ def _shared_resource_exists(resource_type, resource_id, organization, workspace)
             )
         if resource_type == ResourceType.PROJECT.value:
             return _get_shared_project(resource_id, organization, workspace) is not None
+        if resource_type == ResourceType.CALL_EXECUTION.value:
+            return (
+                _get_shared_call_execution(resource_id, organization, workspace)
+                is not None
+            )
     except (TypeError, ValueError, ValidationError):
         return False
     return False
@@ -418,6 +464,28 @@ def _get_shared_project(resource_id, organization, workspace):
             organization=organization,
         )
         .filter(_workspace_scope_q(workspace, "workspace"))
+        .first()
+    )
+
+
+def _get_shared_call_execution(resource_id, organization, workspace):
+    from simulate.models import CallExecution
+
+    return (
+        CallExecution.no_workspace_objects.filter(
+            id=resource_id,
+            test_execution__deleted=False,
+            test_execution__run_test__organization=organization,
+            test_execution__run_test__deleted=False,
+        )
+        .filter(_workspace_scope_q(workspace, "test_execution__run_test__workspace"))
+        .select_related(
+            "scenario",
+            "test_execution__run_test",
+            "test_execution__agent_definition",
+            "test_execution__simulator_agent",
+        )
+        .prefetch_related("transcripts", "chat_messages", "snapshots")
         .first()
     )
 

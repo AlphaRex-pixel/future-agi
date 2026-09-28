@@ -512,6 +512,45 @@ class RunCallsV3View(APIView):
         return Response(response)
 
 
+def build_call_execution_detail(
+    call: CallExecution, request=None, workspace=None
+) -> dict[str, Any]:
+    """Build the v3 call-detail payload; shared-link resolve reuses it.
+
+    ``workspace`` scopes the error-localizer lookups when there is no request
+    workspace (a shared link passes its own).
+    """
+    row, _ = build_call_rows(call.test_execution, [call])
+    data = dict(
+        CallExecutionDetailSerializer(
+            call,
+            context={
+                "request": request,
+                "workspace": workspace,
+                "eval_configs": build_eval_configs_map(call),
+                "detail_mode": True,
+            },
+        ).data
+    )
+    normalized = row[0]
+    data.update(
+        {
+            "goal": normalized["goal"],
+            "scenario_details": normalized["scenario_details"],
+            "ideal_outcome": normalized["ideal_outcome"],
+            "conversation_branch": normalized["conversation_branch"],
+            "persona": normalized["persona"],
+            "persona_details": normalized["persona_details"],
+            "sub_goals": normalized["sub_goals"],
+            "outcome": normalized["outcome"],
+            "cost_breakdown_cents": normalized["cost_breakdown_cents"],
+            "evaluations": normalized["evaluations"],
+            "function_calls": function_calls(call),
+        }
+    )
+    return data
+
+
 class CallExecutionV3DetailView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -535,34 +574,7 @@ class CallExecutionV3DetailView(APIView):
             test_execution__run_test__organization=organization,
             test_execution__run_test__deleted=False,
         )
-        row, _ = build_call_rows(call.test_execution, [call])
-        data = dict(
-            CallExecutionDetailSerializer(
-                call,
-                context={
-                    "request": request,
-                    "eval_configs": build_eval_configs_map(call),
-                    "detail_mode": True,
-                },
-            ).data
-        )
-        normalized = row[0]
-        data.update(
-            {
-                "goal": normalized["goal"],
-                "scenario_details": normalized["scenario_details"],
-                "ideal_outcome": normalized["ideal_outcome"],
-                "conversation_branch": normalized["conversation_branch"],
-                "persona": normalized["persona"],
-                "persona_details": normalized["persona_details"],
-                "sub_goals": normalized["sub_goals"],
-                "outcome": normalized["outcome"],
-                "cost_breakdown_cents": normalized["cost_breakdown_cents"],
-                "evaluations": normalized["evaluations"],
-                "function_calls": function_calls(call),
-            }
-        )
-        return Response(data)
+        return Response(build_call_execution_detail(call, request=request))
 
 
 class RunAnalyticsV3View(APIView):
