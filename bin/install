@@ -635,28 +635,34 @@ port_holder() {
   return 0
 }
 
-# Find the first free TCP port starting from $1, skipping any we've already
-# suggested in this same run (so two conflicting services can't both be
-# offered the same alternative). Result is written to FREE_PORT (a global
-# variable) so updates to SUGGESTED_PORTS persist — `$(find_free_port ...)`
-# would run in a subshell, hiding the array mutation from the next call.
-declare -a SUGGESTED_PORTS=()
+# Ports this run keeps out of suggestions: the configured port of every var
+# of the stack (filled in below, before any is checked) and each replacement
+# already suggested. A replacement for one var must not land on a port that a
+# later var is set to: both would bind it, and compose fails with "port is
+# already allocated".
+declare -a RESERVED_PORTS=()
+port_reserved() {
+  local s
+  # ${arr[@]+"${arr[@]}"} survives `set -u` on an empty array.
+  for s in ${RESERVED_PORTS[@]+"${RESERVED_PORTS[@]}"}; do
+    [[ "$s" == "$1" ]] && return 0
+  done
+  return 1
+}
+
+# Find the first free, unreserved TCP port starting from $1 and reserve it.
+# Result is written to FREE_PORT (a global variable) so updates to
+# RESERVED_PORTS persist — `$(find_free_port ...)` would run in a subshell,
+# hiding the array mutation from the next call.
 FREE_PORT=""
 find_free_port() {
   local p="$1"
   FREE_PORT=""
   while (( p < 65535 )); do
-    if [[ -z "$(port_holder "$p" 2>/dev/null)" ]]; then
-      local seen=0 s
-      # ${arr[@]+"${arr[@]}"} survives `set -u` on an empty array.
-      for s in ${SUGGESTED_PORTS[@]+"${SUGGESTED_PORTS[@]}"}; do
-        [[ "$s" == "$p" ]] && seen=1 && break
-      done
-      if (( seen == 0 )); then
-        SUGGESTED_PORTS+=("$p")
-        FREE_PORT="$p"
-        return 0
-      fi
+    if ! port_reserved "$p" && [[ -z "$(port_holder "$p" 2>/dev/null)" ]]; then
+      RESERVED_PORTS+=("$p")
+      FREE_PORT="$p"
+      return 0
     fi
     p=$((p + 1))
   done
@@ -702,28 +708,49 @@ else
   )
 fi
 
-declare -a UNRESOLVED=()
+# Every var's port, as configured and then as switched below.
+declare -a PORT_VARS=() PORT_VALUES=()
 for entry in "${PORTS_TO_CHECK[@]}"; do
-  var="${entry%%:*}"
-  default="${entry##*:}"
-  port=$(env_value "$var" "$default")
-  holder=$(port_holder "$port" 2>/dev/null) || holder=""
+  PORT_VARS+=("${entry%%:*}")
+  PORT_VALUES+=("$(env_value "${entry%%:*}" "${entry##*:}")")
+done
+RESERVED_PORTS=("${PORT_VALUES[@]}")
+
+declare -a UNRESOLVED=()
+for i in "${!PORT_VARS[@]}"; do
+  var="${PORT_VARS[$i]}"
+  port="${PORT_VALUES[$i]}"
+
+  # Two vars on one port collide inside the stack, whatever else is
+  # listening. A run that failed that way left nothing bound, so only this
+  # check catches it on the re-run.
+  holder=""
+  for (( j = 0; j < i; j++ )); do
+    if [[ "${PORT_VALUES[$j]}" == "$port" ]]; then
+      holder="${PORT_VARS[$j]} (same port)"
+      break
+    fi
+  done
 
   if [[ -z "$holder" ]]; then
-    ok "  $var=$port  free"
-    continue
-  fi
+    holder=$(port_holder "$port" 2>/dev/null) || holder=""
 
-  # Allow our own already-running container to "hold" the port — re-runs
-  # of bin/install on the same project are fine. Anything else collides.
-  # Ask Docker rather than trusting the holder's process name: Colima
-  # forwards published ports through `ssh`, not docker-proxy.
-  if docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
-       | awk -v p=":$port->" -v proj="^${project_name}-" \
-            '$0 ~ p && $1 ~ proj' \
-       | grep -q .; then
-    ok "  $var=$port  (held by this project's container — fine)"
-    continue
+    if [[ -z "$holder" ]]; then
+      ok "  $var=$port  free"
+      continue
+    fi
+
+    # Allow our own already-running container to "hold" the port — re-runs
+    # of bin/install on the same project are fine. Anything else collides.
+    # Ask Docker rather than trusting the holder's process name: Colima
+    # forwards published ports through `ssh`, not docker-proxy.
+    if docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+         | awk -v p=":$port->" -v proj="^${project_name}-" \
+              '$0 ~ p && $1 ~ proj' \
+         | grep -q .; then
+      ok "  $var=$port  (held by this project's container — fine)"
+      continue
+    fi
   fi
 
   # Find a suggested replacement.
@@ -754,6 +781,7 @@ for entry in "${PORTS_TO_CHECK[@]}"; do
 
   if (( apply == 1 )); then
     set_env_var "$var" "$suggestion"
+    PORT_VALUES[i]="$suggestion"
     ok "  $var=$suggestion  written to .env"
     # Keep VITE_HOST_API in sync when BACKEND_PORT moves: the UI calls the
     # API there, http://localhost:8000 when it is unset. A URL naming another

@@ -580,10 +580,19 @@ function Test-PortFree {
 $ownPorts = @(Invoke-Probe { docker ps --filter "label=com.docker.compose.project=$projectName" --format '{{.Ports}}' }) -join ','
 
 $conflicts = @()
+# Two vars on one port collide inside the stack whatever else is listening:
+# compose fails with "port is already allocated", and leaves nothing bound.
+$portOwners = @{}
 foreach ($var in $portsToCheck.Keys) {
   $val = Get-EnvValue $var
   if (-not $val) { $val = $portsToCheck[$var] }
   $port = [int]$val
+  if ($portOwners.ContainsKey($port)) {
+    Warn "  $var=$port  is taken: $($portOwners[$port]) is set to the same port"
+    $conflicts += "$var=$port (same port as $($portOwners[$port]))"
+    continue
+  }
+  $portOwners[$port] = $var
   if (Test-PortFree $port) {
     Ok "  $var=$port  free"
   } elseif ($ownPorts -match ":$port->") {

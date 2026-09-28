@@ -1478,6 +1478,111 @@ def test_a_moved_backend_port_moves_the_url_the_ui_calls(
     assert values["VITE_HOST_API"] == expected
 
 
+STANDALONE_PORTS = {
+    "FRONTEND_PORT": "3000",
+    "BACKEND_PORT": "8000",
+    "FI_COLLECTOR_OTLP_PORT": "4317",
+    "FI_COLLECTOR_OTLP_HTTP_PORT": "4318",
+    "AGENTCC_GATEWAY_PORT": "8090",
+    "MINIO_API_PORT": "9005",
+}
+
+
+def _standalone_ports(repo: Path) -> dict[str, str]:
+    values = _env_values(repo)
+    return {var: values.get(var, default) for var, default in STANDALONE_PORTS.items()}
+
+
+def test_a_switched_port_never_lands_on_another_services_port(tmp_path: Path) -> None:
+    """4317 taken: the collector's gRPC port moves past 4318, which its HTTP
+    port is set to, instead of onto it."""
+    script, environment, state = _installer_sandbox(
+        tmp_path, CI="1", FAGI_STUB_BUSY_PORTS="4317 8000 8001"
+    )
+
+    code, stdout, stderr = _run_installer(script, environment, "--skip-user-creation")
+
+    assert code == 0, stderr
+    ports = _standalone_ports(script.parents[1])
+    assert ports["FI_COLLECTOR_OTLP_PORT"] == "4319"
+    assert ports["FI_COLLECTOR_OTLP_HTTP_PORT"] == "4318"
+    assert ports["BACKEND_PORT"] == "8002"
+    assert len(set(ports.values())) == len(ports)
+    assert "auto-switching to FI_COLLECTOR_OTLP_PORT=4319" in stdout
+    assert (state / "env_at_up").exists()
+
+
+def test_a_rerun_separates_two_ports_an_earlier_run_set_equal(tmp_path: Path) -> None:
+    """What an older installer left behind: compose failed with "port is
+    already allocated" and nothing listens, so only the settings show it."""
+    script, environment, _ = _installer_sandbox(tmp_path, CI="1")
+    repo = script.parents[1]
+    (repo / ".env").write_text(
+        SANDBOX_ENV_EXAMPLE + "FI_COLLECTOR_OTLP_PORT=4318\n", encoding="utf-8"
+    )
+
+    code, stdout, stderr = _run_installer(script, environment, "--no-up")
+
+    assert code == 0, stderr
+    ports = _standalone_ports(repo)
+    assert ports["FI_COLLECTOR_OTLP_PORT"] == "4318"
+    assert ports["FI_COLLECTOR_OTLP_HTTP_PORT"] == "4319"
+    assert "FI_COLLECTOR_OTLP_HTTP_PORT=4318  is taken by FI_COLLECTOR_OTLP_PORT" in (
+        stderr
+    )
+
+
+def test_two_ports_set_equal_are_unresolved_when_the_switch_is_declined(
+    tmp_path: Path,
+) -> None:
+    script, environment, state = _installer_sandbox(tmp_path)
+    repo = script.parents[1]
+    (repo / ".env").write_text(
+        SANDBOX_ENV_EXAMPLE + "MINIO_API_PORT=3000\n", encoding="utf-8"
+    )
+
+    code, stdout, _ = _run_installer(script, environment, "--no-up", typed=b"n\n")
+
+    assert code == 1
+    assert "MINIO_API_PORT=3000  ←  FRONTEND_PORT (same port)" in stdout
+    assert _env_values(repo)["MINIO_API_PORT"] == "3000"
+    assert not (state / "env_at_up").exists()
+
+
+def test_power_shell_installer_reports_two_ports_set_equal() -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("pwsh is unavailable")
+    text = _read(INSTALL_PS1)
+    check = text[text.index("$conflicts = @()") : text.index("if ($conflicts.Count")]
+    script = "\n".join(
+        [
+            "$portsToCheck = [ordered]@{ 'FI_COLLECTOR_OTLP_PORT' = 4317;"
+            " 'FI_COLLECTOR_OTLP_HTTP_PORT' = 4318; 'MINIO_API_PORT' = 9005 }",
+            "function Get-EnvValue { param($n)"
+            " if ($n -eq 'FI_COLLECTOR_OTLP_PORT') { '4318' } else { '' } }",
+            "function Test-PortFree { param([int]$Port) $true }",
+            "function Ok { param($m) }",
+            "function Warn { param($m) Write-Output $m }",
+            "$ownPorts = ''",
+            check,
+            '$conflicts | ForEach-Object { Write-Output "conflict: $_" }',
+        ]
+    )
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", script],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (
+        "conflict: FI_COLLECTOR_OTLP_HTTP_PORT=4318 (same port as"
+        " FI_COLLECTOR_OTLP_PORT)" in result.stdout
+    )
+    assert "MINIO_API_PORT" not in result.stdout
+
+
 @pytest.mark.parametrize(
     "setting, url",
     [
