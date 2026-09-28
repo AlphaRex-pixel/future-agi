@@ -787,6 +787,8 @@ def fetch_session_graph_ch(
             accept_snapshot=lambda payload: snapshot_names_its_statistic(
                 "observe-session-system-graph", metric_id, payload
             ),
+            # A revisit of an open window serves the hit and refreshes it.
+            revalidate_open_window=True,
         )
 
     # Eval and annotation graphs, like filtered system graphs, are exact

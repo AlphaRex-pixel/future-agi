@@ -53,6 +53,16 @@ EXACT_AGGREGATION_TASK_QUEUE = os.getenv(
     "tasks_xl",
 )
 
+# Age (seconds) after which a revisited Observe latency/system-metric chart
+# whose window was still open when its exact snapshot ran refreshes that same
+# snapshot in the background while the cached one is shown. 0 turns it off;
+# values below 60 are raised to 60. The 300 s default and its load arithmetic
+# are documented at _DEFAULT_REVALIDATE_AFTER_SECONDS in
+# tracer/services/exact_aggregation_cache.py.
+EXACT_AGGREGATION_REVALIDATE_AFTER_SECONDS = int(
+    os.getenv("EXACT_AGGREGATION_REVALIDATE_AFTER_SECONDS", "300")
+)
+
 # Eval-usage API reads use ClickHouse in deployed environments. Keep the
 # source selection explicit so contract tests and standalone installs can use
 # the existing PostgreSQL fallback without changing global ClickHouse routing.

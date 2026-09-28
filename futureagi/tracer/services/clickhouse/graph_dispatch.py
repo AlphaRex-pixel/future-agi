@@ -896,8 +896,16 @@ def _read_or_refresh_exact_graph(
     organization_id: str | None = None,
     workspace_id: str | None = None,
     schedule_on_miss: bool = True,
+    revalidate_open_window: bool = False,
 ) -> Any:
-    """Return immediately while a deduplicated exact refresh runs out of band."""
+    """Return immediately while a deduplicated exact refresh runs out of band.
+
+    ``revalidate_open_window`` lets an old open-window hit refresh its own
+    identity in the background (see ``read_or_schedule_exact_snapshot``). The
+    cache-only probes pass ``not refresh``: an explicit refresh re-calls with
+    ``refresh=True`` right after, and a probe claim would make that call find
+    its own claim and reconcile it against Temporal.
+    """
 
     if organization_id is not None:
         identity["organization_id"] = str(organization_id)
@@ -910,6 +918,7 @@ def _read_or_refresh_exact_graph(
         refresh=refresh,
         pending_payload=pending_payload,
         schedule_on_miss=schedule_on_miss,
+        revalidate_open_window=revalidate_open_window,
         # A latency snapshot not marked as the mean is a miss.
         accept_snapshot=lambda payload: snapshot_names_its_statistic(
             namespace, metric_id, payload
@@ -1942,6 +1951,7 @@ def fetch_system_metric_graph_ch(
         organization_id=organization_id,
         workspace_id=workspace_id,
         schedule_on_miss=False,
+        revalidate_open_window=not refresh,
     )
     if (
         isinstance(cached, dict)
@@ -2252,6 +2262,7 @@ def fetch_user_system_metric_graph_ch(
             organization_id=organization_id,
             workspace_id=workspace_id,
             schedule_on_miss=False,
+            revalidate_open_window=not refresh,
         )
         if (
             isinstance(cached, dict)

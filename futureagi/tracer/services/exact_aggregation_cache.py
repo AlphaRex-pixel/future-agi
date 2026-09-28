@@ -60,6 +60,35 @@ _DEFAULT_REFRESH_FAILURE_SECONDS = 5 * 60
 _CACHE_FENCE_FALLBACK_LOCK = RLock()
 _ALLOWED_EXACT_AGGREGATION_TASK_QUEUES = frozenset({"tasks_xl", "exact_aggregation"})
 _DEFAULT_MAX_INFLIGHT_PER_SCOPE = 2
+# Open-window revalidation (``read_or_schedule_exact_snapshot``) applies only to
+# the three Observe system-metric charts. Dashboards, eval usage, attribute
+# detail, eval/annotation charts and the agent graph keep reload-only snapshots.
+_OPEN_WINDOW_REVALIDATION_NAMESPACES = frozenset(
+    {
+        "observe-system-graph",
+        "observe-session-system-graph",
+        "observe-user-system-graph",
+    }
+)
+# How old an open-window snapshot must be before a visit refreshes it
+# (setting EXACT_AGGREGATION_REVALIDATE_AFTER_SECONDS; 0 or None turns it off).
+# Why five minutes, from the two load boundaries a revalidation passes through:
+# - Per identity, the refresh lock plus the "no running or failed state" gate
+#   allow one refresh in flight, and the next cannot start before
+#   ``completed_at + floor``. A continuously viewed identity whose exact read
+#   takes D seconds therefore occupies a worker slot at most D / (D + floor) of
+#   the time. For the ~27 s 7-day session read on the largest tenant that is
+#   27/327 = 8% at 300 s, against 27/87 = 31% at 60 s.
+# - Per project, a revalidation claims admission only while it leaves a slot
+#   free (``_revalidation_admission_limit``): with the default two slots, at
+#   most one revalidation per project runs at a time and a user's new chart
+#   always has the other.
+# 300 s is also the failed-state TTL, so a failing and a succeeding identity
+# are retried on the same cadence, and a revisited chart is never served more
+# than five minutes old without a refresh under way.
+_DEFAULT_REVALIDATE_AFTER_SECONDS = 5 * 60
+# Configuration cannot turn every poll into a claim.
+_MIN_REVALIDATE_AFTER_SECONDS = 60
 
 _REDIS_ATOMIC_REFRESH_CLAIM_SCRIPT = """
 local claimed = redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[3], 'NX')
@@ -475,17 +504,32 @@ def _scope_admission_timeout(members: dict[str, int], now_ms: int) -> int:
     return remaining_seconds + 5 * 60
 
 
+def _revalidation_admission_limit() -> int:
+    """Admission ceiling for a background revalidation: leave one slot free."""
+
+    return max(1, _max_inflight_per_scope() - 1)
+
+
 def _claim_exact_refresh_admission(
     identity: Any,
     token: str,
     *,
     lease_seconds: int,
+    limit: int | None = None,
 ) -> bool:
-    """Admit a bounded number of distinct exact jobs per tenant scope."""
+    """Admit a bounded number of distinct exact jobs per tenant scope.
+
+    ``limit`` lowers the ceiling for one claim (never raises it above the
+    per-scope maximum); a revalidation uses it to keep a slot for foreground
+    work.
+    """
 
     admission_key = _scope_admission_key(identity)
     if admission_key is None:
         return True
+    max_inflight = _max_inflight_per_scope()
+    if limit is not None:
+        max_inflight = max(1, min(max_inflight, int(limit)))
     now_ms = int(time.time() * 1000)
     expiry_ms = now_ms + lease_seconds * 1000
     ttl_margin_ms = 5 * 60 * 1000
@@ -502,7 +546,7 @@ def _claim_exact_refresh_admission(
                     token,
                     expiry_ms,
                     ttl_margin_ms,
-                    _max_inflight_per_scope(),
+                    max_inflight,
                 )
             )
 
@@ -514,7 +558,7 @@ def _claim_exact_refresh_admission(
                 for member, expiry in members.items()
                 if isinstance(expiry, int) and expiry > now_ms
             }
-            if token not in members and len(members) >= _max_inflight_per_scope():
+            if token not in members and len(members) >= max_inflight:
                 cache.set(
                     admission_key,
                     members,
@@ -675,6 +719,22 @@ def _refresh_failure_seconds() -> int:
             )
         ),
     )
+
+
+def _revalidation_floor_seconds() -> int | None:
+    """Minimum snapshot age before an open-window hit refreshes, or ``None`` (off)."""
+
+    configured = getattr(
+        settings,
+        "EXACT_AGGREGATION_REVALIDATE_AFTER_SECONDS",
+        _DEFAULT_REVALIDATE_AFTER_SECONDS,
+    )
+    if configured is None:
+        return None
+    seconds = int(configured)
+    if seconds <= 0:
+        return None
+    return max(_MIN_REVALIDATE_AFTER_SECONDS, seconds)
 
 
 def _refresh_reconcile_seconds() -> int:
@@ -1453,6 +1513,157 @@ def _release_terminal_dispatch_claim(namespace: str, identity: Any) -> bool:
         return False
 
 
+def _parse_utc_instant(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed
+
+
+def _frozen_window_end(identity: Any) -> datetime | None:
+    """The upper bound of the ``created_at`` window a frozen Observe identity holds.
+
+    ``normalize_exact_observe_identity`` writes exactly one SYSTEM_METRIC
+    ``created_at between`` item; anything else has no window to judge.
+    """
+
+    if not isinstance(identity, dict):
+        return None
+    for item in identity.get("filters") or []:
+        if not isinstance(item, dict) or item.get("column_id") != "created_at":
+            continue
+        config = item.get("filter_config") or {}
+        if (
+            config.get("filter_op") != "between"
+            or config.get("col_type") != "SYSTEM_METRIC"
+        ):
+            continue
+        bounds = config.get("filter_value")
+        if isinstance(bounds, (list, tuple)) and len(bounds) == 2:
+            return _parse_utc_instant(bounds[1])
+    return None
+
+
+def _open_window_hit_is_due(namespace: str, identity: Any, snapshot: Any) -> bool:
+    """Whether a served hit was computed while its window was open, long enough ago.
+
+    Only the window's end matters: a snapshot completed after its window closed
+    already holds every span that window can contain (late ingestion aside),
+    while one completed before the end is missing what arrived since.
+    """
+
+    if namespace not in _OPEN_WINDOW_REVALIDATION_NAMESPACES:
+        return False
+    floor_seconds = _revalidation_floor_seconds()
+    if floor_seconds is None or not isinstance(snapshot, dict):
+        return False
+    completed_at = _parse_utc_instant(snapshot.get("query_completed_at"))
+    window_end = _frozen_window_end(identity)
+    if completed_at is None or window_end is None or window_end <= completed_at:
+        return False
+    return (datetime.now(UTC) - completed_at).total_seconds() >= floor_seconds
+
+
+def _enqueue_exact_refresh(
+    namespace: str,
+    identity: Any,
+    token: str,
+    task_queue: str,
+) -> bool:
+    """Hand one claimed refresh to Temporal; on failure record the failed state."""
+
+    try:
+        from temporalio.common import WorkflowIDConflictPolicy
+
+        from tracer.tasks.exact_aggregation import (
+            refresh_exact_aggregation_snapshot,
+        )
+
+        enqueue_result = refresh_exact_aggregation_snapshot.apply_async(
+            kwargs={
+                "namespace": namespace,
+                "identity": identity,
+                "refresh_token": token,
+            },
+            queue=task_queue,
+            task_id=_exact_refresh_workflow_task_id(token),
+            id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
+            # Keep the HTTP API boundary bounded if Temporal is impaired.
+            # This timeout covers only workflow dispatch; accepted exact
+            # reads retain their one-hour activity budget.
+            dispatch_timeout_seconds=2.0,
+        )
+        workflow_id = getattr(enqueue_result, "id", None)
+        if isinstance(workflow_id, str):
+            record_exact_refresh_dispatch(namespace, identity, token, workflow_id)
+    except Exception:
+        logger.warning(
+            "exact_aggregation_refresh_enqueue_failed",
+            namespace=namespace,
+            exc_info=True,
+        )
+        finish_exact_refresh(namespace, identity, token, succeeded=False)
+        return False
+    return True
+
+
+def _revalidate_open_window_hit(
+    namespace: str,
+    identity: Any,
+    previous: Any,
+    read_servable: Callable[[Any], Any | None],
+) -> Any:
+    """Refresh the SAME identity behind a served open-window hit.
+
+    The caller has already established that no refresh of this identity is
+    running or recently failed. Every outcome serves ``previous`` (or the
+    newer snapshot an eager worker just published); it is marked refreshing
+    only when this request's claim was enqueued or another request's claim
+    is persisted. There is no Temporal reconciliation here and no fall-through
+    to the cold-miss scheduler, whose deferred-admission answer is "running"
+    for a job that does not exist.
+    """
+
+    task_queue = _configured_exact_aggregation_task_queue()
+    if task_queue is None:
+        return _decorate_refresh_state(previous, None)
+    token = begin_exact_refresh(namespace, identity)
+    if token is None:
+        # A concurrent visit won the claim (or the cache is impaired): report
+        # only what is persisted.
+        return _decorate_refresh_state(
+            previous, exact_refresh_state(namespace, identity)
+        )
+    if not _claim_exact_refresh_admission(
+        identity,
+        token,
+        lease_seconds=_refresh_dispatch_seconds(),
+        limit=_revalidation_admission_limit(),
+    ):
+        # Foreground work holds the project's slots. The hit is still exact
+        # for its window; a later visit revalidates once a slot is free.
+        finish_exact_refresh(namespace, identity, token, succeeded=True)
+        return _decorate_refresh_state(previous, None)
+    if not _enqueue_exact_refresh(namespace, identity, token, task_queue):
+        # The failed state is the backoff: no visit retries for its TTL.
+        return _decorate_refresh_state(
+            previous, exact_refresh_state(namespace, identity)
+        )
+    current = read_servable(identity)
+    current_state = exact_refresh_state(namespace, identity)
+    if current is None:
+        current = previous
+    if current_state is None and current.get("query_completed_at") == previous.get(
+        "query_completed_at"
+    ):
+        # Enqueued, but the state read was lost: this request owns the claim.
+        current_state = "running"
+    return _decorate_refresh_state(current, current_state)
+
+
 def read_or_schedule_exact_snapshot(
     namespace: str,
     identity: Any,
@@ -1461,6 +1672,7 @@ def read_or_schedule_exact_snapshot(
     pending_payload: Any,
     schedule_on_miss: bool = True,
     accept_snapshot: Callable[[Any], bool] | None = None,
+    revalidate_open_window: bool = False,
 ) -> Any:
     """Serve an exact snapshot immediately and run slow refreshes out of band.
 
@@ -1471,6 +1683,15 @@ def read_or_schedule_exact_snapshot(
     (for example one written by an older worker during a rolling deploy); a
     rejected snapshot is treated exactly as a miss on every read, including
     the re-read after a refresh is enqueued.
+
+    ``revalidate_open_window`` (honoured only for the three Observe
+    system-metric graph namespaces) refreshes a served hit of the same
+    identity when its window was still open at ``completed_at``, the hit is
+    older than ``EXACT_AGGREGATION_REVALIDATE_AFTER_SECONDS``, it passed
+    ``accept_snapshot``, and no refresh of it is running or recently failed.
+    The hit is served at once, marked ``query_refreshing`` only when a claim
+    was taken; this applies to cache-only probes too, which therefore
+    schedule whenever they mark a hit refreshing.
     """
 
     stale_identity = None
@@ -1507,6 +1728,22 @@ def read_or_schedule_exact_snapshot(
     if previous is None and stale_identity is not None:
         previous = read_servable(stale_identity)
     state = exact_refresh_state(namespace, normalized_identity)
+    if (
+        revalidate_open_window
+        and previous is not None
+        and not refresh
+        and state is None
+        and stale_identity is None
+        and _open_window_hit_is_due(namespace, normalized_identity, previous)
+    ):
+        # ``previous`` came from ``normalized_identity`` itself (no refresh, so
+        # no stale identity and no carry) and already passed the caller's guard.
+        return _revalidate_open_window_hit(
+            namespace,
+            normalized_identity,
+            previous,
+            read_servable,
+        )
     if previous is not None and not refresh:
         return _decorate_refresh_state(previous, state)
     if previous is None and state == "failed" and not refresh:
@@ -1566,48 +1803,12 @@ def read_or_schedule_exact_snapshot(
                 admission_deferred = True
     refresh_enqueued = False
     if token is not None:
-        try:
-            from temporalio.common import WorkflowIDConflictPolicy
-
-            from tracer.tasks.exact_aggregation import (
-                refresh_exact_aggregation_snapshot,
-            )
-
-            enqueue_result = refresh_exact_aggregation_snapshot.apply_async(
-                kwargs={
-                    "namespace": namespace,
-                    "identity": normalized_identity,
-                    "refresh_token": token,
-                },
-                queue=task_queue,
-                task_id=_exact_refresh_workflow_task_id(token),
-                id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
-                # Keep the HTTP API boundary bounded if Temporal is impaired.
-                # This timeout covers only workflow dispatch; accepted exact
-                # reads retain their one-hour activity budget.
-                dispatch_timeout_seconds=2.0,
-            )
-            refresh_enqueued = True
-            workflow_id = getattr(enqueue_result, "id", None)
-            if isinstance(workflow_id, str):
-                record_exact_refresh_dispatch(
-                    namespace,
-                    normalized_identity,
-                    token,
-                    workflow_id,
-                )
-        except Exception:
-            logger.warning(
-                "exact_aggregation_refresh_enqueue_failed",
-                namespace=namespace,
-                exc_info=True,
-            )
-            finish_exact_refresh(
-                namespace,
-                normalized_identity,
-                token,
-                succeeded=False,
-            )
+        refresh_enqueued = _enqueue_exact_refresh(
+            namespace,
+            normalized_identity,
+            token,
+            task_queue,
+        )
 
     # Eager test execution (or an exceptionally fast worker) may have already
     # published before enqueue returned. Re-read once; production requests do
