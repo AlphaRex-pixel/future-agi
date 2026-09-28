@@ -133,6 +133,33 @@ export function mapCallRow(row, evalColumns = []) {
 }
 
 /**
+ * Maps a v3 call-detail payload → the same `RunTask` a table row gives, for a
+ * call opened without its list row (a `?rowId=` link to a row off the table's
+ * page). The detail carries the row fields `build_call_rows` produces; the
+ * rest fall back to the detail serializer's names. Pure.
+ * @param {?Object} detail  A `GET /simulate/v3/call-executions/{id}/` payload.
+ * @returns {?import("./runDetail").RunTask}
+ */
+export function taskFromCallDetail(detail) {
+  if (!detail) return null;
+  const columns = new Map();
+  (detail.evaluations ?? []).forEach((evaluation) =>
+    columns.set(evaluation.id, { id: evaluation.id, name: evaluation.name }),
+  );
+  Object.keys(detail.eval_metrics ?? {}).forEach((id) => {
+    if (!columns.has(id)) columns.set(id, { id });
+  });
+  return mapCallRow(
+    {
+      ...detail,
+      latency_ms: detail.avg_agent_latency ?? detail.avg_latency_ms ?? null,
+      csat: detail.overall_score ?? null,
+    },
+    [...columns.values()],
+  );
+}
+
+/**
  * Builds the `TraceColumn[]` descriptor list from the payload's `column_order`.
  * The fixed system columns come from the picker vocabulary; one column is
  * appended per real evaluation column (keyed by the eval id so it matches
