@@ -13,6 +13,7 @@ from ee.usage.schemas.events import CheckResult
 from ee.usage.utils.usage_entries import check_if_dataset_creation_is_allowed
 
 ENTITLEMENTS = "ee.usage.services.entitlements.Entitlements"
+IS_CLOUD = "ee.usage.services.entitlements.DeploymentMode.is_cloud"
 
 
 @pytest.mark.django_db
@@ -47,12 +48,30 @@ def test_dataset_within_limit_is_allowed(organization):
 
 
 @pytest.mark.django_db
-def test_unconfigured_dataset_entitlement_stays_uncapped(organization):
-    """No plan sets "datasets" yet; get_limit() would read that as 0 and deny."""
+def test_unconfigured_dataset_limit_fails_open_on_cloud_and_logs_it(organization):
+    """No plan sets "datasets" yet; can_create() reads that as "not on your plan"."""
     with (
+        patch(IS_CLOUD, return_value=True),
         patch(f"{ENTITLEMENTS}.get_entitlement", return_value=None),
-        patch(f"{ENTITLEMENTS}.can_create") as can_create,
+        # Reads billing.yaml, which only the private cloud overlay ships.
+        patch("ee.usage.services.entitlements._find_upgrade_cta", return_value=None),
+        patch("ee.usage.utils.usage_entries.logger") as logger,
     ):
         assert check_if_dataset_creation_is_allowed(organization) == (True, {})
 
-    can_create.assert_not_called()
+    logger.warning.assert_called_once_with(
+        "dataset_limit_unconfigured_allowing", organization_id=str(organization.id)
+    )
+    logger.exception.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_self_hosted_dataset_creation_is_uncapped_without_a_warning(organization):
+    with (
+        patch(IS_CLOUD, return_value=False),
+        patch("ee.usage.utils.usage_entries.logger") as logger,
+    ):
+        assert check_if_dataset_creation_is_allowed(organization) == (True, {})
+
+    logger.warning.assert_not_called()
+    logger.exception.assert_not_called()

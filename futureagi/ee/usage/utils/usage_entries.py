@@ -2175,18 +2175,18 @@ def check_if_dataset_creation_is_allowed(organization, config=None):
     try:
         from ee.usage.services.entitlements import Entitlements
 
-        # This check never ran while the import above pointed at a missing
-        # module, so datasets have been uncapped. Keep it that way unless a
-        # plan sets a "datasets" limit: get_limit() reads an unconfigured
-        # feature as 0, i.e. "not available on your plan".
-        if Entitlements.get_entitlement(str(organization.id), "datasets") is None:
-            return True, {}
-
+        org_id = str(organization.id)
         dataset_count = Dataset.objects.filter(
             organization=organization, source__in=["build", "observe"], deleted=False
         ).count()
-        result = Entitlements.can_create(str(organization.id), "datasets", dataset_count)
+        result = Entitlements.can_create(org_id, "datasets", dataset_count)
         if not result.allowed:
+            # Fail open while no plan sets a "datasets" limit.
+            if Entitlements.get_entitlement(org_id, "datasets") is None:
+                logger.warning(
+                    "dataset_limit_unconfigured_allowing", organization_id=org_id
+                )
+                return True, {}
             detail = {
                 "resource_name": ResourceTypeChoices.DATASET.value,
                 "limit": int(result.limit) if result.limit else 0,
