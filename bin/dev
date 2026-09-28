@@ -124,8 +124,9 @@ case "$CMD" in
   manage)
     [[ $# -gt 0 ]] || die "usage: ./bin/dev manage <command> [args]"
     # Interactive sessions never mutate the database by default; this one is
-    # an explicit developer action.
-    dc exec -e NO_STARTUP_DB_MUTATIONS=false -w /app/backend "$BACKEND_SERVICE" python manage.py "$@"
+    # an explicit developer action. Logs go to stderr, so stdout carries only
+    # the command's output (./bin/dev manage sqlmigrate tracer 0001 > 0001.sql).
+    dc exec -e NO_STARTUP_DB_MUTATIONS=false -e LOG_STREAM=stderr -w /app/backend "$BACKEND_SERVICE" python manage.py "$@"
     ;;
   rebuild)
     target="${1:-all}"
