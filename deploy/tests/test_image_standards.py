@@ -968,6 +968,72 @@ class StandaloneVerifyBinaries(unittest.TestCase):
             self.assertNotIn("0x3E", workflow)  # no inline copy of the script
 
 
+BASE_PIN = ROOT / "scripts" / "code-executor-base-pin.sh"
+
+
+class CodeExecutorBasePin(unittest.TestCase):
+    """scripts/code-executor-base-pin.sh, the one parse of the base tag
+    futureagi/code-executor/Dockerfile pins (backend-ci.yml, release-images.yml)."""
+
+    def pin(self, arg_line: str | None = None) -> subprocess.CompletedProcess:
+        args = ["bash", str(BASE_PIN)]
+        with tempfile.TemporaryDirectory() as tmp:
+            if arg_line is not None:
+                dockerfile = Path(tmp) / "Dockerfile"
+                dockerfile.write_text(
+                    "# ARG CODE_EXECUTOR_BASE=futureagi/code-executor-base:v0.0.1\n"
+                    f"{arg_line}\nFROM ${{CODE_EXECUTOR_BASE}}\n",
+                    encoding="utf-8",
+                )
+                args.append(str(dockerfile))
+            return subprocess.run(
+                args, cwd=ROOT, capture_output=True, text=True, check=False
+            )
+
+    def test_the_committed_pin_is_a_version_tag(self):
+        proc = self.pin()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        dockerfile = (ROOT / "futureagi" / "code-executor" / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            f"ARG CODE_EXECUTOR_BASE=futureagi/code-executor-base:{proc.stdout.strip()}",
+            dockerfile,
+        )
+
+    def test_prints_the_version_of_an_immutable_pin(self):
+        digest = "@sha256:" + "a" * 64
+        for ref, version in (
+            ("futureagi/code-executor-base:v1.2.3", "v1.2.3"),
+            (f"futureagi/code-executor-base:v1.2.3{digest}", "v1.2.3"),
+            ("futureagi/code-executor-base:v1.2.3-rc.1", "v1.2.3-rc.1"),
+        ):
+            with self.subTest(ref=ref):
+                proc = self.pin(f"  ARG CODE_EXECUTOR_BASE={ref}")
+                self.assertEqual((proc.returncode, proc.stdout), (0, f"{version}\n"))
+
+    def test_anything_else_fails_with_an_annotation(self):
+        for line in (
+            "ARG CODE_EXECUTOR_BASE=futureagi/code-executor-base:latest",
+            "ARG CODE_EXECUTOR_BASE=futureagi/code-executor-base:v1.2",
+            "ARG CODE_EXECUTOR_BASE=someone/code-executor-base:v1.2.3",
+            "ARG CODE_EXECUTOR_BASE",
+            "ARG OTHER=futureagi/code-executor-base:v1.2.3",
+        ):
+            with self.subTest(line=line):
+                proc = self.pin(line)
+                self.assertEqual((proc.returncode, proc.stdout), (1, ""))
+                self.assertIn("::error file=", proc.stderr)
+                self.assertIn("pin ARG CODE_EXECUTOR_BASE=", proc.stderr)
+
+    def test_backend_ci_and_the_release_run_the_one_script(self):
+        for name in ("backend-ci.yml", "release-images.yml"):
+            with self.subTest(workflow=name):
+                text = (WORKFLOWS / name).read_text(encoding="utf-8")
+                self.assertIn("=$(scripts/code-executor-base-pin.sh)", text)
+                self.assertNotIn("CODE_EXECUTOR_BASE=([^[:space:]]+)", text)
+
+
 # ---------------------------------------------------------------------------
 # Health probes against a local server
 # ---------------------------------------------------------------------------

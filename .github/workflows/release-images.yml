@@ -171,20 +171,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: futureagi/code-executor/Dockerfile
+          sparse-checkout: |
+            futureagi/code-executor/Dockerfile
+            scripts/code-executor-base-pin.sh
           sparse-checkout-cone-mode: false
       - id: pin
         shell: bash
         run: |
           set -euo pipefail
-          ref=$(sed -nE 's/^[[:space:]]*ARG[[:space:]]+CODE_EXECUTOR_BASE=([^[:space:]]+).*/\1/p' \
-            futureagi/code-executor/Dockerfile | head -n1)
-          re='^futureagi/code-executor-base:(v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?)(@sha256:[a-f0-9]{64})?$'
-          if [[ ! "$ref" =~ $re ]]; then
-            echo "::error::futureagi/code-executor/Dockerfile must pin ARG CODE_EXECUTOR_BASE=futureagi/code-executor-base:vX.Y.Z[@sha256:...] (found '${ref}')"
-            exit 1
-          fi
-          echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          version=$(scripts/code-executor-base-pin.sh)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
   code-executor-base:
     needs: [guard, code-executor-base-pin]

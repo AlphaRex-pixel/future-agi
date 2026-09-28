@@ -386,14 +386,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ref=$(sed -nE 's/^[[:space:]]*ARG[[:space:]]+CODE_EXECUTOR_BASE=([^[:space:]]+).*/\1/p' \
-            futureagi/code-executor/Dockerfile | head -n1)
-          re='^futureagi/code-executor-base:(v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?)(@sha256:[a-f0-9]{64})?$'
-          if [[ ! "$ref" =~ $re ]]; then
-            echo "::error file=futureagi/code-executor/Dockerfile::pin ARG CODE_EXECUTOR_BASE=futureagi/code-executor-base:vX.Y.Z (found '${ref}')"
-            exit 1
-          fi
-          tag=${BASH_REMATCH[1]}
+          tag=$(scripts/code-executor-base-pin.sh)
           code=$(curl -sS --max-time 20 --retry 3 --retry-all-errors -o /dev/null -w '%{http_code}' \
             "https://hub.docker.com/v2/repositories/futureagi/code-executor-base/tags/${tag}")
           case "$code" in
