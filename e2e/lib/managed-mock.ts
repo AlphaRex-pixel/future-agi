@@ -6,6 +6,7 @@ import { parseDocument } from 'yaml';
 import { E2E } from './env';
 import type { TestActor } from './provisioning';
 import type { StateProbe } from './state-probe';
+import { inspectStandaloneMock } from './managed-mock-standalone';
 
 // docker-compose.distributed.yml backend-env; gateway.e2e.yaml providers.openai.
 export const MOCK_MODEL = 'gpt-4o';
@@ -150,6 +151,8 @@ export function managedMockInspectionError(error: unknown): Error {
  * select their context explicitly. An unattested attach target FAILS, never skips.
  */
 export function inspectManagedMock({ evalBackground = false }: { evalBackground?: boolean } = {}): MockReceipt {
+  // Standalone: one `app` container instead of backend/worker/gateway/frontend.
+  if (process.env.E2E_STACK === 'standalone') return inspectStandaloneMock({ evalBackground });
   for (const endpoint of [E2E.appUrl, E2E.apiUrl, E2E.gatewayUrl, E2E.pgUrl, E2E.chUrl]) {
     requireSafe(new URL(endpoint).hostname === 'localhost', 'requires localhost endpoints');
   }

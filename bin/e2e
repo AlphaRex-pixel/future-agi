@@ -14,6 +14,16 @@ SERVICES=(frontend backend worker worker-exact-aggregation
   postgres clickhouse redis minio
   temporal agentcc-gateway fi-collector fi-property-catalog-consumer mock-llm
   peerdb-server peerdb-flow-worker peerdb-flow-snapshot-worker peerdb-minio)
+# E2E_STACK=standalone: the same suite against the Standalone setup
+# (docker-compose.yml: one `app` container plus Postgres and ClickHouse) on the
+# same host ports. See e2e/stack/docker-compose.standalone-e2e.yml.
+if [[ "${E2E_STACK:-distributed}" == standalone ]]; then
+  ENV_FILE="$ROOT/e2e/stack/standalone-e2e.env"
+  COMPOSE=(docker compose --env-file "$ENV_FILE"
+    -f "$ROOT/docker-compose.yml" -f "$ROOT/e2e/stack/docker-compose.standalone-e2e.yml"
+    -p futureagi-e2e-standalone)
+  SERVICES=(app postgres clickhouse mock-llm)
+fi
 
 backend_port() { grep '^BACKEND_PORT=' "$ENV_FILE" | cut -d= -f2; }
 ch_port() { grep '^CH_HTTP_PORT=' "$ENV_FILE" | cut -d= -f2; }
