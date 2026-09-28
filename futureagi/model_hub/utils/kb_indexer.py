@@ -34,9 +34,8 @@ KB_INDEX_COL_NAME = "chunk_text"
 # Shown to the user as the file's / knowledge base's error.
 KB_EMBEDDINGS_UNAVAILABLE_ERROR = (
     "Knowledge bases need the model serving service to embed documents, and it "
-    "is not reachable. Self-hosted installs: start it with the `ml` compose "
-    "profile (`docker compose --profile ml up -d`) or point MODEL_SERVING_URL "
-    "at a running instance, then upload the file again."
+    "is not reachable. Start it: `docker compose up -d serving`, or point "
+    "MODEL_SERVING_URL at a running instance, then upload the file again."
 )
 
 
