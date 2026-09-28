@@ -171,7 +171,7 @@ EvalPickerProvider.propTypes = {
   addedEvalAction: PropTypes.shape({
     label: PropTypes.string.isRequired,
     onClick: PropTypes.func.isRequired,
-    busyId: PropTypes.string,
+    busyName: PropTypes.string,
     disabled: PropTypes.bool,
     show: PropTypes.func,
   }),

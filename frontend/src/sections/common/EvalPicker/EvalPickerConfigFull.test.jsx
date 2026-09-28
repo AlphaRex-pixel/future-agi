@@ -1,5 +1,5 @@
 import React from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render } from "src/utils/test-utils";
 import { screen, waitFor } from "@testing-library/react";
 
@@ -174,11 +174,7 @@ const TIME_WINDOW = {
   endDate: "2026-05-18T18:29:59.000Z",
 };
 
-const renderConfigFull = ({
-  sourceTimeWindow,
-  evalData,
-  requireInputs,
-} = {}) =>
+const renderConfigFull = ({ sourceTimeWindow, evalData, requireInputs } = {}) =>
   render(
     <EvalPickerProvider
       source="task"
@@ -348,5 +344,133 @@ describe("EvalPickerConfigFull — requireInputs (D13)", () => {
 
     await screen.findByRole("button", { name: "Add Evaluation" });
     expect(screen.queryByText(NO_INPUTS_TOOLTIP)).toBeNull();
+  });
+});
+
+// F3 (cold review 1): under the environment's own source (`simulation`),
+// `hasDataInjection` is always false — it only ever applies to "task" and
+// "tracing" (EvalPickerConfigFull.jsx ~L403-409). So a system eval with no
+// variables hits the pre-existing "no variables" branch before requireInputs
+// gets a chance to run, and shows the template-editing copy instead of D13's
+// — misleading for a system eval, whose template a person can't edit.
+const DEFAULT_STABLE_EVAL_DETAIL_DATA = {
+  id: "tpl-1",
+  name: "toxicity",
+  owner: "system",
+  eval_type: "agent",
+  output_type: "pass_fail",
+  instructions: "Template instructions",
+  config: { model: "template-model", tools: { template: true } },
+};
+
+describe("EvalPickerConfigFull — requireInputs environment shape (D13, F3)", () => {
+  afterEach(() => {
+    Object.assign(stableEvalDetail.data, DEFAULT_STABLE_EVAL_DETAIL_DATA);
+    delete stableEvalDetail.data.required_keys;
+    stableCompositeDetail.data = null;
+  });
+
+  it("shows the D13 copy (not the template-variable copy) for a system eval with no variables under source=simulation", async () => {
+    render(
+      <EvalPickerProvider
+        source="simulation"
+        sourceId="run-test-1"
+        existingEvals={[]}
+        onEvalAdded={() => {}}
+        onClose={() => {}}
+        requireInputs
+      >
+        <EvalPickerConfigFull
+          evalData={{ id: "tpl-1", templateId: "tpl-1", name: "toxicity" }}
+          onBack={() => {}}
+          onSave={() => {}}
+          isSaving={false}
+        />
+      </EvalPickerProvider>,
+    );
+
+    const addButton = await screen.findByRole("button", {
+      name: "Add Evaluation",
+    });
+    expect(addButton).toBeDisabled();
+    // Not getByTestId: under source="simulation" the Test button's own
+    // "no variables" tooltip also renders (it has no requireInputs override),
+    // so two `tooltip-text` nodes exist — match on the D13 copy itself.
+    expect(screen.getByText(NO_INPUTS_TOOLTIP)).toBeInTheDocument();
+  });
+
+  it("shows the D13 copy for a code eval with no required_keys and no saved mapping, under source=simulation", async () => {
+    Object.assign(stableEvalDetail.data, {
+      eval_type: "code",
+      config: {
+        code: "def evaluate(**kwargs):\n    return 1",
+        language: "python",
+      },
+      required_keys: [],
+    });
+
+    render(
+      <EvalPickerProvider
+        source="simulation"
+        sourceId="run-test-1"
+        existingEvals={[]}
+        onEvalAdded={() => {}}
+        onClose={() => {}}
+        requireInputs
+      >
+        <EvalPickerConfigFull
+          evalData={{ id: "tpl-2", templateId: "tpl-2", name: "my_code_eval" }}
+          onBack={() => {}}
+          onSave={() => {}}
+          isSaving={false}
+        />
+      </EvalPickerProvider>,
+    );
+
+    const addButton = await screen.findByRole("button", {
+      name: "Add Evaluation",
+    });
+    expect(addButton).toBeDisabled();
+    expect(screen.getByText(NO_INPUTS_TOOLTIP)).toBeInTheDocument();
+  });
+
+  // P16 (cold review 1 bite-check): requireInputs must not be limited to
+  // non-composite evals — a composite with no child required_keys has
+  // nothing to map either.
+  it("shows the D13 copy for a composite eval with no child required_keys", async () => {
+    Object.assign(stableEvalDetail.data, {
+      template_type: "composite",
+      eval_type: "composite",
+    });
+    stableCompositeDetail.data = { children: [] };
+
+    render(
+      <EvalPickerProvider
+        source="simulation"
+        sourceId="run-test-1"
+        existingEvals={[]}
+        onEvalAdded={() => {}}
+        onClose={() => {}}
+        requireInputs
+      >
+        <EvalPickerConfigFull
+          evalData={{
+            id: "tpl-3",
+            templateId: "tpl-3",
+            name: "my_composite_eval",
+          }}
+          onBack={() => {}}
+          onSave={() => {}}
+          isSaving={false}
+        />
+      </EvalPickerProvider>,
+    );
+
+    const addButton = await screen.findByRole("button", {
+      name: "Add Evaluation",
+    });
+    expect(addButton).toBeDisabled();
+    expect(screen.getByText(NO_INPUTS_TOOLTIP)).toBeInTheDocument();
+    stableCompositeDetail.data = null;
   });
 });

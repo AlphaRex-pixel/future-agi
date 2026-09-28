@@ -22,7 +22,7 @@ import {
   useTheme,
 } from "@mui/material";
 // date-fns available if needed for timestamps
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Iconify from "src/components/iconify";
 import FormSearchField from "src/components/FormSearchField/FormSearchField";
@@ -496,53 +496,146 @@ const SkeletonRows = (
   too — looking for an eval you already have should say so, not come back empty.
 */
 const AddedEvalsSection = ({ addedEvals, searchQuery, action }) => {
-  const [open, setOpen] = useState(false);
+  // `open` is a tri-state override: null means "let the search decide"
+  // (expanded whenever it matches something), true/false means the user
+  // clicked the header and that wins until the search itself changes. A
+  // plain boolean toggle would do nothing while a search match forces the
+  // box open, and would leave it stuck open after the search that opened
+  // it was cleared.
+  const [open, setOpen] = useState(null);
   const q = (searchQuery || "").trim().toLowerCase();
   const shown = q
-    ? addedEvals.filter((e) => `${e.name} ${e.meta || ""}`.toLowerCase().includes(q))
+    ? addedEvals.filter((e) =>
+        `${e.name} ${e.meta || ""}`.toLowerCase().includes(q),
+      )
     : addedEvals;
-  const expanded = open || Boolean(q && shown.length > 0);
+  const expanded = open ?? Boolean(q && shown.length > 0);
+
+  useEffect(() => {
+    setOpen(null);
+  }, [searchQuery]);
 
   if (!addedEvals.length) return null;
   return (
-    <Box sx={{ flexShrink: 0, border: "1px solid", borderColor: "divider", borderRadius: 1, overflow: "hidden", mb: 1.5 }}>
+    <Box
+      sx={{
+        flexShrink: 0,
+        border: "1px solid",
+        borderColor: "divider",
+        borderRadius: 1,
+        overflow: "hidden",
+        mb: 1.5,
+      }}
+    >
       <ButtonBase
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!expanded)}
         aria-expanded={expanded}
-        sx={{ width: "100%", display: "flex", alignItems: "center", gap: 1, px: 1.5, py: 1, justifyContent: "flex-start", textAlign: "left", "&:hover": { bgcolor: "action.hover" } }}
+        sx={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+          px: 1.5,
+          py: 1,
+          justifyContent: "flex-start",
+          textAlign: "left",
+          "&:hover": { bgcolor: "action.hover" },
+        }}
       >
         <Iconify
           icon="solar:alt-arrow-right-linear"
           width={14}
-          sx={{ color: "text.secondary", transition: "transform 150ms", transform: expanded ? "rotate(90deg)" : "none" }}
+          sx={{
+            color: "text.secondary",
+            transition: "transform 150ms",
+            transform: expanded ? "rotate(90deg)" : "none",
+          }}
         />
-        <Iconify icon="solar:check-circle-linear" width={16} sx={{ color: "text.secondary" }} />
-        <Typography sx={{ fontSize: "13px", fontWeight: 600 }}>Added evaluations</Typography>
-        <Box sx={{ px: 0.75, height: 18, minWidth: 18, borderRadius: 0.75, display: "grid", placeItems: "center", bgcolor: "action.selected" }}>
-          <Typography sx={{ fontSize: "11px", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+        <Iconify
+          icon="solar:check-circle-linear"
+          width={16}
+          sx={{ color: "text.secondary" }}
+        />
+        <Typography sx={{ fontSize: "13px", fontWeight: 600 }}>
+          Added evaluations
+        </Typography>
+        <Box
+          sx={{
+            px: 0.75,
+            height: 18,
+            minWidth: 18,
+            borderRadius: 0.75,
+            display: "grid",
+            placeItems: "center",
+            bgcolor: "action.selected",
+          }}
+        >
+          <Typography
+            sx={{
+              fontSize: "11px",
+              fontWeight: 700,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
             {q ? `${shown.length}/${addedEvals.length}` : addedEvals.length}
           </Typography>
         </Box>
       </ButtonBase>
       <Collapse in={expanded} timeout={150} unmountOnExit>
-        <Box sx={{ borderTop: "1px solid", borderColor: "divider", maxHeight: 188, overflowY: "auto" }}>
+        <Box
+          sx={{
+            borderTop: "1px solid",
+            borderColor: "divider",
+            maxHeight: 188,
+            overflowY: "auto",
+          }}
+        >
           {shown.length === 0 ? (
-            <Typography sx={{ px: 1.5, py: 1.25, fontSize: "12px", color: "text.secondary" }}>
+            <Typography
+              sx={{
+                px: 1.5,
+                py: 1.25,
+                fontSize: "12px",
+                color: "text.secondary",
+              }}
+            >
               None of the added evaluations match your search.
             </Typography>
           ) : (
             shown.map((e, i) => (
               <Box
-                key={e.id || e.name}
-                sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.5, py: 0.875, borderTop: i ? "1px solid" : "none", borderColor: "divider" }}
+                key={`${e.id ?? ""}::${e.name ?? ""}`}
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  px: 1.5,
+                  py: 0.875,
+                  borderTop: i ? "1px solid" : "none",
+                  borderColor: "divider",
+                }}
               >
-                <Iconify icon="solar:check-read-linear" width={14} sx={{ color: "success.main", flexShrink: 0 }} />
-                <Typography noWrap sx={{ fontSize: "13px", fontWeight: 500, minWidth: 0 }}>
+                <Iconify
+                  icon="solar:check-read-linear"
+                  width={14}
+                  sx={{ color: "success.main", flexShrink: 0 }}
+                />
+                <Typography
+                  noWrap
+                  sx={{ fontSize: "13px", fontWeight: 500, minWidth: 0 }}
+                >
                   {e.name}
                 </Typography>
                 <Box sx={{ flex: 1 }} />
                 {e.meta && (
-                  <Typography noWrap sx={{ fontSize: "12px", color: "text.secondary", flexShrink: 0 }}>
+                  <Typography
+                    noWrap
+                    sx={{
+                      fontSize: "12px",
+                      color: "text.secondary",
+                      flexShrink: 0,
+                    }}
+                  >
                     {e.meta}
                   </Typography>
                 )}
@@ -552,8 +645,18 @@ const AddedEvalsSection = ({ addedEvals, searchQuery, action }) => {
                     variant="outlined"
                     disabled={action.disabled}
                     onClick={() => action.onClick(e)}
-                    startIcon={action.busyId === e.name ? <CircularProgress size={12} color="inherit" /> : null}
-                    sx={{ flexShrink: 0, height: 24, fontSize: 11, textTransform: "none", px: 1 }}
+                    startIcon={
+                      action.busyName === e.name ? (
+                        <CircularProgress size={12} color="inherit" />
+                      ) : null
+                    }
+                    sx={{
+                      flexShrink: 0,
+                      height: 24,
+                      fontSize: 11,
+                      textTransform: "none",
+                      px: 1,
+                    }}
                   >
                     {action.label}
                   </Button>
@@ -573,7 +676,10 @@ AddedEvalsSection.propTypes = {
   action: PropTypes.shape({
     label: PropTypes.string.isRequired,
     onClick: PropTypes.func.isRequired,
-    busyId: PropTypes.string,
+    // The added eval's name — matched against the row it's rendering the
+    // spinner for. Not an id despite the caller-facing prop name pattern;
+    // callers only know these rows by name (see EvalPickerList.jsx D2).
+    busyName: PropTypes.string,
     disabled: PropTypes.bool,
     show: PropTypes.func,
   }),
@@ -635,12 +741,22 @@ const EvalPickerList = ({ onSelectEval }) => {
   const listItems = useMemo(() => {
     if (!Array.isArray(addedEvals)) return items;
     const addedIds = new Set(addedEvals.map((e) => e.id));
-    const addedNames = new Set(addedEvals.map((e) => String(e.name || "").toLowerCase()));
+    const addedNames = new Set(
+      addedEvals.map((e) =>
+        String(e.name || "")
+          .trim()
+          .toLowerCase(),
+      ),
+    );
     return items.filter(
       (e) =>
         !isAlreadyAdded(e.id) &&
         !addedIds.has(e.id) &&
-        !addedNames.has(String(e.name || "").toLowerCase()),
+        !addedNames.has(
+          String(e.name || "")
+            .trim()
+            .toLowerCase(),
+        ),
     );
   }, [items, addedEvals, isAlreadyAdded]);
 
@@ -828,7 +944,11 @@ const EvalPickerList = ({ onSelectEval }) => {
       </Box>
 
       {Array.isArray(addedEvals) && (
-        <AddedEvalsSection addedEvals={addedEvals} searchQuery={searchQuery} action={addedEvalAction} />
+        <AddedEvalsSection
+          addedEvals={addedEvals}
+          searchQuery={searchQuery}
+          action={addedEvalAction}
+        />
       )}
 
       {/* Scrollable Table */}
@@ -878,7 +998,9 @@ const EvalPickerList = ({ onSelectEval }) => {
                   align="center"
                   sx={{ py: 6, color: "text.disabled" }}
                 >
-                  No evaluations found
+                  {items.length > 0
+                    ? "Every matching evaluation is already added."
+                    : "No evaluations found"}
                 </TableCell>
               </TableRow>
             ) : (
