@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/futureagi/agentcc-gateway/internal/config"
@@ -62,6 +63,46 @@ func postChat(t *testing.T, srv *Server, model string) (int, models.ErrorDetail)
 	var resp models.ErrorResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	return w.Code, resp.Error
+}
+
+// An org provider sharing its ID with a config.yaml entry must never send the
+// org's key to the entry's base_url, including when the org's own base_url is
+// refused.
+func TestOrgProviderKeyNeverReachesConfigYAMLBaseURL(t *testing.T) {
+	// Counts completions only: the registry's own connectivity probe of a
+	// local provider also lands here.
+	var operatorHits atomic.Int32
+	operator := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/chat/completions") {
+			operatorHits.Add(1)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer operator.Close()
+	orgUpstream := startMockOpenAI(t)
+	defer orgUpstream.Close()
+
+	srv := newOrgProviderURLTestServer(t, operator.URL, map[string]*tenant.ProviderConfig{
+		"openai": {
+			APIKey:    "org-key",
+			BaseURL:   orgUpstream.URL, // 127.0.0.1: loopback, never allowed
+			APIFormat: "openai",
+			Models:    []string{"mock-gw"},
+			Enabled:   true,
+		},
+	})
+
+	status, apiErr := postChat(t, srv, "mock-gw")
+
+	if got := operatorHits.Load(); got != 0 {
+		t.Fatalf("config.yaml's openai upstream received %d request(s) for the org's model", got)
+	}
+	if status != http.StatusForbidden || apiErr.Code != "provider_base_url_blocked" {
+		t.Fatalf("status = %d code = %q, want 403 provider_base_url_blocked; message: %s", status, apiErr.Code, apiErr.Message)
+	}
+	if !strings.Contains(apiErr.Message, "loopback") {
+		t.Errorf("message = %q, want it to say the base_url is loopback", apiErr.Message)
+	}
 }
 
 // A private base_url is refused with the reason and the opt-in, not the

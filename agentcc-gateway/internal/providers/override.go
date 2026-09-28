@@ -13,9 +13,13 @@ import (
 	"github.com/futureagi/agentcc-gateway/internal/tenant"
 )
 
-// OrgProviderCache caches per-org provider instances that use org-specific
-// API keys.  The base provider configs (base_url, api_format, etc.) come
-// from the gateway's config.yaml; only the API key is overridden.
+// OrgProviderCache caches per-org provider instances built from the provider
+// configs orgs push through the control plane.
+//
+// An org that states its own base_url gets a provider built from its config
+// alone. One that does not inherits the upstream (base_url, api_format,
+// headers) of the config.yaml entry with the same provider ID, but never that
+// entry's credentials: an org's requests authenticate as the org.
 //
 // Thread-safe: protects the cache with a RWMutex.
 type OrgProviderCache struct {
@@ -62,9 +66,10 @@ func (c *OrgProviderCache) GetOrCreate(orgID, providerID, apiKey string) (Provid
 	return c.GetOrCreateWithTenantConfig(orgID, providerID, apiKey, nil)
 }
 
-// GetOrCreateWithTenantConfig is like GetOrCreate but accepts an optional
-// tenant.ProviderConfig to build the provider when no config.yaml base exists
-// (managed mode).
+// GetOrCreateWithTenantConfig is like GetOrCreate but accepts the org's
+// tenant.ProviderConfig. The provider is built from that config alone when it
+// states a base_url or service account, or when config.yaml has no entry for
+// providerID (managed mode); otherwise it is layered onto that entry.
 func (c *OrgProviderCache) GetOrCreateWithTenantConfig(orgID, providerID, apiKey string, tenantCfg *tenant.ProviderConfig) (Provider, error) {
 	key := orgID + ":" + providerID
 
@@ -86,7 +91,10 @@ func (c *OrgProviderCache) GetOrCreateWithTenantConfig(orgID, providerID, apiKey
 	}
 
 	baseCfg, ok := c.baseCfgs[providerID]
-	if tenantCfg != nil && (!ok || tenantCfg.ServiceAccountJSON != "") {
+	// An org that names its own upstream must get exactly that upstream.
+	// Layering it onto a config.yaml entry that shares the provider ID would
+	// send the org's key to the operator's base_url instead.
+	if tenantCfg != nil && (!ok || tenantCfg.BaseURL != "" || tenantCfg.ServiceAccountJSON != "") {
 		// Validate base URL to prevent SSRF via tenant-supplied config.
 		if err := validateBaseURL(tenantCfg.BaseURL, c.allowPrivateBaseURLs); err != nil {
 			return nil, fmt.Errorf("org %s provider %s: %w", orgID, providerID, err)
@@ -148,14 +156,44 @@ func (c *OrgProviderCache) GetOrCreateWithTenantConfig(orgID, providerID, apiKey
 	return p, nil
 }
 
-// resolveOrgConfig clones a base provider config for one org: the org's API
-// key always wins, and a tenant that states a path prefix wins over the one in
-// config.yaml, including when it states an empty one.
+// resolveOrgConfig clones a base provider config for one org. The upstream it
+// names (base_url, api_format, headers, TLS) stays; everything the org states
+// about itself wins over the rest, including a path prefix stated as empty.
+// None of the operator's credentials carry over: the org authenticates with
+// its own or not at all.
 func resolveOrgConfig(baseCfg config.ProviderConfig, apiKey string, tenantCfg *tenant.ProviderConfig) config.ProviderConfig {
 	orgCfg := baseCfg
 	orgCfg.APIKey = apiKey
-	if tenantCfg != nil && tenantCfg.APIPathPrefix != nil {
+	orgCfg.AWSAccessKeyID = ""
+	orgCfg.AWSSecretAccessKey = ""
+	orgCfg.AWSSessionToken = ""
+	orgCfg.CredentialsFile = ""
+	orgCfg.ServiceAccountJSON = ""
+	if tenantCfg == nil {
+		return orgCfg
+	}
+
+	orgCfg.AWSAccessKeyID = tenantCfg.AWSAccessKeyID
+	orgCfg.AWSSecretAccessKey = tenantCfg.AWSSecretAccessKey
+	orgCfg.AWSSessionToken = tenantCfg.AWSSessionToken
+	orgCfg.ServiceAccountJSON = tenantCfg.ServiceAccountJSON
+	if tenantCfg.AWSRegion != "" {
+		orgCfg.AWSRegion = tenantCfg.AWSRegion
+	}
+	if tenantCfg.APIPathPrefix != nil {
 		orgCfg.APIPathPrefix = tenantCfg.APIPathPrefix
+	}
+	if len(tenantCfg.Models) > 0 {
+		orgCfg.Models = tenantCfg.Models
+	}
+	if tenantCfg.Timeout > 0 {
+		orgCfg.DefaultTimeout = time.Duration(tenantCfg.Timeout) * time.Second
+	}
+	if tenantCfg.MaxConcurrent > 0 {
+		orgCfg.MaxConcurrent = tenantCfg.MaxConcurrent
+	}
+	if tenantCfg.ConnPoolSize > 0 {
+		orgCfg.ConnPoolSize = tenantCfg.ConnPoolSize
 	}
 	return orgCfg
 }
