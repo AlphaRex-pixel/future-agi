@@ -17,6 +17,8 @@ import {
   Tooltip,
   Avatar,
   Skeleton,
+  Collapse,
+  ButtonBase,
   useTheme,
 } from "@mui/material";
 // date-fns available if needed for timestamps
@@ -485,6 +487,98 @@ const SkeletonRows = (
   </>
 );
 
+// ── Added evals ──
+
+/*
+  The evals already on the caller, in their own box under the category chips.
+  Collapsed by default with a count, so the list below is only what can still
+  be added. A search that matches an added eval opens the box and narrows it
+  too — looking for an eval you already have should say so, not come back empty.
+*/
+const AddedEvalsSection = ({ addedEvals, searchQuery, action }) => {
+  const [open, setOpen] = useState(false);
+  const q = (searchQuery || "").trim().toLowerCase();
+  const shown = q
+    ? addedEvals.filter((e) => `${e.name} ${e.meta || ""}`.toLowerCase().includes(q))
+    : addedEvals;
+  const expanded = open || Boolean(q && shown.length > 0);
+
+  if (!addedEvals.length) return null;
+  return (
+    <Box sx={{ flexShrink: 0, border: "1px solid", borderColor: "divider", borderRadius: 1, overflow: "hidden", mb: 1.5 }}>
+      <ButtonBase
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={expanded}
+        sx={{ width: "100%", display: "flex", alignItems: "center", gap: 1, px: 1.5, py: 1, justifyContent: "flex-start", textAlign: "left", "&:hover": { bgcolor: "action.hover" } }}
+      >
+        <Iconify
+          icon="solar:alt-arrow-right-linear"
+          width={14}
+          sx={{ color: "text.secondary", transition: "transform 150ms", transform: expanded ? "rotate(90deg)" : "none" }}
+        />
+        <Iconify icon="solar:check-circle-linear" width={16} sx={{ color: "text.secondary" }} />
+        <Typography sx={{ fontSize: "13px", fontWeight: 600 }}>Added evaluations</Typography>
+        <Box sx={{ px: 0.75, height: 18, minWidth: 18, borderRadius: 0.75, display: "grid", placeItems: "center", bgcolor: "action.selected" }}>
+          <Typography sx={{ fontSize: "11px", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+            {q ? `${shown.length}/${addedEvals.length}` : addedEvals.length}
+          </Typography>
+        </Box>
+      </ButtonBase>
+      <Collapse in={expanded} timeout={150} unmountOnExit>
+        <Box sx={{ borderTop: "1px solid", borderColor: "divider", maxHeight: 188, overflowY: "auto" }}>
+          {shown.length === 0 ? (
+            <Typography sx={{ px: 1.5, py: 1.25, fontSize: "12px", color: "text.secondary" }}>
+              None of the added evaluations match your search.
+            </Typography>
+          ) : (
+            shown.map((e, i) => (
+              <Box
+                key={e.id || e.name}
+                sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.5, py: 0.875, borderTop: i ? "1px solid" : "none", borderColor: "divider" }}
+              >
+                <Iconify icon="solar:check-read-linear" width={14} sx={{ color: "success.main", flexShrink: 0 }} />
+                <Typography noWrap sx={{ fontSize: "13px", fontWeight: 500, minWidth: 0 }}>
+                  {e.name}
+                </Typography>
+                <Box sx={{ flex: 1 }} />
+                {e.meta && (
+                  <Typography noWrap sx={{ fontSize: "12px", color: "text.secondary", flexShrink: 0 }}>
+                    {e.meta}
+                  </Typography>
+                )}
+                {action && (!action.show || action.show(e)) && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={action.disabled}
+                    onClick={() => action.onClick(e)}
+                    startIcon={action.busyId === e.name ? <CircularProgress size={12} color="inherit" /> : null}
+                    sx={{ flexShrink: 0, height: 24, fontSize: 11, textTransform: "none", px: 1 }}
+                  >
+                    {action.label}
+                  </Button>
+                )}
+              </Box>
+            ))
+          )}
+        </Box>
+      </Collapse>
+    </Box>
+  );
+};
+
+AddedEvalsSection.propTypes = {
+  addedEvals: PropTypes.array.isRequired,
+  searchQuery: PropTypes.string,
+  action: PropTypes.shape({
+    label: PropTypes.string.isRequired,
+    onClick: PropTypes.func.isRequired,
+    busyId: PropTypes.string,
+    disabled: PropTypes.bool,
+    show: PropTypes.func,
+  }),
+};
+
 // ── Main Component ──
 
 const EvalPickerList = ({ onSelectEval }) => {
@@ -496,6 +590,8 @@ const EvalPickerList = ({ onSelectEval }) => {
     multiSelect,
     selectedIds,
     onToggleSelect,
+    addedEvals,
+    addedEvalAction,
   } = useEvalPickerContext();
   const useScopedEvals = source === "dataset" || source === "experiment";
   const {
@@ -533,6 +629,20 @@ const EvalPickerList = ({ onSelectEval }) => {
       ),
     [existingEvals],
   );
+
+  // With the box on, added evals live there and are left out of the list —
+  // matched by template id, or by name for rows the caller knows only by name.
+  const listItems = useMemo(() => {
+    if (!Array.isArray(addedEvals)) return items;
+    const addedIds = new Set(addedEvals.map((e) => e.id));
+    const addedNames = new Set(addedEvals.map((e) => String(e.name || "").toLowerCase()));
+    return items.filter(
+      (e) =>
+        !isAlreadyAdded(e.id) &&
+        !addedIds.has(e.id) &&
+        !addedNames.has(String(e.name || "").toLowerCase()),
+    );
+  }, [items, addedEvals, isAlreadyAdded]);
 
   const activeFilterCount = useMemo(() => {
     if (!filters) return 0;
@@ -717,6 +827,10 @@ const EvalPickerList = ({ onSelectEval }) => {
         ) : null}
       </Box>
 
+      {Array.isArray(addedEvals) && (
+        <AddedEvalsSection addedEvals={addedEvals} searchQuery={searchQuery} action={addedEvalAction} />
+      )}
+
       {/* Scrollable Table */}
       <TableContainer sx={{ flex: 1, overflow: "auto", minHeight: 0 }}>
         <Table size="small" stickyHeader sx={{ tableLayout: "fixed" }}>
@@ -757,7 +871,7 @@ const EvalPickerList = ({ onSelectEval }) => {
           <TableBody>
             {isLoading ? (
               <SkeletonRows multiSelect={multiSelect} />
-            ) : items.length === 0 ? (
+            ) : listItems.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={multiSelect ? 8 : 7}
@@ -768,7 +882,7 @@ const EvalPickerList = ({ onSelectEval }) => {
                 </TableCell>
               </TableRow>
             ) : (
-              items.map((evalItem) => {
+              listItems.map((evalItem) => {
                 const isExpanded = expandedEvalId === evalItem.id;
                 const added = isAlreadyAdded(evalItem.id);
                 const createdBy = evalItem.created_by_name || "Unknown";

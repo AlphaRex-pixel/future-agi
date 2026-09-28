@@ -75,6 +75,17 @@ vi.mock("src/sections/tasks/components/TaskFilterBar", () => ({
   default: () => <div />,
 }));
 
+// Renders the tooltip title as plain text whenever `show` is true, so tests
+// can assert on the disabled-reason copy without simulating a real hover.
+vi.mock("src/components/tooltip/CustomTooltip", () => ({
+  default: ({ show, title, children }) => (
+    <>
+      {children}
+      {show && title ? <div data-testid="tooltip-text">{title}</div> : null}
+    </>
+  ),
+}));
+
 // Transitive import of the real TaskLivePreview (needed for the real
 // buildApiFilterArray); its module-scope localStorage read breaks under
 // the test environment.
@@ -163,7 +174,11 @@ const TIME_WINDOW = {
   endDate: "2026-05-18T18:29:59.000Z",
 };
 
-const renderConfigFull = ({ sourceTimeWindow, evalData } = {}) =>
+const renderConfigFull = ({
+  sourceTimeWindow,
+  evalData,
+  requireInputs,
+} = {}) =>
   render(
     <EvalPickerProvider
       source="task"
@@ -175,6 +190,7 @@ const renderConfigFull = ({ sourceTimeWindow, evalData } = {}) =>
       onClose={() => {}}
       sourceTimeWindow={sourceTimeWindow}
       initialEval={evalData || null}
+      requireInputs={requireInputs}
     >
       <EvalPickerConfigFull
         evalData={
@@ -305,5 +321,32 @@ describe("EvalPickerConfigFull — host-supplied queue decorations", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add Evaluation" })).toBeNull();
     expect(screen.getByTestId("queue-progress")).toBeInTheDocument();
+  });
+});
+
+const NO_INPUTS_TOOLTIP =
+  "This evaluation has no inputs to map, so it can't run in an environment.";
+
+describe("EvalPickerConfigFull — requireInputs (D13)", () => {
+  // stableEvalDetail (the mocked eval detail) has no required_keys and no
+  // {{variables}} in its instructions, so `variables` resolves to [] —
+  // exactly the "no inputs to map" case this opt-in rule targets.
+  it("disables adding an eval with no inputs when requireInputs is set", async () => {
+    renderConfigFull({ requireInputs: true });
+
+    const addButton = await screen.findByRole("button", {
+      name: "Add Evaluation",
+    });
+    expect(addButton).toBeDisabled();
+    expect(screen.getByTestId("tooltip-text")).toHaveTextContent(
+      NO_INPUTS_TOOLTIP,
+    );
+  });
+
+  it("does not disable for missing inputs when requireInputs is absent", async () => {
+    renderConfigFull({});
+
+    await screen.findByRole("button", { name: "Add Evaluation" });
+    expect(screen.queryByText(NO_INPUTS_TOOLTIP)).toBeNull();
   });
 });

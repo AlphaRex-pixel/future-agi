@@ -154,6 +154,7 @@ const EvalPickerConfigFull = ({
     sourceTimeWindow,
     filterForm: localFilterForm,
     onClose,
+    requireInputs,
   } = useEvalPickerContext();
   const normalizedEvalData = useMemo(
     () => normalizeEvalPickerEval(evalData),
@@ -2275,6 +2276,12 @@ const EvalPickerConfigFull = ({
               templateFormat === "jinja"
                 ? `Your Jinja template has no variables. Reference an input with a {{ variable }} expression or a {% ... %} block (e.g. {{ input }}) before ${actionLabel}.`
                 : `Your Mustache template has no variables. Add a {{variable}} placeholder (e.g. {{input}}) before ${actionLabel}.`;
+          }
+
+          if (!addDisabled && requireInputs && variables.length === 0) {
+            addDisabled = true;
+            addDisabledReason =
+              "This evaluation has no inputs to map, so it can't run in an environment.";
           }
 
           if (

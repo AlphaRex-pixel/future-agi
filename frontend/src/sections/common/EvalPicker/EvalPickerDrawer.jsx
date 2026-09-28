@@ -290,6 +290,8 @@ const EvalPickerContent = ({
  * @param {Array} sourceColumns - Available columns for variable auto-mapping
  * @param {function} onEvalAdded - Called with the configured eval object when user saves
  * @param {Array} existingEvals - Already-added evals (to disable re-adding)
+ * @param {Array} addedEvals - Opt-in: already-added evals ({ id, name, meta }) shown in a collapsible "Added evaluations" box and left out of the list
+ * @param {boolean} requireInputs - Opt-in: refuse to add an eval that has no inputs to map
  * @param {string} drawerType - MUI Drawer variant: "temporary" (default) or "persistent"
  * @param {number|string} width - Drawer width (default: 700px)
  */
@@ -351,6 +353,13 @@ const EvalPickerDrawer = ({
   // an explicit created_at filter the backend defaults to a 30-day lookback,
   // so previews for older data come back empty.
   sourceTimeWindow = null,
+  // Opt-in "Added evaluations" box: the evals already on the caller, listed
+  // in their own collapsible box instead of as rows in the list;
+  // `addedEvalAction` adds one button per row.
+  addedEvals = null,
+  addedEvalAction = null,
+  // Opt-in: refuse to add an eval that has no inputs to map.
+  requireInputs = false,
 }) => {
   const [currentStep, setCurrentStep] = useState("list");
 
@@ -411,6 +420,9 @@ const EvalPickerDrawer = ({
         sourceFilters={sourceFilters}
         onFiltersChange={onFiltersChange}
         sourceTimeWindow={sourceTimeWindow}
+        addedEvals={addedEvals}
+        addedEvalAction={addedEvalAction}
+        requireInputs={requireInputs}
       >
         <EvalPickerContent
           onStepChange={setCurrentStep}
@@ -459,6 +471,15 @@ EvalPickerDrawer.propTypes = {
     startDate: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
     endDate: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
   }),
+  addedEvals: PropTypes.array,
+  addedEvalAction: PropTypes.shape({
+    label: PropTypes.string.isRequired,
+    onClick: PropTypes.func.isRequired,
+    busyId: PropTypes.string,
+    disabled: PropTypes.bool,
+    show: PropTypes.func,
+  }),
+  requireInputs: PropTypes.bool,
 };
 
 export default EvalPickerDrawer;

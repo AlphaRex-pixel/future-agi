@@ -54,6 +54,13 @@ const EvalPickerProvider = ({
   sourceFilters = null,
   onFiltersChange = null,
   sourceTimeWindow = null,
+  // Opt-in "Added evaluations" box: the evals already on the caller, listed
+  // in their own collapsible box instead of as rows in the list;
+  // `addedEvalAction` adds one button per row.
+  addedEvals = null,
+  addedEvalAction = null,
+  // Opt-in: refuse to add an eval that has no inputs to map.
+  requireInputs = false,
 }) => {
   const [step, setStep] = useState(initialEval ? "config" : "list");
   const [selectedEval, setSelectedEvalState] = useState(
@@ -122,6 +129,9 @@ const EvalPickerProvider = ({
         onFiltersChange,
         sourceTimeWindow,
         filterForm,
+        addedEvals,
+        addedEvalAction,
+        requireInputs,
       }}
     >
       {children}
@@ -157,6 +167,15 @@ EvalPickerProvider.propTypes = {
     startDate: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
     endDate: PropTypes.oneOfType([PropTypes.string, PropTypes.object]),
   }),
+  addedEvals: PropTypes.array,
+  addedEvalAction: PropTypes.shape({
+    label: PropTypes.string.isRequired,
+    onClick: PropTypes.func.isRequired,
+    busyId: PropTypes.string,
+    disabled: PropTypes.bool,
+    show: PropTypes.func,
+  }),
+  requireInputs: PropTypes.bool,
 };
 
 export default EvalPickerProvider;
