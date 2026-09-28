@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import re
 from collections import Counter
+from fnmatch import fnmatchcase
 from functools import lru_cache
 from pathlib import Path
 
@@ -23,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "docs" / "configuration.md"
 ENV_EXAMPLE = ROOT / ".env.example"
 INSTALLER = ROOT / "bin" / "install"
+BACKEND_CI = ROOT / ".github" / "workflows" / "backend-ci.yml"
 
 # The compose files a user runs. Every other root-level docker-compose*.yml is
 # picked up too, so a new one cannot slip past the reference.
@@ -366,4 +368,29 @@ def test_env_example_never_turns_on_a_risky_opt_in(key: str, why: str) -> None:
     value = dict(env_example()[0]).get(key, "false").strip().lower()
     assert value not in {"true", "1", "yes"}, (
         f".env.example must not enable {key}: {why}"
+    )
+
+
+def test_backend_ci_runs_when_a_file_read_here_changes() -> None:
+    """A PR that edits only docs/configuration.md, .env.example or bin/dev
+    (which test_log_stream.py runs) still runs these tests. The Go sources are
+    left out: their own CI covers them, and every push to dev runs this suite."""
+    workflow = yaml.safe_load(BACKEND_CI.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["changes"]["steps"]
+    filters = next(step for step in steps if step.get("id") == "filter")["with"]
+    patterns = yaml.safe_load(filters["filters"])["backend"]
+    names = [*REQUIRED_COMPOSE_FILES, *WORD_READER_FILES]
+    names += [str(path.relative_to(ROOT)) for path in (DOCS, ENV_EXAMPLE)]
+    names += [
+        str(path.relative_to(ROOT))
+        for directory in WORD_READER_DIRS
+        for path in (ROOT / directory).iterdir()
+    ]
+    missed = sorted(
+        name
+        for name in names
+        if not any(fnmatchcase(name, pattern) for pattern in patterns)
+    )
+    assert not missed, (
+        f"add these to the backend paths filter in {BACKEND_CI.name}: {missed}"
     )

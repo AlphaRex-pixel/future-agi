@@ -45,6 +45,11 @@ jobs:
               - 'bin/uninstall'
               - 'deploy/**'
               - '.github/workflows/backend-ci.yml'
+              # Read by futureagi/tests/test_env_reference.py and test_log_stream.py
+              - 'bin/dev'
+              - '.env.example'
+              - 'docs/configuration.md'
+              - 'frontend/docker-entrypoint.sh'
             executor_base:
               - 'futureagi/code-executor/Dockerfile.base'
               - 'futureagi/code-executor/requirements.sandbox.txt'
