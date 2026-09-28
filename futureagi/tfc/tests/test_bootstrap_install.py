@@ -7,6 +7,9 @@ contract and the failure behaviour the chart relies on.
 
 from __future__ import annotations
 
+import io
+import sys
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,6 +21,8 @@ from tfc.management.commands import bootstrap_install as command
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CHART = REPO_ROOT / "deploy" / "helm" / "futureagi"
+# Before any fixture replaces it.
+REGISTER_SEARCH_ATTRIBUTES = command.register_search_attributes
 
 
 @pytest.fixture
@@ -438,3 +443,366 @@ def test_the_helm_chart_bootstrap_job_runs_this_command() -> None:
 
     assert '"manage.py", "bootstrap_install"' in job
     assert "NO_STARTUP_DB_MUTATIONS" in (CHART / "templates" / "_env.tpl").read_text()
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("temporal-frontend:7234", ("temporal-frontend", 7234)),
+        ("temporal-frontend", ("temporal-frontend", 7233)),
+        ("[fd00::1]:7234", ("fd00::1", 7234)),
+        ("[fd00::1]", ("fd00::1", 7233)),
+    ],
+)
+def test_endpoint_takes_host_and_port_or_a_bare_host(value, expected) -> None:
+    assert command.endpoint(value, 7233) == expected
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("redis://:secret@redis.data:6380/0", ("redis.data", 6380)),
+        ("redis://redis.data/0", ("redis.data", 6379)),
+        ("redis://redis.data:port/0", None),
+        ("unix:///run/redis.sock", None),
+        ("", None),
+    ],
+)
+def test_url_endpoint_needs_a_host_and_a_numeric_port(url, expected) -> None:
+    assert command.url_endpoint(url, 6379) == expected
+
+
+@pytest.mark.parametrize("redis_url", ["", "unix:///run/redis.sock"])
+def test_datastore_endpoints_fall_back_to_redis_host_and_the_defaults(
+    monkeypatch: pytest.MonkeyPatch, redis_url: str
+) -> None:
+    monkeypatch.setattr(
+        command,
+        "settings",
+        SimpleNamespace(
+            DATABASES={"default": {"HOST": "pgbouncer", "PORT": 6432}},
+            REDIS_URL=redis_url,
+        ),
+    )
+    env = {"PG_HOST": "postgres", "REDIS_HOST": "cache", "REDIS_PORT": "6390"}
+
+    # A pooler in front of Postgres: both it and Postgres itself are waited for.
+    assert command.datastore_endpoints(env) == [
+        ("Postgres", "pgbouncer", 6432),
+        ("Postgres", "postgres", 5432),
+        ("ClickHouse", "clickhouse", 8123),
+        ("Redis", "cache", 6390),
+        ("Temporal", "localhost", 7233),
+    ]
+
+
+def test_wait_tcp_returns_once_the_port_accepts_and_announces_every_30s(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts: list[tuple[str, int]] = []
+    closed: list[bool] = []
+
+    def connect(address, timeout):
+        attempts.append(address)
+        if len(attempts) <= 3:
+            raise ConnectionRefusedError
+        return SimpleNamespace(close=lambda: closed.append(True))
+
+    monkeypatch.setattr(command.socket, "create_connection", connect)
+    now = [0.0]
+
+    def sleep(seconds: float) -> None:
+        now[0] += 20 * seconds
+
+    logged: list[str] = []
+    command.wait_tcp(
+        "Redis", "redis", 6379, 100, logged.append, clock=lambda: now[0], sleep=sleep
+    )
+
+    assert attempts == [("redis", 6379)] * 4
+    assert closed == [True]
+    # At 0 s and 40 s; not again at 20 s.
+    assert logged == ["waiting for Redis at redis:6379"] * 2
+
+
+def test_run_cli_turns_returns_and_exits_into_an_exit_code() -> None:
+    def exits(code):
+        def main(argv):
+            raise SystemExit(code)
+
+        return main
+
+    seen: list[list[str]] = []
+    assert command.run_cli(seen.append, ["--phase", "native"]) == 0
+    assert seen == [["--phase", "native"]]
+    assert command.run_cli(lambda argv: 3, []) == 3
+    assert command.run_cli(exits(0), []) == 0
+    assert command.run_cli(exits(4), []) == 4
+    # sys.exit("message") prints the message and exits 1.
+    assert command.run_cli(exits("invalid --phase"), []) == 1
+
+
+@pytest.fixture
+def unauthorized(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hosted process without the operator/bootstrap pair."""
+    for name in ("NO_STARTUP_DB_MUTATIONS", "SERVICE_TYPE", "STARTUP_DB_MUTATION_MODE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ENV_TYPE", "production")
+
+
+def test_call_refuses_a_mutation_command_this_process_may_not_run(
+    unauthorized, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ran: list[str] = []
+    monkeypatch.setattr(
+        "django.core.management.call_command",
+        lambda name, **options: ran.append(name),
+    )
+
+    with pytest.raises(
+        command.BootstrapError,
+        match="migrate is not authorized here.*SERVICE_TYPE=bootstrap",
+    ):
+        command.call("migrate", lambda _: None)
+    # A failing createcachetable is otherwise logged and skipped; a refusal
+    # stops the bootstrap before migrate.
+    with pytest.raises(
+        command.BootstrapError, match="createcachetable is not authorized"
+    ):
+        command.migrate_and_seed(lambda _: None)
+    assert ran == []
+
+    # Commands outside the mutation allowlist need no authorization.
+    command.call("check", lambda _: None)
+    assert ran == ["check"]
+
+
+def test_clickhouse_native_schema_success_is_logged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tracer.services.clickhouse import oss_cdc_install
+
+    monkeypatch.setattr(oss_cdc_install, "main", lambda argv: 0)
+    logged: list[str] = []
+
+    command.clickhouse_native_schema(logged.append, 600)
+
+    assert logged[0] == "ClickHouse native schema ..."
+    assert logged[1].startswith("ClickHouse native schema done in ")
+    assert len(logged) == 2
+
+
+@pytest.mark.parametrize(
+    ("env", "message"),
+    [
+        (
+            {"CH_DATABASE": "traces; DROP USER default"},
+            "source database must be a ClickHouse identifier",
+        ),
+        (
+            {"CH_DATABASE": "traces", "PROPERTY_CATALOG_DATABASE": "catalog`x"},
+            "PROPERTY_CATALOG_DATABASE database must be a ClickHouse identifier",
+        ),
+        # FI_CH_DATABASE, not CH_DATABASE, is the trace database when both are set.
+        (
+            {"FI_CH_DATABASE": "property_catalog", "CH_DATABASE": "default"},
+            "its own database",
+        ),
+        ({"PROPERTY_CATALOG_DATABASE": "System"}, "its own database"),
+    ],
+)
+def test_property_catalog_checks_database_names_before_connecting(
+    monkeypatch: pytest.MonkeyPatch, env, message
+) -> None:
+    import clickhouse_connect
+
+    monkeypatch.setattr(
+        clickhouse_connect, "get_client", lambda **_: pytest.fail("connected")
+    )
+
+    with pytest.raises(command.BootstrapError, match=message):
+        command.property_catalog(lambda _: None, env)
+
+
+class FakeOperatorService:
+    """Temporal's operator API: the namespace's custom search attributes."""
+
+    def __init__(self, existing) -> None:
+        self.existing = set(existing)
+        self.requests: list[tuple] = []
+
+    async def list_search_attributes(self, request):
+        self.requests.append(("list", request.namespace))
+        return SimpleNamespace(custom_attributes=dict.fromkeys(self.existing, 2))
+
+    async def add_search_attributes(self, request):
+        added = sorted(request.search_attributes)
+        self.requests.append(("add", request.namespace, added))
+        self.existing.update(added)
+
+
+def test_register_search_attributes_adds_only_the_missing_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tfc.temporal
+    from tfc.temporal.common import client as temporal_client
+    from tfc.temporal.eval_tasks.search_attributes import SEARCH_ATTRIBUTE_NAMES
+
+    service = FakeOperatorService(SEARCH_ATTRIBUTE_NAMES[:1])
+
+    async def get_client():
+        return SimpleNamespace(operator_service=service)
+
+    monkeypatch.setattr(temporal_client, "get_client", get_client)
+    monkeypatch.setattr(tfc.temporal, "TEMPORAL_NAMESPACE", "futureagi-helm")
+    logged: list[str] = []
+
+    command.register_search_attributes(logged.append)
+    command.register_search_attributes(logged.append)
+
+    assert service.requests == [
+        ("list", "futureagi-helm"),
+        ("add", "futureagi-helm", sorted(SEARCH_ATTRIBUTE_NAMES[1:])),
+        ("list", "futureagi-helm"),
+    ]
+    assert logged == [
+        "registered the eval-task search attributes",
+        "eval-task search attributes already registered",
+    ]
+
+
+def test_the_job_retries_search_attributes_until_temporal_serves(
+    local_operator, recorded_steps, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tfc.temporal.common import client as temporal_client
+    from tfc.temporal.eval_tasks.search_attributes import SEARCH_ATTRIBUTE_NAMES
+
+    connects: list[int] = []
+
+    async def get_client():
+        connects.append(1)
+        if len(connects) == 1:
+            raise RuntimeError("Temporal not serving yet")
+        return SimpleNamespace(
+            operator_service=FakeOperatorService(SEARCH_ATTRIBUTE_NAMES)
+        )
+
+    monkeypatch.setattr(temporal_client, "get_client", get_client)
+    monkeypatch.setattr(
+        command, "register_search_attributes", REGISTER_SEARCH_ATTRIBUTES
+    )
+    sleeps: list[float] = []
+    with_retries = command.with_retries
+    monkeypatch.setattr(
+        command,
+        "with_retries",
+        lambda *args, **kwargs: with_retries(*args, **kwargs, sleep=sleeps.append),
+    )
+    out = io.StringIO()
+
+    call_command("bootstrap_install", "--temporal-attempts", "2", stdout=out)
+
+    assert len(connects) == 2 and sleeps == [5]
+    lines = out.getvalue().splitlines()
+    assert (
+        "[bootstrap] Temporal search attributes failed "
+        "(RuntimeError: Temporal not serving yet); retrying in 5s"
+    ) in lines
+    assert "[bootstrap] eval-task search attributes already registered" in lines
+    assert recorded_steps[-2:] == ["cdc", "register_temporal_schedules"]
+
+    # Out of attempts: the Job fails before change data capture.
+    connects.clear()
+    recorded_steps.clear()
+    with pytest.raises(RuntimeError, match="Temporal not serving yet"):
+        call_command("bootstrap_install", "--temporal-attempts", "1", stdout=out)
+    assert "cdc" not in recorded_steps
+
+
+def test_an_image_without_the_outbox_installer_skips_change_data_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tracer.services.clickhouse as clickhouse
+    from tracer.services.clickhouse import oss_outbox_cdc  # noqa: F401 - then hidden
+
+    monkeypatch.setenv("FI_CDC_MODE", "outbox")
+    monkeypatch.delattr(clickhouse, "oss_outbox_cdc")
+    monkeypatch.setitem(sys.modules, command.OUTBOX_CDC_MODULE, None)
+    logged: list[str] = []
+
+    command.change_data_capture(logged.append, attempts=1, delay=0)
+
+    assert logged == [
+        "this image has no outbox CDC installer; skipping change data capture"
+    ]
+
+
+def test_a_missing_dependency_of_the_outbox_installer_is_not_a_skip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tracer.services.clickhouse as clickhouse
+    from tracer.services.clickhouse import oss_outbox_cdc  # noqa: F401 - reloaded
+
+    monkeypatch.delattr(clickhouse, "oss_outbox_cdc")
+    monkeypatch.delitem(sys.modules, command.OUTBOX_CDC_MODULE)
+    monkeypatch.setitem(sys.modules, "psycopg", None)
+    logged: list[str] = []
+
+    with pytest.raises(ModuleNotFoundError) as raised:
+        command.change_data_capture(logged.append, attempts=1, delay=0)
+
+    assert raised.value.name == "psycopg"
+    assert logged == []
+
+
+def test_an_unknown_cdc_mode_fails_before_the_installer_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tracer.services.clickhouse import oss_outbox_cdc
+
+    monkeypatch.setenv("FI_CDC_MODE", "outbax")
+    monkeypatch.setattr(
+        oss_outbox_cdc, "ensure_installed", lambda: pytest.fail("installer ran")
+    )
+    logged: list[str] = []
+
+    with pytest.raises(
+        command.BootstrapError, match="FI_CDC_MODE must be one of"
+    ) as raised:
+        command.change_data_capture(logged.append, attempts=3, delay=0)
+
+    assert raised.value.__suppress_context__
+    assert logged == []
+
+
+def test_change_data_capture_retries_transient_failures_and_logs_the_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tracer.services.clickhouse import oss_outbox_cdc
+
+    monkeypatch.setenv("FI_CDC_MODE", " Outbox ")
+    outcomes = iter(
+        [
+            ConnectionError("clickhouse restarting"),
+            {"mode": "outbox", "ready": True, "run": uuid.UUID(int=7)},
+        ]
+    )
+
+    def ensure_installed():
+        outcome = next(outcomes)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(oss_outbox_cdc, "ensure_installed", ensure_installed)
+    logged: list[str] = []
+
+    command.change_data_capture(logged.append, attempts=2, delay=0)
+
+    assert logged == [
+        "change data capture (FI_CDC_MODE=outbox) ...",
+        "change data capture failed "
+        "(RuntimeError: ConnectionError from the CDC installer); retrying in 0s",
+        'change data capture: {"mode": "outbox", "ready": true, '
+        '"run": "00000000-0000-0000-0000-000000000007"}',
+    ]
