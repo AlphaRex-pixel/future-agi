@@ -20,8 +20,23 @@ const DASH = "-";
 // "coming soon" tooltip.
 export default function SummaryTable({ rows, evals, onOpenRun }) {
   return (
-    <Box sx={{ overflowX: "auto" }}>
-      <Table size="small" sx={{ minWidth: 720 }}>
+    // The card no longer clips (the graph tooltip must escape it), so clip the
+    // table to the card's bottom corners here; a scroll box can't clip its own
+    // scrollbar, hence the wrapper.
+    <Box
+      sx={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        borderBottomLeftRadius: 12,
+        borderBottomRightRadius: 12,
+      }}
+    >
+    {/* Takes the card's remaining height and scrolls both ways under a
+        pinned header. */}
+    <Box sx={{ overflow: "auto", flex: 1, minHeight: 0 }}>
+      <Table stickyHeader size="small" sx={{ minWidth: 720 }}>
         <TableHead>
           <TableRow sx={{ "& th": { border: 0, py: 1, typography: "s3", color: "text.subtitle", whiteSpace: "nowrap" } }}>
             <TableCell padding="checkbox">
@@ -53,6 +68,7 @@ export default function SummaryTable({ rows, evals, onOpenRun }) {
           ))}
         </TableBody>
       </Table>
+    </Box>
     </Box>
   );
 }

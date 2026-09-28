@@ -28,24 +28,19 @@ export default function PagedScenarioViews({
   const allHidden = shownGroups.length === 0 && hiddenGroupIds.length > 0 && !query.trim();
   const isEmpty = shownGroups.length === 0;
 
-  // Once there's more than a page, the rows live in a fixed-height scroll box
-  // with the pager BELOW it. Fixed height (not max) so the box — and therefore
-  // the pager under it — never changes size between pages: the pager stays put
-  // under the cursor for repeated Next clicks. A page change resets only THIS
-  // box to the top (so page N opens at row 1); it never scrolls the page, so
-  // the pager doesn't move. A single page renders naturally (no empty box).
+  // The rows live in a scroll box that fills the card, with the pager BELOW it.
+  // Its size comes from the card, not the rows, so it — and the pager under
+  // it — never changes between pages: the pager stays put under the cursor for
+  // repeated Next clicks. A page change resets only THIS box to the top (so
+  // page N opens at row 1); it never scrolls the page, so the pager doesn't move.
   const bounded = pageCount > 1;
   const scrollRef = useRef(null);
   useEffect(() => {
     if (bounded) scrollRef.current?.scrollTo?.({ top: 0 });
   }, [page, bounded]);
   // This box is the ONE scroll container for the table — both axes — so the
-  // sticky column/group headers pin to it. Bounded (multi-page): a fixed height
-  // that scrolls vertically. Single page: natural height, horizontal scroll only
-  // (the table is wide), taking over the scroll the table no longer wraps itself.
-  const scrollSx = bounded
-    ? { height: "clamp(300px, calc(100dvh - 380px), 640px)", overflow: "auto" }
-    : { overflowX: "auto" };
+  // sticky column/group headers pin to it.
+  const scrollSx = { flex: 1, minHeight: 0, overflow: "auto" };
 
   // Header checkbox toggles the whole page. When the page is already fully
   // selected via an escalated "all matching", un-checking clears the predicate.
@@ -62,7 +57,7 @@ export default function PagedScenarioViews({
   const bulkPayload = selection.payload({ search: query || undefined, filters });
 
   return (
-    <Box sx={{ position: "relative" }}>
+    <Box sx={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       {/* The bulk-action bar isn't here — it takes over the toolbar row above
           (in ScenariosStep) while a selection is active, so acting on rows
           never shifts this table down. */}
@@ -112,7 +107,7 @@ export default function PagedScenarioViews({
       {pageCount > 1 && (
         <Stack
           direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1}
-          sx={{ px: 2, py: 1.5, borderTop: "1px solid", borderColor: "divider" }}
+          sx={{ px: 2, py: 1.5, borderTop: "1px solid", borderColor: "divider", flexShrink: 0 }}
         >
           <Typography sx={{ typography: "s3", color: "text.subtitle", fontVariantNumeric: "tabular-nums" }}>
             Showing {rangeStart.toLocaleString()}–{rangeEnd.toLocaleString()} of {total.toLocaleString()}
@@ -131,7 +126,7 @@ export default function PagedScenarioViews({
 
       {/* Scale-harness inspector (?scnDemo) — the server contract made visible. */}
       {showInspector && (
-      <Box sx={{ px: 2, pb: 1.5 }}>
+      <Box sx={{ px: 2, pb: 1.5, flexShrink: 0 }}>
         <Button
           size="small" variant="text" onClick={() => setInspect((v) => !v)}
           startIcon={<Iconify icon={inspect ? "solar:alt-arrow-down-linear" : "solar:alt-arrow-right-linear"} width={14} />}
