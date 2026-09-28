@@ -148,7 +148,7 @@ class TestServingAvailable:
         [
             ({"/health": 200}, True),
             # An older serving image and the E2E mock answer only the model
-            # list, which is what the client's health_check() has always used.
+            # list.
             ({"/model/v1/models": 200}, True),
             ({}, False),
             # A server error is an answer: serving is there and unhealthy.

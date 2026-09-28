@@ -48,15 +48,11 @@ class ModelServingClient:
     """
 
     def __init__(self, base_url: str | None = None):
-        self.base_url = base_url or os.getenv('MODEL_SERVING_URL', 'http://serving:8080')
-
-
+        self.base_url = base_url or serving_base_url()
 
         self.default_timeout = int(os.getenv('MODEL_SERVING_TIMEOUT', '120'))
         self.max_retries = int(os.getenv('MODEL_SERVING_MAX_RETRIES', '3'))
 
-        self._health_check_cache = {}  
-        self._health_check_cache_ttl = 60  # 1 minute
         self.session = self._create_session()
 
     def _create_session(self) -> requests.Session:
@@ -371,37 +367,8 @@ class ModelServingClient:
             raise ValueError(f"Unsupported audio type: {type(audio_data)}")
 
     def health_check(self, use_cache: bool = True) -> bool:
-        """
-        ✅ IMPROVED: Check if the serving service is healthy with caching.
-        """
-        current_time = time.time()
-        cache_key = "health_check"
-
-        # Check cache if enabled
-        if use_cache and cache_key in self._health_check_cache:
-            cached_result, cached_time = self._health_check_cache[cache_key]
-            if current_time - cached_time < self._health_check_cache_ttl:
-                logger.debug("Using cached health check result")
-                return cached_result
-
-        try:
-            url = f"{self.base_url}/model/v1/models"
-            response = self.session.get(url, timeout=5)
-            is_healthy = response.status_code == 200
-
-            # Cache the result
-            if use_cache:
-                self._health_check_cache[cache_key] = (is_healthy, current_time)
-
-            logger.debug(f"Health check result: {'healthy' if is_healthy else 'unhealthy'}")
-            return is_healthy
-
-        except Exception as e:
-            logger.debug(f"Health check failed: {e}")
-            # Cache negative result for shorter time
-            if use_cache:
-                self._health_check_cache[cache_key] = (False, current_time - self._health_check_cache_ttl + 10)
-            return False
+        """Whether this client's serving answers: ``serving_available()``."""
+        return serving_available(self.base_url, use_cache=use_cache)
 
     def get_model_status(self) -> dict[str, Any]:
         """
@@ -515,8 +482,7 @@ def serving_base_url() -> str:
 def _probe(base_url: str) -> bool:
     # Plain GET, no retry adapter: a missing host should cost one lookup.
     # A server that answers but has no /health (an older serving image, the
-    # E2E mock) is asked for the model list instead, which is what the
-    # client's own health_check() uses.
+    # E2E mock) is asked for the model list instead.
     try:
         response = requests.get(
             f"{base_url}/health", timeout=SERVING_PROBE_TIMEOUT_SECONDS
