@@ -5,6 +5,7 @@ import { Box, Chip, CircularProgress, Stack, Typography, IconButton, Tooltip, Ta
 
 import Iconify from "src/components/iconify";
 import { CustomTabs } from "src/components/tabs/tabs";
+import { ShareDialog } from "src/components/share-dialog";
 import { useCallDetail } from "src/api/simulate-environments/runDetail";
 
 import { BUILD_TONES } from "../../../buildEnvironment/buildTones";
@@ -104,6 +105,7 @@ export default function ChatCallDrawer({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [hasNext, hasPrev, onNext, onPrev]);
   const [side, setSide] = useState("analytics");
+  const [shareOpen, setShareOpen] = useState(false);
   const { callDetail, isLoading } = useCallDetail(task.id);
 
   // The header and chips paint from the already-loaded row immediately, then
@@ -142,6 +144,11 @@ export default function ChatCallDrawer({
           <NavArrow icon="mdi:chevron-down" label="Next conversation (↓)" onClick={onNext} disabled={!hasNext} />
         </Stack>
         <Box flex={1} />
+        <Tooltip arrow title="Share call">
+          <IconButton size="small" aria-label="Share call" onClick={() => setShareOpen(true)}>
+            <Iconify icon="basil:share-outline" width={16} sx={{ color: "text.subtitle" }} />
+          </IconButton>
+        </Tooltip>
         <IconButton size="small" onClick={onClose} aria-label="Close">
           <Iconify icon="mingcute:close-line" width={16} sx={{ color: "text.subtitle" }} />
         </IconButton>
@@ -311,6 +318,15 @@ export default function ChatCallDrawer({
           </Box>
         </Stack>
       </Stack>
+
+      {shareOpen && (
+        <ShareDialog
+          open
+          onClose={() => setShareOpen(false)}
+          resourceType="call_execution"
+          resourceId={task.id}
+        />
+      )}
     </Stack>
   );
 }
