@@ -451,14 +451,9 @@ Desktop, k3s or OrbStack, `examples/local.yaml` publishes the same ports on
 localhost without port-forwards.
 
 Verify the chart before you install it: it is signed keylessly by the
-release workflow and carries a build provenance attestation.
-
-```bash
-cosign verify ghcr.io/future-agi/charts/futureagi:$VERSION \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity https://github.com/future-agi/future-agi/.github/workflows/helm-release.yml@refs/tags/v$VERSION
-gh attestation verify oci://ghcr.io/future-agi/charts/futureagi:$VERSION --repo future-agi/future-agi
-```
+release workflow and carries a build provenance attestation. The chart
+README's [Verify](deploy/helm/futureagi/README.md#verify) section has the
+commands.
 
 Until a release that contains the chart ships, the registry has no versions.
 Install from this checkout instead, with images built from the same branch

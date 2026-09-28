@@ -183,27 +183,17 @@ Every release publishes the Helm chart to
 `oci://ghcr.io/future-agi/charts/futureagi` (version `X.Y.Z`, the release
 without the `v`), signed keylessly with cosign by
 `.github/workflows/helm-release.yml` at the release tag, with a build
-provenance attestation:
-
-```sh
-VERSION=X.Y.Z
-cosign verify ghcr.io/future-agi/charts/futureagi:$VERSION \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity https://github.com/future-agi/future-agi/.github/workflows/helm-release.yml@refs/tags/v$VERSION
-gh attestation verify oci://ghcr.io/future-agi/charts/futureagi:$VERSION --repo future-agi/future-agi \
-  --signer-workflow future-agi/future-agi/.github/workflows/helm-release.yml
-```
+provenance attestation. The chart README's
+[Verify](../deploy/helm/futureagi/README.md#verify) section has the commands
+that check them.
 
 The GitHub Release `vX.Y.Z` carries the same package,
-`futureagi-X.Y.Z.tgz`, with its signature bundle (check it with
-`cosign verify-blob futureagi-X.Y.Z.tgz --bundle futureagi-X.Y.Z.tgz.sigstore.json`
-and the same issuer and identity) and checksums
+`futureagi-X.Y.Z.tgz`, with its signature bundle and checksums
 (`futureagi-X.Y.Z.sha256`). The packaged chart pins every Future AGI image
 to the digest the release built (`image.digests`), and
 `futureagi-images-X.Y.Z.txt` lists every image it can pull as
 `repository:tag@sha256:...`, with a Hauler manifest
-(`futureagi-hauler-X.Y.Z.yaml`) for mirroring into a private registry. The
-[chart README](../deploy/helm/futureagi/README.md#verify) has the details.
+(`futureagi-hauler-X.Y.Z.yaml`) for mirroring into a private registry.
 
 ## Health checks
 
