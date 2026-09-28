@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import structlog
 from django.utils import timezone
+from pydantic import ValidationError
 
 from accounts.models import Organization
 from accounts.models.workspace import Workspace
@@ -113,6 +114,44 @@ class TestGatewayClient:
             "attempt": "2",
             "labels": '["alpha","beta"]',
         }
+
+    @patch("agentcc.services.gateway_client.httpx.Client")
+    def test_import_keys_sends_the_contract_shape(self, mock_client_cls):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.content = b'{"received":1,"loaded":1}'
+        mock_resp.json.return_value = {"received": 1, "loaded": 1}
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.request.return_value = mock_resp
+        mock_client_cls.return_value = mock_client_instance
+        key = {
+            "id": "key_1",
+            "name": "restored",
+            "owner": "",
+            "key_hash": "a" * 64,
+            "key_prefix": "sk-agentcc-a...",
+            "models": [],
+            "providers": [],
+            "metadata": {"org_id": "org-1"},
+            "expires_at": None,
+        }
+
+        client = GatewayClient("http://localhost:8080", "token")
+        assert client.import_keys([key]) == {"received": 1, "loaded": 1}
+
+        request_json = mock_client_instance.request.call_args.kwargs["json"]
+        # No expiry is sent as no field at all, as the contract types it.
+        assert request_json == {
+            "keys": [{k: v for k, v in key.items() if k != "expires_at"}]
+        }
+
+        # A field outside the contract, such as the raw key, is never sent.
+        mock_client_instance.request.reset_mock()
+        with pytest.raises(ValidationError):
+            client.import_keys([{**key, "key": "sk-agentcc-raw"}])
+        mock_client_instance.request.assert_not_called()
 
     @patch("agentcc.services.gateway_client.httpx.Client")
     def test_update_key_stringifies_metadata_for_gateway(self, mock_client_cls):
