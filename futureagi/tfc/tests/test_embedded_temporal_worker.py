@@ -10,6 +10,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from temporalio.service import RPCError, RPCStatusCode
 
 from tfc.temporal import embedded
@@ -135,6 +136,15 @@ def test_own_slot_settings_win_over_full_install_ones(fake_registry, monkeypatch
     assert {(p.max_activities, p.max_workflow_tasks) for p in generic} == {(12, 2)}
     exact = next(plan for plan in plans if plan.queue == "exact_aggregation")
     assert (exact.max_activities, exact.max_workflow_tasks) == (1, 1)
+
+
+def test_a_malformed_slot_count_names_its_variable(fake_registry, monkeypatch):
+    monkeypatch.setenv("FI_APP_TEMPORAL_MAX_CONCURRENT_ACTIVITIES", "many")
+
+    with pytest.raises(
+        ImproperlyConfigured, match="FI_APP_TEMPORAL_MAX_CONCURRENT_ACTIVITIES"
+    ):
+        embedded._worker_plans()
 
 
 def test_worker_kwargs_size_each_worker_to_its_own_slots():

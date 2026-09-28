@@ -74,6 +74,7 @@ from clickhouse_connect.driver.exceptions import (
     OperationalError as ClickHouseOperationalError,
 )
 
+from tfc.utils.env import env_int
 from tracer.services.clickhouse import oss_cdc_bootstrap as core
 from tracer.services.clickhouse import oss_cdc_upgrade as upgrade
 from tracer.services.clickhouse import read_budget
@@ -109,19 +110,15 @@ TRIGGERS = {
 }
 
 
-def _int_env(name: str, default: int) -> int:
-    return int(os.getenv(name, str(default)))
-
-
-DRAIN_BATCH = _int_env("FI_CDC_DRAIN_BATCH", 5000)
-SNAPSHOT_PAGE = _int_env("FI_CDC_SNAPSHOT_PAGE", 10000)
+DRAIN_BATCH = env_int("FI_CDC_DRAIN_BATCH", 5000)
+SNAPSHOT_PAGE = env_int("FI_CDC_SNAPSHOT_PAGE", 10000)
 APPLY_CHUNK = 5000
 # Keys per reconcile page. Pass B sends them to ClickHouse as an IN list, so
 # this also bounds the query text (40 bytes per UUID; max_query_size 256 KiB).
 RECONCILE_CHUNK = 2000
 # Rows are streamed from a server-side cursor and flushed to ClickHouse in
 # blocks of about this many bytes, so wide rows cannot balloon worker memory.
-FLUSH_BYTES = _int_env("FI_CDC_FLUSH_BYTES", 16 * 1024 * 1024)
+FLUSH_BYTES = env_int("FI_CDC_FLUSH_BYTES", 16 * 1024 * 1024)
 FETCH_ROWS = 500
 # Full id-parity sweep interval per table; requested sweeps run sooner.
 RECONCILE_EVERY_S = 24 * 3600
@@ -131,9 +128,9 @@ DEADLETTER_RETRIES = 5
 DDL_LOCK_TIMEOUT_MS = 2000
 DDL_ATTEMPTS = 5
 # ``install --check`` fails when the drain is this far behind.
-CHECK_MAX_LAG_S = _int_env("FI_CDC_MAX_LAG_SECONDS", 900)
-CHECK_MAX_DEPTH = _int_env("FI_CDC_MAX_OUTBOX_DEPTH", 5_000_000)
-INSTALL_SNAPSHOT_S = _int_env("FI_CDC_INSTALL_SNAPSHOT_SECONDS", 30)
+CHECK_MAX_LAG_S = env_int("FI_CDC_MAX_LAG_SECONDS", 900)
+CHECK_MAX_DEPTH = env_int("FI_CDC_MAX_OUTBOX_DEPTH", 5_000_000)
+INSTALL_SNAPSHOT_S = env_int("FI_CDC_INSTALL_SNAPSHOT_SECONDS", 30)
 
 _PEERDB_COLUMNS = ("_peerdb_is_deleted", "_peerdb_version")
 _SYNCED_AT = "_peerdb_synced_at"

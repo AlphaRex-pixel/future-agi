@@ -57,6 +57,8 @@ from typing import NamedTuple
 
 import structlog
 
+from tfc.utils.env import env_int
+
 logger = structlog.get_logger(__name__)
 
 _TRUE = ("1", "true", "yes", "on")
@@ -76,11 +78,6 @@ def enabled() -> bool:
     return os.getenv("FI_EMBEDDED_TEMPORAL_WORKER", "").strip().lower() in _TRUE
 
 
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name, "").strip()
-    return int(raw) if raw else default
-
-
 # Activity and workflow-task slots per generic queue. FI_APP_* wins: a .env
 # carried over from the distributed install sets TEMPORAL_MAX_CONCURRENT_* to size one
 # dedicated worker container per queue (50-200 slots), and applied to every
@@ -93,12 +90,12 @@ DEFAULT_QUEUE_SLOTS = 8
 def _queue_slots(name: str) -> int:
     own = f"FI_APP_{name}"
     if os.getenv(own, "").strip():
-        return _env_int(own, DEFAULT_QUEUE_SLOTS)
-    return _env_int(name, DEFAULT_QUEUE_SLOTS)
+        return env_int(own, DEFAULT_QUEUE_SLOTS)
+    return env_int(name, DEFAULT_QUEUE_SLOTS)
 
 
 def _probe_interval() -> float:
-    return max(1, _env_int("FI_EMBEDDED_WORKER_PROBE_SECONDS", 15))
+    return max(1, env_int("FI_EMBEDDED_WORKER_PROBE_SECONDS", 15))
 
 
 def _retry_delay(consecutive_failures: int) -> float:
@@ -212,7 +209,7 @@ def _worker_kwargs(client, plan: _QueuePlan, interceptor) -> dict:
     from tfc.management.commands.start_temporal_worker import _workflow_cache_kwargs
 
     # More pollers than slots cannot take more work; the exact queue has one.
-    polls = _env_int("TEMPORAL_MAX_CONCURRENT_TASK_POLLS", 2)
+    polls = env_int("TEMPORAL_MAX_CONCURRENT_TASK_POLLS", 2)
     workflow_polls = max(1, min(polls, plan.max_workflow_tasks))
     activity_polls = max(1, min(polls, plan.max_activities))
     kwargs = {
@@ -226,12 +223,12 @@ def _worker_kwargs(client, plan: _QueuePlan, interceptor) -> dict:
         # queue, and queueing counts toward the SDK's 2 s deadlock timeout.
         "interceptors": [interceptor],
         "graceful_shutdown_timeout": timedelta(
-            seconds=_env_int("TEMPORAL_GRACEFUL_SHUTDOWN_TIMEOUT", 30)
+            seconds=env_int("TEMPORAL_GRACEFUL_SHUTDOWN_TIMEOUT", 30)
         ),
         "max_heartbeat_throttle_interval": timedelta(seconds=5),
         "max_concurrent_activities": plan.max_activities,
         "max_concurrent_workflow_tasks": plan.max_workflow_tasks,
-        "max_cached_workflows": _env_int("TEMPORAL_MAX_CACHED_WORKFLOWS", 100),
+        "max_cached_workflows": env_int("TEMPORAL_MAX_CACHED_WORKFLOWS", 100),
         "workflow_task_poller_behavior": PollerBehaviorSimpleMaximum(
             maximum=workflow_polls
         ),
@@ -379,7 +376,7 @@ class EmbeddedTemporalWorker:
         if self._thread is None:
             return
         self.request_stop()
-        grace = _env_int("TEMPORAL_GRACEFUL_SHUTDOWN_TIMEOUT", 30)
+        grace = env_int("TEMPORAL_GRACEFUL_SHUTDOWN_TIMEOUT", 30)
         self._thread.join(timeout if timeout is not None else grace + 10)
         if self._thread.is_alive():
             logger.warning("embedded_temporal_worker_stop_timeout")
@@ -413,7 +410,7 @@ class EmbeddedTemporalWorker:
         FI_EMBEDDED_WORKER_UNHEALTHY_AFTER_SECONDS, counted from startup."""
         down_since = self._down_since
         down_for = 0.0 if down_since is None else time.monotonic() - down_since
-        limit = _env_int("FI_EMBEDDED_WORKER_UNHEALTHY_AFTER_SECONDS", 300)
+        limit = env_int("FI_EMBEDDED_WORKER_UNHEALTHY_AFTER_SECONDS", 300)
         return {
             "healthy": not self._fatal and (down_since is None or down_for < limit),
             "fatal": self._fatal,
@@ -451,7 +448,7 @@ class EmbeddedTemporalWorker:
         asyncio.set_event_loop(loop)
         loop.set_default_executor(
             _QueueRoutingExecutor(
-                max_workers=_env_int("FI_EMBEDDED_ACTIVITY_THREADS", 4),
+                max_workers=env_int("FI_EMBEDDED_ACTIVITY_THREADS", 4),
                 thread_name_prefix="temporal-activity",
             )
         )

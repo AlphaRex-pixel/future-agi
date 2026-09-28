@@ -132,6 +132,16 @@ def test_default_is_the_thread_safe_memory_layer():
     }
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["CHANNEL_LAYER_CAPACITY", "CHANNEL_LAYER_EXPIRY_SECONDS", "GRANIAN_WORKERS"],
+)
+def test_a_malformed_number_names_its_variable(name):
+    # Not a silent fallback to the default: a typo would go unnoticed.
+    with pytest.raises(ImproperlyConfigured, match=name):
+        _select({name: "lots"})
+
+
 def test_redis_layer_prefers_channel_redis_url():
     _, layers = _select(
         {

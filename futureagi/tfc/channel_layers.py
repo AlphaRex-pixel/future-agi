@@ -47,6 +47,8 @@ from urllib.parse import urlsplit, urlunsplit
 from channels.layers import InMemoryChannelLayer
 from django.core.exceptions import ImproperlyConfigured
 
+from tfc.utils.env import env_int
+
 # A send from a foreign thread waits at most this long for the home loop.
 _CROSS_LOOP_TIMEOUT_S = 10.0
 
@@ -107,13 +109,6 @@ class ThreadSafeInMemoryChannelLayer(InMemoryChannelLayer):
 # -- settings -----------------------------------------------------------------
 
 
-def _env_int(env: Mapping[str, str], name: str, default: int) -> int:
-    try:
-        return int(env.get(name) or default)
-    except ValueError:
-        return default
-
-
 def _channels_rabbitmq_installed() -> bool:
     return importlib.util.find_spec("channels_rabbitmq") is not None
 
@@ -148,7 +143,7 @@ def channel_layer_settings(
     files still carry ``amqp://...@rabbitmq``, a host that no longer ships, and
     every ``group_add()`` would wait on it forever.
     """
-    workers = _env_int(env, "GRANIAN_WORKERS", 1)
+    workers = env_int("GRANIAN_WORKERS", 1, env=env)
     amqp_url = env.get("CHANNEL_LAYER_AMQP_URL", "")
     backend = (env.get("CHANNEL_LAYER_BACKEND") or "").strip().lower() or "auto"
     if backend == "inmemory":
@@ -161,8 +156,8 @@ def channel_layer_settings(
         else:
             backend = "memory"
 
-    capacity = _env_int(env, "CHANNEL_LAYER_CAPACITY", 1500)
-    expiry = _env_int(env, "CHANNEL_LAYER_EXPIRY_SECONDS", 300)
+    capacity = env_int("CHANNEL_LAYER_CAPACITY", 1500, env=env)
+    expiry = env_int("CHANNEL_LAYER_EXPIRY_SECONDS", 300, env=env)
 
     if backend == "memory":
         # Only the web process holds WebSockets. Workers and bootstrap read the

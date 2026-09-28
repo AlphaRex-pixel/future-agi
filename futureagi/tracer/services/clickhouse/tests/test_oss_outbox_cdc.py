@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import importlib.util
 import json
+import sys
 import uuid
 from collections import Counter
 from contextlib import nullcontext
@@ -15,6 +17,7 @@ import psycopg
 import pytest
 from clickhouse_connect.driver.exceptions import DatabaseError, DataError
 from clickhouse_connect.driver.exceptions import OperationalError as CHOperationalError
+from django.core.exceptions import ImproperlyConfigured
 
 from tracer.services.clickhouse import oss_cdc_bootstrap as core
 from tracer.services.clickhouse import oss_cdc_upgrade as upgrade
@@ -37,6 +40,30 @@ def test_cdc_mode_defaults_to_peerdb_and_normalizes(value, mode):
 def test_unknown_cdc_mode_fails_closed(value):
     with pytest.raises(cdc.OutboxCDCError, match="FI_CDC_MODE"):
         cdc.cdc_mode({"FI_CDC_MODE": value})
+
+
+def _fresh_module(monkeypatch, env):
+    """Execute oss_outbox_cdc again under ``env``, leaving the loaded one alone."""
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    spec = importlib.util.spec_from_file_location("fresh_oss_outbox_cdc", cdc.__file__)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_blank_tuning_variables_mean_the_defaults(monkeypatch):
+    # Compose and Helm pass unset variables through as empty strings.
+    module = _fresh_module(
+        monkeypatch, {"FI_CDC_DRAIN_BATCH": "", "FI_CDC_MAX_LAG_SECONDS": " "}
+    )
+    assert (module.DRAIN_BATCH, module.CHECK_MAX_LAG_S) == (5000, 900)
+
+
+def test_a_malformed_tuning_variable_names_itself(monkeypatch):
+    with pytest.raises(ImproperlyConfigured, match="FI_CDC_SNAPSHOT_PAGE"):
+        _fresh_module(monkeypatch, {"FI_CDC_SNAPSHOT_PAGE": "10k"})
 
 
 def test_version_clock_is_strictly_increasing_across_backwards_steps_and_floor():
