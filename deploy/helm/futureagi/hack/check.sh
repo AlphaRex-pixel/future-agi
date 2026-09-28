@@ -299,9 +299,10 @@ SH
 printf '#!/bin/sh\n' >"$fake/bin/helm"
 cat >"$fake/bin/curl" <<'SH'
 #!/bin/sh
-# /health/ answers once FAKE_STATE/healthy exists.
+# /health/ answers once FAKE_STATE/healthy exists and the port-forward, which
+# it goes through, is up (has recorded its PID).
 case " $* " in
-  *"/health/"*) [ -e "$FAKE_STATE/healthy" ] ;;
+  *"/health/"*) [ -e "$FAKE_STATE/healthy" ] && [ -s "$FAKE_STATE/port-forward.pid" ] ;;
   *) echo '{}' ;;
 esac
 SH
@@ -319,9 +320,14 @@ port_forward_stopped() {
   [ -z "$(ls -A "$fake/tmp")" ] || fail "support-bundle.sh ($1) left its working directory"
   rm -f "$fake/port-forward.pid"
 }
+# Before any other failure: a port-forward the script left must not outlive
+# check.sh.
+kill_port_forward() {
+  kill "$(cat "$fake/port-forward.pid" 2>/dev/null)" 2>/dev/null || true
+}
 touch "$fake/healthy"
-"${support_bundle[@]}" >"$fake/run.txt" 2>&1 || { cat "$fake/run.txt" >&2; fail "support-bundle.sh against a fake cluster"; }
-ls "$fake/out"/futureagi-support-futureagi-*.tar.gz >/dev/null || fail "support-bundle.sh wrote no bundle"
+"${support_bundle[@]}" >"$fake/run.txt" 2>&1 || { cat "$fake/run.txt" >&2; kill_port_forward; fail "support-bundle.sh against a fake cluster"; }
+ls "$fake/out"/futureagi-support-futureagi-*.tar.gz >/dev/null || { kill_port_forward; fail "support-bundle.sh wrote no bundle"; }
 port_forward_stopped "finished"
 # Killed while it waits for the backend, with SIGTERM and with Ctrl-C (SIGINT
 # to its whole process group): after cleaning up it must die of the signal,
@@ -357,7 +363,7 @@ PY
 rm -f "$fake/healthy"
 for sig in TERM INT; do
   how=$("$python" "$fake/kill.py" "$fake" "$sig" "${support_bundle[@]}") || true
-  [ "$how" = "killed by SIG$sig" ] || { cat "$fake/run.txt" >&2; fail "support-bundle.sh ${how:-failed} on SIG$sig, not killed by it"; }
+  [ "$how" = "killed by SIG$sig" ] || { cat "$fake/run.txt" >&2; kill_port_forward; fail "support-bundle.sh ${how:-failed} on SIG$sig, not killed by it"; }
   port_forward_stopped "killed with SIG$sig"
 done
 rm -rf "$fake"
