@@ -216,11 +216,13 @@ services:
       AGENTCC_CONTROL_PLANE_TOKEN: ${AGENTCC_ADMIN_TOKEN:-local-dev-only-admin-token-replace-me}
       AGENTCC_SYNC_ON_STARTUP: "true"
       # Re-read keys and org settings every minute too, so a gateway that
-      # started before the app (or missed an update) catches up.
+      # started before the app (or missed an update) catches up. A gateway
+      # from before this setting ignores it and syncs only on start.
       AGENTCC_SYNC_INTERVAL: ${AGENTCC_SYNC_INTERVAL:-60s}
       # Provider base URLs on private networks (a local Ollama or vLLM); read
       # by the gateway and the API. Off: ClickHouse and the rest of the Docker
-      # network would be reachable through a provider URL.
+      # network would be reachable through a provider URL. A gateway and API
+      # from before this setting ignore it and refuse every private URL.
       AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS: ${AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS:-false}
       AGENTCC_HARNESS_API_KEY: ${AGENTCC_HARNESS_API_KEY:-}
       AGENTCC_BASE_URL: ${AGENTCC_BASE_URL:-}

@@ -831,7 +831,8 @@ echo "AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS=true" >> .env
 docker compose up -d
 ```
 
-Anyone who can add a provider can then point the gateway and the API at any
+A gateway or API from before this setting ignores it and refuses them
+regardless. Anyone who can add a provider can then point the gateway and the API at any
 address on those networks, the databases included (ClickHouse's `default` user
 has no password in either Compose setup), so allow it only where all of them
 are trusted. Loopback, link-local and cloud metadata addresses stay refused.
