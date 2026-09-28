@@ -971,7 +971,7 @@ def test_the_job_retries_search_attributes_until_temporal_serves(
         "(RuntimeError: Temporal not serving yet); retrying in 5s"
     ) in lines
     assert "[bootstrap] eval-task search attributes already registered" in lines
-    assert recorded_steps[-2:] == ["cdc", "register_temporal_schedules"]
+    assert recorded_steps[-3:] == ["cdc", "register_temporal_schedules", "first admin"]
 
     # Out of attempts: the Job fails before change data capture, without
     # sleeping after its last attempt.
