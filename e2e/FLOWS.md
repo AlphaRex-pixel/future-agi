@@ -171,7 +171,7 @@
 
 **User steps:**
 
-1. an owner account exists (created over the API, as ./bin/install creates it)
+1. an owner account exists before the first visit (signed up over the API; ./bin/install runs create_user)
 2. open /setup in a fresh, signed-out browser
 3. choose Test flight and continue
 4. read the pre-flight checks and the next step, which says to sign in

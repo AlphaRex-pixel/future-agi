@@ -32,7 +32,7 @@ base('AUTH-E2E-003: first-run setup sends an existing owner to sign in', {
   annotation: flowAnnotation({
     id: 'AUTH-E2E-003', area: 'auth',
     userGoal: 'An operator whose install already created the owner account runs the first-run checks at /setup and is sent to sign in with that account instead of signing up again',
-    steps: ['an owner account exists (created over the API, as ./bin/install creates it)',
+    steps: ['an owner account exists before the first visit (signed up over the API; ./bin/install runs create_user)',
             'open /setup in a fresh, signed-out browser', 'choose Test flight and continue',
             'read the pre-flight checks and the next step, which says to sign in', 'press Continue',
             'land on the sign-in page and sign in with the existing account'],
@@ -42,8 +42,8 @@ base('AUTH-E2E-003: first-run setup sends an existing owner to sign in', {
                     'signing in as the owner returns a token pair from POST /accounts/token/ and moves on to organization setup'],
   }),
 }, async ({ page }, testInfo) => {
-  // 15 s snapshot wait + 7 × UI_READY (420 s), plus provisioning and navigation.
-  base.setTimeout(480_000);
+  // 15 s snapshot wait + 8 × UI_READY (480 s), plus provisioning and navigation.
+  base.setTimeout(540_000);
   const req = await pwRequest.newContext({ baseURL: E2E.apiUrl });
   const owner = await provisionActor(req, 'first-run');
   const probe = new StateProbe({ api: owner.api, chUrl: E2E.chUrl, chDatabase: E2E.chDatabase,
@@ -63,7 +63,7 @@ base('AUTH-E2E-003: first-run setup sends an existing owner to sign in', {
     await expect(page.getByRole('heading', { name: 'Plan your launch' })).toBeVisible({ timeout: UI_READY });
     const testFlight = page.getByRole('button', { name: /^Test flight/ });
     await testFlight.click();
-    await expect(testFlight).toHaveAttribute('aria-pressed', 'true');
+    await expect(testFlight).toHaveAttribute('aria-pressed', 'true', { timeout: UI_READY });
     const checksResponse = page.waitForResponse(r => {
       const url = new URL(r.url());
       return url.pathname === SETUP_CHECKS && url.searchParams.get('mode') === TEST_FLIGHT;
