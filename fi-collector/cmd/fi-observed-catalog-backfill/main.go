@@ -414,7 +414,8 @@ func main() {
 	defer cancel()
 	err := run(ctx, os.Args[1:], os.Getenv, os.Stdout)
 	if errors.Is(err, flag.ErrHelp) {
-		fmt.Fprint(os.Stdout, `Repair observed attributes using SELECT-only source access and Kafka publication.
+		fmt.Fprint(os.Stdout, `Repair observed attributes using SELECT-only source access, publishing to Kafka
+or, with FI_OBSERVED_CATALOG_MODE=direct, writing the index directly.
 
 Preview spans:
   fi-observed-catalog-backfill --project UUID --since RFC3339 --until RFC3339
