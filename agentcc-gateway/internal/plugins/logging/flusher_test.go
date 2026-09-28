@@ -491,33 +491,52 @@ func TestLogFlusherClose_WarnsWhenTheBackendIsGone(t *testing.T) {
 	}
 }
 
-// blockingTraceHandler holds each request.trace log line until release closes.
-type blockingTraceHandler struct{ release <-chan struct{} }
+// blockingLogHandler holds each log line whose message is msg until release
+// closes, as a slow stdout would. It sends on started, if set, as one begins.
+type blockingLogHandler struct {
+	msg     string
+	started chan<- struct{}
+	release <-chan struct{}
+}
 
-func (h blockingTraceHandler) Enabled(context.Context, slog.Level) bool { return true }
-func (h blockingTraceHandler) Handle(_ context.Context, r slog.Record) error {
-	if r.Message == "request.trace" {
+func (h blockingLogHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h blockingLogHandler) Handle(_ context.Context, r slog.Record) error {
+	if r.Message == h.msg {
+		if h.started != nil {
+			h.started <- struct{}{}
+		}
 		<-h.release
 	}
 	return nil
 }
-func (h blockingTraceHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
-func (h blockingTraceHandler) WithGroup(string) slog.Handler      { return h }
+func (h blockingLogHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h blockingLogHandler) WithGroup(string) slog.Handler      { return h }
 
 // The plugin's Close makes the last flush while the trace emitter drains, so
 // their waits do not add up in the shutdown's time budget.
 func TestPluginClose_FlushesWhileTheEmitterDrains(t *testing.T) {
 	flushed := make(chan struct{})
 	prev := slog.Default()
-	slog.SetDefault(slog.New(blockingTraceHandler{release: flushed}))
+	slog.SetDefault(slog.New(blockingLogHandler{msg: "request.trace", release: flushed}))
 	defer slog.SetDefault(prev)
+	var p *Plugin
+	emitterClosing := func() bool {
+		p.emitter.mu.RLock()
+		defer p.emitter.mu.RUnlock()
+		return p.emitter.closed
+	}
 	wh := newFakeLogWebhook(t, func(n int, _ *http.Request) int {
 		if n == 1 {
-			close(flushed) // the emitter drains only once the flush is sent
+			// Answer once the emitter has begun to drain, which it finishes
+			// only after this: Close must run the two at once.
+			for d := time.Now().Add(2 * time.Second); !emitterClosing() && time.Now().Before(d); {
+				time.Sleep(time.Millisecond)
+			}
+			close(flushed)
 		}
 		return http.StatusOK
 	})
-	p := New(enabledCfg(), nil)
+	p = New(enabledCfg(), nil)
 	p.SetFlusher(NewLogFlusher(wh.URL, "secret", time.Hour, 100))
 	rc := newRC()
 	rc.Response = &models.ChatCompletionResponse{}
