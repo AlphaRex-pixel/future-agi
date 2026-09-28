@@ -218,10 +218,9 @@ describe("EvalPickerCreateNew — task preview time window", () => {
   });
 });
 
-// EvalPickerCreateNew's single-eval save never checked requireInputs, so a
-// code eval with no required params (e.g. `def evaluate(**kwargs)`) could be
-// saved with an empty mapping — stored that way it reads back as a harness
-// result column, hidden and never graded.
+// The mapping step normally reports at least one mapped input, but an eval
+// stored with an empty mapping reads back as a result column and is never
+// graded, so with requireInputs the save must refuse one outright.
 describe("EvalPickerCreateNew — requireInputs", () => {
   beforeEach(() => {
     capturedProps.simulation = null;

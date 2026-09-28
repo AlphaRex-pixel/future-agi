@@ -496,12 +496,11 @@ const SkeletonRows = (
   too — looking for an eval you already have should say so, not come back empty.
 */
 const AddedEvalsSection = ({ addedEvals, searchQuery, action }) => {
-  // `open` is a tri-state override: null means "let the search decide"
-  // (expanded whenever it matches something), true/false means the user
-  // clicked the header and that wins until the search itself changes. A
-  // plain boolean toggle would do nothing while a search match forces the
-  // box open, and would leave it stuck open after the search that opened
-  // it was cleared.
+  // `open` is a tri-state override: null lets the search decide (expanded
+  // whenever it matches something); true/false is the user's last click on
+  // the header. A plain boolean toggle would do nothing while a search match
+  // forces the box open, and would leave it stuck open after the search that
+  // opened it was cleared.
   const [open, setOpen] = useState(null);
   const q = (searchQuery || "").trim().toLowerCase();
   const shown = q

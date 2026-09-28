@@ -53,9 +53,19 @@ vi.mock("../hooks/useEvalPickerData", () => ({
     setFilters: vi.fn(),
   }),
 }));
-vi.mock("../EvalPickerConfigFull", () => ({
-  default: () => <div data-testid="config-stub" />,
-}));
+vi.mock("../EvalPickerConfigFull", async () => {
+  const { useEvalPickerContext } = await import("../context/EvalPickerContext");
+  const ConfigStub = () => {
+    const { requireInputs } = useEvalPickerContext();
+    return (
+      <div
+        data-testid="config-stub"
+        data-require-inputs={String(requireInputs)}
+      />
+    );
+  };
+  return { default: ConfigStub };
+});
 
 const theme = createTheme({
   palette: palette("light"),
@@ -274,5 +284,20 @@ describe("EvalPickerDrawer — Added evaluations", () => {
       false,
     );
     spy.mockRestore();
+  });
+
+  it("hands requireInputs to the config step, off unless the caller asks", () => {
+    const initialEval = { id: "tpl-a", name: "Alpha eval" };
+    const { unmount } = renderDrawer({ initialEval });
+    expect(screen.getByTestId("config-stub")).toHaveAttribute(
+      "data-require-inputs",
+      "false",
+    );
+    unmount();
+    renderDrawer({ initialEval, requireInputs: true });
+    expect(screen.getByTestId("config-stub")).toHaveAttribute(
+      "data-require-inputs",
+      "true",
+    );
   });
 });
