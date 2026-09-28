@@ -164,9 +164,12 @@ NOISE_LABELS: dict[str, str] = {
     "present": "Background noise",
     "street": "Street",
     "vehicle": "In a car",
-    "transit": "Airport / station",
+    "transit": "Station / transit",
+    "airport": "Airport",
     "retail": "Shop / mall",
     "office": "Office",
+    "home": "Home",
+    "hospital": "Hospital",
     "outdoors": "Outdoors",
     "crowd": "Crowded room",
 }
