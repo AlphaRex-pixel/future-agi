@@ -399,9 +399,21 @@ func (h *Handlers) applyOrgProviderOverride(orgID string, orgCfg *tenant.OrgConf
 // provider config. It checks each enabled provider's model list and creates a
 // cached provider instance with the org's API key.
 func (h *Handlers) resolveOrgProvider(orgID string, orgCfg *tenant.OrgConfig, model string) (providers.Provider, string) {
-	if orgCfg == nil || h.orgProviderCache == nil {
-		return nil, ""
+	if p, providerID, _ := h.orgProviderFor(orgID, orgCfg, model); p != nil {
+		return p, providerID
 	}
+	return nil, ""
+}
+
+// orgProviderFor returns the first of the org's enabled providers that lists
+// model and can be built. When every one that lists it fails to build, it
+// returns the first failure and that provider's ID instead.
+func (h *Handlers) orgProviderFor(orgID string, orgCfg *tenant.OrgConfig, model string) (providers.Provider, string, error) {
+	if orgCfg == nil || h.orgProviderCache == nil {
+		return nil, "", nil
+	}
+	var failedID string
+	var firstErr error
 	for providerID, pcfg := range orgCfg.Providers {
 		if pcfg == nil || !pcfg.Enabled || !pcfg.HasCredentials() {
 			continue
@@ -412,13 +424,16 @@ func (h *Handlers) resolveOrgProvider(orgID string, orgCfg *tenant.OrgConfig, mo
 				if err != nil {
 					slog.Warn("failed to create org provider for model",
 						"org_id", orgID, "provider", providerID, "model", model, "error", err)
+					if firstErr == nil {
+						failedID, firstErr = providerID, err
+					}
 					continue
 				}
-				return p, providerID
+				return p, providerID, nil
 			}
 		}
 	}
-	return nil, ""
+	return nil, failedID, firstErr
 }
 
 func (h *Handlers) effectiveFailover(orgCfg *tenant.OrgConfig) *routing.Failover {
@@ -1160,20 +1175,9 @@ func (h *Handlers) ChatCompletion(w http.ResponseWriter, r *http.Request) {
 // base_url was refused, say) that is the reason to report: the generic
 // answer would send the caller looking at their API key instead.
 func (h *Handlers) unavailableModelError(rc *models.RequestContext, model string) error {
-	orgID, orgCfg := h.resolveOrgConfig(rc)
-	if orgCfg != nil && orgID != "" && h.orgProviderCache != nil {
-		for providerID, pcfg := range orgCfg.Providers {
-			if pcfg == nil || !pcfg.Enabled || !pcfg.HasCredentials() {
-				continue
-			}
-			for _, m := range pcfg.Models {
-				if !orgModelMatches(m, model, providerID) {
-					continue
-				}
-				if _, err := h.orgProviderCache.GetOrCreateWithTenantConfig(orgID, providerID, pcfg.APIKey, pcfg); err != nil {
-					return orgProviderError(model, providerID, err)
-				}
-			}
+	if orgID, orgCfg := h.resolveOrgConfig(rc); orgID != "" {
+		if _, providerID, err := h.orgProviderFor(orgID, orgCfg, model); err != nil {
+			return orgProviderError(model, providerID, err)
 		}
 	}
 	return models.ErrForbidden(fmt.Sprintf("model %q is not available for this API key", model))
@@ -1181,10 +1185,9 @@ func (h *Handlers) unavailableModelError(rc *models.RequestContext, model string
 
 // orgProviderError turns an org provider that could not be built into the
 // error the caller sees. Only a refused base_url is explained in detail; other
-// build errors can carry config the caller should not see.
+// build errors can carry config the caller should not see (orgProviderFor
+// logs them).
 func orgProviderError(model, providerID string, err error) *models.APIError {
-	slog.Warn("org provider unusable", "provider", providerID, "model", model, "error", err)
-
 	var urlErr *providers.BaseURLError
 	if errors.As(err, &urlErr) {
 		status, errType, code := http.StatusForbidden, models.ErrTypePermission, "provider_base_url_blocked"
