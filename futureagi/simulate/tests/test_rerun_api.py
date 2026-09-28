@@ -443,6 +443,7 @@ class TestRerunParallelismAdmission:
             schema_version="futureagi.harness-job.v1",
             payload={
                 "source": {"kind": "remote", "endpoint": "https://agent.example.com"},
+                "scenario_count": 4,
                 "runtime": {
                     "parallelism": 4,
                     "cpu_units": 8,
@@ -452,7 +453,7 @@ class TestRerunParallelismAdmission:
             },
             state=HostedHarnessJob.State.COMPLETED,
             seed=1,
-            scenario_count=1,
+            scenario_count=4,
             artifact_level="standard",
             max_artifact_bytes=1,
             deadline_at=timezone.now() + timedelta(hours=1),
@@ -472,7 +473,10 @@ class TestRerunParallelismAdmission:
         # A rerun re-registers an attempt through the SAME chokepoint.
         register_attempt(job.id, endpoint_base_url="https://platform.example")
         job.refresh_from_db()
-        assert job.payload["metadata"]["parallelism_clamped"] == {"requested": 4}
+        assert job.payload["metadata"]["parallelism_clamped"] == {
+            "requested": 4,
+            "admitted": 1,
+        }
         # Requested value preserved -> a later rerun can re-qualify.
         assert job.payload["runtime"]["parallelism"] == 4
 

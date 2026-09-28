@@ -33892,6 +33892,11 @@ export type SimulateV3TestExecutionCallsGroupBy =
 
 export const SimulateV3TestExecutionCallsGroupBy = {
   goal: "goal",
+  sub_goal: "sub_goal",
+  accent: "accent",
+  age: "age",
+  attack: "attack",
+  task: "task",
   status: "status",
 } as const;
 

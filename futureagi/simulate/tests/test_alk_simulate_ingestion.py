@@ -13,6 +13,7 @@ the API envelope — runs for real.
 
 import importlib
 import json
+import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 

@@ -57762,6 +57762,11 @@
                         "type": "string",
                         "enum": [
                             "goal",
+                            "sub_goal",
+                            "accent",
+                            "age",
+                            "attack",
+                            "task",
                             "status"
                         ],
                         "default": ""

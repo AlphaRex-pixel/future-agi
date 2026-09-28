@@ -327,6 +327,33 @@ describe("RunTraceTable", () => {
     expect(screen.getByText("Showing 51–100 of 200")).toBeInTheDocument();
   });
 
+  it("opens a new page at the top of the table's own scroll box", async () => {
+    const user = userEvent.setup();
+    useRunCalls.mockImplementation((_executionId, opts = {}) => ({
+      tasks: TASKS,
+      columns: COLUMNS,
+      groups: groupsFor(TASKS, opts.groupBy),
+      facets: FACETS,
+      count: 200,
+      totalPages: 2,
+      isLoading: false,
+    }));
+    const scrollTo = vi.fn();
+    const original = Element.prototype.scrollTo;
+    Element.prototype.scrollTo = scrollTo;
+    try {
+      renderTable();
+      await user.click(screen.getByRole("button", { name: "Go to page 2" }));
+
+      expect(scrollTo).toHaveBeenCalledWith({ top: 0 });
+      // The box holding the table, not the card around it.
+      const scrolled = scrollTo.mock.contexts.at(-1);
+      expect(scrolled.querySelector(":scope > table")).not.toBeNull();
+    } finally {
+      Element.prototype.scrollTo = original;
+    }
+  });
+
   it("applies column picker choices to the rendered table", async () => {
     const user = userEvent.setup();
     renderTable();
@@ -355,6 +382,51 @@ describe("RunTraceTable", () => {
     expect(screen.getByText("Passed")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getAllByText("Errored")).not.toHaveLength(0);
+  });
+
+  it("offers the Scenarios tab's axes plus Status and requests the chosen one", async () => {
+    const user = userEvent.setup();
+    renderTable();
+
+    expect(useRunCalls).toHaveBeenLastCalledWith(
+      "ex1",
+      expect.objectContaining({ groupBy: "goal" }),
+    );
+    await user.click(screen.getByRole("button", { name: /Group by/ }));
+    expect(
+      screen.getAllByRole("menuitem").map((item) => item.textContent),
+    ).toEqual([
+      "Use case",
+      "Sub-goal",
+      "Accent",
+      "Age",
+      "Attack",
+      "Task",
+      "Status",
+      "No grouping",
+    ]);
+    await user.click(screen.getByRole("menuitem", { name: "Task" }));
+
+    expect(useRunCalls).toHaveBeenLastCalledWith(
+      "ex1",
+      expect.objectContaining({ groupBy: "task" }),
+    );
+  });
+
+  it("lists every call flat, without group rows, under No grouping", async () => {
+    const user = userEvent.setup();
+    renderTable();
+    await user.click(screen.getByRole("button", { name: /Group by/ }));
+    await user.click(screen.getByRole("menuitem", { name: "No grouping" }));
+
+    expect(useRunCalls).toHaveBeenLastCalledWith(
+      "ex1",
+      expect.objectContaining({ groupBy: "" }),
+    );
+    expect(screen.queryByText(/Expand all|Collapse all/)).toBeNull();
+    TASKS.forEach((task) => {
+      expect(screen.getAllByText(task.scenario).length).toBeGreaterThan(0);
+    });
   });
 
   it("has no AI filter box — it isn't wired for run calls", async () => {
