@@ -1,6 +1,8 @@
 import { Box, Stack, Typography } from "@mui/material";
 import PropTypes from "prop-types";
 import React from "react";
+import Iconify from "src/components/iconify";
+import CustomTooltip from "src/components/tooltip/CustomTooltip";
 import { getFileIcon, statusIcons } from "./icons";
 
 export function TitleCell(props) {
@@ -53,7 +55,7 @@ const cellStyles = {
 };
 
 export function ProcessingStatusCell(props) {
-  const { value } = props;
+  const { value, data } = props;
 
   const statusIconSrc = statusIcons[value];
 
@@ -91,6 +93,16 @@ export function ProcessingStatusCell(props) {
         <Typography variant="s2" fontWeight={"fontWeightMedium"}>
           {value}
         </Typography>
+        {value === "Failed" && data?.error && (
+          <CustomTooltip show={true} title={data.error} arrow>
+            <Iconify
+              icon="solar:info-circle-outline"
+              color="text.primary"
+              width={12}
+              height={12}
+            />
+          </CustomTooltip>
+        )}
       </Stack>
     </Box>
   );
@@ -98,4 +110,5 @@ export function ProcessingStatusCell(props) {
 
 ProcessingStatusCell.propTypes = {
   value: PropTypes.string,
+  data: PropTypes.object,
 };

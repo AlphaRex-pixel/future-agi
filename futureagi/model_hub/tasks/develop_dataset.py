@@ -677,7 +677,7 @@ def ingest_files_to_s3(files, kb_id, org):
     try:
         ingest_futures = []
         docs = []
-        error_files = []
+        file_errors = {}
         latest_error = None
         kb_file = KnowledgeBaseFile.objects.get(id=kb_id)
         kb_file.status = StatusType.PROCESSING.value
@@ -715,7 +715,7 @@ def ingest_files_to_s3(files, kb_id, org):
                     result = future.result()
                     if result and "file_id" in result:
                         if result.get("error"):
-                            error_files.append(result["file_id"])
+                            file_errors[str(result["file_id"])] = result["error"]
                             latest_error = result["error"]
                         else:
                             docs.append(result["file_id"])
@@ -730,9 +730,20 @@ def ingest_files_to_s3(files, kb_id, org):
 
         if docs:
             Files.objects.filter(id__in=docs).update(status=StatusType.COMPLETED.value)
-        if error_files:
-            Files.objects.filter(id__in=error_files).update(
-                status=StatusType.FAILED.value
+        # Keep each file's own error so the files table can show why it failed.
+        for failed_file in Files.objects.filter(id__in=list(file_errors)):
+            # Stored as a JSON string (the files view json.loads it).
+            meta = failed_file.metadata or {}
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except ValueError:
+                    meta = {}
+            if not isinstance(meta, dict):
+                meta = {}
+            meta["error"] = file_errors[str(failed_file.id)][:10000]
+            Files.objects.filter(id=failed_file.id).update(
+                status=StatusType.FAILED.value, metadata=json.dumps(meta)
             )
 
         kb_file.refresh_from_db()
