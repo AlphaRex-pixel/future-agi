@@ -35,7 +35,9 @@ from model_hub.utils.annotation_queue_helpers import (
 )
 from tfc.constants.roles import OrganizationRoles
 from tfc.utils.api_contracts import validated_request
+from tfc.utils.api_errors import ApiErrorCode
 from tfc.utils.api_serializers import ApiTextErrorResponseSerializer
+from tfc.utils.error_codes import get_error_message
 from tfc.utils.general_methods import GeneralMethods
 from tfc.utils.pagination import ExtendedPageNumberPagination
 from tracer.models.span_notes import SpanNotes
@@ -105,9 +107,6 @@ def _resolve_queue_item(queue_item_id, source_type, source_obj, organization, us
     )
 
 
-SCORE_PROJECT_MISMATCH = "score_project_mismatch"
-
-
 def _score_project_conflict(
     queue_item, tracer_project_id, *, source_lookup, label_ids, annotator_id
 ):
@@ -126,10 +125,7 @@ def _score_project_conflict(
         return None
     item_project_id = queue_item.project_id or queue_item.queue.project_id
     if item_project_id and str(item_project_id) != str(tracer_project_id):
-        return (
-            "This queue item belongs to another project's copy of this source. "
-            "Annotate it from that project."
-        )
+        return get_error_message("SCORE_PROJECT_MISMATCH", 0)
     moved = (
         Score.no_workspace_objects.filter(
             **source_lookup,
@@ -143,10 +139,7 @@ def _score_project_conflict(
         .exists()
     )
     if moved:
-        return (
-            "A score on this queue item belongs to another project's copy of "
-            "this source. Annotate it from that project."
-        )
+        return get_error_message("SCORE_PROJECT_MISMATCH", 1)
     return None
 
 
@@ -446,7 +439,9 @@ class ScoreViewSet(viewsets.ModelViewSet):
         )
         if conflict:
             return self._gm.custom_error_response(
-                status.HTTP_409_CONFLICT, conflict, code=SCORE_PROJECT_MISMATCH
+                status.HTTP_409_CONFLICT,
+                conflict,
+                code=ApiErrorCode.SCORE_PROJECT_MISMATCH,
             )
 
         # Upsert: update if exists, create if not.
@@ -585,7 +580,9 @@ class ScoreViewSet(viewsets.ModelViewSet):
         )
         if conflict:
             return self._gm.custom_error_response(
-                status.HTTP_409_CONFLICT, conflict, code=SCORE_PROJECT_MISMATCH
+                status.HTTP_409_CONFLICT,
+                conflict,
+                code=ApiErrorCode.SCORE_PROJECT_MISMATCH,
             )
 
         created_scores = []

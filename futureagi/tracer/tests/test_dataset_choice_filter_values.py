@@ -20,6 +20,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from tfc.utils.api_errors import ApiErrorCode
+from tfc.utils.error_codes import get_error_message
+
 ROOT = Path(__file__).resolve().parents[2]
 DATASET = "11111111-1111-4111-8111-111111111111"
 COLUMN = "22222222-2222-4222-8222-222222222222"
@@ -216,6 +219,9 @@ def reader(dashboard_source):
             HTTP_422_UNPROCESSABLE_ENTITY=422,
         ),
         "logger": Mock(),
+        # The registries the view reads its error codes and messages from.
+        "ApiErrorCode": ApiErrorCode,
+        "get_error_message": get_error_message,
     }
     search_method = next(
         node

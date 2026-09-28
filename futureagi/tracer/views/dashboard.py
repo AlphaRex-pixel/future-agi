@@ -23,10 +23,12 @@ from rest_framework.viewsets import ModelViewSet
 
 from tfc.routers import uses_db
 from tfc.utils.api_contracts import validated_request
+from tfc.utils.api_errors import ApiErrorCode
 from tfc.utils.api_serializers import (
     ApiErrorResponseSerializer,
 )
 from tfc.utils.base_viewset import BaseModelViewSetMixin
+from tfc.utils.error_codes import get_error_message
 from tfc.utils.general_methods import GeneralMethods
 from tracer.db_routing import DATABASE_FOR_DASHBOARD_LIST
 from tracer.models.custom_eval_config import CustomEvalConfig
@@ -5372,8 +5374,8 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
         if len(values) > max_values:
             return self._gm.custom_error_response(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "Too many values to browse exactly. Enter a more specific search.",
-                code="filter_value_inventory_too_broad",
+                get_error_message("FILTER_VALUE_INVENTORY_TOO_BROAD"),
+                code=ApiErrorCode.FILTER_VALUE_INVENTORY_TOO_BROAD,
             )
         if page_size is None:
             return self._gm.success_response(
@@ -5457,7 +5459,7 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                     return self._gm.custom_error_response(
                         status.HTTP_503_SERVICE_UNAVAILABLE,
                         "Filter values are temporarily unavailable. Please retry.",
-                        code="service_unavailable",
+                        code=ApiErrorCode.SERVICE_UNAVAILABLE,
                     )
                 sql = (
                     f"SELECT DISTINCT {col_expr} AS val "
@@ -5512,8 +5514,8 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
         except DatasetValuesTooBroad:
             return self._gm.custom_error_response(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "Too many values to browse exactly. Enter a more specific search.",
-                code="filter_value_inventory_too_broad",
+                get_error_message("FILTER_VALUE_INVENTORY_TOO_BROAD"),
+                code=ApiErrorCode.FILTER_VALUE_INVENTORY_TOO_BROAD,
             )
         except UNAVAILABLE_READ_ERRORS as exc:
             logger.warning(
@@ -5523,7 +5525,7 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
             return self._gm.custom_error_response(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 "Filter values are temporarily unavailable. Please retry.",
-                code="service_unavailable",
+                code=ApiErrorCode.SERVICE_UNAVAILABLE,
             )
         except Exception as exc:
             if is_clickhouse_api_read_unavailable_error(exc):
@@ -5629,8 +5631,8 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
         except DatasetValuesTooBroad:
             return self._gm.custom_error_response(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
-                "Too many values to browse exactly. Enter a more specific search.",
-                code="filter_value_inventory_too_broad",
+                get_error_message("FILTER_VALUE_INVENTORY_TOO_BROAD"),
+                code=ApiErrorCode.FILTER_VALUE_INVENTORY_TOO_BROAD,
             )
         except UNAVAILABLE_READ_ERRORS as exc:
             logger.warning(
@@ -5642,7 +5644,7 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
             return self._gm.custom_error_response(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 "Filter values are temporarily unavailable. Please retry.",
-                code="service_unavailable",
+                code=ApiErrorCode.SERVICE_UNAVAILABLE,
             )
         except Exception as exc:
             logger.exception(
@@ -5718,8 +5720,8 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                     if len(values) > max_values:
                         return self._gm.custom_error_response(
                             status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            "Too many values to browse exactly. Enter a more specific search.",
-                            code="filter_value_inventory_too_broad",
+                            get_error_message("FILTER_VALUE_INVENTORY_TOO_BROAD"),
+                            code=ApiErrorCode.FILTER_VALUE_INVENTORY_TOO_BROAD,
                         )
         except (ReadDeadlineExceeded, InvalidChoiceCell):
             return self._gm.custom_error_response(

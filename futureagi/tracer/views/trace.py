@@ -42,6 +42,7 @@ from rest_framework.viewsets import ModelViewSet
 
 from model_hub.models.score import Score
 from tfc.utils.api_contracts import validated_request
+from tfc.utils.api_errors import ApiErrorCode
 from tfc.utils.api_serializers import ApiErrorResponseSerializer
 from tfc.utils.base_viewset import BaseModelViewSetMixin
 from tfc.utils.error_codes import get_error_message
@@ -7267,8 +7268,8 @@ class UsersView(APIView):
                 # cannot be exact. The cursor contract (the UI's) serves them.
                 return self._gm.custom_error_response(
                     status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    "These user filters need cursor pagination. Retry with cursor_mode=true.",
-                    code="user_filter_requires_cursor",
+                    get_error_message("USER_FILTER_REQUIRES_CURSOR"),
+                    code=ApiErrorCode.USER_FILTER_REQUIRES_CURSOR,
                 )
             # A globally sorted page over a derived metric requires evaluating
             # every matching user before LIMIT.  The bounded cursor path cannot

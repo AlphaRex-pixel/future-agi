@@ -3,6 +3,7 @@
 from rest_framework import status
 
 from tfc.constants.api_calls import DATASET_LIMIT_CHECK_FAILED, APICallStatusChoices
+from tfc.utils.api_errors import ApiErrorCode
 from tfc.utils.error_codes import get_error_message
 from tfc.utils.general_methods import GeneralMethods
 
@@ -19,7 +20,7 @@ def dataset_limit_check_failed_response():
     return _gm.custom_error_response(
         status.HTTP_503_SERVICE_UNAVAILABLE,
         get_error_message(DATASET_LIMIT_CHECK_FAILED),
-        code="dataset_limit_check_failed",
+        code=ApiErrorCode.DATASET_LIMIT_CHECK_FAILED,
     )
 
 
