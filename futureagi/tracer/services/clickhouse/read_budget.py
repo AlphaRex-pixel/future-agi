@@ -41,6 +41,10 @@ _TRANSIENT_CLICKHOUSE_ERROR_CODES = {
     ErrorCodes.SHARD_HAS_NO_CONNECTIONS,
 }
 
+# An INSERT refused while merges are behind: back-pressure, like the read
+# budget codes, not a fault in the rows.
+_WRITE_BACKPRESSURE_ERROR_CODES = {ErrorCodes.TOO_MANY_PARTS}
+
 # Code 386 (NO_COMMON_TYPE) has appeared on customer-facing browse/value APIs
 # when heterogeneous production values reach a ClickHouse comparison.  It is
 # not a timeout and must not be treated as one inside selectors, but at the HTTP
@@ -127,6 +131,23 @@ def is_read_budget_error(exc: Exception) -> bool:
         return getattr(exc, "code", None) in _READ_BUDGET_ERROR_CODES
     if isinstance(exc, ClickHouseConnectDatabaseError):
         return _clickhouse_connect_error_code(exc) in _READ_BUDGET_ERROR_CODES
+    return False
+
+
+def is_clickhouse_overload_error(exc: Exception) -> bool:
+    """Return whether ClickHouse refused a statement for capacity, not content.
+
+    The read-budget codes (memory, timeouts, too many queries) plus
+    TOO_MANY_PARTS. The same statement can succeed later unchanged, so a
+    writer must retry it rather than split it or blame its rows.
+    """
+
+    if is_read_budget_error(exc):
+        return True
+    if isinstance(exc, ClickHouseError):
+        return getattr(exc, "code", None) in _WRITE_BACKPRESSURE_ERROR_CODES
+    if isinstance(exc, ClickHouseConnectDatabaseError):
+        return _clickhouse_connect_error_code(exc) in _WRITE_BACKPRESSURE_ERROR_CODES
     return False
 
 

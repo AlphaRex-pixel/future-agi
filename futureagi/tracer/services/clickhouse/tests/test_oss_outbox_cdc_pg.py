@@ -897,12 +897,17 @@ def test_poison_row_is_bisected_parked_and_later_retried(pg, ch, config, monkeyp
     assert pg.execute(
         "SELECT table_name, pk, error FROM fi_cdc_deadletter"
     ).fetchall() == [("tracer_trace", str(bad), "DataError")]
+    # A parked key's ClickHouse row is stale until it applies.
+    check = cdc.install(pg, ch, config=config, apply=False)
+    assert not check["ready"] and check["parked_keys"] == 1
+    assert any("1 keys are parked" in p for p in check["problems"])
     ch.fail_insert = None
     assert cdc.requeue_deadletter(pg) == 1
     assert cdc.requeue_deadletter(pg) == 0  # at most hourly
     _drain(pg, ch, config)
     assert bad in ch.live("tracer_trace")
     assert not pg.execute("SELECT 1 FROM fi_cdc_deadletter").fetchall()
+    assert cdc.install(pg, ch, config=config, apply=False)["ready"]
 
 
 def test_transient_clickhouse_failure_keeps_every_outbox_row(pg, ch, config):
@@ -919,6 +924,30 @@ def test_transient_clickhouse_failure_keeps_every_outbox_row(pg, ch, config):
     assert not pg.execute("SELECT 1 FROM fi_cdc_deadletter").fetchall()
     ch.fail_insert = None
     assert _drain(pg, ch, config)["outbox_depth"] == 0
+
+
+def test_clickhouse_out_of_memory_parks_nothing_and_keeps_the_batch(pg, ch, config):
+    _install(pg, ch, config)
+    keys = [_trace(pg, name=f"t{i}") for i in range(30)]
+    attempts = []
+
+    def out_of_memory(table, rows, names):
+        attempts.append(table)
+        raise DatabaseError(
+            "Received ClickHouse exception, code: 241, server response: Code: "
+            "241. DB::Exception: Memory limit (total) exceeded. "
+            "(MEMORY_LIMIT_EXCEEDED) (for url http://clickhouse:8123)"
+        )
+
+    ch.fail_insert = out_of_memory
+    with pytest.raises(DatabaseError):
+        _drain(pg, ch, config)
+    assert len(attempts) == 1  # no bisection
+    assert not pg.execute("SELECT 1 FROM fi_cdc_deadletter").fetchall()
+    assert cdc.status(pg, tables=TABLES)["outbox_depth"] == len(keys)
+    ch.fail_insert = None
+    assert _drain(pg, ch, config)["outbox_depth"] == 0
+    assert set(keys) <= set(ch.live("tracer_trace"))
 
 
 def test_park_budget_fails_the_table_instead_of_parking_everything(

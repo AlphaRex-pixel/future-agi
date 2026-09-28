@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
-from clickhouse_connect.driver.exceptions import DataError
+from clickhouse_connect.driver.exceptions import DatabaseError, DataError
 from clickhouse_connect.driver.exceptions import OperationalError as CHOperationalError
 
 from tracer.services.clickhouse import oss_cdc_bootstrap as core
@@ -322,6 +322,38 @@ def test_poison_rows_are_bisected_out_and_parked(monkeypatch):
 def test_transient_errors_are_never_parked(monkeypatch, error):
     with pytest.raises(type(error)):
         _isolate(monkeypatch, lambda values: error, [str(uuid.uuid4())] * 1)
+
+
+def _clickhouse_refusal(code: int, name: str) -> DatabaseError:
+    # What clickhouse-connect raises for a server exception over HTTP.
+    return DatabaseError(
+        f"Received ClickHouse exception, code: {code}, server response: "
+        f"Code: {code}. DB::Exception: limit reached. ({name}) "
+        "(for url http://clickhouse:8123)"
+    )
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        _clickhouse_refusal(241, "MEMORY_LIMIT_EXCEEDED"),
+        _clickhouse_refusal(252, "TOO_MANY_PARTS"),
+        _clickhouse_refusal(202, "TOO_MANY_SIMULTANEOUS_QUERIES"),
+        _clickhouse_refusal(159, "TIMEOUT_EXCEEDED"),
+    ],
+)
+def test_clickhouse_capacity_errors_fail_the_tick_without_bisecting(monkeypatch, error):
+    # A server short of memory or behind on merges refuses the whole batch;
+    # bisecting it would park healthy keys (and leave their CH rows stale).
+    calls = []
+
+    def fail(values):
+        calls.append(values)
+        return error
+
+    with pytest.raises(DatabaseError):
+        _isolate(monkeypatch, fail, [str(uuid.uuid4()) for _ in range(8)])
+    assert len(calls) == 1
 
 
 def test_structural_errors_fail_the_table_without_bisecting(monkeypatch):

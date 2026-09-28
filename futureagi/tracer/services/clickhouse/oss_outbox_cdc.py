@@ -75,6 +75,7 @@ from clickhouse_connect.driver.exceptions import (
 
 from tracer.services.clickhouse import oss_cdc_bootstrap as core
 from tracer.services.clickhouse import oss_cdc_upgrade as upgrade
+from tracer.services.clickhouse import read_budget
 from tracer.services.clickhouse.oss_cdc_source import (
     SourceError,
     SourceInventory,
@@ -775,8 +776,9 @@ def _apply_isolated(
 ) -> set[str]:
     """Apply ``keys`` (outbox text form); bisect a failure down to poison rows.
 
-    Returns the parked keys. Raises transient errors unchanged and
-    ``_TableFailed`` for structural errors or when the park budget runs out.
+    Returns the parked keys. Raises transient and ClickHouse capacity errors
+    unchanged and ``_TableFailed`` for structural errors or when the park
+    budget runs out.
     """
     try:
         apply_keys(pg, ch, spec, [spec.pk_value(k) for k in keys], clock, stats)
@@ -786,6 +788,10 @@ def _apply_isolated(
     except _STRUCTURAL as error:
         raise _TableFailed(error) from error
     except Exception as error:
+        if read_budget.is_clickhouse_overload_error(error):
+            # ClickHouse is short of memory or behind on merges: the batch,
+            # not a row, is the problem. Fail the tick; the next retries it.
+            raise
         if len(keys) > 1:
             mid = len(keys) // 2
             return _apply_isolated(
@@ -1520,6 +1526,12 @@ def check(pg, ch, *, config, source, tables, peerdb) -> dict:
             )
         if state["outbox_depth"] > CHECK_MAX_DEPTH:
             problems.append(f"outbox holds {state['outbox_depth']} rows")
+        if state["parked_keys"]:
+            problems.append(
+                f"{state['parked_keys']} keys are parked in {DEADLETTER}, so "
+                "their ClickHouse rows are stale; fix the cause, then run "
+                "`requeue --apply`"
+            )
     try:
         core.inspect_bootstrap(
             ch,
