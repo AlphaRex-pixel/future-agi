@@ -544,9 +544,9 @@ const EvalPickerCreateNew = ({ onBack, onSave }) => {
     }
     if (!validate()) return;
     if (requireInputs && Object.keys(sourceMapping || {}).length === 0) {
-      // A code eval with no required params (e.g. `def evaluate(**kwargs)`)
-      // can pass every other check with an empty mapping — stored that way
-      // it reads back as a harness result column (D13), never graded.
+      // Defensive: the mapping step normally guarantees at least one mapped
+      // input, but an eval stored with an empty mapping reads back as a
+      // result column and is never graded, so never save one here.
       enqueueSnackbar(
         "This evaluation has no inputs to map, so it can't run in an environment.",
         { variant: "error" },

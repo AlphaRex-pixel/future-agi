@@ -218,12 +218,11 @@ describe("EvalPickerCreateNew — task preview time window", () => {
   });
 });
 
-// F4 (cold review 1): EvalPickerCreateNew's single-eval save never checked
-// requireInputs, so a code eval with no required params (e.g.
-// `def evaluate(**kwargs)`) could be saved with an empty mapping — stored
-// that way it reads back as a harness result column (D13), hidden and never
-// graded.
-describe("EvalPickerCreateNew — requireInputs (D13, F4)", () => {
+// EvalPickerCreateNew's single-eval save never checked requireInputs, so a
+// code eval with no required params (e.g. `def evaluate(**kwargs)`) could be
+// saved with an empty mapping — stored that way it reads back as a harness
+// result column, hidden and never graded.
+describe("EvalPickerCreateNew — requireInputs", () => {
   beforeEach(() => {
     capturedProps.simulation = null;
     enqueueSnackbarSpy.mockClear();
@@ -245,8 +244,8 @@ describe("EvalPickerCreateNew — requireInputs (D13, F4)", () => {
     );
 
     // Simulate the (mocked) SimulationTestMode reporting "ready" with an
-    // empty mapping — the real case when the code has no required params,
-    // so there is nothing left for the user to map.
+    // empty mapping — a state the mapping step should never report; the
+    // save must still refuse it.
     await act(async () => {
       capturedProps.simulation.onReadyChange(true, {});
     });

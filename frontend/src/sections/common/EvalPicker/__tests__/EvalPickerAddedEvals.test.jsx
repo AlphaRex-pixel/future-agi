@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { palette } from "src/theme/palette";
 import EvalPickerDrawer from "../EvalPickerDrawer";
 
-const data = vi.hoisted(() => ({ searchQuery: "" }));
+const data = vi.hoisted(() => ({ searchQuery: "", items: null }));
 const ITEMS = [
   {
     id: "tpl-a",
@@ -37,8 +37,8 @@ const ITEMS = [
 
 vi.mock("../hooks/useEvalPickerData", () => ({
   useEvalPickerData: () => ({
-    items: ITEMS,
-    total: ITEMS.length,
+    items: data.items ?? ITEMS,
+    total: (data.items ?? ITEMS).length,
     isLoading: false,
     isSearching: false,
     searchQuery: data.searchQuery,
@@ -61,28 +61,27 @@ const theme = createTheme({
   palette: palette("light"),
   spacing: (f) => `${0.25 * f}rem`,
 });
-const renderDrawer = (props) =>
-  render(
-    <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
-      <BrowserRouter>
-        <ThemeProvider theme={theme}>
-          <EvalPickerDrawer
-            open
-            onClose={vi.fn()}
-            source="simulation"
-            {...props}
-          />
-        </ThemeProvider>
-      </BrowserRouter>
-    </QueryClientProvider>,
-  );
+const drawerTree = (props) => (
+  <QueryClientProvider
+    client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+  >
+    <BrowserRouter>
+      <ThemeProvider theme={theme}>
+        <EvalPickerDrawer
+          open
+          onClose={vi.fn()}
+          source="simulation"
+          {...props}
+        />
+      </ThemeProvider>
+    </BrowserRouter>
+  </QueryClientProvider>
+);
+const renderDrawer = (props) => render(drawerTree(props));
 
 beforeEach(() => {
   data.searchQuery = "";
+  data.items = null;
 });
 
 describe("EvalPickerDrawer — Added evaluations", () => {
@@ -153,10 +152,9 @@ describe("EvalPickerDrawer — Added evaluations", () => {
     ).toHaveLength(1);
   });
 
-  // F2 — with the box off (addedEvals absent), existingEvals must still
-  // disable already-added rows in the plain list the way every other
-  // caller relies on today; the box's own id/name filter must not apply
-  // in that case.
+  // With the box off (addedEvals absent), existingEvals must still disable
+  // already-added rows in the plain list the way every other caller relies
+  // on today; the box's own id/name filter must not apply in that case.
   it("keeps already-added rows as disabled 'Added' rows when addedEvals is absent", () => {
     renderDrawer({ existingEvals: [{ id: "tpl-a" }] });
     expect(screen.getByText("Alpha eval")).toBeInTheDocument();
@@ -168,7 +166,7 @@ describe("EvalPickerDrawer — Added evaluations", () => {
     expect(screen.queryByText("Alpha eval")).toBeNull();
   });
 
-  // F6 — behaviours already implemented but previously untested.
+  // Behaviours already implemented but previously untested.
   it("matches names case-insensitively", () => {
     renderDrawer({ addedEvals: [{ id: "zz", name: "GAMMA EVAL" }] });
     expect(screen.queryByText("Gamma eval")).toBeNull();
@@ -209,5 +207,72 @@ describe("EvalPickerDrawer — Added evaluations", () => {
     const btn = screen.getByRole("button", { name: "Grade this run" });
     expect(btn).toBeDisabled();
     expect(within(btn).getByRole("progressbar")).toBeInTheDocument();
+  });
+
+  it("keeps a box the user opened open through a search that matches none of it", () => {
+    const { rerender } = renderDrawer({
+      addedEvals: [{ id: "a", name: "alpha x" }],
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Added evaluations/ }));
+    data.searchQuery = "zzz";
+    rerender(drawerTree({ addedEvals: [{ id: "a", name: "alpha x" }] }));
+    expect(
+      screen.getByRole("button", { name: /Added evaluations/ }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByText("None of the added evaluations match your search."),
+    ).toBeInTheDocument();
+  });
+
+  it("lets the header close a box the search opened, until the search changes", () => {
+    data.searchQuery = "alpha";
+    const { rerender } = renderDrawer({
+      addedEvals: [{ id: "a", name: "alpha x" }],
+    });
+    const header = () =>
+      screen.getByRole("button", { name: /Added evaluations/ });
+    expect(header()).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(header());
+    expect(header()).toHaveAttribute("aria-expanded", "false");
+    data.searchQuery = "alph";
+    rerender(drawerTree({ addedEvals: [{ id: "a", name: "alpha x" }] }));
+    expect(header()).toHaveAttribute("aria-expanded", "true");
+    data.searchQuery = "";
+    rerender(drawerTree({ addedEvals: [{ id: "a", name: "alpha x" }] }));
+    expect(header()).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("trims names before matching", () => {
+    renderDrawer({ addedEvals: [{ id: "zz", name: "  GAMMA EVAL " }] });
+    expect(screen.queryByText("Gamma eval")).toBeNull();
+  });
+
+  it("says every match is already added when the box takes the whole page", () => {
+    renderDrawer({ addedEvals: ITEMS.map(({ id, name }) => ({ id, name })) });
+    expect(
+      screen.getByText("Every matching evaluation is already added."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No evaluations found")).toBeNull();
+  });
+
+  it("keeps 'No evaluations found' for an empty page without addedEvals", () => {
+    data.items = [];
+    renderDrawer({});
+    expect(screen.getByText("No evaluations found")).toBeInTheDocument();
+  });
+
+  it("renders two added configs of one template without a key clash", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderDrawer({
+      addedEvals: [
+        { id: "tpl-x", name: "toxicity" },
+        { id: "tpl-x", name: "toxicity_2" },
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Added evaluations/ }));
+    expect(spy.mock.calls.some((c) => String(c[0]).includes("same key"))).toBe(
+      false,
+    );
+    spy.mockRestore();
   });
 });

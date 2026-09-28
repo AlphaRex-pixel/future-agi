@@ -511,9 +511,11 @@ const AddedEvalsSection = ({ addedEvals, searchQuery, action }) => {
     : addedEvals;
   const expanded = open ?? Boolean(q && shown.length > 0);
 
+  // A new search re-arms auto-expand only when the user had closed the box;
+  // a box they opened stays open and says when nothing matches.
   useEffect(() => {
-    setOpen(null);
-  }, [searchQuery]);
+    setOpen((v) => (v === false ? null : v));
+  }, [q]);
 
   if (!addedEvals.length) return null;
   return (
@@ -676,9 +678,8 @@ AddedEvalsSection.propTypes = {
   action: PropTypes.shape({
     label: PropTypes.string.isRequired,
     onClick: PropTypes.func.isRequired,
-    // The added eval's name — matched against the row it's rendering the
-    // spinner for. Not an id despite the caller-facing prop name pattern;
-    // callers only know these rows by name (see EvalPickerList.jsx D2).
+    // Name of the added eval whose action is in flight; its row shows a spinner.
+    // Matched by name because one template can back several added evals.
     busyName: PropTypes.string,
     disabled: PropTypes.bool,
     show: PropTypes.func,

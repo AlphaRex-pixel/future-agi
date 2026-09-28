@@ -291,6 +291,7 @@ const EvalPickerContent = ({
  * @param {function} onEvalAdded - Called with the configured eval object when user saves
  * @param {Array} existingEvals - Already-added evals (to disable re-adding)
  * @param {Array} addedEvals - Opt-in: already-added evals ({ id, name, meta }) shown in a collapsible "Added evaluations" box and left out of the list
+ * @param {Object} addedEvalAction - Opt-in: one button per added row ({ label, onClick(addedEval), busyName?, disabled?, show?(addedEval) })
  * @param {boolean} requireInputs - Opt-in: refuse to add an eval that has no inputs to map
  * @param {string} drawerType - MUI Drawer variant: "temporary" (default) or "persistent"
  * @param {number|string} width - Drawer width (default: 700px)
