@@ -13,9 +13,8 @@ set and the aggregate itself), on one thread. The lean statement:
 * keeps ``spans FINAL`` for the aggregate itself, so "the latest live version
   of each span" is resolved exactly as before (re-parents, tombstones,
   resurrections, session moves and equal-version ties included);
-* runs on ``EXACT_GRAPH_SESSION_READ_MAX_THREADS`` threads with FINAL kept
-  inside each day partition (every version of a span shares its start hour,
-  so its partition), on the background worker only.
+* runs on ``EXACT_GRAPH_SESSION_READ_MAX_THREADS`` threads, on the
+  background worker only.
 
 **The oracle is dev's statement itself**, produced by the same public reader
 with the lean switch and the session settings removed. Both run on one
@@ -832,8 +831,10 @@ def test_query_log_reads_fewer_rows_on_background_threads(store, case):
     threads = graph.settings.EXACT_GRAPH_SESSION_READ_MAX_THREADS
     assert threads > graph.settings.FILTER_SELECTOR_MAX_THREADS
     assert lean.settings["max_threads"] == threads
-    assert lean.settings["do_not_merge_across_partitions_select_final"] == 1
-    assert "do_not_merge_across_partitions_select_final" not in dev.settings
+    # Only the thread budget differs from the shared exact envelope.
+    assert {k: v for k, v in lean.settings.items() if k != "max_threads"} == {
+        k: v for k, v in dev.settings.items() if k != "max_threads"
+    }
     assert dev.settings["max_threads"] == graph.settings.FILTER_SELECTOR_MAX_THREADS
     # ``Settings['max_threads']`` is blank when the value equals the server's
     # auto default, so prove the parallelism by the threads the query used.

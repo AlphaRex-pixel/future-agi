@@ -4791,23 +4791,21 @@ def _session_graph_read_settings() -> dict[str, Any]:
     """Settings for the Sessions graph statement, which only the background
     exact-aggregation worker runs.
 
-    It is the shared exact envelope with two changes. The statement may use
-    ``EXACT_GRAPH_SESSION_READ_MAX_THREADS`` workers, and its ``spans FINAL``
-    collapses versions inside each day partition only. Every version of a
-    span shares its replacement key, which contains the start hour, so all of
-    them live in one ``toDate(start_time)`` partition: no merge across
-    partitions can ever pair two versions, and per-partition FINAL returns
-    the same rows while each partition is read by its own worker, without
-    re-reading intersecting ranges. The byte, memory, result and deadline
-    ceilings stay the shared ones. Built per call so a runtime or test
-    override of the shared dict is honoured. Interactive statements keep
-    ``FILTER_SELECTOR_MAX_THREADS``.
+    It is the shared exact envelope with one change: the statement may use
+    ``EXACT_GRAPH_SESSION_READ_MAX_THREADS`` workers, which parallel FINAL
+    spreads over key ranges (ranges no fresh part overlaps skip the merge).
+    Per-partition FINAL (``do_not_merge_across_partitions_select_final``) is
+    deliberately not set: on a merged day part plus small fresh version parts
+    it sends every row through the merge and measured 2-3x more CPU. Block
+    sizes stay the shared ones; larger blocks multiplied memory ~5x. The
+    byte, memory, result and deadline ceilings stay the shared ones. Built per
+    call so a runtime or test override of the shared dict is honoured.
+    Interactive statements keep ``FILTER_SELECTOR_MAX_THREADS``.
     """
 
     return {
         **EXACT_GRAPH_READ_SETTINGS,
         "max_threads": settings.EXACT_GRAPH_SESSION_READ_MAX_THREADS,
-        "do_not_merge_across_partitions_select_final": 1,
     }
 
 
