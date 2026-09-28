@@ -277,7 +277,7 @@ application code.
 | Hardware | 2 vCPU, 4 GB (3 GB minimum); idles at about 1 GB | 4+ vCPU, 12–16 GB (6 GB minimum) | Evaluation: about 4 CPUs and 8 GiB free. Production: per service, see [Sizing](deploy/helm/futureagi/README.md#sizing) |
 | Workflow engine | Temporal dev server (SQLite) inside `app`; the worker runs in the API process | Temporal server on Postgres; one all-queue worker, per-queue workers with the `all` profile | Your Temporal (or a bundled dev server); all-queue worker plus optional per-queue Deployments |
 | Postgres → ClickHouse sync | In-process outbox | PeerDB | In-process outbox |
-| Observed-attribute suggestions (Kafka catalog) | Off | On | Off |
+| Observed-attribute suggestions in filters, widgets and tasks | On: the collector writes them directly | On: through Kafka | On: the collector writes them directly |
 | Model serving | Optional (`ml` profile) | Always on | Optional (`serving.enabled`) |
 | Code-eval sandbox | In-app, unprivileged; nsjail with the optional `sandbox` profile. See [Code evals and the sandbox](#code-evals-and-the-sandbox) | nsjail `code-executor` (privileged) | Off by default: custom code evals are refused until you enable the privileged sandbox |
 | Scaling | One machine | Per service, on one machine | Per service, with autoscaling |
@@ -1368,6 +1368,38 @@ If your platform cannot run `code-executor` at all, you can set `CODE_EXECUTOR_L
 Distributed. The Postgres connection is the usual cause. Check
 `docker compose logs postgres` for out-of-memory kills, and raise the Docker
 VM's memory to 12 GB or more.
+
+### Filters suggest no attributes or values for older traces
+
+Trace filters, dashboard widgets and task filters suggest the span attributes
+and values that were indexed as spans arrived (the observed-attribute index,
+written by the collector). Spans stored while nothing indexed them are
+missing from the suggestions, although filtering on them still works when you
+type the name and value. That covers Standalone and Helm installs made before
+the collector wrote the index itself, and the gaps the collector logs as
+`observed_catalog_handoff_gap`, with the affected project and time range in
+the `observed_catalog_repair_scope` events that follow.
+
+Index a project's older spans with `fi-observed-catalog-backfill`, which is in
+the `app` container (Standalone). Without `--apply` it only previews, writing
+nothing:
+
+```bash
+docker compose exec app sh -c 'FI_PG_DSN="$FI_PG_READ" \
+  FI_OBSERVED_BACKFILL_CH_URL="$FI_CH_URL" FI_OBSERVED_BACKFILL_CH_DATABASE="$FI_CH_DATABASE" \
+  FI_OBSERVED_BACKFILL_CH_USERNAME="$CH_USERNAME" FI_OBSERVED_BACKFILL_CH_PASSWORD="$CH_PASSWORD" \
+  exec fi-observed-catalog-backfill "$@"' backfill \
+  --project <project UUID> --since 2026-01-01T00:00:00Z --until 2026-10-01T00:00:00Z
+```
+
+Then run it again with `--apply --checkpoint /data/collector/backfill-<project UUID>.json`
+added. Every hour of the range takes at least one page and a run stops after
+`--max-pages` (100): raise it, or repeat the same command until its last line
+says `"scan_complete": true`. Rerunning over a range already indexed is
+harmless. On Helm, run the same binary from the
+`futureagi/fi-collector` image with the collector's environment; see
+[fi-collector/PROPERTY_CATALOG_OSS.md](fi-collector/PROPERTY_CATALOG_OSS.md)
+for every option.
 
 ---
 

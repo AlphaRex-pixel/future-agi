@@ -482,20 +482,26 @@ database, override `PG_HOST`, `PGBOUNCER_HOST` or `CH_HOST` in a
 | `AGENTCC_INTERNAL_URL`, `AGENTCC_GATEWAY_INTERNAL_URL` | `http://agentcc-gateway:8080` | D H | Gateway address inside the Compose network. Standalone fixes it inside the container. |
 | `ALK_RUNNER_API_URL` | S: `http://127.0.0.1:8000`; D: `http://backend` | S D H | Platform URL the simulation runner reports results to. |
 
-### Distributed: observed-attribute catalog (Kafka)
+### Observed-attribute catalog
 
-Suggestions of observed span attributes, collected through Kafka. Standalone
-creates the (empty) catalog database and its two users but runs no Kafka.
+The span attributes and values that trace filters, dashboard widgets and task
+filters suggest (including values of built-in properties such as the model).
+The bootstrap creates the catalog database and its two users. Standalone and
+Helm collectors write it directly (`FI_OBSERVED_CATALOG_MODE=direct`, through
+a local spool); Distributed's collector publishes to Kafka and
+`fi-property-catalog-consumer` writes it. Spans stored before an install
+collected them can be indexed later with `fi-observed-catalog-backfill`
+([INSTALLATION.md](../INSTALLATION.md#filters-suggest-no-attributes-or-values-for-older-traces)).
 
 | Key | Default | Setups | What it does |
 | --- | --- | --- | --- |
 | `PROPERTY_CATALOG_DATABASE` | `property_catalog` | S D H | ClickHouse database of the catalog. |
 | `PROPERTY_CATALOG_API_PASSWORD` | `oss-observed-reader-local-only` | S D H | Password of the catalog's read-only ClickHouse user. Required by the production overlay; reuse the provisioned value, never rotate it on retained data. |
-| `PROPERTY_CATALOG_CONSUMER_PASSWORD` | `oss-observed-writer-local-only` | S D H | Password of the catalog's writer user. Same rules. |
+| `PROPERTY_CATALOG_CONSUMER_PASSWORD` | `oss-observed-writer-local-only` | S D H | Password of the catalog's writer user: the collector (S, H) or the Kafka consumer (D). Same rules. |
 | `OBSERVED_CATALOG_KAFKA_TOPIC` | `futureagi.observed-attributes.v1` | D H | Topic the collector publishes observations to. |
 | `OBSERVED_CATALOG_KAFKA_GROUP` | `futureagi.observed-attributes.consumer.v1` | D H | Consumer group of the catalog writer. |
-| `OBSERVED_CATALOG_MAX_SPOOL_FILES`, `OBSERVED_CATALOG_MAX_SPOOL_BYTES` | `10000`, `536870912` | D H | Local spool limits of the collector while Kafka is unreachable. |
-| `FI_OBSERVED_CATALOG_MAX_KEYS_PER_SPAN`, `FI_OBSERVED_CATALOG_MAX_ARRAY_MEMBERS_PER_SPAN` | `128`, `256` | D H | Most attribute keys and array members observed per span. |
+| `OBSERVED_CATALOG_MAX_SPOOL_FILES`, `OBSERVED_CATALOG_MAX_SPOOL_BYTES` | `10000`, `536870912` | D H | Local spool limits of the collector while Kafka is unreachable. Standalone reads them as `FI_OBSERVED_CATALOG_MAX_SPOOL_FILES` and `FI_OBSERVED_CATALOG_MAX_SPOOL_BYTES` (while ClickHouse is unreachable). |
+| `FI_OBSERVED_CATALOG_MAX_KEYS_PER_SPAN`, `FI_OBSERVED_CATALOG_MAX_ARRAY_MEMBERS_PER_SPAN` | `128`, `256` | S D H | Most attribute keys and array members observed per span. |
 | `ERROR_FEED_KAFKA_TOPIC` | `error-feed.trace-available.v1` | D H | Topic announcing new traces to the error feed. Must differ from the catalog topic. |
 | `PROPERTY_CATALOG_KAFKA_PARTITIONS` | `6` | D | Partitions of both topics. |
 | `PROPERTY_CATALOG_KAFKA_RETENTION_MS`, `PROPERTY_CATALOG_KAFKA_RETENTION_HOURS` | `259200000`, `72` | D | Topic retention and the broker's log retention. |
@@ -557,7 +563,8 @@ nothing. Change what they are derived from instead, or use a
 | `REDIS_HOST`, `REDIS_URL`, `REDIS_CACHE_URL`, `REDIS_LOCK_URL`, `REDIS_STATE_URL`, `CHANNEL_LAYER_BACKEND`, `CHANNEL_REDIS_URL` | the bundled Redis, databases 0 to 3 | S D | `REDIS_PASSWORD` in Standalone. |
 | `TEMPORAL_HOST` | `127.0.0.1:7233` (S), `temporal:7233` (D) | S D | The bundled Temporal. |
 | `S3_ENDPOINT_URL`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET` | the bundled MinIO, bucket `futureagi` | S D | `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`. |
-| `FI_PG_WRITE`, `FI_PG_READ`, `FI_CH_URL`, `FI_AUTH_REDIS_ADDR`, `FI_AUTH_REDIS_PASSWORD`, `FI_GRPC_ADDR`, `FI_HTTP_ADDR`, `FI_ADMIN_ADDR`, `FI_DEAD_LETTER_FILE`, `FI_OBSERVED_CATALOG_MODE`, `FI_PROPERTY_CATALOG_MODE`, `FI_ERROR_FEED_KAFKA_BROKERS` and the other `FI_*` collector settings | the collector's addresses and credentials | S D | `PG_*`, `REDIS_PASSWORD`, `CH_DATABASE`, the catalog keys above. |
+| `FI_PG_WRITE`, `FI_PG_READ`, `FI_CH_URL`, `FI_AUTH_REDIS_ADDR`, `FI_AUTH_REDIS_PASSWORD`, `FI_GRPC_ADDR`, `FI_HTTP_ADDR`, `FI_ADMIN_ADDR`, `FI_DEAD_LETTER_FILE`, `FI_ERROR_FEED_KAFKA_BROKERS` and the other `FI_*` collector settings | the collector's addresses and credentials | S D | `PG_*`, `REDIS_PASSWORD`, `CH_DATABASE`, the catalog keys above. |
+| `FI_OBSERVED_CATALOG_MODE`, `FI_OBSERVED_CATALOG_CH_URL`, `FI_OBSERVED_CATALOG_CH_DATABASE`, `FI_OBSERVED_CATALOG_CH_USERNAME`, `FI_OBSERVED_CATALOG_CH_PASSWORD`, `FI_OBSERVED_CATALOG_SPOOL_DIR` | S: `direct`, the catalog's writer user, spool in `/data/collector/observed-catalog`; D: `kafka` and the `FI_OBSERVED_CATALOG_KAFKA_*` broker and topic | S D | How the collector hands on observed attributes. `PROPERTY_CATALOG_DATABASE`, `PROPERTY_CATALOG_CONSUMER_PASSWORD`, `OBSERVED_CATALOG_KAFKA_TOPIC`. `FI_PROPERTY_CATALOG_MODE` stays `disabled`: the collector refuses any other value of this retired key. |
 | `FI_COLLECTOR_HOST` | `127.0.0.1` (S), `fi-collector` (D) | S D | The setup checks probe the collector there, on its container port 4317 whatever `FI_COLLECTOR_OTLP_PORT` publishes on the host. |
 | `PROPERTY_CATALOG_CH_HOST`, `PROPERTY_CATALOG_CH_PORT`, `PROPERTY_CATALOG_CH_USER`, `PROPERTY_CATALOG_CH_PASSWORD` | the catalog's read-only ClickHouse user | S D | `PROPERTY_CATALOG_API_PASSWORD`. |
 | `DJANGO_SETTINGS_MODULE`, `SERVICE_TYPE`, `NO_STARTUP_DB_MUTATIONS`, `FI_SKIP_CH25_MIGRATION` | fixed | S D | Only the bootstrap jobs change the database schema. |

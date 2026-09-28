@@ -233,7 +233,8 @@ Distributed has:
 - the PeerDB change data capture from Postgres to ClickHouse (Standalone uses
   an in-process outbox, `FI_CDC_MODE=outbox`);
 - per-queue Temporal workers and queue routing;
-- the Kafka-backed observed-attribute catalog;
+- the Kafka transport of the observed-attribute catalog (Standalone's
+  collector writes the index directly);
 - the voice simulation runner (`worker-simulation-runner`);
 - the gRPC server (port `50051`);
 - `docker-compose.distributed.yml` or the production overlay themselves.

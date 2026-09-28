@@ -108,6 +108,13 @@ EOF
 if [ -n "$REDIS_PASSWORD" ] && ! grep -q FI_AUTH_REDIS_PASSWORD /usr/local/bin/fi-collector; then
   unset FI_AUTH_REDIS_ADDR
 fi
+# fi-collector builds without FI_OBSERVED_CATALOG_MODE=direct refuse to start
+# with it. They run without observed-attribute suggestions instead.
+if [ "${FI_OBSERVED_CATALOG_MODE:-}" = "direct" ] \
+  && ! grep -q "FI_OBSERVED_CATALOG_MODE=direct" /usr/local/bin/fi-collector; then
+  echo "[start] this fi-collector cannot write observed attributes without Kafka; property suggestions stay off" >&2
+  export FI_OBSERVED_CATALOG_MODE=disabled
+fi
 
 # The collector's Postgres DSNs (docker-compose.yml) embed PG_USER and
 # PG_PASSWORD verbatim; percent-encode them when they need it.

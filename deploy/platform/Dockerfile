@@ -75,6 +75,9 @@ RUN apt-get update \
     && install -d -m 0700 -o root -g root /etc/futureagi/secrets
 
 COPY --from=collector /usr/local/bin/fi-collector /usr/local/bin/fi-collector
+# Indexes the attributes of spans stored while nothing collected them
+# (INSTALLATION.md, "Filters suggest no attributes or values for older traces").
+COPY --from=collector /usr/local/bin/fi-observed-catalog-backfill /usr/local/bin/fi-observed-catalog-backfill
 COPY --from=collector /etc/fi-collector/config.yaml /etc/fi-collector/config.yaml
 COPY --from=gateway /app/agentcc-gateway /usr/local/bin/agentcc-gateway
 COPY --from=temporal /usr/local/bin/temporal /usr/local/bin/temporal

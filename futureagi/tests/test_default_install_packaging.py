@@ -94,7 +94,18 @@ def test_default_app_service_contract() -> None:
     assert env["EXACT_AGGREGATION_TASK_QUEUE"] == (
         "${EXACT_AGGREGATION_TASK_QUEUE:-exact_aggregation}"
     )
-    assert env["FI_OBSERVED_CATALOG_MODE"] == "disabled"
+    # No Kafka: the collector writes the observed-attribute index the
+    # bootstrap provisions, as its writer, from a spool on the data volume.
+    assert env["FI_OBSERVED_CATALOG_MODE"] == "direct"
+    assert env["FI_OBSERVED_CATALOG_CH_URL"] == "http://clickhouse:8123"
+    assert env["FI_OBSERVED_CATALOG_CH_DATABASE"] == env["PROPERTY_CATALOG_DATABASE"]
+    assert env["FI_OBSERVED_CATALOG_CH_USERNAME"] == "observed_catalog_writer"
+    assert (
+        env["FI_OBSERVED_CATALOG_CH_PASSWORD"]
+        == env["PROPERTY_CATALOG_CONSUMER_PASSWORD"]
+    )
+    assert env["FI_OBSERVED_CATALOG_SPOOL_DIR"].startswith("/data/collector/")
+    assert env["FI_PROPERTY_CATALOG_MODE"] == "disabled"
     assert env["ENABLE_GRPC"] == "false"
     assert env["DEBUG"] == "${DEBUG:-false}"
     assert env["TEMPORAL_HOST"] == "127.0.0.1:7233"
@@ -496,6 +507,31 @@ def _run_start_section(section: str, env: dict[str, str], epilogue: str) -> str:
         check=True,
     )
     return result.stdout
+
+
+@pytest.mark.parametrize(
+    "binary, expected",
+    [
+        (b"\x7fELF FI_OBSERVED_CATALOG_MODE=direct requires ...", "direct"),
+        (b"\x7fELF FI_OBSERVED_CATALOG_MODE must be disabled or kafka", "disabled"),
+    ],
+)
+def test_start_keeps_a_collector_without_direct_mode_running(
+    tmp_path, binary, expected
+) -> None:
+    """docker-compose.yml asks for FI_OBSERVED_CATALOG_MODE=direct; a platform
+    image built with an older fi-collector would refuse it and never start."""
+    collector = tmp_path / "fi-collector"
+    collector.write_bytes(binary)
+    section = _start_section(
+        'if [ "${FI_OBSERVED_CATALOG_MODE:-}" = "direct" ]', "fi\n"
+    ).replace("/usr/local/bin/fi-collector", str(collector))
+    out = _run_start_section(
+        section,
+        {"FI_OBSERVED_CATALOG_MODE": "direct"},
+        'printf %s "$FI_OBSERVED_CATALOG_MODE"',
+    )
+    assert out == expected
 
 
 @pytest.mark.parametrize("key_mounted", [True, False])

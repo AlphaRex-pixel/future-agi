@@ -151,8 +151,9 @@ services:
       CH25_DROP_LEGACY_CDC_CHAIN: ${CH25_DROP_LEGACY_CDC_CHAIN:-true}
       CH25_EVAL_LOGGER_TABLE: ${CH25_EVAL_LOGGER_TABLE:-tracer_eval_logger}
       CH25_QUERY_TYPES_V2_ONLY: ${CH25_QUERY_TYPES_V2_ONLY:-span_list,trace_list,session_list,voice_call_list,dashboard,monitor_metrics,eval_metrics,filter_builder,trace_detail,annotation_labels}
-      # Observed-attribute index: the bootstrap creates it (empty) and its
-      # users; suggestions are collected only by the distributed topology's Kafka.
+      # Observed-attribute index (property and value suggestions in filters,
+      # widgets and tasks): the bootstrap creates it and its users; the
+      # collector writes it directly (FI_OBSERVED_CATALOG_* below), no Kafka.
       PROPERTY_CATALOG_DATABASE: ${PROPERTY_CATALOG_DATABASE:-property_catalog}
       PROPERTY_CATALOG_CH_HOST: clickhouse
       PROPERTY_CATALOG_CH_PORT: "9000"
@@ -178,7 +179,15 @@ services:
       FI_HTTP_ADDR: ":4318"
       FI_ADMIN_ADDR: 127.0.0.1:9464
       FI_DEAD_LETTER_FILE: /data/collector/dead_letter.jsonl
-      FI_OBSERVED_CATALOG_MODE: disabled
+      # Observed attributes go through a local spool straight into the index,
+      # as the index's writer (Distributed publishes them to Kafka instead).
+      FI_OBSERVED_CATALOG_MODE: direct
+      FI_OBSERVED_CATALOG_CH_URL: http://clickhouse:8123
+      FI_OBSERVED_CATALOG_CH_DATABASE: ${PROPERTY_CATALOG_DATABASE:-property_catalog}
+      FI_OBSERVED_CATALOG_CH_USERNAME: observed_catalog_writer
+      FI_OBSERVED_CATALOG_CH_PASSWORD: ${PROPERTY_CATALOG_CONSUMER_PASSWORD:-oss-observed-writer-local-only}
+      FI_OBSERVED_CATALOG_SPOOL_DIR: /data/collector/observed-catalog
+      # Obsolete; kept "disabled" so an old .env value cannot stop the collector.
       FI_PROPERTY_CATALOG_MODE: disabled
       FI_ERROR_FEED_KAFKA_BROKERS: ""
 
