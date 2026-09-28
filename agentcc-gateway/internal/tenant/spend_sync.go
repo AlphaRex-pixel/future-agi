@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/futureagi/agentcc-gateway/internal/auth"
@@ -76,20 +77,27 @@ func SyncSpendFromControlPlane(ctx context.Context, baseURL, adminToken, period 
 // StartPeriodicSync runs SyncFromControlPlane (and optionally key sync)
 // on a timer. It blocks until ctx is cancelled — call it in a goroutine.
 func StartPeriodicSync(ctx context.Context, interval time.Duration, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore) {
-	runPeriodicSync(ctx, interval, baseURL, adminToken, store, keyStore, false)
+	runPeriodicSync(ctx, interval, baseURL, adminToken, store, keyStore, nil)
 }
 
 // runPeriodicSync is StartPeriodicSync. The org and key syncs each log a
 // failure at INFO unless it is the second or later in a row, when it is WARN:
 // one missed tick is a backend restart (Standalone stops the API before the
-// gateway; a Distributed or Helm rollout), two are an outage. With
-// quietUntilLoaded, every failure is INFO until that sync first succeeds here.
-func runPeriodicSync(ctx context.Context, interval time.Duration, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore, quietUntilLoaded bool) {
+// gateway; a Distributed or Helm rollout), two are an outage. With loaded
+// (shared with the startup sync), a half's failures are all INFO until that
+// half has loaded, here or in the startup sync; without it, both halves count
+// as loaded from the start.
+func runPeriodicSync(ctx context.Context, interval time.Duration, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore, loaded *syncLoaded) {
 	if interval <= 0 || baseURL == "" {
 		return
 	}
-	orgs := periodicFailures{loaded: !quietUntilLoaded}
-	keys := periodicFailures{loaded: !quietUntilLoaded}
+	if loaded == nil {
+		loaded = &syncLoaded{}
+		loaded.orgs.Store(true)
+		loaded.keys.Store(true)
+	}
+	orgs := periodicFailures{loaded: &loaded.orgs}
+	keys := periodicFailures{loaded: &loaded.keys}
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -121,23 +129,30 @@ func runPeriodicSync(ctx context.Context, interval time.Duration, baseURL, admin
 	}
 }
 
+// syncLoaded records which halves of the control plane sync have loaded. The
+// startup and periodic syncs share one, so a half the startup sync loaded
+// counts as loaded for the periodic sync too.
+type syncLoaded struct {
+	orgs, keys atomic.Bool
+}
+
 // periodicFailures tracks one half of the periodic sync: whether it has
 // loaded, and how many times in a row it has failed.
 type periodicFailures struct {
-	loaded bool
+	loaded *atomic.Bool
 	inARow int
 }
 
 // failed counts a failure and returns the level to log it at.
 func (f *periodicFailures) failed() slog.Level {
 	f.inARow++
-	if f.loaded && f.inARow >= 2 {
+	if f.loaded.Load() && f.inARow >= 2 {
 		return slog.LevelWarn
 	}
 	return slog.LevelInfo
 }
 
 func (f *periodicFailures) succeeded() {
-	f.loaded = true
+	f.loaded.Store(true)
 	f.inARow = 0
 }

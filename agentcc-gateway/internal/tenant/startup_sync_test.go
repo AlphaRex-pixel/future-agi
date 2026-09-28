@@ -428,6 +428,39 @@ func TestRunControlPlaneSync_PeriodicSyncIsQuietUntilItLoads(t *testing.T) {
 	})
 }
 
+// A half the startup sync loaded is loaded for the periodic re-sync too. If the
+// control plane goes down before a periodic sync of it first succeeds, the
+// startup sync has already returned, so the periodic sync is the one to warn.
+func TestRunControlPlaneSync_PeriodicSyncWarnsOnceTheStartupSyncHasLoaded(t *testing.T) {
+	logs := recordLogs(t)
+	shortenStartupSync(t, time.Hour, time.Hour, time.Hour, time.Hour)
+	// Only the first request to each endpoint succeeds: the startup sync's,
+	// made well before the first periodic tick.
+	var cp *fakeControlPlane
+	cp = newFakeControlPlane(t, func() bool { return cp.orgRequests.Load() > 1 || cp.keyRequests.Load() > 1 })
+	store, ks := NewStore(), auth.NewKeyStore(config.AuthConfig{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		RunControlPlaneSync(ctx, true, 50*time.Millisecond, cp.URL, "token", store, ks)
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	waitFor(t, "the startup sync to load", func() bool {
+		return logs.count(slog.LevelInfo, "control plane startup sync succeeded") == 1
+	})
+	assertSynced(t, store, ks)
+	waitFor(t, "a WARN from each half of the periodic sync", func() bool {
+		return logs.count(slog.LevelWarn, "periodic sync failed") >= 1 &&
+			logs.count(slog.LevelWarn, "periodic key sync failed") >= 1
+	})
+}
+
 // A fresh install has no API keys until the first one is created, so the
 // control plane answers an empty key set on every periodic sync. That is not a
 // failure: no WARN, however many syncs see it. A real failure still warns, and

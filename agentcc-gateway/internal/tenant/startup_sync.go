@@ -30,6 +30,11 @@ var (
 // its config.yaml keys. Run it in a goroutine so startup never waits on it.
 // Reports whether the sync completed.
 func SyncOnStartup(ctx context.Context, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore) bool {
+	return syncOnStartup(ctx, baseURL, adminToken, store, keyStore, &syncLoaded{})
+}
+
+// syncOnStartup is SyncOnStartup, marking each half in loaded as it loads.
+func syncOnStartup(ctx context.Context, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore, loaded *syncLoaded) bool {
 	start := time.Now()
 	var lastWarn time.Time
 	wait := startupSyncFirstRetry
@@ -44,6 +49,7 @@ func SyncOnStartup(ctx context.Context, baseURL, adminToken string, store *Store
 				errs = append(errs, err)
 			} else {
 				orgsSynced = true
+				loaded.orgs.Store(true)
 			}
 			cancel()
 		}
@@ -53,6 +59,7 @@ func SyncOnStartup(ctx context.Context, baseURL, adminToken string, store *Store
 				errs = append(errs, err)
 			} else {
 				keysSynced = true
+				loaded.keys.Store(true)
 			}
 			cancel()
 		}
@@ -122,18 +129,19 @@ func jittered(d time.Duration) time.Duration {
 // periodic re-sync every interval (0 = none), until ctx ends. The periodic
 // re-sync starts right away, so what has loaded is re-synced even while the
 // rest keeps failing. Next to a startup sync it logs a half's failures at INFO
-// until that half first loads: the startup sync is the one that warns about a
-// long outage. Blocks; run it in a goroutine.
+// until that half first loads, in either sync: until then the startup sync is
+// the one that warns about a long outage. Blocks; run it in a goroutine.
 func RunControlPlaneSync(ctx context.Context, startup bool, interval time.Duration, baseURL, adminToken string, store *Store, keyStore *auth.KeyStore) {
 	if !startup {
 		StartPeriodicSync(ctx, interval, baseURL, adminToken, store, keyStore)
 		return
 	}
+	loaded := &syncLoaded{}
 	periodic := make(chan struct{})
 	go func() {
 		defer close(periodic)
-		runPeriodicSync(ctx, interval, baseURL, adminToken, store, keyStore, true)
+		runPeriodicSync(ctx, interval, baseURL, adminToken, store, keyStore, loaded)
 	}()
-	SyncOnStartup(ctx, baseURL, adminToken, store, keyStore)
+	syncOnStartup(ctx, baseURL, adminToken, store, keyStore, loaded)
 	<-periodic
 }
