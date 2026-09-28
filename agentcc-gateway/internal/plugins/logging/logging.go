@@ -3,6 +3,8 @@ package logging
 import (
 	"context"
 	"log/slog"
+	"sync"
+	"time"
 
 	"github.com/futureagi/agentcc-gateway/internal/config"
 	"github.com/futureagi/agentcc-gateway/internal/models"
@@ -111,9 +113,28 @@ func markRedacted(record *TraceRecord) {
 	record.Metadata["privacy_redacted"] = "true"
 }
 
-// Close drains buffered trace records and stops workers.
+// shutdownFlushTimeout bounds Close's last attempt to deliver request logs.
+// The Helm chart gives a stopping gateway 45 s: a 10 s preStop sleep, up to
+// 30 s (server.shutdown_timeout) for in-flight requests, then this, which
+// runs alongside the emitter's drain and leaves a second for the rest.
+const shutdownFlushTimeout = 4 * time.Second
+
+// Close drains buffered trace records and stops workers while it makes a
+// last, bounded attempt to deliver the request logs still buffered for the
+// webhook.
 func (p *Plugin) Close() {
+	var wg sync.WaitGroup
+	if p.flusher != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), shutdownFlushTimeout)
+			defer cancel()
+			p.flusher.Close(ctx)
+		}()
+	}
 	if p.emitter != nil {
 		p.emitter.Close()
 	}
+	wg.Wait()
 }
