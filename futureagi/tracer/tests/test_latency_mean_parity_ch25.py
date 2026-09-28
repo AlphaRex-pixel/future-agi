@@ -61,6 +61,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from django.test import override_settings
 
 from conftest import (
     _ch_test_http_port,
@@ -572,6 +573,7 @@ def _read_every_path(analytics, patcher):
     state, enqueued = _background_harness(patcher, analytics)
     envelopes = {}
     scheduled = {}
+    inline_enqueued = {}
 
     def record(label, envelope, before=None):
         envelopes[label] = envelope
@@ -621,19 +623,38 @@ def _read_every_path(analytics, patcher):
                 timeout_ms=_TIMEOUT_MS,
             ),
         )
+        if case == "none":
+            # The unfiltered chart's root estimate is tiny here: it is
+            # computed inline, and nothing is enqueued. (A span-level filter
+            # keeps the background path, so only this case has an inline row.)
+            before = len(enqueued)
+            record(
+                f"session/inline/{case}",
+                session_graph.fetch_session_graph_ch(
+                    analytics=analytics,
+                    project_id=PROJECT_ID,
+                    filters=filters,
+                    interval="hour",
+                    req_data_config={"type": "SYSTEM_METRIC", "id": "latency"},
+                    organization_id=ORGANIZATION_ID,
+                ),
+            )
+            inline_enqueued[f"session/inline/{case}"] = len(enqueued) > before
         before = len(enqueued)
-        record(
-            f"session/background/{case}",
-            session_graph.fetch_session_graph_ch(
-                analytics=analytics,
-                project_id=PROJECT_ID,
-                filters=filters,
-                interval="hour",
-                req_data_config={"type": "SYSTEM_METRIC", "id": "latency"},
-                organization_id=ORGANIZATION_ID,
-            ),
-            before,
-        )
+        # Inline off, so the same chart runs on the real worker.
+        with override_settings(SESSION_GRAPH_INLINE_MAX_ESTIMATED_ROWS=0):
+            record(
+                f"session/background/{case}",
+                session_graph.fetch_session_graph_ch(
+                    analytics=analytics,
+                    project_id=PROJECT_ID,
+                    filters=filters,
+                    interval="hour",
+                    req_data_config={"type": "SYSTEM_METRIC", "id": "latency"},
+                    organization_id=ORGANIZATION_ID,
+                ),
+                before,
+            )
         record(
             f"users/inline/{case}",
             graph_dispatch.fetch_user_system_metric_graph_ch(
@@ -661,7 +682,7 @@ def _read_every_path(analytics, patcher):
             before,
         )
         state["background"] = False
-    return envelopes, enqueued, scheduled
+    return envelopes, enqueued, scheduled, inline_enqueued
 
 
 def _series(label, envelope):
@@ -687,7 +708,9 @@ def _store(merged):
             physical = _load(client, base, newer, merged=merged)
             analytics = _LiveAnalytics(client)
             with pytest.MonkeyPatch.context() as patcher:
-                envelopes, enqueued, scheduled = _read_every_path(analytics, patcher)
+                envelopes, enqueued, scheduled, inline_enqueued = _read_every_path(
+                    analytics, patcher
+                )
     return SimpleNamespace(
         base=base,
         newer=newer,
@@ -697,6 +720,7 @@ def _store(merged):
         series={label: _series(label, env) for label, env in envelopes.items()},
         enqueued=enqueued,
         scheduled=scheduled,
+        inline_enqueued=inline_enqueued,
     )
 
 
@@ -819,6 +843,27 @@ def test_unfiltered_latency_requests_run_on_an_empty_filter_set(merged):
 def test_merged_store_every_path_publishes_the_oracle_mean(merged, path, case):
     label = f"{path}/{case}"
     _assert_matches_oracle(label, merged.series[label], _oracle_for(label, merged.live))
+
+
+@pytest.mark.parametrize("store", ["merged", "unmerged"])
+def test_an_affordable_session_chart_is_inline_and_equals_the_worker(request, store):
+    """The unfiltered Sessions latency chart of a small scope runs inline:
+    nothing is enqueued, it is the oracle, and it equals the same chart the
+    worker computes, bucket by bucket (same statement, same numbers)."""
+
+    observed = request.getfixturevalue(store)
+    assert observed.inline_enqueued == {"session/inline/none": False}
+    label = "session/inline/none"
+    assert observed.envelopes[label]["query_status"] == "complete"
+    assert observed.envelopes[label]["metric_statistic"] == "mean"
+    _assert_matches_oracle(label, observed.series[label], session_oracle(observed.live))
+    inline, background = (
+        observed.series[label],
+        observed.series["session/background/none"],
+    )
+    for hour in HOURS:
+        assert abs(inline[hour][0] - background[hour][0]) <= 1e-9, hour
+        assert inline[hour][1] == background[hour][1], hour
 
 
 @pytest.mark.parametrize("case", list(_ALWAYS_TRUE))

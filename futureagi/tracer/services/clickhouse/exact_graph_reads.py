@@ -418,9 +418,10 @@ def _metadata(
     started: float,
     query_count: int,
     rows_returned: int,
+    wall_ms: int | None = None,
 ) -> dict[str, Any]:
     elapsed_ms = max(monotonic() - started, 0.0) * 1000
-    if elapsed_ms >= EXACT_GRAPH_QUERY_TIMEOUT_MS:
+    if elapsed_ms >= (EXACT_GRAPH_QUERY_TIMEOUT_MS if wall_ms is None else wall_ms):
         raise ExactGraphReadError("exact graph refresh deadline exceeded")
     metadata = {
         "query_complete": True,
@@ -436,19 +437,23 @@ def _metadata(
 def _remaining_exact_graph_timeout_ms(
     started: float,
     statement_ceiling_ms: int | None = None,
+    *,
+    wall_ms: int | None = None,
 ) -> int:
     """Return the time left on one authoritative exact-refresh wall.
 
     Background readers do builder, relation, database, formatting, and
     publication work under one reviewed graph budget. A later statement may
     consume only the remaining portion; it never receives a fresh
-    per-statement grant.
+    per-statement grant. ``wall_ms`` replaces the background wall for a
+    reader run inline on an interactive wall (the Sessions graph).
     """
 
     elapsed_ms = max(monotonic() - started, 0.0) * 1000
+    wall = EXACT_GRAPH_QUERY_TIMEOUT_MS if wall_ms is None else int(wall_ms)
     # Floor the remaining duration, rather than subtracting a floored elapsed
     # duration, so rounding can never grant a statement time beyond the wall.
-    remaining_ms = int(EXACT_GRAPH_QUERY_TIMEOUT_MS - elapsed_ms)
+    remaining_ms = int(wall - elapsed_ms)
     if remaining_ms < settings.EXACT_GRAPH_MIN_REMAINING_MS:
         raise ExactGraphReadError("exact graph refresh bounded deadline exceeded")
     if statement_ceiling_ms is None:
@@ -465,21 +470,24 @@ def _execute_direct_exact_graph_query(
     params: dict[str, Any],
     started: float,
     settings: dict[str, Any],
+    wall_ms: int | None = None,
 ) -> Any:
     """Execute a direct publication read inside its refresh's remaining wall."""
 
     return analytics.execute_ch_query(
         query,
         params,
-        timeout_ms=_remaining_exact_graph_timeout_ms(started),
+        timeout_ms=_remaining_exact_graph_timeout_ms(started, wall_ms=wall_ms),
         settings=settings,
     )
 
 
-def _finalize_exact_graph_payload(payload: Any, *, started: float) -> Any:
+def _finalize_exact_graph_payload(
+    payload: Any, *, started: float, wall_ms: int | None = None
+) -> Any:
     """Fence publication after all formatting and result construction."""
 
-    _remaining_exact_graph_timeout_ms(started)
+    _remaining_exact_graph_timeout_ms(started, wall_ms=wall_ms)
     return payload
 
 
@@ -4819,6 +4827,76 @@ def _session_graph_read_settings() -> dict[str, Any]:
     }
 
 
+def session_graph_reads_lean_roots(
+    *, project_id: str, filters: list[dict[str, Any]]
+) -> bool:
+    """Whether the Sessions graph statement for ``filters`` is the lean one.
+
+    That is the statement whose candidates come from one narrow read of root
+    versions (``_session_aggregate_source_sql``'s ``lean_graph_source`` with
+    no span-level membership leaf) and that runs alone: no scalar witness, no
+    absence probe, no first/last-message aggregate. Window, session-id and
+    post-aggregate (duration, cost, tokens, trace count) filters keep that
+    shape; span-level and message filters do not. Only this shape is costed by
+    ``session_graph_root_estimate_sql``: its work follows the live roots of
+    the window, which is what that estimate counts.
+    """
+
+    if _session_filters_need_message_aggregates(filters):
+        return False
+    span_filters = [
+        item
+        for item in filters
+        if _is_raw_attribute_filter(item)
+        or (item.get("column_id") or item.get("columnId"))
+        not in {
+            *_SESSION_POST_AGGREGATE_FILTERS,
+            *_SESSION_MESSAGE_FILTER_COLUMNS,
+            *SESSION_ID_FILTER_COLS,
+        }
+    ]
+    plan = _session_membership_plan(project_id=project_id, filters=span_filters)
+    return not (plan.scalar_predicates or plan.relational_predicates)
+
+
+def session_graph_root_estimate_sql(
+    *, project_id: str, filters: list[dict[str, Any]]
+) -> tuple[str, dict[str, Any]] | None:
+    """``EXPLAIN ESTIMATE`` of the lean Sessions statement's root read.
+
+    The rows are the live-root candidates of the window - project, window,
+    ``is_deleted = 0``, ``parent_span_id = ''``, a session - answered from part
+    metadata alone: the rows of the granules the primary key and skip indexes
+    (or ``proj_root_spans``, ordered by exactly these keys, when the optimizer
+    picks it) cannot exclude. It is therefore an upper bound rounded up to
+    whole granules of the rows present when it runs. ``None`` for an empty window:
+    the reader then sends no statement at all.
+    """
+
+    start_date, end_date, empty = _snapshot_window(filters)
+    if empty:
+        return None
+    return (
+        """
+        EXPLAIN ESTIMATE
+        SELECT trace_session_id
+        FROM spans
+        WHERE project_id = toUUID(%(project_id)s)
+          AND is_deleted = 0
+          AND parent_span_id = ''
+          AND start_time >= fromUnixTimestamp64Micro(%(start_date_us)s)
+          AND start_time < fromUnixTimestamp64Micro(%(end_date_us)s)
+          AND isNotNull(trace_session_id)
+          AND trace_session_id != toUUID('00000000-0000-0000-0000-000000000000')
+        """,
+        {
+            "project_id": project_id,
+            "start_date_us": _unix_microseconds(start_date),
+            "end_date_us": _unix_microseconds(end_date),
+        },
+    )
+
+
 def read_exact_session_system_graph(
     *,
     analytics: Any,
@@ -4826,7 +4904,18 @@ def read_exact_session_system_graph(
     filters: list[dict[str, Any]],
     interval: str,
     metric_id: str,
+    wall_ms: int | None = None,
+    interactive: bool = False,
 ) -> dict[str, Any]:
+    """The one statement behind every Sessions system chart.
+
+    The exact-aggregation worker runs it on ``GRAPH_BACKGROUND_WALL_MS`` with
+    the session thread budget. ``interactive`` runs the SAME statement (same
+    SQL, same parameters, same numbers) inline on the caller's ``wall_ms``
+    with the shared exact settings - one thread, as other interactive reads -
+    for a scope whose root estimate is affordable (``session_graph``).
+    """
+
     started = monotonic()
     start_date, end_date, empty = _snapshot_window(filters)
     interval = _effective_graph_interval(interval, start_date, end_date)
@@ -4839,9 +4928,11 @@ def read_exact_session_system_graph(
                     started=started,
                     query_count=0,
                     rows_returned=0,
+                    wall_ms=wall_ms,
                 ),
             },
             started=started,
+            wall_ms=wall_ms,
         )
     bucket_fn = BaseQueryBuilder.time_bucket_expr(interval)
     session_value = {
@@ -4894,14 +4985,15 @@ def read_exact_session_system_graph(
     """
         return query, query_params
 
-    # Background-only statement: it may use the session thread budget. The
+    # On the background worker the statement may use the session thread
+    # budget; inline it keeps the shared single-thread exact settings. The
     # absence probe below keeps the shared exact settings. A first/last-message
     # filter selects on argMin/argMax(input, start_time), which has no
     # tie-break: roots tied at one start_time resolve by read order, which is
     # stable on one thread and not on several. Such a chart keeps dev's
     # single-thread settings for the main, witness and fallback statements
     # (the witness copies ``graph_settings``), so it selects dev's sessions.
-    if _session_filters_need_message_aggregates(filters):
+    if interactive or _session_filters_need_message_aggregates(filters):
         graph_settings = dict(EXACT_GRAPH_READ_SETTINGS)
     else:
         graph_settings = _session_graph_read_settings()
@@ -4922,6 +5014,7 @@ def read_exact_session_system_graph(
             params=probe[1],
             started=started,
             settings=EXACT_GRAPH_READ_SETTINGS,
+            wall_ms=wall_ms,
         )
         if probe_result.data:
             query_count += 1
@@ -4945,7 +5038,7 @@ def read_exact_session_system_graph(
                 query,
                 query_params,
                 timeout_ms=_remaining_exact_graph_timeout_ms(
-                    started, _SESSION_SCALAR_WITNESS_TIMEOUT_MS
+                    started, _SESSION_SCALAR_WITNESS_TIMEOUT_MS, wall_ms=wall_ms
                 ),
                 settings=witness_settings,
             )
@@ -4962,6 +5055,7 @@ def read_exact_session_system_graph(
                 params=query_params,
                 started=started,
                 settings=graph_settings,
+                wall_ms=wall_ms,
             )
     else:
         result = _execute_direct_exact_graph_query(
@@ -4970,6 +5064,7 @@ def read_exact_session_system_graph(
             params=query_params,
             started=started,
             settings=graph_settings,
+            wall_ms=wall_ms,
         )
     rows = list(result.data or [])
     columns = list(result.columns or [])
@@ -5002,9 +5097,11 @@ def read_exact_session_system_graph(
                 started=started,
                 query_count=query_count,
                 rows_returned=len(rows),
+                wall_ms=wall_ms,
             ),
         },
         started=started,
+        wall_ms=wall_ms,
     )
 
 
@@ -5019,4 +5116,6 @@ __all__ = [
     "read_exact_session_system_graph",
     "read_exact_system_graph",
     "read_exact_user_system_graph",
+    "session_graph_reads_lean_roots",
+    "session_graph_root_estimate_sql",
 ]

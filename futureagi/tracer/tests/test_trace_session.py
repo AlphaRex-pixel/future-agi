@@ -12,6 +12,7 @@ from unittest import mock
 import pytest
 from clickhouse_driver.errors import NetworkError, ServerException
 from django.conf import settings as django_settings
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework import status
 
@@ -809,10 +810,16 @@ class TestTraceSessionGraphAPI:
             "query_sampled": False,
             "query_refreshing": True,
         }
-        with mock.patch(
-            "tracer.services.clickhouse.session_graph.read_or_schedule_exact_snapshot",
-            return_value=pending,
-        ) as exact_read:
+        # Inline off: an affordable scope is otherwise computed inline from the
+        # same exact statement (test_session_graph_inline); this pins the
+        # background snapshot's identity.
+        with (
+            override_settings(SESSION_GRAPH_INLINE_MAX_ESTIMATED_ROWS=0),
+            mock.patch(
+                "tracer.services.clickhouse.session_graph.read_or_schedule_exact_snapshot",
+                return_value=pending,
+            ) as exact_read,
+        ):
             graph = fetch_session_graph_ch(
                 analytics=analytics,
                 project_id=str(uuid.uuid4()),

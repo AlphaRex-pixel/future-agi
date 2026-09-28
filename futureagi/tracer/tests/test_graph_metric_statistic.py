@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from django.test import override_settings
 
 from tracer.services.clickhouse import graph_dispatch, session_graph
 from tracer.services.clickhouse.exact_graph_reads import ExactGraphReadError
@@ -318,7 +319,10 @@ class TestSessionGraphEnvelopes:
             "read_or_schedule_exact_snapshot",
             lambda namespace, identity, **call: call["pending_payload"],
         )
-        response = _session_graph({"type": "SYSTEM_METRIC", "id": "latency"})
+        # Inline off: an affordable scope is otherwise computed inline, whose
+        # envelope names the mean too (test_session_graph_inline).
+        with override_settings(SESSION_GRAPH_INLINE_MAX_ESTIMATED_ROWS=0):
+            response = _session_graph({"type": "SYSTEM_METRIC", "id": "latency"})
         assert response["query_status"] == "pending"
         assert response["metric_statistic"] == "mean"
 

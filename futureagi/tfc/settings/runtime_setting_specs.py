@@ -360,6 +360,13 @@ INTERACTIVE_READ_SETTING_SPECS = {
             # _DEFAULT_REVALIDATE_AFTER_SECONDS in
             # tracer/services/exact_aggregation_cache.py.
             ("EXACT_AGGREGATION_REVALIDATE_AFTER_SECONDS", 300, 0, 86_400),
+            # A Sessions latency chart whose lean root read the index estimates
+            # at or below this many rows is computed inline on the interactive
+            # wall (one thread) instead of queueing on the exact worker; 0 turns
+            # inline off. Production root-row estimates: ~27k (small tenant,
+            # 7D), 1.2M (small tenant, 12M), 3.5M (largest tenant, 7D), 77M
+            # (largest tenant, 30D). See session_graph._inline_session_latency_graph.
+            ("SESSION_GRAPH_INLINE_MAX_ESTIMATED_ROWS", 2_000_000, 0, 50_000_000),
             ("GRAPH_EVENT_LIMIT", 2_000, 1, 100_000),
             ("GRAPH_TRACE_DECORATION_CANDIDATE_LIMIT", 40, 1, 4_096),
             ("GRAPH_SPAN_METRIC_BATCH_SIZE", 1_024, 1, 4_096),

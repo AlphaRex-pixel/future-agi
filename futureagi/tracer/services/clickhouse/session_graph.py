@@ -8,6 +8,7 @@ from datetime import datetime
 from time import monotonic
 from typing import Any
 
+import structlog
 from django.conf import settings
 
 from tracer.services.clickhouse.bounded_graph_reads import (
@@ -17,7 +18,14 @@ from tracer.services.clickhouse.bounded_graph_reads import (
     GraphCandidateSample,
     read_graph_candidates,
 )
+from tracer.services.clickhouse.exact_graph_reads import (
+    ExactGraphReadError,
+    read_exact_session_system_graph,
+    session_graph_reads_lean_roots,
+    session_graph_root_estimate_sql,
+)
 from tracer.services.clickhouse.graph_dispatch import (
+    _GRAPH_SEED_PROBE_ERRORS,
     OBSERVE_SYSTEM_GRAPH_PAYLOAD_VERSION,
     _require_rollup_result_shape,
     degraded_graph_response,
@@ -37,6 +45,7 @@ from tracer.services.clickhouse.query_builders.session_time_series import (
 from tracer.services.clickhouse.query_service import QueryExecutor, QueryResult
 from tracer.services.clickhouse.read_budget import (
     ReadDeadline,
+    WallCappedAnalytics,
     is_clickhouse_query_error,
     is_read_budget_error,
 )
@@ -46,6 +55,8 @@ from tracer.services.clickhouse.v2.query_builders.trace_list import (
 from tracer.services.exact_aggregation_cache import (
     read_or_schedule_exact_snapshot,
 )
+
+logger = structlog.get_logger(__name__)
 
 SESSION_GRAPH_WALL_DEADLINE_MS = settings.INTERACTIVE_ANALYTICS_DEFAULT_WALL_MS
 SESSION_GRAPH_QUERY_TIMEOUT_MS = settings.INTERACTIVE_ANALYTICS_DEFAULT_WALL_MS
@@ -79,6 +90,9 @@ _SESSION_IDENTITY_ONLY_METRICS = frozenset(
     {"traffic", "session_count", "avg_traces_per_session"}
 )
 _SESSION_ROLLUP_METRICS = SESSION_SYSTEM_METRICS - {"avg_traces_per_session"}
+# Server cap on the one metadata estimate that decides inline vs background
+# (the raw trace graph's seed estimate uses the same per-probe grant).
+SESSION_GRAPH_INLINE_ESTIMATE_CAP_MS = 1_500
 
 _SESSION_GRAPH_READ_CAPS = {
     "max_threads": settings.DASHBOARD_TRACE_READ_MAX_THREADS,
@@ -656,6 +670,133 @@ def _fetch_system_metric_graph(
         )
 
 
+def _session_graph_root_estimate(
+    *, analytics: Any, project_id: str, filters: list[dict[str, Any]]
+) -> int | None:
+    """Estimated live-root candidates of the window, or ``None`` if unknown.
+
+    One ``EXPLAIN ESTIMATE`` (part metadata only) with a small server cap. A
+    statement that fails, is stopped, or answers in an unexpected shape is
+    ``None``: never guess inline. An empty answer with the estimate's columns
+    is zero rows; an empty window sends nothing and is zero.
+    """
+
+    built = session_graph_root_estimate_sql(project_id=project_id, filters=filters)
+    if built is None:
+        return 0
+    query, params = built
+    try:
+        result = analytics.execute_ch_query(
+            query,
+            params,
+            timeout_ms=SESSION_GRAPH_INLINE_ESTIMATE_CAP_MS,
+            # Index analysis parallelises over parts; the estimate reads no
+            # column data (the raw graph's seed estimate uses the same budget).
+            settings={"max_threads": settings.DASHBOARD_TRACE_READ_MAX_THREADS},
+            server_execution_cap_ms=SESSION_GRAPH_INLINE_ESTIMATE_CAP_MS,
+        )
+    except _GRAPH_SEED_PROBE_ERRORS as exc:
+        logger.info(
+            "session_graph_inline_estimate_unavailable",
+            error_type=type(exc).__name__,
+        )
+        return None
+    columns = getattr(result, "columns", None)
+    data = getattr(result, "data", None)
+    if not isinstance(columns, list | tuple) or "rows" not in columns:
+        return None
+    if not isinstance(data, list | tuple):
+        return None
+    total = 0
+    for row in data:
+        if not isinstance(row, dict):
+            return None
+        try:
+            total += max(0, int(row["rows"]))
+        except (KeyError, TypeError, ValueError):
+            return None
+    return total
+
+
+def _inline_session_latency_graph(
+    *,
+    analytics: QueryExecutor,
+    project_id: str,
+    filters: list[dict[str, Any]],
+    interval: str,
+    metric_id: str,
+    wall_deadline_ms: int,
+) -> dict[str, Any] | None:
+    """Compute an affordable Sessions latency chart inline, or return ``None``.
+
+    Every Sessions latency chart is an exact snapshot, and the exact worker
+    has one slot per region: a small tenant's 0.3-1.6 s chart queued behind
+    the largest tenant's 30-day read. So before the job is scheduled, one
+    metadata estimate costs the lean statement's root read. At or below
+    ``SESSION_GRAPH_INLINE_MAX_ESTIMATED_ROWS`` (0 disables) the SAME
+    statement runs here, on the interactive wall with the interactive
+    settings (one thread), and the chart is returned complete and not cached,
+    as an inline trace graph is. ``None`` - the caller takes the unchanged
+    background path - when the scope is not the lean shape, the lane cannot
+    carry per-query settings (neither the caps nor the thread pin would reach
+    the server), the estimate is unknown or too large, or the inline read is
+    stopped at the wall.
+
+    Every statement here asks the server to stop at what is left of the
+    interactive wall, so a scope the estimate misjudged costs at most that
+    wall before it goes to the worker.
+    """
+
+    max_estimated_rows = int(settings.SESSION_GRAPH_INLINE_MAX_ESTIMATED_ROWS)
+    if max_estimated_rows <= 0:
+        return None
+    if not bool(getattr(analytics, "supports_per_query_read_settings", True)):
+        return None
+    if not session_graph_reads_lean_roots(project_id=project_id, filters=filters):
+        return None
+    deadline = ReadDeadline.start(
+        min(int(wall_deadline_ms), SESSION_GRAPH_WALL_DEADLINE_MS),
+        enforce_on_server=True,
+    )
+    capped = WallCappedAnalytics(
+        analytics, deadline, floor_ms=int(settings.EXACT_GRAPH_MIN_REMAINING_MS)
+    )
+    estimated_rows = _session_graph_root_estimate(
+        analytics=capped, project_id=project_id, filters=filters
+    )
+    if estimated_rows is None or estimated_rows > max_estimated_rows:
+        logger.info(
+            "session_graph_inline_declined",
+            estimated_rows=estimated_rows,
+            max_estimated_rows=max_estimated_rows,
+        )
+        return None
+    try:
+        return read_exact_session_system_graph(
+            analytics=capped,
+            project_id=project_id,
+            filters=filters,
+            interval=interval,
+            metric_id=metric_id,
+            wall_ms=deadline.remaining_ms(
+                floor_ms=int(settings.EXACT_GRAPH_MIN_REMAINING_MS)
+            ),
+            interactive=True,
+        )
+    except ExactGraphReadError as exc:
+        error_type = type(exc).__name__
+    except Exception as exc:
+        if not (is_read_budget_error(exc) or is_clickhouse_query_error(exc)):
+            raise
+        error_type = type(exc).__name__
+    logger.info(
+        "session_graph_inline_read_failed",
+        estimated_rows=estimated_rows,
+        error_type=error_type,
+    )
+    return None
+
+
 def _session_scoped_filters(
     filters: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -708,8 +849,9 @@ def fetch_session_graph_ch(
             raise ValueError("Unsupported session system metric")
         # Latency never reads the rollup: ``spans_per_session`` holds only
         # per-session t-digest states (no latency sum), so an unfiltered
-        # latency graph takes the exact snapshot below with its empty filter
-        # set and publishes the same mean as any filtered one.
+        # latency graph takes the exact statement below with its empty filter
+        # set and publishes the same mean as any filtered one - inline when
+        # its root estimate is affordable, else as a background snapshot.
         if (
             metric_id in _SESSION_ROLLUP_METRICS
             and not publishes_latency("session", metric_id)
@@ -760,6 +902,19 @@ def fetch_session_graph_ch(
                 }
             )
             return response
+        if publishes_latency("session", metric_id):
+            # An affordable scope is answered now instead of queueing on the
+            # one exact slot; anything else takes the background path below.
+            inline = _inline_session_latency_graph(
+                analytics=analytics,
+                project_id=str(project_id),
+                filters=filters,
+                interval=interval,
+                metric_id=metric_id,
+                wall_deadline_ms=wall_deadline_ms,
+            )
+            if inline is not None:
+                return inline
         identity = {
             "project_id": str(project_id),
             "filters": filters,
