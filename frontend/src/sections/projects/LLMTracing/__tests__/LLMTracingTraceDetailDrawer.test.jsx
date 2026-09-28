@@ -29,7 +29,7 @@ import LLMTracingTraceDetailDrawer from "../LLMTracingTraceDetailDrawer";
 
 const lastDrawerProps = () => mocks.drawerProps.mock.lastCall[0];
 
-// TraceDetailDrawerV2 reads useGetTraceDetail(traceId, projectId), which sends
+// TraceDetailDrawerV2 reads useGetTraceDetail(traceId, { projectId }), which sends
 // project_id only when it is given (src/api/project/__tests__/trace-detail).
 // /dashboard/users/:userId renders LLMTracingView mode="user": the route has
 // no observeId and the grid lists every project's rows, so the same trace id

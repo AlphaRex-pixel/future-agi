@@ -9,7 +9,7 @@ import axios, { endpoints } from "src/utils/axios";
  * pass the project the trace was opened from whenever the caller knows it;
  * without it the backend serves the newest copy in the caller's scope.
  */
-export const useGetTraceDetail = (traceId, projectId) => {
+export const useGetTraceDetail = (traceId, { projectId } = {}) => {
   return useQuery({
     queryKey: projectId
       ? ["trace-detail", traceId, projectId]

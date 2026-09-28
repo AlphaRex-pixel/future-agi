@@ -572,9 +572,16 @@ describe("useVoiceCallDetail", () => {
   });
 
   it("pins the read to the project the call was opened from", async () => {
-    renderHook(() => useVoiceCallDetail("trace-1", true, "project-1"), {
-      wrapper: createWrapper(),
-    });
+    renderHook(
+      () =>
+        useVoiceCallDetail("trace-1", {
+          enabled: true,
+          projectId: "project-1",
+        }),
+      {
+        wrapper: createWrapper(),
+      },
+    );
 
     await waitFor(() => expect(axiosMocks.get).toHaveBeenCalledTimes(1));
     expect(axiosMocks.get).toHaveBeenCalledWith(
@@ -584,7 +591,7 @@ describe("useVoiceCallDetail", () => {
   });
 
   it("omits project_id when the caller has no project in context", async () => {
-    renderHook(() => useVoiceCallDetail("trace-1", true), {
+    renderHook(() => useVoiceCallDetail("trace-1", { enabled: true }), {
       wrapper: createWrapper(),
     });
 

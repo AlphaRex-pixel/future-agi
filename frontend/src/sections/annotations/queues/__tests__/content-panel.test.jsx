@@ -494,7 +494,7 @@ describe("Annotation queue ContentPanel", () => {
       );
 
       expect(mockUseGetTraceDetail).toHaveBeenCalled();
-      for (const [traceId, projectId] of mockUseGetTraceDetail.mock.calls) {
+      for (const [traceId, { projectId }] of mockUseGetTraceDetail.mock.calls) {
         expect([traceId, projectId]).toEqual(["trace-1", "proj-item"]);
       }
     },
@@ -526,10 +526,9 @@ describe("Annotation queue ContentPanel", () => {
       trace_id: "trace-voice-3",
       project_id: "proj-item",
     });
-    expect(mockUseGetTraceDetail).toHaveBeenCalledWith(
-      "trace-voice-3",
-      "proj-item",
-    );
+    expect(mockUseGetTraceDetail).toHaveBeenCalledWith("trace-voice-3", {
+      projectId: "proj-item",
+    });
   });
 
   describe("View session for trace / span items", () => {

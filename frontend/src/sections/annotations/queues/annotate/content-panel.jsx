@@ -185,7 +185,9 @@ const READ_ONLY_TAB_TOOLTIP = "Open trace project to edit the view";
 
 function InlineTraceView({ traceId, spanId, projectId: pinnedProjectId }) {
   const queryClient = useQueryClient();
-  const { data, isLoading } = useGetTraceDetail(traceId, pinnedProjectId);
+  const { data, isLoading } = useGetTraceDetail(traceId, {
+    projectId: pinnedProjectId,
+  });
   const projectId = data?.trace?.project || pinnedProjectId;
   const sessionId = data?.trace?.session;
   const [showSession, setShowSession] = useState(false);
@@ -658,11 +660,10 @@ InlineTraceView.propTypes = {
 // annotate view and the main simulate/observe drawers in lockstep.
 // ---------------------------------------------------------------------------
 function VoiceCallContent({ traceId, projectId }) {
-  const { data: callData, isLoading } = useVoiceCallDetail(
-    traceId,
-    true,
+  const { data: callData, isLoading } = useVoiceCallDetail(traceId, {
+    enabled: true,
     projectId,
-  );
+  });
 
   if (isLoading) {
     return (

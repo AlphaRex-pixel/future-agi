@@ -35,7 +35,7 @@ describe("useGetTraceDetail", () => {
   });
 
   it("pins the read to the project the trace was opened from", async () => {
-    renderHook(() => useGetTraceDetail("trace-1", "project-1"), {
+    renderHook(() => useGetTraceDetail("trace-1", { projectId: "project-1" }), {
       wrapper: createQueryWrapper(),
     });
 

@@ -1185,7 +1185,10 @@ export const useCallExecutionDetail = (callExecutionId, enabled = false) => {
 
 // Pass the project the call was opened from whenever it is known: the same
 // trace id can exist in several projects.
-export const useVoiceCallDetail = (traceId, enabled = false, projectId) => {
+export const useVoiceCallDetail = (
+  traceId,
+  { enabled = false, projectId } = {},
+) => {
   return useQuery({
     queryKey: projectId
       ? ["voiceCallDetail", traceId, projectId]

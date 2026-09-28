@@ -806,7 +806,9 @@ PatternSummary.propTypes = {
 
 // ── Agent flow from real span tree ────────────────────────────────────────────
 export function TraceGraphView({ traceId, mode, projectId }) {
-  const { data, isLoading, isError } = useGetTraceDetail(traceId, projectId);
+  const { data, isLoading, isError } = useGetTraceDetail(traceId, {
+    projectId,
+  });
   const spanTree = data?.observation_spans || data?.observationSpans;
 
   const graphData = useMemo(() => {
@@ -1050,8 +1052,8 @@ function TraceGraphCompare({
   mode,
   projectId,
 }) {
-  const failQ = useGetTraceDetail(failingTraceId, projectId);
-  const passQ = useGetTraceDetail(workingTraceId, projectId);
+  const failQ = useGetTraceDetail(failingTraceId, { projectId });
+  const passQ = useGetTraceDetail(workingTraceId, { projectId });
 
   const failGraph = useMemo(() => {
     const tree = failQ.data?.observation_spans || failQ.data?.observationSpans;

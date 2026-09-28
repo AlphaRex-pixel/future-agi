@@ -498,11 +498,10 @@ function toTranscriptLines(detail) {
 }
 
 function useVoiceCallData(traceId, projectId) {
-  const { data: detail, isLoading } = useVoiceCallDetail(
-    traceId,
-    !!traceId,
+  const { data: detail, isLoading } = useVoiceCallDetail(traceId, {
+    enabled: !!traceId,
     projectId,
-  );
+  });
   const lines = useMemo(() => toTranscriptLines(detail), [detail]);
   const recordingUrl =
     detail?.recording_url ||
