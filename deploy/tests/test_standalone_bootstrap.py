@@ -629,6 +629,18 @@ class MainTest(StackTest):
         self.assertNotIn("createcachetable failed", self.out.getvalue())
         self.assertFalse(bootstrap.READY.exists())
 
+    def test_a_backend_image_without_bootstrap_install_says_what_to_build(self):
+        # A published backend image from before the Standalone setup.
+        sys.modules[bootstrap.BOOTSTRAP_INSTALL] = None
+
+        with self.assertRaisesRegex(
+            bootstrap.BootstrapError,
+            r"^this backend image predates the Standalone setup.*--from-source",
+        ):
+            bootstrap.main()
+
+        self.assertEqual(self.stack.log, ["phase waiting"])
+
     def test_waits_for_a_bracketed_ipv6_temporal_and_defaults_empty_ports(self):
         os.environ.update(
             PG_PORT="", CH_HTTP_PORT="", REDIS_PORT="", TEMPORAL_HOST="[fd00::1]:7234"

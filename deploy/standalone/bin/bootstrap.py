@@ -76,6 +76,8 @@ TRUE = ("1", "true", "yes", "on")
 ADOPT_DISTRIBUTED_INSTALL = "FI_ADOPT_DISTRIBUTED_INSTALL_DATA"
 # Written after the first successful boot on an adopted database.
 ADOPTED = DATA / ".adopted-distributed-install"
+# The datastore steps this script runs (manage.py bootstrap_install).
+BOOTSTRAP_INSTALL = "tfc.management.commands.bootstrap_install"
 
 # Boot progress for the UI's starting page. bin/start empties this directory
 # on every container start. World-readable: nginx's workers read it.
@@ -661,7 +663,19 @@ def main() -> None:
     started = time.monotonic()
     set_phase("waiting")
     configure_django()
-    from tfc.management.commands import bootstrap_install as steps
+    # A plain import: `from package import module` turns a missing module
+    # into an ImportError ("cannot import name") without its name.
+    try:
+        import tfc.management.commands.bootstrap_install as steps
+    except ModuleNotFoundError as exc:
+        if exc.name != BOOTSTRAP_INSTALL:
+            raise
+        raise BootstrapError(
+            "this backend image predates the Standalone setup: it has no "
+            "`manage.py bootstrap_install`, whose steps this bootstrap runs. Build "
+            "the image on a backend from the same checkout (./bin/install "
+            "--from-source does) or on a release that ships it."
+        ) from None
 
     for name, host, port in (
         (
