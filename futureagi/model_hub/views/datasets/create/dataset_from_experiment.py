@@ -9,7 +9,6 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
-logger = structlog.get_logger(__name__)
 from model_hub.models.choices import ModelTypes, SourceChoices
 from model_hub.models.develop_dataset import Cell, Column, Dataset, Row
 from model_hub.models.evals_metric import UserEvalMetric
@@ -38,6 +37,8 @@ try:
     from ee.usage.utils.usage_entries import log_and_deduct_cost_for_resource_request
 except ImportError:
     log_and_deduct_cost_for_resource_request = None
+
+logger = structlog.get_logger(__name__)
 
 
 def _request_organization(request):

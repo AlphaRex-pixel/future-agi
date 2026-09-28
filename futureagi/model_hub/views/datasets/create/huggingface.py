@@ -10,7 +10,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.renderers import JSONRenderer
 from rest_framework.views import APIView
 
-logger = structlog.get_logger(__name__)
 from analytics.utils import (
     MixpanelEvents,
     MixpanelTypes,
@@ -56,6 +55,8 @@ try:
 except ImportError:
     ROW_LIMIT_REACHED_MESSAGE = None
     log_and_deduct_cost_for_resource_request = None
+
+logger = structlog.get_logger(__name__)
 
 
 class GetHuggingFaceDatasetConfigView(APIView):
