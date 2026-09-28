@@ -40,14 +40,13 @@ bootstrap = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(bootstrap)
 
 OUTBOX = "tracer.services.clickhouse.oss_outbox_cdc"
-# docker-compose's service endpoints, none of them the defaults.
+# docker-compose's service endpoints, none of them the defaults. Django's
+# (PGBOUNCER_HOST, REDIS_URL) are FakeStack.settings.
 SERVICES = {
     "PG_HOST": "pg.internal",
     "PG_PORT": "5433",
     "CH_HOST": "ch.internal",
     "CH_HTTP_PORT": "8124",
-    "REDIS_HOST": "redis.internal",
-    "REDIS_PORT": "6380",
     "TEMPORAL_HOST": "temporal.internal:7234",
 }
 FIRST_BOOT = [
@@ -129,6 +128,13 @@ class FakeStack:
         self.search_attribute_calls: list[tuple] = []
         self.cdc_calls: list[tuple] = []
         self.setup_env: dict[str, str] = {}
+        # Where Django connects: docker-compose.yml points PGBOUNCER_HOST at
+        # PG_HOST.
+        self.settings = SimpleNamespace(
+            BASE_DIR=str(BACKEND / "tfc"),
+            DATABASES={"default": {"HOST": "pg.internal", "PORT": "5433"}},
+            REDIS_URL="redis://:secret@redis.internal:6380/0",
+        )
         # Postgres
         self.peerdb_slots = 0
         self.temporal_databases = 0
@@ -320,9 +326,7 @@ class FakeStack:
         return {
             "django": package("django", setup=self.setup),
             "django.apps": package("django.apps", apps=apps),
-            "django.conf": package(
-                "django.conf", settings=SimpleNamespace(BASE_DIR=str(BACKEND / "tfc"))
-            ),
+            "django.conf": package("django.conf", settings=self.settings),
             "django.db": package(
                 "django.db", connection=connection, connections=connections
             ),
@@ -641,9 +645,11 @@ class MainTest(StackTest):
 
         self.assertEqual(self.stack.log, ["phase waiting"])
 
-    def test_waits_for_a_bracketed_ipv6_temporal_and_defaults_empty_ports(self):
-        os.environ.update(
-            PG_PORT="", CH_HTTP_PORT="", REDIS_PORT="", TEMPORAL_HOST="[fd00::1]:7234"
+    def test_waits_where_django_and_the_cdc_installer_connect(self):
+        # A pooler in front of Postgres: Django connects to it, the CDC
+        # installer to Postgres itself.
+        self.stack.settings.DATABASES["default"].update(
+            HOST="pooler.internal", PORT="6432"
         )
 
         bootstrap.main()
@@ -651,13 +657,13 @@ class MainTest(StackTest):
         self.assertEqual(
             [step for step in self.stack.log if step.startswith("tcp ")],
             [
-                "tcp pg.internal:5432",
-                "tcp ch.internal:8123",
-                "tcp redis.internal:6379",
-                "tcp fd00::1:7234",
+                "tcp pooler.internal:6432",
+                "tcp pg.internal:5433",
+                "tcp ch.internal:8124",
+                "tcp redis.internal:6380",
+                "tcp temporal.internal:7234",
             ],
         )
-        self.assertEqual(self.stack.clickhouse[0][1]["port"], 8123)
         self.assertTrue(bootstrap.READY.exists())
 
     def test_logs_the_cdc_mode_the_installer_runs(self):

@@ -677,27 +677,7 @@ def main() -> None:
             "--from-source does) or on a release that ships it."
         ) from None
 
-    for name, host, port in (
-        (
-            "Postgres",
-            os.environ.get("PG_HOST", "postgres"),
-            int(os.environ.get("PG_PORT") or 5432),
-        ),
-        (
-            "ClickHouse",
-            os.environ.get("CH_HOST", "clickhouse"),
-            int(os.environ.get("CH_HTTP_PORT") or 8123),
-        ),
-        (
-            "Redis",
-            os.environ.get("REDIS_HOST", "127.0.0.1"),
-            int(os.environ.get("REDIS_PORT") or 6379),
-        ),
-        (
-            "Temporal",
-            *steps.endpoint(os.environ.get("TEMPORAL_HOST", "127.0.0.1:7233"), 7233),
-        ),
-    ):
+    for name, host, port in steps.datastore_endpoints():
         steps.wait_tcp(name, host, port, 300, log)
 
     import django

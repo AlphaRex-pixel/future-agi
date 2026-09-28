@@ -111,7 +111,7 @@ def test_the_standalone_bootstrap_runs_the_same_steps_in_the_same_order(
     local_operator, recorded_steps, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     call_command("bootstrap_install")
-    job = [step for step in recorded_steps if not step.startswith("wait ")]
+    job = list(recorded_steps)
     recorded_steps.clear()
     spec = importlib.util.spec_from_file_location(
         "standalone_bootstrap", STANDALONE_BOOTSTRAP
@@ -135,13 +135,7 @@ def test_the_standalone_bootstrap_runs_the_same_steps_in_the_same_order(
 
     standalone.main()
 
-    assert [step for step in recorded_steps if not step.startswith("wait ")] == job
-    assert [step for step in recorded_steps if step.startswith("wait ")] == [
-        "wait Postgres",
-        "wait ClickHouse",
-        "wait Redis",
-        "wait Temporal",
-    ]
+    assert recorded_steps == job
 
 
 def test_property_catalog_can_be_skipped(local_operator, recorded_steps) -> None:
@@ -725,7 +719,13 @@ def test_datastore_endpoints_fall_back_to_redis_host_and_the_defaults(
             REDIS_URL=redis_url,
         ),
     )
-    env = {"PG_HOST": "postgres", "REDIS_HOST": "cache", "REDIS_PORT": "6390"}
+    env = {
+        "PG_HOST": "postgres",
+        "PG_PORT": "",
+        "CH_HTTP_PORT": "",
+        "REDIS_HOST": "cache",
+        "REDIS_PORT": "6390",
+    }
 
     # A pooler in front of Postgres: both it and Postgres itself are waited for.
     assert command.datastore_endpoints(env) == [
