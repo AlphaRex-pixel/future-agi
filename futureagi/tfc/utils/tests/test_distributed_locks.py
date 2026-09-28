@@ -588,13 +588,22 @@ class TestRedisPasswordNotLogged:
         assert "redis://:***@futureagi-redis:6379/2" in caplog.text
 
     def test_connection_failure_log_masks_password(self, caplog):
-        from tfc.utils.distributed_locks import DistributedLockManager
+        """Regression guard: the failure path logs the error, not the URL.
 
-        caplog.set_level("INFO", logger="tfc.utils.distributed_locks")
-        manager = DistributedLockManager(
-            redis_url=f"redis://:{self.PASSWORD}@127.0.0.1:1/2",
-            fallback_to_local=True,
+        It passes without the redaction fix too; it keeps a future change to
+        the fallback warning from adding the raw URL.
+        """
+        from tfc.utils import distributed_locks
+
+        caplog.set_level("INFO", logger=distributed_locks.__name__)
+        refused = distributed_locks.redis.ConnectionError(
+            "Error 111 connecting to futureagi-redis:6379. Connection refused."
         )
+        with patch.object(distributed_locks.redis, "from_url", side_effect=refused):
+            manager = distributed_locks.DistributedLockManager(
+                redis_url=f"redis://:{self.PASSWORD}@futureagi-redis:6379/2",
+                fallback_to_local=True,
+            )
 
         assert not manager.is_distributed
         assert "Falling back to local locks" in caplog.text
