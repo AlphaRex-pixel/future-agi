@@ -301,7 +301,8 @@ func (f *LogFlusher) flush() {
 // Close stops accepting records and makes a last attempt to deliver the
 // buffered ones, trying each batch up to finalFlushAttempts times until ctx
 // ends. A flush already sending finishes first (or is cut off when ctx ends),
-// so no batch is sent twice. It logs how many records were not delivered.
+// so no batch is sent twice. It logs how many records were not delivered, and
+// how many it did deliver.
 func (f *LogFlusher) Close(ctx context.Context) {
 	f.mu.Lock()
 	if f.closed {
@@ -323,6 +324,7 @@ func (f *LogFlusher) Close(ctx context.Context) {
 	if len(records) > 0 {
 		undelivered, err = f.deliver(ctx, records)
 	}
+	delivered := len(records) - undelivered
 
 	f.mu.Lock()
 	undelivered += f.lost
@@ -330,6 +332,9 @@ func (f *LogFlusher) Close(ctx context.Context) {
 	switch {
 	case undelivered > 0:
 		attrs := []any{"undelivered", undelivered}
+		if delivered > 0 {
+			attrs = append(attrs, "delivered", delivered)
+		}
 		level := slog.LevelError
 		if err != nil {
 			attrs = append(attrs, "error", err)

@@ -454,6 +454,17 @@ func TestLogFlusherClose_SendsTheBacklogInBatches(t *testing.T) {
 			if n, _, _ := undeliveredLogged(t, logs); n != tc.wantUndelivered {
 				t.Errorf("logged undelivered = %d, want %d", n, tc.wantUndelivered)
 			}
+			var delivered int64 // the same line says how many were delivered
+			logs.mu.Lock()
+			for _, rec := range logs.records {
+				if v, ok := findAttr(rec, "delivered"); ok {
+					delivered = v.Int64()
+				}
+			}
+			logs.mu.Unlock()
+			if want := int64(len(tc.wantDelivered)); delivered != want {
+				t.Errorf("logged delivered = %d, want %d", delivered, want)
+			}
 		})
 	}
 }
