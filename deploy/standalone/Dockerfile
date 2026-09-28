@@ -10,8 +10,12 @@
 # same components as separate services.
 #
 # The image is assembled from the published component images, so the build
-# context is just this directory and nothing is compiled:
-#   docker build -t futureagi/standalone:latest deploy/standalone
+# context is just this directory and nothing is compiled. bin/bootstrap.py
+# runs the backend's `manage.py bootstrap_install`, so BACKEND_IMAGE must
+# come from the same version as this directory: check out the tag you pass,
+# or use ./bin/install --from-source.
+#   docker build --build-arg BACKEND_IMAGE=futureagi/future-agi:vX.Y.Z \
+#     -t futureagi/standalone:vX.Y.Z deploy/standalone
 # A from-source install (./bin/install --from-source) and the release build
 # pass their own component tags instead. The backend they pass is the slim
 # variant (futureagi/Dockerfile.oss --build-arg IMAGE_VARIANT=slim):
@@ -24,8 +28,9 @@
 # Runs as root (docs/images.md): supervisord starts Redis, MinIO, nginx and
 # the API as root, runs code evals as the unprivileged `sandbox` user, and
 # keeps secrets in a root-only directory.
-# The component image defaults float on :latest for a quick local build; a
-# release pins all four to the digests it just published (release-images.yml).
+# The component image defaults float on :latest, the newest release, which
+# only a checkout of that release's tag matches; a release pins all four to
+# the digests it just published (release-images.yml).
 # ============================================================================
 ARG BACKEND_IMAGE=futureagi/future-agi:latest
 ARG FRONTEND_IMAGE=futureagi/frontend:latest

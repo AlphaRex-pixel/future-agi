@@ -72,7 +72,8 @@ found".
 `IMAGE_VARIANT` only sets the defaults of the per-feature build arguments
 ([Build arguments](#build-arguments)); one passed explicitly wins. A
 Standalone install that needs any of the above can build its app image from
-the default variant:
+the default variant, from a checkout of the same tag (the image's bootstrap
+runs that backend's `manage.py bootstrap_install`):
 
 ```bash
 docker build -t futureagi/standalone:local \

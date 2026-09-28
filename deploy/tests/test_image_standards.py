@@ -46,7 +46,8 @@ IMAGES = {
         "user": "root",
         "stopsignal": "SIGTERM",
         "healthcheck": True,
-        # :latest for a quick local build; a release passes digests.
+        # :latest for a build from the newest release's tag; a release
+        # passes digests.
         "floating": {
             "BACKEND_IMAGE",
             "FRONTEND_IMAGE",
