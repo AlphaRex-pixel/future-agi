@@ -48,6 +48,25 @@ def _touch_content(job):
     job.save(update_fields=["content_updated_at", "updated_at"])
 
 
+def _bound_by_name(run_test, name):
+    """The live config this environment already binds under ``name``, if any.
+
+    "Grade this run" names an eval the environment already has. A person may
+    have added it from outside the harness's offer or under a name of their
+    own, so the offer's gates would refuse it even though it is bound and
+    gradeable.
+    """
+    from simulate.services.harness_evals import selected_eval_configs
+
+    for config in selected_eval_configs(run_test):
+        if name in {
+            str(config.name or ""),
+            str(getattr(config.eval_template, "name", "") or ""),
+        }:
+            return config
+    return None
+
+
 def _uuid_or_none(value):
     """The id as a UUID, or ``None`` when it is not one.
 
@@ -278,10 +297,11 @@ class HarnessEnvironmentViewSet(viewsets.ViewSet):
         """Add an eval from inside a finished run, and grade that run's calls with it.
 
         Two things happen inside one ``transaction.atomic()`` block: the eval
-        is bound to the environment exactly as ``add_evaluation`` binds it --
-        same gates, refusals, lock, and idempotency, so adding an
-        already-bound name is not an error and creates no second row -- and
-        this run's finished calls are selected and stamped for grading.
+        is bound to the environment exactly as ``add_evaluation`` binds it,
+        except that a name the environment already binds -- including one a
+        person added outside the harness's offer -- is graded as it stands
+        and creates no second row -- and this run's finished calls are
+        selected and stamped for grading.
         Wrapping both together means a failure anywhere in this request rolls
         the bind and the stamps back together: no grading job is ever
         dispatched against a bind that did not survive, because
@@ -366,7 +386,9 @@ class HarnessEnvironmentViewSet(viewsets.ViewSet):
         before_bind = timezone.now()
         try:
             with transaction.atomic():
-                eval_config = add_selected_eval(job.run_test, wanted, modality)
+                eval_config = _bound_by_name(job.run_test, wanted) or add_selected_eval(
+                    job.run_test, wanted, modality
+                )
                 if not eval_config.mapping:
                     # The idempotent name match above can return one of the
                     # harness's own result-column rows (empty ``mapping``)

@@ -379,7 +379,10 @@ EVAL_RUN_CREDITS = 0.5
 
 
 def eval_entry(
-    template: EvalTemplate, mapping: dict[str, str], modality: str
+    template: EvalTemplate,
+    mapping: dict[str, str],
+    modality: str,
+    labels: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """One eval in the one list format the harness, the picker and the detail share.
 
@@ -394,7 +397,9 @@ def eval_entry(
     `label` falls back to the source name for a mapping stored before this
     change: the detail builds entries from what is bound, and a row bound
     under the old voice table can carry a source this table no longer
-    produces.
+    produces. `labels` names sources the table does not know — a person's
+    mapping can point at a scenario column by id; the detail passes the
+    column names it resolved.
     """
     return {
         "name": str(template.name or ""),
@@ -414,7 +419,8 @@ def eval_entry(
             {
                 "key": key,
                 "source": mapping[key],
-                "label": _LABEL_BY_SOURCE.get(mapping[key], mapping[key]),
+                "label": (labels or {}).get(mapping[key])
+                or _LABEL_BY_SOURCE.get(mapping[key], mapping[key]),
             }
             for key in sorted(mapping)
         ],
