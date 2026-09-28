@@ -1369,14 +1369,33 @@ class Workflows(unittest.TestCase):
         self.assertIn("ref: ${{ needs.prepare.outputs.revision }}", multiarch)
         self.assertIn("OCI labels (linux/${{ matrix.arch }})", multiarch)
 
-        single = (WORKFLOWS / "build-image.yml").read_text(encoding="utf-8")
-        self.assertIn("VERSION=${{ steps.version.outputs.version }}", single)
-        self.assertIn("REVISION=${{ steps.source.outputs.revision }}", single)
-        self.assertIn("CREATED=${{ steps.source.outputs.created }}", single)
-
         base = (WORKFLOWS / "base-image-publish.yml").read_text(encoding="utf-8")
         self.assertIn("VERSION=${{ inputs.version }}", base)
         self.assertIn("REVISION=${{ steps.source.outputs.revision }}", base)
+
+    @unittest.skipUnless(HAVE_YAML, "PyYAML unavailable")
+    def test_every_release_image_builds_through_the_multiarch_workflow(self):
+        self.assertFalse((WORKFLOWS / "build-image.yml").exists())
+        jobs = yaml_jobs(WORKFLOWS / "release-images.yml")
+        for name, job in jobs.items():
+            if "uses" in job:
+                with self.subTest(job=name):
+                    self.assertIn(
+                        job["uses"],
+                        {
+                            "./.github/workflows/build-image-multiarch.yml",
+                            "./.github/workflows/base-image-publish.yml",
+                        },
+                    )
+        runner = jobs["simulation-runner"]
+        self.assertEqual(
+            runner["uses"], "./.github/workflows/build-image-multiarch.yml"
+        )
+        self.assertEqual(json.loads(runner["with"]["arches"]), ["amd64"])
+        self.assertEqual(runner["permissions"]["packages"], "write")
+        for workflow in WORKFLOWS.glob("*.y*ml"):
+            with self.subTest(workflow=workflow.name):
+                self.assertNotIn("build-image.yml", workflow.read_text("utf-8"))
 
     def test_standalone_ci_builds_every_image_with_the_label_args(self):
         ci = (WORKFLOWS / "standalone-ci.yml").read_text(encoding="utf-8")

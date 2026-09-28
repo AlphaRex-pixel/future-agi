@@ -4,12 +4,12 @@
 # (release-please only cuts bare vX.Y.Z; the guard job double-checks).
 #
 # Every image builds through build-image-multiarch.yml: linux/amd64 and
-# linux/arm64 on native runners (the CUDA serving variant: amd64 only),
-# pushed by digest, run, checked against its compressed-size budget
-# (scripts/image_size_budget.json), and tagged only when every architecture
-# passed. Layers come from a registry build cache, so an upgrade downloads
-# only the layers that changed. The simulation runner (amd64 only) still uses
-# build-image.yml, and the code-executor base base-image-publish.yml.
+# linux/arm64 on native runners (the CUDA serving variant and the simulation
+# runner: amd64 only), pushed by digest, run, checked against its
+# compressed-size budget (scripts/image_size_budget.json), and tagged only
+# when every architecture passed. Layers come from a registry build cache, so
+# an upgrade downloads only the layers that changed. The code-executor base
+# builds through base-image-publish.yml.
 #
 # The backend has two variants (futureagi/Dockerfile.oss IMAGE_VARIANT,
 # docs/images.md): the default, feature-complete futureagi/future-agi:<tag>,
@@ -383,16 +383,18 @@ jobs:
   simulation-runner:
     needs: [guard, build, backend, resolve-sdk]
     if: github.event_name == 'push'
-    uses: ./.github/workflows/build-image.yml
+    permissions:
+      contents: read
+      packages: write # ghcr build cache
+    uses: ./.github/workflows/build-image-multiarch.yml
     with:
       image: futureagi/future-agi-simulation-runner
       context: .
       dockerfile: ./Dockerfile.simulation-runner
       version: ${{ needs.guard.outputs.version }}
       ref: ${{ github.ref }}
-      platforms: linux/amd64
       push-latest: true
-      free-disk: false
+      arches: '["amd64"]'
       cache-scope: simulation-runner
       timeout-minutes: 45
       build-args: |

@@ -83,7 +83,7 @@
       "budget_mb": 1350,
       "projected_mb": 1172,
       "enforce": false,
-      "note": "FROM the default futureagi/future-agi variant plus a ~401 MB SDK venv (v1.41.1: 1171.4 = 770.5 + 400.9). Published by build-image.yml, so it is reported after the release, not gated."
+      "note": "FROM the default futureagi/future-agi variant plus a ~401 MB SDK venv (v1.41.1: 1171.4 = 770.5 + 400.9). Checked by build-image-multiarch.yml before its tags move, but reported only until a release measures it."
     }
   ],
   "default_install": {

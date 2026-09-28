@@ -171,10 +171,10 @@ jobs:
     timeout-minutes: 120
     steps:
       # future-agi-base and serving-base both carry torch, whose wheels blow
-      # past the ~14GB free on a stock runner; same reclaim set build-image.yml
-      # uses for its heavy legs. Written for x64: if it ever fails on the arm64
-      # leg (it clears paths that image may not have), gate it with
-      # `if: matrix.arch == 'amd64'`.
+      # past the ~14GB free on a stock runner; same reclaim set
+      # build-image-multiarch.yml uses for its heavy legs. Written for x64: if
+      # it ever fails on the arm64 leg (it clears paths that image may not
+      # have), gate it with `if: matrix.arch == 'amd64'`.
       - name: Free up disk space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # main as of 2026-07-23
         with:
