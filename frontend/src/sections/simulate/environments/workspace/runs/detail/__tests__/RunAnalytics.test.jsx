@@ -36,31 +36,33 @@ const analytics = {
     ],
     breakdowns: [
       {
-        key: "call_success",
+        key: "goal_outcome",
         total: 4,
-        headline: { label: "successful", count: 2, share: 50 },
+        headline: { label: "passed", count: 2, share: 50 },
         segments: [
-          { label: "successful", count: 2, share: 50, statuses: ["passed"] },
+          { label: "passed", count: 2, share: 50, statuses: ["passed"] },
+          { label: "failed", count: 1, share: 25, statuses: ["failed"] },
           {
-            label: "unsuccessful",
+            label: "inconclusive",
             count: 1,
             share: 25,
-            statuses: ["failed", "error"],
+            statuses: ["inconclusive"],
           },
-          { label: "unknown", count: 1, share: 25, statuses: ["inconclusive"] },
         ],
       },
       {
-        key: "goal_outcome",
+        key: "disconnection",
         total: 4,
-        segments: [
-          { label: "passed", count: 2, share: 50 },
-          { label: "failed", count: 1, share: 25 },
-          { label: "inconclusive", count: 1, share: 25 },
-        ],
+        segments: [{ label: "Caller hung up", count: 4, share: 100 }],
       },
     ],
-    evaluation_summary: { graders: 1, passed: 2, measured: 3 },
+    evaluation_summary: {
+      graders: 1,
+      passed: 2,
+      measured: 3,
+      pass_rate: 66.67,
+      errored_checks: 0,
+    },
     voice_slos: [
       {
         key: "model",
@@ -84,20 +86,20 @@ const analytics = {
     agent_response_time: {
       measured: 2,
       total: 4,
-      target_ms: 550,
-      p50: 550,
-      p95: 590,
+      target_ms: 1500,
+      p50: 1500,
+      p95: 1590,
       at_or_above_target: 1,
       at_or_above_target_percent: 50,
       bins: [
-        { label: "550ms", lower: 550, upper: 575, count: 1, danger: true },
+        { label: "1500ms", lower: 1500, upper: 1525, count: 1, danger: true },
       ],
     },
     pipeline_cost: [],
     tools: { total_invocations: 0, total_tools: 0, volume: [], failures: [] },
     use_case_risk: [
       {
-        goal: "Handle a refund",
+        scenario: "Handle a refund",
         passed: 2,
         failed: 1,
         error: 0,
@@ -131,12 +133,52 @@ const analytics = {
   },
   scenario_risk: [
     {
-      goal: "Handle a refund",
+      scenario: "Handle a refund",
       total: 4,
       pass_rate: 66.67,
       outcomes: { failed: 1, error: 0 },
     },
   ],
+  reliability: {
+    trials: 2,
+    scenarios: 2,
+    consistent_pass: 1,
+    passed_at_least_once: 2,
+    repeated: 2,
+    flaky: 1,
+    flip_rate: 50,
+    pass_rate_interval: {
+      low: 12.5,
+      high: 95.1,
+      effective_n: 3,
+      evaluated: 3,
+      clusters: 2,
+    },
+    rows: [
+      {
+        scenario: "refund-flips",
+        runs: 2,
+        passed: 1,
+        failed: 1,
+        error: 0,
+        inconclusive: 0,
+        evaluated: 2,
+        pass_rate: 50,
+        verdict: "flaky",
+      },
+      {
+        scenario: "refund-stable",
+        runs: 2,
+        passed: 1,
+        failed: 0,
+        error: 0,
+        inconclusive: 1,
+        evaluated: 1,
+        pass_rate: 100,
+        verdict: "passed",
+      },
+    ],
+  },
   turn_distribution: [
     { turn_count: 4, passed: 2, failed: 1, error: 0, inconclusive: 1 },
   ],
@@ -145,7 +187,10 @@ const analytics = {
       id: "eval-1",
       name: "Policy adherence",
       passed: 2,
+      failed: 1,
       measured: 3,
+      errored: 1,
+      missing: 0,
       pass_rate: 66.67,
     },
   ],
@@ -207,7 +252,7 @@ describe("RunAnalytics", () => {
     expect(screen.getAllByText("66.7%").length).toBeGreaterThan(0);
     expect(screen.getByText("Policy adherence")).toBeInTheDocument();
     expect(
-      screen.getByRole("region", { name: "Use case risk" }),
+      screen.getByRole("region", { name: "Weakest scenarios" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("region", { name: "Tool failure rate" }),
@@ -216,6 +261,32 @@ describe("RunAnalytics", () => {
     expect(screen.queryByText("Failure attribution")).not.toBeInTheDocument();
     expect(screen.queryByText(/critical failures/i)).not.toBeInTheDocument();
     expect(useRunAnalytics).toHaveBeenCalledWith("execution-1");
+  });
+
+  it("shows which scenarios flip across trials", () => {
+    render(<RunAnalytics executionId="execution-1" />);
+    const panel = screen.getByRole("region", {
+      name: "Reliability across trials",
+    });
+    expect(within(panel).getByText("refund-flips")).toBeInTheDocument();
+    expect(
+      within(panel).getAllByText("Flipped between trials").length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getByText(
+        /2 scenarios × 2 trials · pass rate 95% range 12.5%–95.1%/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("hides provider-only charts when no provider reported them", () => {
+    render(<RunAnalytics executionId="execution-1" />);
+    expect(
+      screen.queryByRole("region", { name: "Provider sentiment" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Provider's own success flag" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows an honest empty state", () => {
@@ -244,7 +315,7 @@ describe("RunAnalytics", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        /50% of measured calls were at or over the 550ms target/,
+        /50% of measured calls averaged at or over the 1,?500ms target/,
       ),
     ).toBeInTheDocument();
     expect(
@@ -253,19 +324,15 @@ describe("RunAnalytics", () => {
     expect(
       screen.queryByText("Pass / fail by conversation length"),
     ).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^About / })).toHaveLength(17);
+    expect(screen.getAllByRole("button", { name: /^About / })).toHaveLength(16);
   });
 
-  it("forwards server-provided status filters from the success chart", () => {
+  it("forwards server-provided status filters from the outcome chart", () => {
     const open = vi.fn();
     render(<RunAnalytics executionId="execution-1" onOpenCalls={open} />);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Show Unsuccessful calls" }),
-    );
-    expect(open).toHaveBeenCalledWith({ status: ["failed", "error"] });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Show Successful calls" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Show Failed calls" }));
+    expect(open).toHaveBeenCalledWith({ status: ["failed"] });
+    fireEvent.click(screen.getByRole("button", { name: "Show Passed calls" }));
     expect(open).toHaveBeenLastCalledWith({ status: ["passed"] });
   });
 
@@ -273,7 +340,7 @@ describe("RunAnalytics", () => {
     const open = vi.fn();
     render(<RunAnalytics executionId="execution-1" onOpenCall={open} />);
     fireEvent.click(
-      within(screen.getByRole("region", { name: "Slowest tasks" })).getByRole(
+      within(screen.getByRole("region", { name: "Slowest calls" })).getByRole(
         "button",
         { name: "Open task 1" },
       ),

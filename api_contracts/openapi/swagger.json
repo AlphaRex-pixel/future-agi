@@ -134540,7 +134540,8 @@
                 "graders",
                 "passed",
                 "measured",
-                "pass_rate"
+                "pass_rate",
+                "errored_checks"
             ],
             "type": "object",
             "properties": {
@@ -134560,12 +134561,16 @@
                     "title": "Pass rate",
                     "type": "number",
                     "x-nullable": true
+                },
+                "errored_checks": {
+                    "title": "Errored checks",
+                    "type": "integer"
                 }
             }
         },
         "RunDashboardRisk": {
             "required": [
-                "goal",
+                "scenario",
                 "passed",
                 "failed",
                 "error",
@@ -134573,8 +134578,8 @@
             ],
             "type": "object",
             "properties": {
-                "goal": {
-                    "title": "Goal",
+                "scenario": {
+                    "title": "Scenario",
                     "type": "string",
                     "minLength": 1
                 },
@@ -134949,7 +134954,7 @@
                 "latency",
                 "tokens",
                 "cost_cents",
-                "goal"
+                "scenario"
             ],
             "type": "object",
             "properties": {
@@ -134981,10 +134986,157 @@
                 "cost_cents": {
                     "$ref": "#/definitions/TotalMetricStats"
                 },
-                "goal": {
-                    "title": "Goal",
+                "scenario": {
+                    "title": "Scenario",
                     "type": "string",
                     "minLength": 1
+                }
+            }
+        },
+        "ReliabilityInterval": {
+            "required": [
+                "low",
+                "high",
+                "effective_n",
+                "evaluated",
+                "clusters"
+            ],
+            "type": "object",
+            "properties": {
+                "low": {
+                    "title": "Low",
+                    "type": "number"
+                },
+                "high": {
+                    "title": "High",
+                    "type": "number"
+                },
+                "effective_n": {
+                    "title": "Effective n",
+                    "type": "number"
+                },
+                "evaluated": {
+                    "title": "Evaluated",
+                    "type": "integer"
+                },
+                "clusters": {
+                    "title": "Clusters",
+                    "type": "integer"
+                }
+            },
+            "x-nullable": true
+        },
+        "ReliabilityRow": {
+            "required": [
+                "passed",
+                "failed",
+                "error",
+                "inconclusive",
+                "scenario",
+                "runs",
+                "evaluated",
+                "pass_rate",
+                "verdict"
+            ],
+            "type": "object",
+            "properties": {
+                "passed": {
+                    "title": "Passed",
+                    "type": "integer"
+                },
+                "failed": {
+                    "title": "Failed",
+                    "type": "integer"
+                },
+                "error": {
+                    "title": "Error",
+                    "type": "integer"
+                },
+                "inconclusive": {
+                    "title": "Inconclusive",
+                    "type": "integer"
+                },
+                "scenario": {
+                    "title": "Scenario",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "runs": {
+                    "title": "Runs",
+                    "type": "integer"
+                },
+                "evaluated": {
+                    "title": "Evaluated",
+                    "type": "integer"
+                },
+                "pass_rate": {
+                    "title": "Pass rate",
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "verdict": {
+                    "title": "Verdict",
+                    "type": "string",
+                    "enum": [
+                        "passed",
+                        "failed",
+                        "flaky",
+                        "not_evaluated"
+                    ]
+                }
+            }
+        },
+        "Reliability": {
+            "required": [
+                "trials",
+                "scenarios",
+                "consistent_pass",
+                "passed_at_least_once",
+                "repeated",
+                "flaky",
+                "flip_rate",
+                "pass_rate_interval",
+                "rows"
+            ],
+            "type": "object",
+            "properties": {
+                "trials": {
+                    "title": "Trials",
+                    "type": "integer"
+                },
+                "scenarios": {
+                    "title": "Scenarios",
+                    "type": "integer"
+                },
+                "consistent_pass": {
+                    "title": "Consistent pass",
+                    "type": "integer"
+                },
+                "passed_at_least_once": {
+                    "title": "Passed at least once",
+                    "type": "integer"
+                },
+                "repeated": {
+                    "title": "Repeated",
+                    "type": "integer"
+                },
+                "flaky": {
+                    "title": "Flaky",
+                    "type": "integer"
+                },
+                "flip_rate": {
+                    "title": "Flip rate",
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "pass_rate_interval": {
+                    "$ref": "#/definitions/ReliabilityInterval"
+                },
+                "rows": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ReliabilityRow"
+                    }
                 }
             }
         },
@@ -135027,6 +135179,7 @@
                 "passed",
                 "failed",
                 "measured",
+                "errored",
                 "missing",
                 "pass_rate",
                 "average_score"
@@ -135053,6 +135206,10 @@
                 },
                 "measured": {
                     "title": "Measured",
+                    "type": "integer"
+                },
+                "errored": {
+                    "title": "Errored",
                     "type": "integer"
                 },
                 "missing": {
@@ -135327,6 +135484,7 @@
                 "execution",
                 "summary",
                 "scenario_risk",
+                "reliability",
                 "turn_distribution",
                 "evaluations",
                 "failure_breakdown",
@@ -135352,6 +135510,9 @@
                     "items": {
                         "$ref": "#/definitions/Risk"
                     }
+                },
+                "reliability": {
+                    "$ref": "#/definitions/Reliability"
                 },
                 "turn_distribution": {
                     "type": "array",

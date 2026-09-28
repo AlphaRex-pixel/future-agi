@@ -293,7 +293,37 @@ class AnalyticsSummarySerializer(RunSummarySerializer):
 
 
 class RiskSerializer(RunSummarySerializer):
-    goal = serializers.CharField()
+    scenario = serializers.CharField()
+
+
+class ReliabilityIntervalSerializer(serializers.Serializer):
+    low = serializers.FloatField()
+    high = serializers.FloatField()
+    effective_n = serializers.FloatField()
+    evaluated = serializers.IntegerField()
+    clusters = serializers.IntegerField()
+
+
+class ReliabilityRowSerializer(OutcomeCountsSerializer):
+    scenario = serializers.CharField()
+    runs = serializers.IntegerField()
+    evaluated = serializers.IntegerField()
+    pass_rate = serializers.FloatField(allow_null=True)
+    verdict = serializers.ChoiceField(
+        choices=["passed", "failed", "flaky", "not_evaluated"]
+    )
+
+
+class ReliabilitySerializer(serializers.Serializer):
+    trials = serializers.IntegerField()
+    scenarios = serializers.IntegerField()
+    consistent_pass = serializers.IntegerField()
+    passed_at_least_once = serializers.IntegerField()
+    repeated = serializers.IntegerField()
+    flaky = serializers.IntegerField()
+    flip_rate = serializers.FloatField(allow_null=True)
+    pass_rate_interval = ReliabilityIntervalSerializer(allow_null=True)
+    rows = ReliabilityRowSerializer(many=True)
 
 
 class TurnDistributionSerializer(OutcomeCountsSerializer):
@@ -306,6 +336,7 @@ class EvaluationSummarySerializer(serializers.Serializer):
     passed = serializers.IntegerField()
     failed = serializers.IntegerField()
     measured = serializers.IntegerField()
+    errored = serializers.IntegerField()
     missing = serializers.IntegerField()
     pass_rate = serializers.FloatField(allow_null=True)
     average_score = serializers.FloatField(allow_null=True)
@@ -356,6 +387,7 @@ class RunAnalyticsV3ResponseSerializer(serializers.Serializer):
     execution = AnalyticsExecutionSerializer()
     summary = AnalyticsSummarySerializer()
     scenario_risk = RiskSerializer(many=True)
+    reliability = ReliabilitySerializer()
     turn_distribution = TurnDistributionSerializer(many=True)
     evaluations = EvaluationSummarySerializer(many=True)
     failure_breakdown = FailureBreakdownSerializer(many=True)

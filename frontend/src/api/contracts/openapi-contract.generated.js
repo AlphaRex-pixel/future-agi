@@ -72171,6 +72171,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "execution",
         "summary",
         "scenario_risk",
+        "reliability",
         "turn_distribution",
         "evaluations",
         "failure_breakdown",
@@ -72196,6 +72197,9 @@ export const OPENAPI_CONTRACT = Object.freeze({
           items: {
             $ref: "#/definitions/Risk",
           },
+        },
+        reliability: {
+          $ref: "#/definitions/Reliability",
         },
         turn_distribution: {
           type: "array",
@@ -97385,6 +97389,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "passed",
         "failed",
         "measured",
+        "errored",
         "missing",
         "pass_rate",
         "average_score",
@@ -97411,6 +97416,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         measured: {
           title: "Measured",
+          type: "integer",
+        },
+        errored: {
+          title: "Errored",
           type: "integer",
         },
         missing: {
@@ -97546,6 +97555,60 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    Reliability: {
+      required: [
+        "trials",
+        "scenarios",
+        "consistent_pass",
+        "passed_at_least_once",
+        "repeated",
+        "flaky",
+        "flip_rate",
+        "pass_rate_interval",
+        "rows",
+      ],
+      type: "object",
+      properties: {
+        trials: {
+          title: "Trials",
+          type: "integer",
+        },
+        scenarios: {
+          title: "Scenarios",
+          type: "integer",
+        },
+        consistent_pass: {
+          title: "Consistent pass",
+          type: "integer",
+        },
+        passed_at_least_once: {
+          title: "Passed at least once",
+          type: "integer",
+        },
+        repeated: {
+          title: "Repeated",
+          type: "integer",
+        },
+        flaky: {
+          title: "Flaky",
+          type: "integer",
+        },
+        flip_rate: {
+          title: "Flip rate",
+          type: "number",
+          "x-nullable": true,
+        },
+        pass_rate_interval: {
+          $ref: "#/definitions/ReliabilityInterval",
+        },
+        rows: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/ReliabilityRow",
+          },
+        },
+      },
+    },
     Risk: {
       required: [
         "total",
@@ -97556,7 +97619,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "latency",
         "tokens",
         "cost_cents",
-        "goal",
+        "scenario",
       ],
       type: "object",
       properties: {
@@ -97588,8 +97651,8 @@ export const OPENAPI_CONTRACT = Object.freeze({
         cost_cents: {
           $ref: "#/definitions/TotalMetricStats",
         },
-        goal: {
-          title: "Goal",
+        scenario: {
+          title: "Scenario",
           type: "string",
           minLength: 1,
         },
@@ -110643,6 +110706,88 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    ReliabilityInterval: {
+      required: ["low", "high", "effective_n", "evaluated", "clusters"],
+      type: "object",
+      properties: {
+        low: {
+          title: "Low",
+          type: "number",
+        },
+        high: {
+          title: "High",
+          type: "number",
+        },
+        effective_n: {
+          title: "Effective n",
+          type: "number",
+        },
+        evaluated: {
+          title: "Evaluated",
+          type: "integer",
+        },
+        clusters: {
+          title: "Clusters",
+          type: "integer",
+        },
+      },
+      "x-nullable": true,
+    },
+    ReliabilityRow: {
+      required: [
+        "passed",
+        "failed",
+        "error",
+        "inconclusive",
+        "scenario",
+        "runs",
+        "evaluated",
+        "pass_rate",
+        "verdict",
+      ],
+      type: "object",
+      properties: {
+        passed: {
+          title: "Passed",
+          type: "integer",
+        },
+        failed: {
+          title: "Failed",
+          type: "integer",
+        },
+        error: {
+          title: "Error",
+          type: "integer",
+        },
+        inconclusive: {
+          title: "Inconclusive",
+          type: "integer",
+        },
+        scenario: {
+          title: "Scenario",
+          type: "string",
+          minLength: 1,
+        },
+        runs: {
+          title: "Runs",
+          type: "integer",
+        },
+        evaluated: {
+          title: "Evaluated",
+          type: "integer",
+        },
+        pass_rate: {
+          title: "Pass rate",
+          type: "number",
+          "x-nullable": true,
+        },
+        verdict: {
+          title: "Verdict",
+          type: "string",
+          enum: ["passed", "failed", "flaky", "not_evaluated"],
+        },
+      },
+    },
     RunDashboardBreakdown: {
       required: ["key", "label", "total", "segments", "headline"],
       type: "object",
@@ -110736,7 +110881,13 @@ export const OPENAPI_CONTRACT = Object.freeze({
       },
     },
     RunDashboardEvaluationSummary: {
-      required: ["graders", "passed", "measured", "pass_rate"],
+      required: [
+        "graders",
+        "passed",
+        "measured",
+        "pass_rate",
+        "errored_checks",
+      ],
       type: "object",
       properties: {
         graders: {
@@ -110755,6 +110906,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Pass rate",
           type: "number",
           "x-nullable": true,
+        },
+        errored_checks: {
+          title: "Errored checks",
+          type: "integer",
         },
       },
     },
@@ -110911,11 +111066,11 @@ export const OPENAPI_CONTRACT = Object.freeze({
       },
     },
     RunDashboardRisk: {
-      required: ["goal", "passed", "failed", "error", "inconclusive"],
+      required: ["scenario", "passed", "failed", "error", "inconclusive"],
       type: "object",
       properties: {
-        goal: {
-          title: "Goal",
+        scenario: {
+          title: "Scenario",
           type: "string",
           minLength: 1,
         },

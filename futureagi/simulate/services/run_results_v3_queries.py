@@ -26,11 +26,18 @@ from django.db.models import (
 )
 from django.db.models.fields.json import KeyTransform
 from django.db.models.functions import Cast, Coalesce, Lower, NullIf, Trim
-from django.db.models.lookups import Exact, GreaterThan, In
+from django.db.models.lookups import (
+    Exact,
+    GreaterThan,
+    GreaterThanOrEqual,
+    In,
+    LessThanOrEqual,
+)
 
 from model_hub.models.develop_dataset import Cell
 from simulate.models import CallExecution, SimulateEvalConfig, TestExecution
 from simulate.semantics import SupportedProviders
+from simulate.services.run_reliability_v3 import build_reliability
 from simulate.services.run_results_v3 import build_evaluation_catalog
 from simulate.services.run_results_v3_expressions import (
     PercentileCont,
@@ -40,6 +47,11 @@ from simulate.services.run_results_v3_expressions import (
 
 OUTCOMES = ("passed", "failed", "error", "inconclusive")
 GROUP_FIELDS = {"goal": "result_goal", "status": "result_outcome"}
+# Outcomes that judge the agent. Errored and inconclusive calls never ran to a verdict,
+# so they are reported as run health rather than counted against the agent.
+EVALUATED_OUTCOMES = ("passed", "failed")
+# Fewer evaluated calls than this and a slice's pass rate is too noisy to rank.
+MIN_RANKED_SLICE = 3
 
 
 def _json_value(field: str, *keys: str):
@@ -222,6 +234,47 @@ def run_calls_queryset(
             ),
             output_field=CharField(),
         ),
+        result_scenario=Coalesce(
+            _json_text("call_metadata", "harness_scenario_key"),
+            _json_text("call_metadata", "hosted_harness_receipt", "scenario_key"),
+            Cast("row_id", TextField()),
+            F("scenario__name"),
+            output_field=CharField(),
+        ),
+        # One CSAT per call on the 0-10 scale. The scorer's own value comes first.
+        # overall_score is accepted only above 1: the voice CSAT step falls back to the
+        # provider's 0/1 success flag in that field, and 1.0 cannot be told apart.
+        result_csat=Coalesce(
+            Case(
+                When(
+                    Q(
+                        GreaterThanOrEqual(
+                            _safe_json_float("conversation_metrics_data", "csat_score"),
+                            Value(0.0),
+                        )
+                    )
+                    & Q(
+                        LessThanOrEqual(
+                            _safe_json_float("conversation_metrics_data", "csat_score"),
+                            Value(10.0),
+                        )
+                    ),
+                    then=_safe_json_float("conversation_metrics_data", "csat_score"),
+                ),
+                default=None,
+                output_field=FloatField(),
+            ),
+            Case(
+                When(
+                    overall_score__gt=1,
+                    overall_score__lte=10,
+                    then=F("overall_score"),
+                ),
+                default=None,
+                output_field=FloatField(),
+            ),
+            output_field=FloatField(),
+        ),
     )
     return queryset.select_related("scenario", "test_execution__agent_definition")
 
@@ -281,12 +334,10 @@ def apply_run_call_query(queryset: QuerySet, query: dict[str, Any]) -> QuerySet:
 def _aggregate_expressions(include_percentiles: bool = True) -> dict[str, Any]:
     expressions: dict[str, Any] = {
         "total": Count("id"),
-        "measured": Count(
-            "id", filter=Q(result_outcome__in=["passed", "failed", "error"])
-        ),
+        "measured": Count("id", filter=Q(result_outcome__in=EVALUATED_OUTCOMES)),
         "tokens_total_value": Sum("result_tokens"),
         "cost_cents_total_value": Sum("cost_cents"),
-        "csat_average": Avg("overall_score"),
+        "csat_average": Avg("result_csat"),
         "turns_average": Avg("result_turn_count"),
     }
     for outcome in OUTCOMES:
@@ -460,6 +511,7 @@ def group_run_calls(
 def _breakdown_run_calls(queryset: QuerySet, field: str) -> list[dict[str, Any]]:
     orm_fields = {
         "goal": "result_goal",
+        "scenario": "result_scenario",
         "provider": "result_provider",
         "modality": "simulation_call_type",
     }
@@ -483,9 +535,11 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
     summary = summarize_run_calls(queryset)
     configs, _ = build_evaluation_catalog(execution)
 
-    risk = _breakdown_run_calls(queryset, "goal")
+    risk = _breakdown_run_calls(queryset, "scenario")
+    # Weakest first; slices with too few evaluated calls to rank go last.
     risk.sort(
         key=lambda item: (
+            item["measured"] < MIN_RANKED_SLICE,
             item["pass_rate"] is None,
             item["pass_rate"] or 0,
             -item["total"],
@@ -521,6 +575,16 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
         evaluation_expressions[f"present_{eval_id}"] = Count(
             "id", filter=Q(eval_outputs__has_key=eval_id)
         )
+        # The evaluator ran but produced no verdict: not a fail against the agent.
+        evaluation_expressions[f"errored_{eval_id}"] = Count(
+            "id",
+            filter=Q(
+                In(
+                    Lower(Trim(_json_text("eval_outputs", eval_id, "status"))),
+                    ["failed", "error"],
+                )
+            ),
+        )
         output_type_key = f"eval_outputs__{eval_id}__output_type"
         evaluation_expressions[f"score_{eval_id}"] = Avg(
             Case(
@@ -551,6 +615,8 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
                 "passed": passed,
                 "failed": failed,
                 "measured": measured,
+                # The evaluator ran but could not produce a verdict; not a fail.
+                "errored": evaluation_values.get(f"errored_{eval_id}") or 0,
                 "missing": summary["total"] - present,
                 "pass_rate": round(passed / measured * 100, 2) if measured else None,
                 "average_score": evaluation_values.get(f"score_{eval_id}"),
@@ -629,7 +695,7 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
         }
         for sibling in reversed(siblings)
     ]
-
+    reliability = build_reliability(queryset, execution.trials)
     return {
         "execution": {
             "id": str(execution.id),
@@ -639,6 +705,7 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
         },
         "summary": {**summary, "evaluators": len(configs)},
         "scenario_risk": risk,
+        "reliability": reliability,
         "turn_distribution": list(turn_distribution.values()),
         "evaluations": sorted(
             evaluations,
@@ -648,7 +715,9 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
                 row["name"],
             ),
         ),
-        "dashboard": build_run_dashboard(queryset, summary, evaluations, risk),
+        "dashboard": build_run_dashboard(
+            queryset, summary, evaluations, risk, reliability
+        ),
         "failure_breakdown": [
             {
                 "reason": reason,

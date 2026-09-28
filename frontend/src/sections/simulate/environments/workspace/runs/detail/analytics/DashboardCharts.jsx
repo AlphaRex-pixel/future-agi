@@ -44,8 +44,7 @@ const OUTCOME_COLORS = {
   neutral: COLORS[5],
   negative: COLORS[2],
   unknown: COLORS[5],
-  successful: COLORS[0],
-  unsuccessful: COLORS[2],
+  "not reported": COLORS[5],
   escalated: COLORS[0],
 };
 export const number = (value, digits = 1) =>
@@ -144,17 +143,14 @@ const pieLabel = (label) =>
   ({
     true: "Successful",
     false: "Unsuccessful",
-    successful: "Successful",
-    unsuccessful: "Unsuccessful",
     escalated: "Escalated",
     passed: "Passed",
     failed: "Failed",
     error: "Errored",
-    inconclusive: "Inconclusive",
+    inconclusive: "Not evaluated",
     positive: "Positive",
     neutral: "Neutral",
     negative: "Negative",
-    unknown: "Unknown",
   })[label.toLowerCase()] || label;
 export function Donut({ data, onOpen }) {
   if (!data?.total) return <NoMeasurement />;

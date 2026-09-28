@@ -141,10 +141,11 @@ class RunDashboardEvaluationSummarySerializer(serializers.Serializer):
     passed = serializers.IntegerField()
     measured = serializers.IntegerField()
     pass_rate = serializers.FloatField(allow_null=True)
+    errored_checks = serializers.IntegerField()
 
 
 class RunDashboardRiskSerializer(serializers.Serializer):
-    goal = serializers.CharField()
+    scenario = serializers.CharField()
     passed = serializers.IntegerField()
     failed = serializers.IntegerField()
     error = serializers.IntegerField()

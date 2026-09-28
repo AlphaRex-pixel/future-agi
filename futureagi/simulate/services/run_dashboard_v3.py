@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 import json
+from collections import defaultdict
 from typing import Any
 
 from django.db.models import (
@@ -25,17 +25,45 @@ from django.db.models import (
 )
 from django.db.models.functions import Coalesce, Extract, Floor, Lower
 
+from simulate.services.run_dashboard_v3_distributions import (
+    csat_distribution,
+    response_time_distribution,
+)
 from simulate.services.run_results_v3_expressions import (
     PercentileCont,
     _json_text,
     _safe_json_float,
 )
-from simulate.services.run_dashboard_v3_distributions import (
-    csat_distribution,
-    response_time_distribution,
-)
 
 CHART_BUCKETS = 100
+NOT_REPORTED = "Not reported"
+# Provider-agnostic end reasons (metric list v1 §5.1), first match wins. The hosted ALK
+# reasons are listed explicitly: none of them appear in any provider's vocabulary.
+END_REASONS = [
+    ("Caller hung up", r"(during|before|after).*(warm.?transfer)"),
+    ("Error", r"transfer.?(cancel|fail)|warm.?transfer.*(fail|error)"),
+    (
+        "Error",
+        r"error|fail|unavailable|^sip-|twilio|busy|no-answer|did-not-answer|dial|"
+        r"invalid|not-connected|not-found|join-timed-out|microphone-permission|"
+        r"concurrency|payment|websocket|shutdown|scam|call-timeout|cancel|"
+        r"room-deleted|spam|user-declined",
+    ),
+    ("Voicemail", r"voicemail|ivr|machine"),
+    ("Transferred", r"transfer|forward"),
+    ("Silence timeout", r"silence|inactivity|idle"),
+    (
+        "Time or turn limit",
+        r"max.?duration|exceeded-max|duration-limit|max.?turns|conversation_timeout",
+    ),
+    (
+        "Caller hung up",
+        r"customer|user|caller|persona|client|human-ended|hangup-by-user|"
+        r"participant-disconnected|simulator_end_call",
+    ),
+    ("Agent ended", r"assistant|agent|end-call|target_disconnected"),
+    ("Completed", r"complete|done|script-completed|outcome_satisfied"),
+]
 
 
 def _stats(queryset: QuerySet, fields: dict[str, str]) -> dict[str, dict[str, Any]]:
@@ -69,7 +97,7 @@ def _breakdown(
     )
     segments = [
         {
-            "label": str(row[field] or "Unknown"),
+            "label": str(row[field] or NOT_REPORTED),
             "count": row["count"],
             "share": round(row["count"] * 100 / total, 2) if total else 0,
         }
@@ -84,24 +112,21 @@ def _breakdown(
                 "share": round(remainder * 100 / total, 2),
             }
         )
-    preferred = {"call_success": "successful", "goal_outcome": "passed"}.get(key)
-    if preferred:
-        order = {
-            "call_success": ["successful", "unsuccessful", "unknown"],
-            "goal_outcome": ["passed", "failed", "error", "escalated", "inconclusive"],
-        }[key]
+    order = {
+        "goal_outcome": ["passed", "failed", "error", "escalated", "inconclusive"],
+    }.get(key)
+    if order:
         by_label = {segment["label"]: segment for segment in segments}
         segments = [
             by_label.get(value, {"label": value, "count": 0, "share": 0})
             for value in order
         ]
-    if key == "call_success":
+    if key == "goal_outcome":
+        # Drill-down filters: only the outcomes the calls list can filter on.
         for segment in segments:
-            segment["statuses"] = {
-                "successful": ["passed"],
-                "unsuccessful": ["failed", "error"],
-                "unknown": ["inconclusive"],
-            }[segment["label"]]
+            if segment["label"] in {"passed", "failed", "error", "inconclusive"}:
+                segment["statuses"] = [segment["label"]]
+    preferred = {"goal_outcome": "passed"}.get(key)
     headline = next(
         (segment for segment in segments if segment["label"] == preferred), None
     )
@@ -196,7 +221,7 @@ def _tool_stats(queryset: QuerySet) -> dict:
                 else None
             ),
             "failure_label": (
-                f'{round(count["failures"] * 100 / count["measured"])}% · {count["failures"]}/{count["measured"]}'
+                f"{round(count['failures'] * 100 / count['measured'])}% · {count['failures']}/{count['measured']}"
                 if count["measured"]
                 else "Not measured"
             ),
@@ -284,16 +309,16 @@ def _tails(queryset: QuerySet, field: str) -> list[dict]:
     rows = (
         queryset.filter(**{f"{field}__isnull": False})
         .order_by(f"-{field}", "id")
-        .values("id", "result_goal", "simulation_call_type", "result_provider", field)[
-            :8
-        ]
+        .values(
+            "id", "result_scenario", "simulation_call_type", "result_provider", field
+        )[:8]
     )
     return [
         {
             "rank": index + 1,
             "id": str(row["id"]),
-            "label": row["result_goal"] or "Untitled task",
-            "axis_label": f'#{index + 1} {(row["result_goal"] or "Untitled task")[:20]}',
+            "label": row["result_scenario"] or "Untitled scenario",
+            "axis_label": f"#{index + 1} {(row['result_scenario'] or 'Untitled scenario')[:20]}",
             "value": row[field],
             "modality": row["simulation_call_type"],
             "provider": row["result_provider"],
@@ -303,113 +328,75 @@ def _tails(queryset: QuerySet, field: str) -> list[dict]:
 
 
 def build_run_dashboard(
-    queryset: QuerySet, summary: dict, evaluations: list, risk: list
+    queryset: QuerySet,
+    summary: dict,
+    evaluations: list,
+    risk: list,
+    reliability: dict | None = None,
 ) -> dict[str, Any]:
     total = summary["total"]
-    queryset = (
-        queryset.annotate(
-            dashboard_csat_raw=_safe_json_float(
-                "conversation_metrics_data", "csat_score"
+    end_reason = Case(
+        *[
+            When(ended_reason__iregex=pattern, then=Value(label))
+            for label, pattern in END_REASONS
+        ],
+        When(
+            Q(ended_reason__isnull=True) | Q(ended_reason=""),
+            then=Value(NOT_REPORTED),
+        ),
+        default=Value("Unrecognised"),
+        output_field=TextField(),
+    )
+    queryset = queryset.annotate(
+        # Provider-reported only: the platform does not compute sentiment (v1 D1).
+        dashboard_sentiment=Lower(
+            Coalesce(
+                _json_text("analysis_data", "user_sentiment"),
+                _json_text(
+                    "provider_call_data",
+                    "retell",
+                    "call_analysis",
+                    "user_sentiment",
+                ),
+            )
+        ),
+        dashboard_success_raw=Lower(
+            Coalesce(
+                _json_text("analysis_data", "call_successful"),
+                _json_text(
+                    "provider_call_data",
+                    "retell",
+                    "call_analysis",
+                    "call_successful",
+                ),
+                _json_text("analysis_data", "successEvaluation"),
+            )
+        ),
+        dashboard_disconnection=end_reason,
+    ).annotate(
+        dashboard_provider_success=Case(
+            When(
+                dashboard_success_raw__in=["true", "false"],
+                then=F("dashboard_success_raw"),
             ),
-            dashboard_sentiment=Lower(
-                Coalesce(
-                    _json_text("analysis_data", "user_sentiment"),
-                    _json_text(
-                        "provider_call_data",
-                        "retell",
-                        "call_analysis",
-                        "user_sentiment",
-                    ),
-                    Value("Unknown", output_field=TextField()),
+            default=None,
+            output_field=TextField(),
+        ),
+        dashboard_csat=F("result_csat"),
+        dashboard_goal=Case(
+            When(
+                Q(
+                    call_metadata__harness_outcome_status__in=[
+                        "escalated",
+                        "handoff",
+                    ]
                 )
+                | Q(dashboard_disconnection="Transferred"),
+                then=Value("escalated"),
             ),
-            dashboard_success_raw=Lower(
-                Coalesce(
-                    _json_text("analysis_data", "call_successful"),
-                    _json_text(
-                        "provider_call_data",
-                        "retell",
-                        "call_analysis",
-                        "call_successful",
-                    ),
-                    _json_text("analysis_data", "successEvaluation"),
-                    Value("Unknown", output_field=TextField()),
-                )
-            ),
-        )
-        .annotate(
-            dashboard_provider_success=Case(
-                When(
-                    dashboard_success_raw__in=["true", "false"],
-                    then=F("dashboard_success_raw"),
-                ),
-                default=Value("unknown"),
-                output_field=TextField(),
-            ),
-            dashboard_csat=Case(
-                When(
-                    dashboard_csat_raw__gte=0,
-                    dashboard_csat_raw__lte=10,
-                    then=F("dashboard_csat_raw"),
-                ),
-                output_field=FloatField(),
-            ),
-            dashboard_success=Case(
-                When(result_outcome="passed", then=Value("successful")),
-                When(
-                    result_outcome__in=["failed", "error"], then=Value("unsuccessful")
-                ),
-                default=Value("unknown"),
-                output_field=TextField(),
-            ),
-            dashboard_goal=Case(
-                When(
-                    Q(
-                        call_metadata__harness_outcome_status__in=[
-                            "escalated",
-                            "handoff",
-                        ]
-                    )
-                    | Q(
-                        ended_reason__in=[
-                            "escalated",
-                            "human-handoff",
-                            "assistant-forwarded-call",
-                            "call-transfer",
-                            "transfer",
-                        ]
-                    ),
-                    then=Value("escalated"),
-                ),
-                default=F("result_outcome"),
-                output_field=TextField(),
-            ),
-        )
-        .annotate(
-            dashboard_disconnection=Case(
-                When(dashboard_goal="escalated", then=Value("Escalated")),
-                When(
-                    Q(ended_reason__icontains="timeout")
-                    | Q(ended_reason__icontains="timed-out")
-                    | Q(ended_reason="max-duration-reached"),
-                    then=Value("Timeout"),
-                ),
-                When(result_outcome="error", then=Value("Error")),
-                When(result_outcome="passed", then=Value("Task complete")),
-                When(
-                    ended_reason__in=[
-                        "max-turns-reached",
-                        "max_turns",
-                        "incomplete",
-                        "customer-ended-call",
-                        "assistant-ended-call",
-                    ],
-                    then=Value("Incomplete"),
-                ),
-                default=Value("Unknown"),
-                output_field=TextField(),
-            ),
-        )
+            default=F("result_outcome"),
+            output_field=TextField(),
+        ),
     )
     voice = queryset.filter(simulation_call_type="voice")
     # A run is one modality in practice; a mixed run counts as voice.
@@ -457,13 +444,30 @@ def build_run_dashboard(
         )
 
     is_voice = noun == "call"
+    outcomes = summary["outcomes"]
+    interval = (reliability or {}).get("pass_rate_interval")
+    metric(
+        "pass_rate",
+        f"{noun.capitalize()}s passed",
+        summary["pass_rate"],
+        "percent",
+        summary["measured"],
+        (
+            f"Passed every eval, out of evaluated {noun}s. 95% range "
+            f"{interval['low']:.0f}–{interval['high']:.0f}% across "
+            f"{interval['clusters']} scenarios."
+            if interval
+            else f"Passed every eval, out of evaluated {noun}s. Errored {noun}s are excluded."
+        ),
+    )
     metric("total", f"Total {noun}s", total, measured=total)
     metric(
-        "connected",
-        f"{noun.capitalize()}s connected",
-        values["connected"],
-        measured=total,
-        note=f"{noun.capitalize()}s with recorded conversation evidence",
+        "ran_cleanly",
+        f"{noun.capitalize()}s ran cleanly",
+        round((total - outcomes["error"]) * 100 / total, 2) if total else None,
+        "percent",
+        total,
+        f"{noun.capitalize()}s that did not error; errors are infrastructure, not the agent",
     )
     metric(
         "connected_rate",
@@ -471,8 +475,15 @@ def build_run_dashboard(
         round(values["connected"] * 100 / total, 2) if total else None,
         "percent",
         total,
+        f"{noun.capitalize()}s with recorded conversation evidence",
     )
-    metric("csat", "Avg CSAT score", values["csat"], measured=values["csat_measured"])
+    metric(
+        "csat",
+        "Avg CSAT (0–10)",
+        values["csat"],
+        measured=values["csat_measured"],
+        note="Scorer CSAT on a 0–10 scale; a provider success flag is never counted",
+    )
     metric(
         "agent_latency",
         "Agent latency" if is_voice else "Agent response time",
@@ -496,11 +507,11 @@ def build_run_dashboard(
         )
         metric(
             "talk",
-            "Talk ratio (agent/user)",
+            "Agent share of talk time",
             voice_values["talk"],
-            "ratio",
+            "percent",
             voice_values["talk_measured"],
-            "Mean agent/customer speaking share for measured voice calls",
+            "Agent speaking time ÷ (agent + caller) speaking time, averaged over calls",
         )
     metric(
         "duration",
@@ -525,7 +536,7 @@ def build_run_dashboard(
         },
     )
     metric(
-        "latency_p90",
+        "duration_p90",
         f"{noun.capitalize()} duration p90",
         (
             duration_stats["duration_seconds"]["p90"] * 1000
@@ -548,8 +559,9 @@ def build_run_dashboard(
     )
     metric("total_cost", "Total cost", cost["total_value"], "cents", cost["measured"])
 
+    # Time to first word is not emitted by any runner today, so it is listed as
+    # unavailable instead of shown as an always-empty row.
     slos = {
-        "ttfw": "Time to first word",
         "model": "LLM response",
         "voice": "Text-to-speech",
         "transcriber": "Speech recognition",
@@ -564,8 +576,10 @@ def build_run_dashboard(
         }
     )
     slo_stats = _stats(voice, {key: f"slo_{key}" for key in slos})
+    latency_stats = _stats(queryset, {"latency_ms": "result_latency_ms"})
+    # Per-call averages: a single long pause inside an otherwise quick call is hidden.
     curve = queryset.aggregate(
-        **{f"p{p}": PercentileCont("duration_seconds", p / 100) for p in range(101)}
+        **{f"p{p}": PercentileCont("result_latency_ms", p / 100) for p in range(101)}
     )
     costs = queryset.aggregate(
         **{
@@ -579,11 +593,12 @@ def build_run_dashboard(
         }
     )
     component_total = sum(value or 0 for value in costs.values())
-    eval_passed = sum(row["passed"] for row in evaluations)
-    eval_measured = sum(row["measured"] for row in evaluations)
+    eval_errored = sum(row["errored"] for row in evaluations)
     return {
         "csat": csat_distribution(queryset, total),
-        "agent_response_time": response_time_distribution(queryset, total),
+        "agent_response_time": response_time_distribution(
+            queryset, total, voice=is_voice
+        ),
         "pipeline_cost": [
             {
                 "key": key,
@@ -604,15 +619,15 @@ def build_run_dashboard(
         ],
         "evaluation_summary": {
             "graders": len(evaluations),
-            "passed": eval_passed,
-            "measured": eval_measured,
-            "pass_rate": (
-                round(eval_passed * 100 / eval_measured, 2) if eval_measured else None
-            ),
+            # Call level: a call passes only when every eval that ran on it passed.
+            "passed": outcomes["passed"],
+            "measured": summary["measured"],
+            "pass_rate": summary["pass_rate"],
+            "errored_checks": eval_errored,
         },
         "use_case_risk": [
             {
-                "goal": row["goal"],
+                "scenario": row["scenario"],
                 "passed": row["outcomes"]["passed"],
                 "failed": row["outcomes"]["failed"],
                 "error": row["outcomes"]["error"],
@@ -624,9 +639,6 @@ def build_run_dashboard(
         "metrics": metrics,
         "breakdowns": [
             _breakdown(
-                queryset, "dashboard_success", "call_success", "Call successful", total
-            ),
-            _breakdown(
                 queryset,
                 "dashboard_goal",
                 "goal_outcome",
@@ -634,15 +646,25 @@ def build_run_dashboard(
                 total,
             ),
             _breakdown(
-                queryset, "dashboard_sentiment", "sentiment", "User sentiment", total
-            ),
-            _breakdown(
                 queryset,
                 "dashboard_disconnection",
                 "disconnection",
-                "Disconnection reason",
+                "How calls ended" if is_voice else "How chats ended",
                 total,
             ),
+            # Provider-only verdicts appear only when some call reports them.
+            *[
+                _breakdown(queryset, field, key, label, total)
+                for field, key, label in [
+                    (
+                        "dashboard_provider_success",
+                        "provider_success",
+                        "Provider's own success flag",
+                    ),
+                    ("dashboard_sentiment", "sentiment", "Provider sentiment"),
+                ]
+                if queryset.filter(**{f"{field}__isnull": False}).exists()
+            ],
         ],
         "voice_slos": [
             {"key": key, "label": label, **slo_stats[key]}
@@ -661,11 +683,7 @@ def build_run_dashboard(
         "series_mode": "calls" if total <= CHART_BUCKETS else "time_buckets",
         "series_limit": CHART_BUCKETS,
         "latency_percentiles": [
-            {
-                "percentile": p,
-                "value": curve[f"p{p}"] * 1000 if curve[f"p{p}"] is not None else None,
-            }
-            for p in range(101)
+            {"percentile": p, "value": curve[f"p{p}"]} for p in range(101)
         ],
         "distributions": [
             {
@@ -675,6 +693,7 @@ def build_run_dashboard(
                     for key, value in duration_stats["duration_seconds"].items()
                 },
             },
+            {"key": "latency_ms", **latency_stats["latency_ms"]},
             *[{"key": key, **stats} for key, stats in duration_stats.items()],
         ],
         "tools": _tool_stats(queryset),
@@ -695,7 +714,7 @@ def build_run_dashboard(
             },
             {
                 "key": "ttfw",
-                "reason": "Time-to-first-word telemetry is not currently emitted; the widget remains unmeasured until it is recorded.",
+                "reason": "Time-to-first-word telemetry is not emitted by any runner yet.",
             },
             {
                 "key": "transport_cost",

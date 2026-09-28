@@ -22357,11 +22357,12 @@ export interface RunDashboardEvaluationSummaryApi {
   passed: number;
   measured: number;
   pass_rate: number;
+  errored_checks: number;
 }
 
 export interface RunDashboardRiskApi {
   /** @minLength 1 */
-  goal: string;
+  scenario: string;
   passed: number;
   failed: number;
   error: number;
@@ -22450,7 +22451,50 @@ export interface RiskApi {
   tokens: TotalMetricStatsApi;
   cost_cents: TotalMetricStatsApi;
   /** @minLength 1 */
-  goal: string;
+  scenario: string;
+}
+
+export interface ReliabilityIntervalApi {
+  low: number;
+  high: number;
+  effective_n: number;
+  evaluated: number;
+  clusters: number;
+}
+
+export type ReliabilityRowApiVerdict =
+  (typeof ReliabilityRowApiVerdict)[keyof typeof ReliabilityRowApiVerdict];
+
+export const ReliabilityRowApiVerdict = {
+  passed: "passed",
+  failed: "failed",
+  flaky: "flaky",
+  not_evaluated: "not_evaluated",
+} as const;
+
+export interface ReliabilityRowApi {
+  passed: number;
+  failed: number;
+  error: number;
+  inconclusive: number;
+  /** @minLength 1 */
+  scenario: string;
+  runs: number;
+  evaluated: number;
+  pass_rate: number;
+  verdict: ReliabilityRowApiVerdict;
+}
+
+export interface ReliabilityApi {
+  trials: number;
+  scenarios: number;
+  consistent_pass: number;
+  passed_at_least_once: number;
+  repeated: number;
+  flaky: number;
+  flip_rate: number;
+  pass_rate_interval: ReliabilityIntervalApi;
+  rows: ReliabilityRowApi[];
 }
 
 export interface TurnDistributionApi {
@@ -22469,6 +22513,7 @@ export interface EvaluationSummaryApi {
   passed: number;
   failed: number;
   measured: number;
+  errored: number;
   missing: number;
   pass_rate: number;
   average_score: number;
@@ -22546,6 +22591,7 @@ export interface RunAnalyticsV3ResponseApi {
   execution: AnalyticsExecutionApi;
   summary: AnalyticsSummaryApi;
   scenario_risk: RiskApi[];
+  reliability: ReliabilityApi;
   turn_distribution: TurnDistributionApi[];
   evaluations: EvaluationSummaryApi[];
   failure_breakdown: FailureBreakdownApi[];

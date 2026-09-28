@@ -606,7 +606,6 @@ class TestRunResultsV3Views:
         assert body["execution"]["selected_scenario_keys"] == ["routine-return"]
         assert body["execution"]["trials"] == 2
 
-
     def test_harness_error_is_not_green_when_transport_completed(
         self, auth_client, test_execution, analytics_call_executions
     ):
@@ -850,10 +849,97 @@ class TestRunResultsV3Views:
             "error": 1,
             "inconclusive": 2,
         }
-        assert body["summary"]["pass_rate"] == 50.0
+        # An infrastructure error says nothing about the agent, so it is not in the rate.
+        assert body["summary"]["measured"] == 1
+        assert body["summary"]["pass_rate"] == 100.0
         assert body["summary"]["latency"]["measured"] == 1
         assert body["summary"]["latency"]["total"] == 4
         assert "critical_failures" not in body["summary"]
+
+    def test_analytics_scores_trials_per_scenario_without_counting_errors(
+        self, auth_client, test_execution, scenario
+    ):
+        """3 scenarios x 2 trials: one always passes, one flips, one fails then errors."""
+        test_execution.trials = 2
+        test_execution.save(update_fields=["trials"])
+        verdicts = {
+            "always-passes": ["passed", "passed"],
+            "flips": ["passed", "failed"],
+            "fails-then-errors": ["failed", "errored"],
+        }
+        for key, outcomes in verdicts.items():
+            for trial, outcome in enumerate(outcomes, start=1):
+                eval_output = {
+                    "source": "harness",
+                    "name": "Policy check",
+                    "output": {"passed": "Passed", "failed": "Failed"}.get(outcome),
+                    "status": "Failed" if outcome == "errored" else "completed",
+                    "output_type": "Pass/Fail",
+                }
+                CallExecution.objects.create(
+                    test_execution=test_execution,
+                    scenario=scenario,
+                    phone_number=f"+91{trial}{len(key)}",
+                    status="completed",
+                    duration_seconds=60,
+                    ended_reason="simulator_end_call",
+                    simulation_call_type="voice",
+                    call_metadata={
+                        "harness_outcome_status": outcome,
+                        "harness_scenario_key": key,
+                        "harness_trial_index": trial,
+                    },
+                    eval_outputs={"policy-check": eval_output},
+                )
+
+        response = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/analytics/"
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        body = response.json()
+        assert body["summary"]["outcomes"]["error"] == 1
+        assert body["summary"]["measured"] == 5
+        assert body["summary"]["pass_rate"] == 60.0
+        assert {row["scenario"]: row["total"] for row in body["scenario_risk"]} == {
+            "always-passes": 2,
+            "flips": 2,
+            "fails-then-errors": 2,
+        }
+        reliability = body["reliability"]
+        assert reliability["trials"] == 2
+        assert reliability["scenarios"] == 3
+        assert reliability["consistent_pass"] == 1
+        assert reliability["passed_at_least_once"] == 2
+        assert reliability["repeated"] == 2
+        assert reliability["flaky"] == 1
+        by_key = {row["scenario"]: row for row in reliability["rows"]}
+        assert by_key["flips"]["verdict"] == "flaky"
+        assert by_key["fails-then-errors"]["error"] == 1
+        interval = reliability["pass_rate_interval"]
+        # Trials of one scenario are not independent, so the range must not claim more
+        # precision than the 3 scenarios behind these 5 verdicts.
+        assert interval["low"] < 60.0 < interval["high"]
+        assert 3 <= interval["effective_n"] <= 5
+        evaluation = next(
+            row for row in body["evaluations"] if row["id"] == "policy-check"
+        )
+        assert (evaluation["passed"], evaluation["failed"], evaluation["errored"]) == (
+            3,
+            2,
+            1,
+        )
+        dashboard = body["dashboard"]
+        endings = {
+            segment["label"]: segment["count"]
+            for segment in next(
+                chart
+                for chart in dashboard["breakdowns"]
+                if chart["key"] == "disconnection"
+            )["segments"]
+        }
+        assert endings == {"Caller hung up": 6}
+        assert dashboard["evaluation_summary"]["pass_rate"] == 60.0
 
     def test_export_applies_filters_to_underlying_rows(
         self, auth_client, test_execution, analytics_call_executions
@@ -907,10 +993,10 @@ class TestRunResultsV3Views:
         serializer = RunDashboardV3Serializer(data=dashboard)
         assert serializer.is_valid(), serializer.errors
         metrics = {row["key"]: row for row in dashboard["metrics"]}
-        assert len(metrics) == 13
         assert "turn_count" not in metrics
         assert metrics["total"]["label"] == "Total calls"
-        assert {"wpm", "stop", "talk"} <= metrics.keys()
+        assert {"pass_rate", "ran_cleanly", "wpm", "stop", "talk"} <= metrics.keys()
+        assert metrics["talk"]["unit"] == "percent"
         assert metrics["csat"]["value"] == 7
         assert metrics["csat"]["measured"] == 1
         tools = {row["name"]: row for row in dashboard["tools"]["failures"]}
@@ -939,47 +1025,56 @@ class TestRunResultsV3Views:
         )
         assert response.status_code == 200
         metrics = {row["key"]: row for row in response.json()["dashboard"]["metrics"]}
-        assert len(metrics) == 10
         assert not {"wpm", "stop", "talk", "turn_count"} & metrics.keys()
         assert {key: metrics[key]["label"] for key in metrics} == {
+            "pass_rate": "Chats passed",
             "total": "Total chats",
-            "connected": "Chats connected",
+            "ran_cleanly": "Chats ran cleanly",
             "connected_rate": "Chats connected (%)",
-            "csat": "Avg CSAT score",
+            "csat": "Avg CSAT (0–10)",
             "agent_latency": "Agent response time",
             "duration": "Avg chat duration",
             "turns": "Avg turns/chat",
-            "latency_p90": "Chat duration p90",
+            "duration_p90": "Chat duration p90",
             "cost_per_pass": "Cost / pass",
             "total_cost": "Total cost",
         }
+        target = response.json()["dashboard"]["agent_response_time"]["target_ms"]
+        assert target == 3000
 
-    def test_dashboard_task_success_is_independent_of_provider_verdict(
+    def test_dashboard_shows_provider_verdicts_only_when_reported(
         self, auth_client, test_execution, analytics_call_executions
     ):
+        url = f"/simulate/v3/test-executions/{test_execution.id}/analytics/"
+        charts = {
+            row["key"] for row in auth_client.get(url).json()["dashboard"]["breakdowns"]
+        }
+        assert charts == {"goal_outcome", "disconnection"}
+
         call = analytics_call_executions[0]
         call.call_metadata = {"harness_outcome_status": "passed"}
         call.analysis_data = {"call_successful": False, "user_sentiment": "negative"}
         call.save()
-        response = auth_client.get(
-            f"/simulate/v3/test-executions/{test_execution.id}/analytics/"
-        )
+        response = auth_client.get(url)
         assert response.status_code == 200
         charts = {row["key"]: row for row in response.json()["dashboard"]["breakdowns"]}
-        success = {
-            row["label"]: row["count"] for row in charts["call_success"]["segments"]
+        # The provider's verdict is shown beside ours and never replaces it.
+        assert charts["goal_outcome"]["headline"]["count"] == 1
+        provider = {
+            s["label"]: s["count"] for s in charts["provider_success"]["segments"]
         }
-        goals = {
-            row["label"]: row["count"] for row in charts["goal_outcome"]["segments"]
-        }
-        assert success == {"successful": 1, "unsuccessful": 1, "unknown": 2}
-        assert goals["passed"] == 1
+        assert provider == {"false": 1, "Not reported": 3}
+        sentiment = {s["label"]: s["count"] for s in charts["sentiment"]["segments"]}
+        assert sentiment == {"negative": 1, "Not reported": 3}
 
     def test_dashboard_histograms_use_measured_values_and_exact_threshold(
         self, auth_client, test_execution, analytics_call_executions
     ):
         for call, score, latency in zip(
-            analytics_call_executions, [0, 4, 10, "missing"], [549, 550, 575, None]
+            analytics_call_executions,
+            [0, 4, 10, "missing"],
+            [1499, 1500, 1575, None],
+            strict=True,
         ):
             call.conversation_metrics_data = {"csat_score": score}
             call.avg_agent_latency_ms = latency
