@@ -1292,8 +1292,9 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 # Billing usage events go to the Redis stream usage:events, which only the
 # UsageConsumerWorkflow of Future AGI Cloud (ee.cloud) drains. Without it the
 # stream only grows until Redis is full, so unset, events are on exactly when
-# that consumer ships with this code. fi-collector reads the same variables,
-# and is off unless USAGE_EVENTS_ENABLED=true. The cap bounds the stream
+# that consumer ships with this code. fi-collector reads the same variables
+# and is on unless USAGE_EVENTS_ENABLED=false, which every self-hosted compose
+# file and the Helm chart set. The cap bounds the stream
 # (~160 bytes an entry) while its consumer is behind or stopped.
 from tfc.ee_loader import usage_event_consumer_available  # noqa: E402
 

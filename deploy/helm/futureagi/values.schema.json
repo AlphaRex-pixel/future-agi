@@ -127,6 +127,10 @@
           "type": "boolean",
           "description": "[OTEL_ENABLED] export the platform's own traces over OpenTelemetry (configure OTEL_* in `config.extraEnv`)."
         },
+        "usageEvents": {
+          "type": "boolean",
+          "description": "[USAGE_EVENTS_ENABLED] billing usage events on the Redis stream usage:events, from the backend, workers and fi-collector. Only for installs that run the usage consumer (Future AGI Cloud): anywhere else nothing drains the stream and it fills Redis."
+        },
         "cdcMode": {
           "type": "string",
           "enum": [

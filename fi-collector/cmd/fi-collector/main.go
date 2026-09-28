@@ -98,10 +98,10 @@ func main() {
 	var usageEmitter server.UsageEmitter = server.NoopUsageEmitter{}
 	var metering server.Metering = server.NoopMetering{}
 	if rdb != nil {
-		if cfg.Auth.UsageEvents {
+		if cfg.Auth.UsageEventsOn() {
 			usageEmitter = auth.NewUsageEmitter(rdb, authenticator.PGRead(), log, cfg.Auth.UsageEventsMaxLen)
 		} else {
-			log.Info("usage events off: nothing drains the usage:events stream on this install (USAGE_EVENTS_ENABLED=true turns them on)")
+			log.Info("usage events off (USAGE_EVENTS_ENABLED=false): nothing writes the usage:events stream")
 		}
 		metering = auth.NewMetering(rdb, authenticator.PGRead(), log)
 	}
@@ -329,12 +329,12 @@ func applyEnvOverrides(log *slog.Logger, c *rootConfig) error {
 	}
 	// Same variables as the Django emitter (tfc/settings/settings.py).
 	if v := os.Getenv("USAGE_EVENTS_ENABLED"); v != "" {
+		on := false
 		switch strings.ToLower(strings.TrimSpace(v)) {
 		case "true", "1", "yes", "on":
-			c.Auth.UsageEvents = true
-		default:
-			c.Auth.UsageEvents = false
+			on = true
 		}
+		c.Auth.UsageEvents = &on
 	}
 	if v := os.Getenv("USAGE_EVENTS_MAX_LEN"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)

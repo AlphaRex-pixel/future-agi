@@ -148,6 +148,7 @@ NO_STARTUP_DB_MUTATIONS is "true" everywhere except the bootstrap job.
       "AGENTCC_GATEWAY_INTERNAL_URL" (printf "http://%s:%v" (include "futureagi.component" (dict "root" $root "component" "agentcc-gateway")) $v.agentccGateway.service.port)
       "CODE_EXECUTOR_URL" (ternary (printf "http://%s:8060" (include "futureagi.component" (dict "root" $root "component" "code-executor"))) "" $v.codeExecutor.enabled)
       "CODE_EXECUTOR_LOCAL_FALLBACK" (toString $v.codeExecutor.localFallback)
+      "USAGE_EVENTS_ENABLED" (toString $v.config.usageEvents)
       "MODEL_SERVING_URL" (ternary (printf "http://%s:8080" (include "futureagi.component" (dict "root" $root "component" "serving"))) "" $v.serving.enabled)
       "FI_COLLECTOR_HOST" (include "futureagi.component" (dict "root" $root "component" "fi-collector"))
       "FI_COLLECTOR_OTLP_PORT" (toString $v.fiCollector.service.grpcPort)
@@ -274,6 +275,7 @@ pod's 1Gi emptyDir with the dead-letter file. */ -}}
       "FI_HTTP_ADDR" ":4318"
       "FI_ADMIN_ADDR" ":9464"
       "FI_DEAD_LETTER_FILE" "/var/lib/fi-collector/dead_letter.jsonl"
+      "USAGE_EVENTS_ENABLED" (toString $v.config.usageEvents)
       "FI_OBSERVED_CATALOG_MODE" $observedMode
       "FI_OBSERVED_CATALOG_SPOOL_DIR" "/var/lib/fi-collector/observed-catalog"
       "FI_OBSERVED_CATALOG_MAX_SPOOL_BYTES" "268435456"

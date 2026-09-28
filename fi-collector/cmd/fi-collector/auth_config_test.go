@@ -60,14 +60,15 @@ func TestAuthEnvExplicitURIsTakePrecedenceWithoutLosingTLS(t *testing.T) {
 	}
 }
 
-// Usage events stay off unless USAGE_EVENTS_ENABLED says otherwise: only
-// Future AGI Cloud drains the stream, anywhere else it would fill Redis.
-func TestUsageEventsAreOffUnlessEnabled(t *testing.T) {
+// Usage events stay on unless USAGE_EVENTS_ENABLED turns them off, so Future
+// AGI Cloud's collector needs no new setting; self-hosted installs set it to
+// false because nothing drains the stream there.
+func TestUsageEventsAreOnUnlessDisabled(t *testing.T) {
 	for _, tc := range []struct {
 		value string
 		want  bool
 	}{
-		{"", false}, {"false", false}, {"no", false}, {"true", true}, {"TRUE", true}, {"1", true},
+		{"", true}, {"false", false}, {"no", false}, {"0", false}, {"true", true}, {"TRUE", true}, {"1", true},
 	} {
 		clearCollectorEnv(t)
 		t.Setenv("USAGE_EVENTS_ENABLED", tc.value)
@@ -75,8 +76,8 @@ func TestUsageEventsAreOffUnlessEnabled(t *testing.T) {
 		if err := applyEnvOverrides(slog.Default(), &cfg); err != nil {
 			t.Fatal(err)
 		}
-		if cfg.Auth.UsageEvents != tc.want {
-			t.Errorf("USAGE_EVENTS_ENABLED=%q: usage events %v, want %v", tc.value, cfg.Auth.UsageEvents, tc.want)
+		if cfg.Auth.UsageEventsOn() != tc.want {
+			t.Errorf("USAGE_EVENTS_ENABLED=%q: usage events %v, want %v", tc.value, cfg.Auth.UsageEventsOn(), tc.want)
 		}
 	}
 }
