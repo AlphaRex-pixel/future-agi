@@ -42,7 +42,7 @@ def _filters(*leaves):
     ]
 
 
-def _source(filters=None, enabled=True):
+def _source(filters=None, enabled=True, lean=False):
     return graph._session_aggregate_source_sql(
         project_id=PROJECT,
         filters=filters or _filters(),
@@ -51,6 +51,7 @@ def _source(filters=None, enabled=True):
         include_trace_ids=False,
         anchor_by_session_start=True,
         use_scalar_witness=enabled,
+        lean_graph_source=lean,
     )
 
 
@@ -197,7 +198,11 @@ def test_success_is_one_complete_statement_and_caps_only_tighten(monkeypatch):
     assert settings["set_overflow_mode"] == "throw"
     assert settings["result_overflow_mode"] == "throw"
     assert settings["max_memory_usage"] == original["max_memory_usage"]
-    assert settings["max_threads"] == original["max_threads"]
+    # The Sessions graph runs only on the background worker, on its own
+    # thread budget; the shared interactive pin is untouched.
+    session_threads = graph.settings.EXACT_GRAPH_SESSION_READ_MAX_THREADS
+    assert settings["max_threads"] == session_threads
+    assert graph.EXACT_GRAPH_READ_SETTINGS["max_threads"] == original["max_threads"]
 
 
 @pytest.mark.parametrize(
@@ -215,12 +220,13 @@ def test_budget_failure_discards_witness_and_runs_original_exact_query(code):
     assert len(analytics.calls) == 2 and result["query_count"] == 2
     assert "session_scalar_witness_ids" in analytics.calls[0][0]
     fallback, params, _, settings = analytics.calls[1]
-    original_source, _ = _source(enabled=False)
+    # The graph reader's own (lean) source, without the witness.
+    original_source, _ = _source(enabled=False, lean=True)
     assert original_source in fallback
     assert "session_scalar_witness_ids" not in fallback
     assert params["snapshot_start_date"] == START
     assert params["snapshot_end_date"] == END
-    assert settings == graph.EXACT_GRAPH_READ_SETTINGS
+    assert settings == graph._session_graph_read_settings()
     assert result["query_complete"] is True
     assert any(point["value"] == 17 for point in result["data"])
 

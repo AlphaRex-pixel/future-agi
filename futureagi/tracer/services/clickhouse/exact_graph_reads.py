@@ -2956,6 +2956,7 @@ def _finite_survivor_map_ctes(
     candidate_column: str,
     prefix: str,
     map_name: str,
+    candidate_array: bool = False,
 ) -> str:
     """Materialize only remap groups touched by one finite candidate relation.
 
@@ -2966,6 +2967,13 @@ def _finite_survivor_map_ctes(
     resulting tiny map once as a scalar tuple array.  Candidate IDs themselves
     stay relational: ClickHouse does not accept a scalar array alias as the
     right-hand side of ``IN`` in ``PREWHERE``.
+
+    ``candidate_array`` reads the candidate relation ONCE, into a scalar
+    array, and exposes it relationally through ``arrayJoin``. Without it every
+    reference (the remap probe, the union, and any caller's own use of
+    ``<prefix>_candidate_ids``) re-executes the candidate source, which for a
+    Session source is a complete ``spans FINAL`` pass. The ids, and therefore
+    every lookup in the map, are the same either way.
     """
 
     identifiers = (
@@ -2980,13 +2988,26 @@ def _finite_survivor_map_ctes(
     candidate_ids_name = f"{prefix}_candidate_ids"
     target_relation = f"{prefix}_target_new_ids"
     pair_name = f"{prefix}_pairs"
-    return f"""
+    if candidate_array:
+        array_name = f"{prefix}_candidate_array"
+        candidate_ids_cte = f"""
+    (
+        SELECT groupUniqArray(assumeNotNull({candidate_column}))
+        FROM {candidate_relation}
+        WHERE isNotNull({candidate_column})
+    ) AS {array_name},
+    {candidate_ids_name} AS (
+        SELECT arrayJoin({array_name}) AS {candidate_column}
+    ),"""
+    else:
+        candidate_ids_cte = f"""
     {candidate_ids_name} AS (
         SELECT DISTINCT
             assumeNotNull({candidate_column}) AS {candidate_column}
         FROM {candidate_relation}
         WHERE isNotNull({candidate_column})
-    ),
+    ),"""
+    return f"""{candidate_ids_cte}
     {target_relation} AS (
         SELECT DISTINCT new_id
         FROM {remap_table} FINAL
@@ -3289,6 +3310,7 @@ def _session_aggregate_source_sql(
     candidate_trace_ids_sql: str | None = None,
     candidate_trace_ids_param: str | None = None,
     use_scalar_witness: bool = False,
+    lean_graph_source: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Build one full-window, remap-resolved per-session source.
 
@@ -3299,8 +3321,25 @@ def _session_aggregate_source_sql(
     ``snapshot_*`` parameters are deliberately distinct from an outer graph
     partition's dates so a session can never be split at an output-bucket
     boundary.
+
+    ``lean_graph_source`` (the Sessions graph statement) returns the same
+    rows with fewer ``spans FINAL`` passes. The candidate ids are read once,
+    into a scalar array, instead of once per reference. With no span-level
+    membership leaf, they come from a narrow non-FINAL read of root VERSIONS
+    in the anchor window: the latest live root of every exact candidate is
+    itself such a version, so this is a superset of the exact ids. A superset
+    changes no lookup the aggregate makes: every remap group containing an
+    exact id is touched either way, so its survivor is the same, and each
+    aggregate row's resolved id stays in ``selected_sessions``. A membership
+    leaf resolves spans whose session is NOT a candidate through the same
+    finite map, where a larger touched set can change the survivor of a remap
+    chain; filtered charts therefore keep the exact FINAL candidates (read
+    once). The aggregate itself always stays on ``spans FINAL``: the latest
+    version of a span decides whether it is a live root at all.
     """
 
+    if lean_graph_source and not anchor_by_session_start:
+        raise ValueError("the lean Session graph source is anchored by session start")
     span_filters = [
         item
         for item in filters
@@ -3402,7 +3441,41 @@ def _session_aggregate_source_sql(
         candidate_column="physical_session_id",
         prefix="candidate_session_remap",
         map_name="ts_survivor_map",
+        candidate_array=lean_graph_source,
     )
+    candidate_physical_session_ids = f"""
+    candidate_physical_session_ids AS (
+        SELECT DISTINCT
+            candidate_rs.trace_session_id AS physical_session_id
+        FROM (
+            {session_root_rows}
+        ) AS candidate_rs
+        WHERE 1 = 1
+          {candidate_trace_clause}
+    )"""
+    if lean_graph_source and not (
+        membership_plan.scalar_predicates or membership_plan.relational_predicates
+    ):
+        # Root versions only, no FINAL: every exact candidate's latest live
+        # root is one of these rows (same session, same exact start_time).
+        # PREWHERE keeps to the immutable project/replacement-hour key, as the
+        # FINAL source does; the root/time/session tests read four narrow
+        # columns, and a non-FINAL read may use the parent-span bloom index.
+        candidate_physical_session_ids = """
+    candidate_physical_session_ids AS (
+        SELECT DISTINCT trace_session_id AS physical_session_id
+        FROM spans
+        PREWHERE project_id = toUUID(%(project_id)s)
+          AND toStartOfHour(start_time) >= %(snapshot_scan_start_date)s
+          AND toStartOfHour(start_time) < %(snapshot_scan_end_date)s
+        WHERE parent_span_id = ''
+          AND start_time >= fromUnixTimestamp64Micro(%(snapshot_start_date_us)s)
+          AND start_time < fromUnixTimestamp64Micro(%(snapshot_end_date_us)s)
+          AND start_time >= fromUnixTimestamp64Micro(%(start_date_us)s)
+          AND start_time < fromUnixTimestamp64Micro(%(end_date_us)s)
+          AND trace_session_id !=
+              toUUID('00000000-0000-0000-0000-000000000000')
+    )"""
     membership_ctes = ""
     if membership_plan.relational_ctes:
         membership_ctes = f""",
@@ -3582,16 +3655,7 @@ def _session_aggregate_source_sql(
         else ""
     )
     source = f"""
-    WITH
-    candidate_physical_session_ids AS (
-        SELECT DISTINCT
-            candidate_rs.trace_session_id AS physical_session_id
-        FROM (
-            {session_root_rows}
-        ) AS candidate_rs
-        WHERE 1 = 1
-          {candidate_trace_clause}
-    ),
+    WITH{candidate_physical_session_ids},
     {session_map_ctes},
     candidate_sessions AS (
         SELECT DISTINCT
@@ -4723,6 +4787,30 @@ def _session_numeric_absence_probe_sql(
     )
 
 
+def _session_graph_read_settings() -> dict[str, Any]:
+    """Settings for the Sessions graph statement, which only the background
+    exact-aggregation worker runs.
+
+    It is the shared exact envelope with two changes. The statement may use
+    ``EXACT_GRAPH_SESSION_READ_MAX_THREADS`` workers, and its ``spans FINAL``
+    collapses versions inside each day partition only. Every version of a
+    span shares its replacement key, which contains the start hour, so all of
+    them live in one ``toDate(start_time)`` partition: no merge across
+    partitions can ever pair two versions, and per-partition FINAL returns
+    the same rows while each partition is read by its own worker, without
+    re-reading intersecting ranges. The byte, memory, result and deadline
+    ceilings stay the shared ones. Built per call so a runtime or test
+    override of the shared dict is honoured. Interactive statements keep
+    ``FILTER_SELECTOR_MAX_THREADS``.
+    """
+
+    return {
+        **EXACT_GRAPH_READ_SETTINGS,
+        "max_threads": settings.EXACT_GRAPH_SESSION_READ_MAX_THREADS,
+        "do_not_merge_across_partitions_select_final": 1,
+    }
+
+
 def read_exact_session_system_graph(
     *,
     analytics: Any,
@@ -4776,6 +4864,7 @@ def read_exact_session_system_graph(
             include_trace_ids=False,
             anchor_by_session_start=True,
             use_scalar_witness=use_scalar_witness,
+            lean_graph_source=True,
         )
         query_params = {
             **query_params,
@@ -4797,6 +4886,9 @@ def read_exact_session_system_graph(
     """
         return query, query_params
 
+    # Background-only statement: it may use the session thread budget. The
+    # absence probe below keeps the shared exact settings.
+    graph_settings = _session_graph_read_settings()
     query, query_params = build_query(use_scalar_witness=True)
     has_witness = "session_scalar_witness_ids AS (" in query
     query_count = 1
@@ -4822,7 +4914,7 @@ def read_exact_session_system_graph(
         # Keep normal zero-filled graph formatting below, not the empty-window path.
         result = probe_result
     elif has_witness:
-        witness_settings = dict(EXACT_GRAPH_READ_SETTINGS)
+        witness_settings = dict(graph_settings)
         for name, ceiling in (
             ("max_bytes_to_read", _SESSION_SCALAR_WITNESS_MAX_BYTES),
             ("max_rows_in_set", _SESSION_SCALAR_WITNESS_MAX_SET_ROWS),
@@ -4853,7 +4945,7 @@ def read_exact_session_system_graph(
                 query=query,
                 params=query_params,
                 started=started,
-                settings=EXACT_GRAPH_READ_SETTINGS,
+                settings=graph_settings,
             )
     else:
         result = _execute_direct_exact_graph_query(
@@ -4861,7 +4953,7 @@ def read_exact_session_system_graph(
             query=query,
             params=query_params,
             started=started,
-            settings=EXACT_GRAPH_READ_SETTINGS,
+            settings=graph_settings,
         )
     rows = list(result.data or [])
     columns = list(result.columns or [])

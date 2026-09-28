@@ -270,6 +270,7 @@ INTERACTIVE_READ_SETTING_SPECS = {
                 4 * 1024**3,
             ),
             ("EXACT_GRAPH_TRACE_CLASSIFIER_MAX_THREADS", 8, 1, 32),
+            ("EXACT_GRAPH_SESSION_READ_MAX_THREADS", 4, 1, 32),
             (
                 "INTERACTIVE_READ_DEFAULT_MAX_RESPONSE_UNITS",
                 2 * 1024**2,
@@ -927,6 +928,11 @@ def validate_interactive_read_settings(values: Mapping[str, Numeric]) -> None:
         values["EXACT_GRAPH_TRACE_CLASSIFIER_MAX_THREADS"],
         values["CLICKHOUSE_APPLICATION_READ_MAX_THREADS"],
         "exact-graph classifier threads cannot exceed the application maximum",
+    )
+    _require_at_most(
+        values["EXACT_GRAPH_SESSION_READ_MAX_THREADS"],
+        values["CLICKHOUSE_APPLICATION_READ_MAX_THREADS"],
+        "exact-graph session threads cannot exceed the application maximum",
     )
     _require_at_most(
         values["ANALYTICS_DEFAULT_LOOKBACK_DAYS"],
