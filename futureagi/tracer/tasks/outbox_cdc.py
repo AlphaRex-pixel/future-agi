@@ -15,10 +15,18 @@ from __future__ import annotations
 
 import functools
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 import structlog
 
 from tfc.temporal.drop_in import temporal_activity
+
+if TYPE_CHECKING:
+    from tracer.services.clickhouse.oss_outbox_cdc import (
+        DrainResult,
+        DrainSkipped,
+        ReconcileResult,
+    )
 
 logger = structlog.get_logger(__name__)
 
@@ -61,30 +69,37 @@ def _enabled() -> bool:
     return cdc.cdc_mode() == "outbox"
 
 
-def _report(event: str, result: dict) -> None:
-    problems = {
-        key: result[key]
-        for key in (
-            "errors",
-            "rearmed",
-            "rearm_failed",
-            "drift_errors",
-            "added_columns",
-        )
-        if result.get(key)
-    }
-    parked = {k: v for k, v in result.items() if k.endswith(".parked")}
-    if problems or parked:
-        # Repairs (re-armed capture, added columns) and failures both need a look.
-        logger.error("outbox_cdc_attention", activity=event, **problems, **parked)
-    if result.get("lag_seconds", 0) > LAG_ERROR_SECONDS:
+def _attention(activity: str, **problems) -> None:
+    """Repairs (re-armed capture, added columns) and failures both need a look."""
+    problems = {key: value for key, value in problems.items() if value}
+    if problems:
+        logger.error("outbox_cdc_attention", activity=activity, **problems)
+
+
+def _report_drain(result: DrainResult | DrainSkipped) -> None:
+    if "skipped" in result:
+        return
+    _attention(
+        "outbox_cdc_drain",
+        errors=result["errors"],
+        rearmed=result["rearmed"],
+        rearm_failed=result["rearm_failed"],
+        drift_errors=result["drift_errors"],
+        added_columns=result["added_columns"],
+        parked=result["parked"],
+    )
+    if result["lag_seconds"] > LAG_ERROR_SECONDS:
         logger.error(
             "outbox_cdc_lagging",
             lag_seconds=result["lag_seconds"],
-            outbox_depth=result.get("outbox_depth"),
+            outbox_depth=result["outbox_depth"],
         )
-    elif result.get("outbox_depth", 0) > BACKLOG_WARNING_ROWS:
+    elif result["outbox_depth"] > BACKLOG_WARNING_ROWS:
         logger.warning("outbox_cdc_backlog", outbox_depth=result["outbox_depth"])
+
+
+def _report_reconcile(result: ReconcileResult) -> None:
+    _attention("outbox_cdc_reconcile", errors=result["errors"])
 
 
 @temporal_activity(time_limit=60, queue="tasks_s", max_retries=0)
@@ -102,7 +117,7 @@ def drain_outbox_cdc():
         result = cdc.drain(
             pg, ch, tables=tables, source=config.source, budget_s=DRAIN_BUDGET_S
         )
-    _report("outbox_cdc_drain", result)
+    _report_drain(result)
     return result
 
 
@@ -119,5 +134,5 @@ def reconcile_outbox_cdc():
 
     with _connections() as (_, pg, ch, tables):
         result = cdc.reconcile(pg, ch, tables=tables)
-    _report("outbox_cdc_reconcile", result)
+    _report_reconcile(result)
     return result

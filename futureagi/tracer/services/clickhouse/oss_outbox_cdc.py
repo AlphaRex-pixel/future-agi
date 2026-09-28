@@ -64,9 +64,10 @@ import sys
 import time
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Required, TypedDict
 
 import psycopg
 from clickhouse_connect.driver.exceptions import (
@@ -82,6 +83,11 @@ from tracer.services.clickhouse.oss_cdc_source import (
     SourceTable,
     inspect_source,
 )
+
+if TYPE_CHECKING:
+    from clickhouse_connect.driver.client import Client
+
+    from tracer.services.clickhouse.oss_cdc_install import Config
 
 MODES = ("outbox", "peerdb", "off")
 OUTBOX = "fi_cdc_outbox"
@@ -140,6 +146,73 @@ _DERIVED = upgrade.MIGRATIONS["cdc_002_usage_eval_fields.sql"]
 
 class OutboxCDCError(ValueError):
     """Safe-to-display error: no SQL, row data or credentials."""
+
+
+# What the entry points return. tracer.tasks.outbox_cdc raises its alerts
+# from these keys, and the CLI prints them as JSON.
+
+
+class DrainSkipped(TypedDict):
+    skipped: str
+
+
+class DrainResult(TypedDict):
+    # Row counts: "<table>.upserted", "<table>.tombstoned", "<table>.snapshot",
+    # "outbox_rows" and "unknown_table".
+    stats: dict[str, int]
+    parked: dict[str, int]  # table -> keys parked this tick
+    outbox_depth: int
+    lag_seconds: float
+    rearmed: list[str]
+    rearm_failed: dict[str, str]
+    errors: dict[str, str]
+    drift: dict[str, list[str]]
+    drift_errors: dict[str, str]
+    added_columns: list[str]
+    pending_snapshots: list[str]
+
+
+class ReconcileResult(TypedDict):
+    stats: dict[str, int]  # "<table>.reconciled" plus the apply counts
+    swept: list[str]
+    errors: dict[str, str]
+    requeued: int
+
+
+class Status(TypedDict, total=False):
+    installed: Required[bool]  # the other keys only when installed
+    capture_broken: dict[str, list[str]]
+    outbox_depth: int
+    lag_seconds: float
+    pending_snapshots: dict[str, str]  # table -> last copied key
+    reconcile_requested: list[str]
+    parked_keys: int
+
+
+class CheckResult(Status, total=False):
+    ready: Required[bool]
+    applied: Required[bool]
+    problems: Required[list[str]]
+
+
+class InstallResult(TypedDict):
+    ready: bool
+    applied: bool
+    armed_triggers: dict[str, list[str]]
+    created_landing: list[str]
+    added_columns: list[str]
+    created_dependents: list[str]
+    peerdb_takeover: dict[str, list[str]] | None
+    resynced: list[str]
+    pending_snapshots: list[str]
+    snapshot: dict[str, int]
+
+
+class EnsureResult(TypedDict, total=False):
+    mode: Required[str]
+    install: InstallResult | CheckResult  # outbox: install(apply=True)
+    removed_triggers: list[str]  # peerdb and off
+    schedules: str  # with schedules=True
 
 
 def cdc_mode(env=None) -> str:
@@ -744,9 +817,10 @@ _STRUCTURAL = (psycopg.ProgrammingError,)
 
 
 class _TableFailed(Exception):
-    def __init__(self, error: Exception):
+    def __init__(self, error: Exception, parked: Iterable[str] = ()):
         super().__init__(type(error).__name__)
         self.error = error
+        self.parked = frozenset(parked)  # keys parked before the table failed
 
 
 def _probe(pg, ch, table: str) -> None:
@@ -772,13 +846,19 @@ def park(pg, table: str, pk: str, error: Exception) -> None:
 
 
 def _apply_isolated(
-    pg, ch, spec, keys: list[str], clock, stats, budget: list[int]
+    pg,
+    ch,
+    spec: TableSpec,
+    keys: list[str],
+    clock: VersionClock,
+    stats: Counter,
+    budget: int,
 ) -> set[str]:
     """Apply ``keys`` (outbox text form); bisect a failure down to poison rows.
 
-    Returns the parked keys. Raises transient and ClickHouse capacity errors
-    unchanged and ``_TableFailed`` for structural errors or when the park
-    budget runs out.
+    Parks at most ``budget`` keys and returns them. Raises transient and
+    ClickHouse capacity errors unchanged and ``_TableFailed`` for structural
+    errors or when a key needs parking beyond ``budget``.
     """
     try:
         apply_keys(pg, ch, spec, [spec.pk_value(k) for k in keys], clock, stats)
@@ -794,15 +874,19 @@ def _apply_isolated(
             raise
         if len(keys) > 1:
             mid = len(keys) // 2
-            return _apply_isolated(
-                pg, ch, spec, keys[:mid], clock, stats, budget
-            ) | _apply_isolated(pg, ch, spec, keys[mid:], clock, stats, budget)
+            parked = _apply_isolated(pg, ch, spec, keys[:mid], clock, stats, budget)
+            try:
+                return parked | _apply_isolated(
+                    pg, ch, spec, keys[mid:], clock, stats, budget - len(parked)
+                )
+            except _TableFailed as failure:
+                raise _TableFailed(
+                    failure.error, parked | failure.parked
+                ) from failure.error
         _probe(pg, ch, spec.name)  # an outage is not a poison row
-        if budget[0] <= 0:
+        if budget <= 0:
             raise _TableFailed(error) from error
-        budget[0] -= 1
         park(pg, spec.name, keys[0], error)
-        stats[f"{spec.name}.parked"] += 1
         return {keys[0]}
 
 
@@ -912,14 +996,14 @@ def _add_drift(pg, ch, specs, target) -> tuple[list[str], dict[str, str]]:
 
 
 def drain(
-    pg,
-    ch,
+    pg: psycopg.Connection,
+    ch: Client,
     *,
     tables: tuple[str, ...],
-    source=None,
+    source: core.PeerTarget | None = None,
     budget_s: float = 8.0,
     batch: int = DRAIN_BATCH,
-) -> dict:
+) -> DrainResult | DrainSkipped:
     """One tick: re-arm capture, apply outbox batches, then continue snapshots.
 
     ``source`` (the PG PeerTarget) enables runtime ADD COLUMN for new PG
@@ -930,6 +1014,8 @@ def drain(
         if clock is None:
             return {"skipped": "another writer holds the CDC lock"}
         stats: Counter = Counter()
+        # Keys parked per table this tick, against MAX_PARKED_PER_TICK.
+        parked: Counter = Counter()
         rearmed, rearm_failed = _rearm(pg, tables)
         depth, lag = _outbox_head(pg)
         pending = _pending_snapshots(pg, tables)
@@ -948,21 +1034,21 @@ def drain(
             has_deadletter = bool(
                 pg.execute(f"SELECT EXISTS (SELECT 1 FROM {DEADLETTER})").fetchone()[0]
             )
-            budget: dict[str, list[int]] = {}
             while time.monotonic() < deadline:
-                done = drain_batch(
+                result = drain_batch(
                     pg,
                     ch,
                     specs,
                     clock,
                     stats,
                     skip=set(errors) | set(failed),
-                    failed=failed,
                     batch=batch,
                     has_deadletter=has_deadletter,
-                    budget=budget,
+                    parked=parked,
                 )
-                if done < batch:
+                failed.update(result.failed)
+                parked += Counter(result.parked)
+                if result.rows < batch:
                     break
             # Leftover budget goes to pending (re)snapshots, one page at a time.
             for table in pending:
@@ -972,7 +1058,8 @@ def drain(
                             break
             depth, lag = _outbox_head(pg)
         return {
-            **stats,
+            "stats": dict(stats),
+            "parked": dict(parked),
             "outbox_depth": depth,
             "lag_seconds": round(lag, 3),
             "rearmed": rearmed,
@@ -985,6 +1072,13 @@ def drain(
         }
 
 
+@dataclass(frozen=True)
+class BatchResult:
+    rows: int  # outbox rows read; fewer than the batch size: nothing more due
+    failed: dict[str, str]  # table -> safe error; its rows stay in the outbox
+    parked: dict[str, int]  # table -> keys parked by this batch
+
+
 def drain_batch(
     pg,
     ch,
@@ -993,26 +1087,27 @@ def drain_batch(
     stats: Counter,
     *,
     skip: set[str] = frozenset(),
-    failed: dict[str, str] | None = None,
     batch: int = DRAIN_BATCH,
     has_deadletter: bool = False,
-    budget: dict[str, list[int]] | None = None,
-) -> int:
+    parked: Mapping[str, int] | None = None,
+) -> BatchResult:
     """Apply the oldest ``batch`` outbox rows of the tables not in ``skip``.
 
-    Rows of a table that fails stay in the outbox; the table joins ``failed``
-    and the rest of the tick skips it. ``budget`` caps parked keys per table
-    for the whole tick.
+    Rows of a table that fails stay in the outbox; the caller skips the
+    tables in ``failed`` for the rest of the tick. ``parked`` holds the keys
+    each table already parked this tick, so no table parks more than
+    MAX_PARKED_PER_TICK a tick.
     """
-    failed = {} if failed is None else failed
-    budget = {} if budget is None else budget
+    parked = {} if parked is None else parked
+    failed: dict[str, str] = {}
+    parked_now: dict[str, int] = {}
     rows = pg.execute(
         f"SELECT seq, table_name, pk, op FROM {OUTBOX} "
         "WHERE table_name <> ALL(%s) ORDER BY seq LIMIT %s",
         (sorted(skip), batch),
     ).fetchall()
     if not rows:
-        return 0
+        return BatchResult(rows=0, failed={}, parked={})
     keys: dict[str, list[tuple[int, str]]] = defaultdict(list)
     truncated: set[str] = set()
     done: list[int] = []
@@ -1028,19 +1123,21 @@ def drain_batch(
             keys[table].append((seq, pk))
     for table, entries in keys.items():
         pks = list(dict.fromkeys(pk for _, pk in entries))
-        budget.setdefault(table, [MAX_PARKED_PER_TICK])
+        budget = MAX_PARKED_PER_TICK - parked.get(table, 0)
         try:
-            parked = _apply_isolated(
-                pg, ch, specs[table], pks, clock, stats, budget[table]
-            )
+            held = _apply_isolated(pg, ch, specs[table], pks, clock, stats, budget)
         except _TableFailed as failure:
             failed[table] = f"{table}: apply failed ({failure})"
+            if failure.parked:
+                parked_now[table] = len(failure.parked)
             continue
+        if held:
+            parked_now[table] = len(held)
         if has_deadletter:
             # A key that applies cleanly now is no longer parked.
             pg.execute(
                 f"DELETE FROM {DEADLETTER} WHERE table_name = %s AND pk = ANY(%s)",
-                (table, [pk for pk in pks if pk not in parked]),
+                (table, [pk for pk in pks if pk not in held]),
             )
         done.extend(seq for seq, _ in entries)
     if truncated:
@@ -1048,7 +1145,7 @@ def drain_batch(
         request_reconcile(pg, truncated)
     pg.execute(f"DELETE FROM {OUTBOX} WHERE seq = ANY(%s)", (done,))
     stats["outbox_rows"] += len(done)
-    return len(rows)
+    return BatchResult(rows=len(rows), failed=failed, parked=parked_now)
 
 
 # ---------------------------------------------------------------------------
@@ -1221,13 +1318,13 @@ def _due_reconciles(pg, tables, *, full: bool, max_age_s: int) -> list[str]:
 
 
 def reconcile(
-    pg,
-    ch,
+    pg: psycopg.Connection,
+    ch: Client,
     *,
     tables: tuple[str, ...],
     full: bool = False,
     max_age_s: int = RECONCILE_EVERY_S,
-) -> dict:
+) -> ReconcileResult:
     """Reconcile requested tables and those not swept for ``max_age_s``.
 
     Tables still snapshotting wait; the snapshot requests a reconcile when it
@@ -1250,7 +1347,12 @@ def reconcile(
             (started, started, table),
         )
         swept.append(table)
-    return {**stats, "swept": swept, "errors": errors, "requeued": requeued}
+    return {
+        "stats": dict(stats),
+        "swept": swept,
+        "errors": errors,
+        "requeued": requeued,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1407,14 +1509,14 @@ def _ch_max_version(ch, tables) -> int:
 
 
 def install(
-    pg,
-    ch,
+    pg: psycopg.Connection,
+    ch: Client,
     *,
-    config,
+    config: Config,
     apply: bool,
     takeover_peerdb: bool = False,
     snapshot_budget_s: float = INSTALL_SNAPSHOT_S,
-) -> dict:
+) -> InstallResult | CheckResult:
     """Check (``apply=False``, read-only) or install capture and landing tables.
 
     Apply is idempotent; the Standalone bootstrap runs it on every start. The
@@ -1504,7 +1606,15 @@ def install(
     }
 
 
-def check(pg, ch, *, config, source, tables, peerdb) -> dict:
+def check(
+    pg: psycopg.Connection,
+    ch: Client,
+    *,
+    config: Config,
+    source: SourceInventory,
+    tables: tuple[str, ...],
+    peerdb: dict[str, list[str]],
+) -> CheckResult:
     """Read-only readiness. Fails when capture could be running without a drain."""
     problems = []
     if config.hosted:
@@ -1554,7 +1664,7 @@ def _outbox_exists(pg) -> bool:
     )
 
 
-def status(pg, *, tables: tuple[str, ...]) -> dict:
+def status(pg: psycopg.Connection, *, tables: tuple[str, ...]) -> Status:
     if not _outbox_exists(pg):
         return {"installed": False}
     depth, lag = _outbox_head(pg)
@@ -1591,7 +1701,7 @@ def resync(pg, *, tables: Iterable[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def connect(config):
+def connect(config: Config) -> tuple[psycopg.Connection, Client]:
     import clickhouse_connect
 
     pg = psycopg.connect(
@@ -1623,19 +1733,19 @@ def connect(config):
     return pg, ch
 
 
-def load_config(env=None):
+def load_config(env: Mapping[str, str] | None = None) -> Config:
     from tracer.services.clickhouse.oss_cdc_install import Config
 
     return Config.from_env(os.environ if env is None else env)
 
 
 def ensure_installed(
-    env=None,
+    env: Mapping[str, str] | None = None,
     *,
     schedules: bool = True,
     takeover_peerdb: bool = True,
     snapshot_budget_s: float = INSTALL_SNAPSHOT_S,
-) -> dict:
+) -> EnsureResult:
     """Make the install match ``FI_CDC_MODE``. Idempotent; call on every start.
 
     The Standalone bootstrap calls this once per container start, after
@@ -1654,10 +1764,11 @@ def ensure_installed(
     env = os.environ if env is None else env
     mode = cdc_mode(env)
     config = load_config(env)
+    result: EnsureResult = {"mode": mode}
     pg, ch = connect(config)
     try:
         if mode == "outbox":
-            result = install(
+            result["install"] = install(
                 pg,
                 ch,
                 config=config,
@@ -1666,11 +1777,9 @@ def ensure_installed(
                 snapshot_budget_s=snapshot_budget_s,
             )
         else:
-            result = {
-                "removed_triggers": uninstall_capture(pg)
-                if capture_installed(pg)
-                else []
-            }
+            result["removed_triggers"] = (
+                uninstall_capture(pg) if capture_installed(pg) else []
+            )
     finally:
         pg.close()
         ch.close()
@@ -1679,7 +1788,7 @@ def ensure_installed(
 
         sync_outbox_cdc_schedules(enabled=mode == "outbox")
         result["schedules"] = "registered" if mode == "outbox" else "removed"
-    return {"mode": mode, **result}
+    return result
 
 
 def main(argv=None) -> int:

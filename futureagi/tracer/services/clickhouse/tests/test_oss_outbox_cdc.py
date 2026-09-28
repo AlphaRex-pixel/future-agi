@@ -294,7 +294,7 @@ def _isolate(monkeypatch, fail, keys, budget=10):
     monkeypatch.setattr(cdc, "apply_keys", apply_keys)
     monkeypatch.setattr(cdc, "park", lambda pg, table, pk, error: parked.append(pk))
     monkeypatch.setattr(cdc, "_probe", lambda pg, ch, table: probes.append(table))
-    result = cdc._apply_isolated(None, None, SPEC, keys, None, Counter(), [budget])
+    result = cdc._apply_isolated(None, None, SPEC, keys, None, Counter(), budget)
     return result, applied, parked, probes
 
 
@@ -369,13 +369,11 @@ def test_structural_errors_fail_the_table_without_bisecting(monkeypatch):
 
 
 def test_park_budget_turns_a_bad_table_into_a_table_failure(monkeypatch):
-    with pytest.raises(cdc._TableFailed):
-        _isolate(
-            monkeypatch,
-            lambda values: DataError("all bad"),
-            [str(uuid.uuid4()) for _ in range(5)],
-            budget=2,
-        )
+    keys = [str(uuid.uuid4()) for _ in range(5)]
+    with pytest.raises(cdc._TableFailed) as failure:
+        _isolate(monkeypatch, lambda values: DataError("all bad"), keys, budget=2)
+    # The keys parked before the budget ran out are reported, not lost.
+    assert failure.value.parked == set(keys[:2])
 
 
 def test_malformed_outbox_key_is_parked_not_fatal(monkeypatch):
@@ -517,6 +515,24 @@ def test_activities_are_no_ops_outside_outbox_mode(monkeypatch):
     )
 
 
+def _drain_result(**changes) -> cdc.DrainResult:
+    """A quiet tick, with ``changes``."""
+    result: cdc.DrainResult = {
+        "stats": {},
+        "parked": {},
+        "outbox_depth": 0,
+        "lag_seconds": 0.0,
+        "rearmed": [],
+        "rearm_failed": {},
+        "errors": {},
+        "drift": {},
+        "drift_errors": {},
+        "added_columns": [],
+        "pending_snapshots": [],
+    }
+    return {**result, **changes}
+
+
 def test_drain_activity_passes_the_source_and_reports_lag(monkeypatch):
     from contextlib import contextmanager
 
@@ -536,7 +552,9 @@ def test_drain_activity_passes_the_source_and_reports_lag(monkeypatch):
         "drain",
         lambda pg, ch, **kwargs: (
             seen.update(kwargs)
-            or {"lag_seconds": 3600.0, "outbox_depth": 9, "errors": {"t": "t: broken"}}
+            or _drain_result(
+                lag_seconds=3600.0, outbox_depth=9, errors={"t": "t: broken"}
+            )
         ),
     )
     monkeypatch.setattr(
@@ -558,11 +576,16 @@ def test_drain_activity_passes_the_source_and_reports_lag(monkeypatch):
 @pytest.mark.parametrize(
     "result, warned, errored",
     [
-        ({"lag_seconds": 5.0, "outbox_depth": 50_001}, [50_001], []),
-        ({"lag_seconds": 5.0, "outbox_depth": 50_000}, [], []),
+        (_drain_result(lag_seconds=5.0, outbox_depth=50_001), [50_001], []),
+        (_drain_result(lag_seconds=5.0, outbox_depth=50_000), [], []),
         # A lagging drain is already an error; no second, weaker message.
-        ({"lag_seconds": 601.0, "outbox_depth": 90_000}, [], ["outbox_cdc_lagging"]),
-        ({}, [], []),
+        (
+            _drain_result(lag_seconds=601.0, outbox_depth=90_000),
+            [],
+            ["outbox_cdc_lagging"],
+        ),
+        (_drain_result(), [], []),
+        ({"skipped": "another writer holds the CDC lock"}, [], []),
     ],
 )
 def test_a_deep_outbox_that_keeps_up_is_a_backlog_warning(
@@ -578,12 +601,60 @@ def test_a_deep_outbox_that_keeps_up_is_a_backlog_warning(
     )
     monkeypatch.setattr(tasks.logger, "error", lambda event, **kw: errors.append(event))
 
-    tasks._report("outbox_cdc_drain", result)
+    tasks._report_drain(result)
 
     assert warnings == [
         ("outbox_cdc_backlog", {"outbox_depth": depth}) for depth in warned
     ]
     assert errors == errored
+
+
+@pytest.mark.parametrize(
+    "changes, fields",
+    [
+        ({"parked": {"t": 2}}, {"parked": {"t": 2}}),
+        ({"rearmed": ["t"], "added_columns": ["t.c"]}, None),
+        ({"rearm_failed": {"t": "busy"}, "drift_errors": {"t": "x"}}, None),
+    ],
+)
+def test_parked_keys_and_repairs_raise_the_attention_alert(
+    monkeypatch, changes, fields
+):
+    from tracer.tasks import outbox_cdc as tasks
+
+    logged = []
+    monkeypatch.setattr(
+        tasks.logger, "error", lambda event, **kw: logged.append((event, kw))
+    )
+    tasks._report_drain(_drain_result(**changes))
+    assert logged == [
+        (
+            "outbox_cdc_attention",
+            {"activity": "outbox_cdc_drain", **(fields or changes)},
+        )
+    ]
+
+
+def test_reconcile_errors_raise_the_attention_alert(monkeypatch):
+    from tracer.tasks import outbox_cdc as tasks
+
+    logged = []
+    monkeypatch.setattr(
+        tasks.logger, "error", lambda event, **kw: logged.append((event, kw))
+    )
+    result: cdc.ReconcileResult = {
+        "stats": {"t.reconciled": 3},
+        "swept": ["t"],
+        "errors": {"u": "u: landing table missing in ClickHouse"},
+        "requeued": 0,
+    }
+    tasks._report_reconcile(result)
+    assert logged == [
+        (
+            "outbox_cdc_attention",
+            {"activity": "outbox_cdc_reconcile", "errors": result["errors"]},
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------

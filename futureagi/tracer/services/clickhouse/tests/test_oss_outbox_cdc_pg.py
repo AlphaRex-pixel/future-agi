@@ -613,6 +613,18 @@ def test_every_write_path_is_captured_and_mirrored(pg, ch, config, other):
     }
 
 
+def test_results_have_exactly_their_typed_keys(pg, ch, config):
+    # tracer.tasks.outbox_cdc raises its alerts from these keys.
+    assert set(_install(pg, ch, config)) == cdc.InstallResult.__required_keys__
+    _trace(pg)
+    assert set(_drain(pg, ch, config)) == cdc.DrainResult.__required_keys__
+    reconciled = cdc.reconcile(pg, ch, tables=TABLES)
+    assert set(reconciled) == cdc.ReconcileResult.__required_keys__
+    assert set(cdc.status(pg, tables=TABLES)) == (
+        cdc.Status.__required_keys__ | cdc.Status.__optional_keys__
+    )
+
+
 def test_idle_tick_writes_nothing(pg, ch, config):
     _install(pg, ch, config)
     _drain(pg, ch, config)
@@ -724,7 +736,7 @@ def test_existing_rows_snapshot_resumably_without_looking_like_new_arrivals(
     copied = 0
     for _ in range(len(TABLES) + 3):
         tick = _drain(pg, ch, config)
-        copied += tick.get("tracer_trace.snapshot", 0)
+        copied += tick["stats"].get("tracer_trace.snapshot", 0)
         if not tick["pending_snapshots"]:
             break
         if [p for p in pages if p[0] == "tracer_trace"] == [
@@ -826,7 +838,7 @@ def test_replica_role_writes_are_repaired_by_the_daily_sweep(pg, ch, config, oth
 
     result = cdc.reconcile(pg, ch, tables=TABLES, max_age_s=0)
 
-    assert result["tracer_trace.reconciled"] == 4
+    assert result["stats"]["tracer_trace.reconciled"] == 4
     assert set(ch.live("tracer_trace")) == set(keys[3:]) | {added}
 
 
@@ -891,7 +903,7 @@ def test_poison_row_is_bisected_parked_and_later_retried(pg, ch, config, monkeyp
 
     result = _drain(pg, ch, config)
 
-    assert result["tracer_trace.parked"] == 1 and result["errors"] == {}
+    assert result["parked"] == {"tracer_trace": 1} and result["errors"] == {}
     assert result["outbox_depth"] == 0
     assert set(ch.live("tracer_trace")) == set(good)
     assert pg.execute(
@@ -969,7 +981,7 @@ def test_park_budget_fails_the_table_instead_of_parking_everything(
 
     result = _drain(pg, ch, config)
 
-    assert result["tracer_trace.parked"] == 2
+    assert result["parked"] == {"tracer_trace": 2}
     assert "tracer_trace" in result["errors"]
     assert trace_free in ch.live("model_hub_score")
     assert result["outbox_depth"] == 5  # kept, not dropped
@@ -1086,7 +1098,7 @@ def test_ensure_installed_follows_the_mode_and_syncs_schedules(
     )
 
     result = cdc.ensure_installed({"FI_CDC_MODE": "outbox"}, snapshot_budget_s=0)
-    assert result["mode"] == "outbox" and result["ready"]
+    assert result["mode"] == "outbox" and result["install"]["ready"]
     assert cdc.broken_capture(cdc.capture_state(pg, TABLES)) == {}
 
     result = cdc.ensure_installed({"FI_CDC_MODE": "off"})

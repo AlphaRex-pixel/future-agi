@@ -202,7 +202,7 @@ def test_reconcile_activity_repairs_writes_capture_never_saw(
 
     assert result["errors"] == {}
     assert sorted(result["swept"]) == sorted(installed)
-    assert result["tracer_trace.reconciled"] == 2
+    assert result["stats"]["tracer_trace.reconciled"] == 2
     assert _live(ch, "tracer_trace") == {hidden}
     assert _tombstoned(ch, "tracer_trace", first)
     assert _activity_sessions(pg) == 0
