@@ -18447,6 +18447,47 @@ export interface HarnessSubGoalApi {
   judged: boolean;
 }
 
+export type HarnessTargetMetricsApiProvider =
+  (typeof HarnessTargetMetricsApiProvider)[keyof typeof HarnessTargetMetricsApiProvider];
+
+export const HarnessTargetMetricsApiProvider = {
+  vapi: "vapi",
+  retell: "retell",
+  livekit: "livekit",
+} as const;
+
+export interface HarnessTargetUsageApi {
+  /** @minimum 0 */
+  prompt_tokens?: number;
+  /** @minimum 0 */
+  completion_tokens?: number;
+  /** @minimum 0 */
+  total_tokens?: number;
+}
+
+export interface HarnessTargetLatencyApi {
+  /** @minimum 0 */
+  turn?: number;
+  /** @minimum 0 */
+  model?: number;
+  /** @minimum 0 */
+  voice?: number;
+  /** @minimum 0 */
+  transcriber?: number;
+  /** @minimum 0 */
+  endpointing?: number;
+  /** @maxItems 1000 */
+  turns?: number[];
+}
+
+export interface HarnessTargetMetricsApi {
+  provider: HarnessTargetMetricsApiProvider;
+  usage?: HarnessTargetUsageApi;
+  /** @minimum 0 */
+  cost_cents?: number;
+  latency?: HarnessTargetLatencyApi;
+}
+
 export interface HarnessCallApi {
   started_at: string;
   ended_at: string;
@@ -18465,6 +18506,7 @@ export interface HarnessCallApi {
    * @maxLength 128
    */
   stop_reason?: string;
+  target_metrics?: HarnessTargetMetricsApi;
 }
 
 export type HarnessFailureApiDomain =

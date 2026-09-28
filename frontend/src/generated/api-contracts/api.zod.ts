@@ -37634,6 +37634,28 @@ export const simulateApiHarnessAttemptsResultsBodyCallRecordingArtifactsDefault 
   [];
 export const simulateApiHarnessAttemptsResultsBodyCallStopReasonMax = 128;
 
+export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsUsagePromptTokensMin = 0;
+
+export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsUsageCompletionTokensMin = 0;
+
+export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsUsageTotalTokensMin = 0;
+
+export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsCostCentsMin = 0;
+
+export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyTurnMin = 0;
+
+export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyModelMin = 0;
+
+export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyVoiceMin = 0;
+
+export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyTranscriberMin = 0;
+
+export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyEndpointingMin = 0;
+
+export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyTurnsItemMin = 0;
+
+export const simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyTurnsMax = 1000;
+
 export const simulateApiHarnessAttemptsResultsBodyFailureStageMax = 64;
 
 export const simulateApiHarnessAttemptsResultsBodyFailureCodeMax = 128;
@@ -37703,6 +37725,85 @@ export const SimulateApiHarnessAttemptsResultsBody = zod.object({
       .string()
       .min(1)
       .max(simulateApiHarnessAttemptsResultsBodyCallStopReasonMax)
+      .optional(),
+    target_metrics: zod
+      .object({
+        provider: zod.enum(["vapi", "retell", "livekit"]),
+        usage: zod
+          .object({
+            prompt_tokens: zod
+              .number()
+              .min(
+                simulateApiHarnessAttemptsResultsBodyCallTargetMetricsUsagePromptTokensMin,
+              )
+              .optional(),
+            completion_tokens: zod
+              .number()
+              .min(
+                simulateApiHarnessAttemptsResultsBodyCallTargetMetricsUsageCompletionTokensMin,
+              )
+              .optional(),
+            total_tokens: zod
+              .number()
+              .min(
+                simulateApiHarnessAttemptsResultsBodyCallTargetMetricsUsageTotalTokensMin,
+              )
+              .optional(),
+          })
+          .optional(),
+        cost_cents: zod
+          .number()
+          .min(
+            simulateApiHarnessAttemptsResultsBodyCallTargetMetricsCostCentsMin,
+          )
+          .optional(),
+        latency: zod
+          .object({
+            turn: zod
+              .number()
+              .min(
+                simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyTurnMin,
+              )
+              .optional(),
+            model: zod
+              .number()
+              .min(
+                simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyModelMin,
+              )
+              .optional(),
+            voice: zod
+              .number()
+              .min(
+                simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyVoiceMin,
+              )
+              .optional(),
+            transcriber: zod
+              .number()
+              .min(
+                simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyTranscriberMin,
+              )
+              .optional(),
+            endpointing: zod
+              .number()
+              .min(
+                simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyEndpointingMin,
+              )
+              .optional(),
+            turns: zod
+              .array(
+                zod
+                  .number()
+                  .min(
+                    simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyTurnsItemMin,
+                  ),
+              )
+              .max(
+                simulateApiHarnessAttemptsResultsBodyCallTargetMetricsLatencyTurnsMax,
+              )
+              .optional(),
+          })
+          .optional(),
+      })
       .optional(),
   }),
   failure: zod.object({
