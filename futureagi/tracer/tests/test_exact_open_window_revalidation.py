@@ -423,13 +423,67 @@ def test_enqueue_failure_keeps_the_same_window_snapshot(monkeypatch):
 
     assert served["query_status"] == "complete"
     assert served["query_completed_at"] == completed_at
-    assert served["query_refresh_failed"] is True
+    # Nobody asked for this refresh: its failure is not shown as a failed
+    # read above a valid chart. The hit is served plain, with its age.
+    assert served["query_refresh_failed"] is False
     assert served["query_refreshing"] is False
-    # The failed state is the backoff: the next visit does not retry.
-    assert again["query_refresh_failed"] is True
+    assert again["query_refresh_failed"] is False
+    assert again["query_refreshing"] is False
+    # The failed state is still the backoff: the next visit does not retry.
     frozen = eac.normalize_exact_observe_identity(identity)
+    assert eac.exact_refresh_state(SESSION_NS, frozen) == "failed"
+    assert cache.get(eac._refresh_lock_key(SESSION_NS, frozen)) is None
     stored = cache.get(eac.snapshot_cache_key(SESSION_NS, frozen))
     assert stored["completed_at"] == completed_at
+
+
+@pytest.mark.parametrize("namespace", SCOPED)
+def test_failed_automatic_revalidation_serves_the_hit_plain_to_every_viewer(
+    namespace, queue, temporal_status
+):
+    identity = _identity()
+    completed_at = _seed(namespace, identity, age=OLD)
+    assert _read(namespace, identity)["query_refreshing"] is True
+    (job,) = queue
+    # The worker's exact read fails.
+    eac.finish_exact_refresh(
+        namespace, job["identity"], job["refresh_token"], succeeded=False
+    )
+
+    viewers = [_read(namespace, identity) for _ in range(5)]
+
+    assert all(view["query_status"] == "complete" for view in viewers)
+    assert all(view["query_completed_at"] == completed_at for view in viewers)
+    assert all(view["query_refresh_failed"] is False for view in viewers)
+    assert all(view["query_refreshing"] is False for view in viewers)
+    # Backoff: no second claim while the failed state stands.
+    assert len(queue) == 1
+    assert eac.exact_refresh_state(namespace, job["identity"]) == "failed"
+    assert temporal_status == []
+
+
+def test_failed_explicit_refresh_still_reports_the_failure(queue):
+    identity = _identity()
+    _seed(SESSION_NS, identity, age=OLD)
+    # An automatic revalidation ran and succeeded earlier...
+    assert _read(SESSION_NS, identity)["query_refreshing"] is True
+    (auto,) = queue
+    eac.finish_exact_refresh(
+        SESSION_NS, auto["identity"], auto["refresh_token"], succeeded=True
+    )
+    # ...then the user's Reload fails: that failure is theirs to see.
+    assert _read(SESSION_NS, identity, refresh=True)["query_refreshing"] is True
+    explicit = queue[-1]
+    assert explicit["refresh_token"] != auto["refresh_token"]
+    eac.finish_exact_refresh(
+        SESSION_NS, explicit["identity"], explicit["refresh_token"], succeeded=False
+    )
+
+    served = _read(SESSION_NS, identity)
+
+    assert served["query_status"] == "complete"
+    assert served["query_refresh_failed"] is True
+    assert served["query_refreshing"] is False
 
 
 @pytest.mark.parametrize("disabled", [0, -1, None])
@@ -569,6 +623,29 @@ def test_entry_point_revalidates_an_old_open_hit_once(
     assert first["query_refreshing"] is True
     assert poll["query_refreshing"] is True
     assert [job["namespace"] for job in queue] == [namespace]
+    assert temporal_status == []
+
+
+@pytest.mark.parametrize(("namespace", "fetch"), _ENTRY_POINTS)
+def test_entry_point_serves_the_hit_plain_after_its_revalidation_fails(
+    monkeypatch, queue, temporal_status, namespace, fetch
+):
+    _unaffordable(monkeypatch)
+    filters = [_window(end_offset=OPEN), _MODEL_FILTER]
+    completed_at = _seed(namespace, _entry_identity(namespace, filters), age=OLD)
+    assert fetch(filters, False)["query_refreshing"] is True
+    (job,) = queue
+    eac.finish_exact_refresh(
+        namespace, job["identity"], job["refresh_token"], succeeded=False
+    )
+
+    served = fetch(filters, False)
+
+    assert served["query_status"] == "complete"
+    assert served["query_completed_at"] == completed_at
+    assert served["query_refresh_failed"] is False
+    assert served["query_refreshing"] is False
+    assert len(queue) == 1
     assert temporal_status == []
 
 

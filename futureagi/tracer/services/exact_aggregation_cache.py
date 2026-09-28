@@ -453,6 +453,17 @@ def _refresh_reconcile_key(namespace: str, identity: Any) -> str:
     return f"{snapshot_cache_key(namespace, identity)}:refresh-reconcile"
 
 
+def _revalidation_token_key(namespace: str, identity: Any) -> str:
+    """The token of the latest automatic open-window revalidation claim.
+
+    A side key, not a field in the refresh state: the dispatch/running state
+    records are compared by value (Lua and fallback compare-and-set), so an
+    extra field there would break those fences.
+    """
+
+    return f"{snapshot_cache_key(namespace, identity)}:revalidate-token"
+
+
 def _carry_exact_snapshot_to_refreshed_identity(
     namespace: str,
     source_identity: Any,
@@ -1556,6 +1567,52 @@ def _frozen_window_end(identity: Any) -> datetime | None:
     return None
 
 
+def _remember_revalidation_token(namespace: str, identity: Any, token: str) -> None:
+    """Mark ``token`` as an automatic revalidation for as long as its state lives."""
+
+    try:
+        cache.set(
+            _revalidation_token_key(namespace, identity),
+            token,
+            timeout=_refresh_dispatch_seconds()
+            + _refresh_lock_seconds()
+            + _refresh_failure_seconds(),
+        )
+    except Exception:
+        logger.warning(
+            "exact_aggregation_revalidation_token_write_failed",
+            namespace=namespace,
+            exc_info=True,
+        )
+
+
+def _served_refresh_state(
+    namespace: str,
+    identity: Any,
+    state: str | None,
+) -> str | None:
+    """The refresh state to show on a served hit.
+
+    A failed AUTOMATIC revalidation is not a failed read: nobody asked for it,
+    and the hit is still exact for its window as of its ``completed_at``. It
+    is served plain (the failed state still blocks a re-claim for its TTL, so
+    it remains the backoff). A failed explicit refresh keeps
+    ``query_refresh_failed``: the user asked for newer data and did not get it.
+    """
+
+    if state != "failed":
+        return state
+    record = _exact_refresh_state_record(namespace, identity)
+    token = record.get("token") if isinstance(record, dict) else None
+    if not token:
+        return state
+    try:
+        automatic = cache.get(_revalidation_token_key(namespace, identity))
+    except Exception:
+        return state
+    return None if automatic == token else state
+
+
 def _open_window_hit_is_due(namespace: str, identity: Any, snapshot: Any) -> bool:
     """Whether a served hit was computed while its window was open, long enough ago.
 
@@ -1644,7 +1701,10 @@ def _revalidate_open_window_hit(
         # A concurrent visit won the claim (or the cache is impaired): report
         # only what is persisted.
         return _decorate_refresh_state(
-            previous, exact_refresh_state(namespace, identity)
+            previous,
+            _served_refresh_state(
+                namespace, identity, exact_refresh_state(namespace, identity)
+            ),
         )
     if not _claim_exact_refresh_admission(
         identity,
@@ -1656,10 +1716,15 @@ def _revalidate_open_window_hit(
         # for its window; a later visit revalidates once a slot is free.
         finish_exact_refresh(namespace, identity, token, succeeded=True)
         return _decorate_refresh_state(previous, None)
+    _remember_revalidation_token(namespace, identity, token)
     if not _enqueue_exact_refresh(namespace, identity, token, task_queue):
-        # The failed state is the backoff: no visit retries for its TTL.
+        # The failed state is the backoff: no visit retries for its TTL. It is
+        # this automatic claim's failure, so the hit is served plain.
         return _decorate_refresh_state(
-            previous, exact_refresh_state(namespace, identity)
+            previous,
+            _served_refresh_state(
+                namespace, identity, exact_refresh_state(namespace, identity)
+            ),
         )
     current = read_servable(identity)
     current_state = exact_refresh_state(namespace, identity)
@@ -1754,7 +1819,9 @@ def read_or_schedule_exact_snapshot(
             read_servable,
         )
     if previous is not None and not refresh:
-        return _decorate_refresh_state(previous, state)
+        return _decorate_refresh_state(
+            previous, _served_refresh_state(namespace, normalized_identity, state)
+        )
     if previous is None and state == "failed" and not refresh:
         return _decorate_refresh_state(pending_payload, state)
     if not schedule_on_miss:
