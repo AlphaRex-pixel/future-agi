@@ -19,6 +19,7 @@ from agentic_eval.core_evals.fi_utils.exceptions import (
 from agentic_eval.core_evals.fi_utils.fi_code_execution import CodeExecution
 from agentic_eval.core_evals.fi_utils.json import extract_json_path, validate_json
 from agentic_eval.core_evals.fi_utils.logging import logger
+from agentic_eval.core_evals.fi_utils.sandbox import SETUP_ERROR_MESSAGES
 from agentic_eval.core_evals.fi_utils.utils import PreserveUndefined
 from agentic_eval.core_evals.keys.openai_api import OpenAiApiKey
 from agentic_eval.core_evals.llm_services.openai_api import OpenAiService
@@ -1723,7 +1724,8 @@ def custom_code_eval(code, language=None, **kwargs):
         raise ValueError("Code eval function returned None (no result produced)")
     if status != "success":
         error_msg = result.get("data", "Unknown error in code eval")
-        if result.get("setup_error") is True and isinstance(error_msg, str):
+        # Only the sandbox's own texts: an eval script can print any result.
+        if isinstance(error_msg, str) and error_msg in SETUP_ERROR_MESSAGES:
             raise CodeEvalSetupError(error_msg)
         raise ValueError(f"Code eval input validation failed: {error_msg}")
 

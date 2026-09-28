@@ -4,11 +4,15 @@ Standalone's built-in sandbox has no Node.js, so a JavaScript eval fails with
 the code-executor's hint to turn on the `sandbox` profile. Dataset cells show
 it; the eval playground and "Test Evaluation" must show it too instead of their
 generic retry message, while other code eval failures stay generic there.
+Only the sandbox's own setup messages count: the executor passes an eval
+script's result through as is, so a result's setup_error flag proves nothing.
 
 urlopen is replaced at the urllib boundary with the code-executor's answer.
 """
 
+import errno
 import json
+import urllib.error
 import urllib.request
 from unittest import mock
 
@@ -23,11 +27,7 @@ from model_hub.models.evals_metric import EvalTemplate
 
 JS_CODE = "function evaluate(output, expected) { return output === expected; }\n"
 # code-executor/server.py's answer to a JavaScript eval without Node.js.
-NO_NODE_MESSAGE = (
-    "JavaScript evals need Node.js, which this sandbox does not have. In "
-    "Standalone, set COMPOSE_PROFILES=sandbox in .env and run "
-    "docker compose up -d: the nsjail sandbox it adds runs them."
-)
+NO_NODE_MESSAGE = sandbox.EXECUTOR_NO_NODE_MESSAGE
 NO_NODE_RESULT = {
     "status": "error",
     "data": NO_NODE_MESSAGE,
@@ -56,6 +56,8 @@ def executor_answers(monkeypatch, settings):
     "result, message",
     [
         (NO_NODE_RESULT, NO_NODE_MESSAGE),
+        # An executor image from before the flag gives the same text.
+        ({"status": "error", "data": NO_NODE_MESSAGE}, NO_NODE_MESSAGE),
         (
             {
                 "status": "error",
@@ -64,7 +66,16 @@ def executor_answers(monkeypatch, settings):
             },
             sandbox.EXECUTOR_UNAVAILABLE_MESSAGE,
         ),
+        (
+            {
+                "status": "error",
+                "data": sandbox.LOCAL_NO_NODE_MESSAGE,
+                "setup_error": True,
+            },
+            sandbox.LOCAL_NO_NODE_MESSAGE,
+        ),
     ],
+    ids=["no-node", "no-node-unflagged", "unavailable", "local-no-node"],
 )
 def test_a_setup_error_keeps_the_sandbox_message(result, message):
     with mock.patch(
@@ -77,15 +88,41 @@ def test_a_setup_error_keeps_the_sandbox_message(result, message):
     assert str(raised.value) == message
 
 
-def test_other_code_eval_errors_are_not_setup_errors():
+# The eval's own code can print this result: the executor returns it as is.
+FAKED_SETUP_ERROR = {"status": "error", "data": PRIVATE_ERROR, "setup_error": True}
+
+
+@pytest.mark.parametrize(
+    "result",
+    [{"status": "error", "data": PRIVATE_ERROR}, FAKED_SETUP_ERROR],
+    ids=["plain", "flagged"],
+)
+def test_other_code_eval_errors_are_not_setup_errors(result):
     with mock.patch(
         "agentic_eval.core_evals.fi_evals.function.functions.CodeExecution.execute",
-        return_value={"status": "error", "data": PRIVATE_ERROR},
+        return_value=result,
     ):
         with pytest.raises(ValueError) as raised:
             custom_code_eval(JS_CODE, language="javascript", output="a")
 
     assert not isinstance(raised.value, CodeEvalSetupError)
+
+
+def test_the_local_javascript_runner_without_node_is_a_setup_error(
+    executor_answers, settings, monkeypatch
+):
+    """CODE_EXECUTOR_LOCAL_FALLBACK with the executor down and no Node.js."""
+    settings.CODE_EXECUTOR_LOCAL_FALLBACK = True
+    # urlopen is the fixture's stand-in: the executor is not reachable.
+    urllib.request.urlopen.side_effect = urllib.error.URLError(
+        ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
+    )
+    monkeypatch.setattr(sandbox.os.path, "isfile", lambda path: False)
+
+    with pytest.raises(CodeEvalSetupError) as raised:
+        custom_code_eval(JS_CODE, language="javascript", output="a")
+
+    assert str(raised.value) == sandbox.LOCAL_NO_NODE_MESSAGE
 
 
 def _js_code_eval(user, workspace):
@@ -157,10 +194,15 @@ def test_javascript_eval_without_node_shows_the_sandbox_hint(
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("call", [_playground, _test_evaluation])
+@pytest.mark.parametrize(
+    "result",
+    [{"status": "error", "data": PRIVATE_ERROR}, FAKED_SETUP_ERROR],
+    ids=["plain", "flagged"],
+)
 def test_other_code_eval_failures_stay_generic(
-    call, auth_client, user, workspace, executor_answers
+    call, result, auth_client, user, workspace, executor_answers
 ):
-    executor_answers({"status": "error", "data": PRIVATE_ERROR, "execution_time": 0})
+    executor_answers({**result, "execution_time": 0})
 
     response = call(auth_client, _js_code_eval(user, workspace))
 

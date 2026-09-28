@@ -38,5 +38,6 @@ class MediaNotAccessibleError(ValueError):
 
 class CodeEvalSetupError(ValueError):
     """Raised when this install cannot run a code eval at all: no code
-    executor, or no Node.js for a JavaScript eval. The message comes from the
-    sandbox and says how to fix the setup, so callers may show it to users."""
+    executor, or no Node.js for a JavaScript eval. Its message is always one of
+    the backend's own texts (sandbox.SETUP_ERROR_MESSAGES), never one an eval
+    script returned, so callers may show it to users."""

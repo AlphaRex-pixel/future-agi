@@ -51,9 +51,24 @@ _UNREACHABLE_ERRNOS = frozenset(
     {errno.ECONNREFUSED, errno.EHOSTUNREACH, errno.ENETUNREACH}
 )
 
-# A setup error: returned with "setup_error": True, which lets callers show it.
+# Setup errors: this install cannot run the eval at all, and the message says
+# so. They are returned with "setup_error": True, but custom_code_eval shows
+# only these exact texts to users: the executor returns an eval script's own
+# result as is, so the script could set that flag on any text.
 EXECUTOR_UNAVAILABLE_MESSAGE = (
     "Code executor unavailable: the code-executor service could not be reached"
+)
+# code-executor/server.py's NO_NODE_MESSAGE, word for word
+# (tests/test_default_install_packaging.py compares the two).
+EXECUTOR_NO_NODE_MESSAGE = (
+    "JavaScript evals need Node.js, which this sandbox does not have. In "
+    "Standalone, set COMPOSE_PROFILES=sandbox in .env and run "
+    "docker compose up -d: the nsjail sandbox it adds runs them."
+)
+# The local JavaScript runner's (CODE_EXECUTOR_LOCAL_FALLBACK) without Node.js.
+LOCAL_NO_NODE_MESSAGE = "Node.js is not available for JavaScript execution"
+SETUP_ERROR_MESSAGES = frozenset(
+    {EXECUTOR_UNAVAILABLE_MESSAGE, EXECUTOR_NO_NODE_MESSAGE, LOCAL_NO_NODE_MESSAGE}
 )
 
 # ---------------------------------------------------------------------------
@@ -663,7 +678,7 @@ def execute_sandboxed_javascript(code: str, input_data: dict, timeout: int = DEF
             break
 
     if not node_path:
-        return {"status": "error", "data": "Node.js is not available for JavaScript execution"}
+        return {"status": "error", "data": LOCAL_NO_NODE_MESSAGE, "setup_error": True}
 
     script = _build_js_sandbox_single_file(code, input_data)
 

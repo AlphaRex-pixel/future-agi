@@ -1302,8 +1302,11 @@ def test_a_javascript_eval_without_node_says_how_to_run_it(
 
     assert result["status"] == "error"
     assert "COMPOSE_PROFILES=sandbox" in result["data"]
-    # Marks the message as safe to show, so the eval playground shows it too.
     assert result["setup_error"] is True
+    # The eval playground shows it because the backend knows this exact text.
+    from agentic_eval.core_evals.fi_utils import sandbox
+
+    assert result["data"] == sandbox.EXECUTOR_NO_NODE_MESSAGE
     base = (ROOT / "futureagi" / "code-executor" / "Dockerfile.base").read_text(
         encoding="utf-8"
     )
