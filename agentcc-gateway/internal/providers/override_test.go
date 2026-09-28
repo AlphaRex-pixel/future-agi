@@ -130,6 +130,15 @@ func stubLookupIP(t *testing.T, answers map[string][]string) {
 	t.Cleanup(func() { lookupIP = orig })
 }
 
+// allowLoopbackDial lets org providers connect to a test server on loopback,
+// for tests of something other than the dial check.
+func allowLoopbackDial(t *testing.T) {
+	t.Helper()
+	orig := orgDialContext
+	orgDialContext = func(bool) func(context.Context, string, string) (net.Conn, error) { return nil }
+	t.Cleanup(func() { orgDialContext = orig })
+}
+
 // recordingUpstream is an OpenAI-compatible server that records the bearer
 // token of every request it receives.
 func recordingUpstream(t *testing.T) (*httptest.Server, *atomic.Int32, *atomic.Value) {
@@ -157,10 +166,11 @@ func TestGetOrCreate_TenantBaseURLWinsOverConfigYAML(t *testing.T) {
 	orgUpstream, orgHits, orgAuth := recordingUpstream(t)
 
 	// The org's upstream is reached as "localhost". DNS is stubbed for the
-	// URL check only, so the check sees a public address while the dial
-	// still lands on the test server.
+	// URL check only, so the check sees a public address, and the dial check
+	// is off so the dial still lands on the test server.
 	_, port, _ := net.SplitHostPort(strings.TrimPrefix(orgUpstream.URL, "http://"))
 	stubLookupIP(t, map[string][]string{"localhost": {"203.0.113.7"}})
+	allowLoopbackDial(t)
 
 	cache := NewOrgProviderCache(map[string]config.ProviderConfig{
 		"openai": {BaseURL: operator.URL, APIKey: "operator-key", APIFormat: "openai", Models: []string{"gpt-4o"}},
@@ -193,6 +203,43 @@ func TestGetOrCreate_TenantBaseURLWinsOverConfigYAML(t *testing.T) {
 	}
 	if got := operatorHits.Load(); got != 0 {
 		t.Errorf("operator upstream hits = %d, want 0: the org's request went to config.yaml's base_url", got)
+	}
+}
+
+// The URL check runs once, when the provider is built. A host that resolved
+// to a public address then but now points somewhere the gateway refuses (DNS
+// rebinding) must still not receive the org's key: the dialer checks the
+// address it connects to.
+func TestGetOrCreate_DialRefusesAHostThatNoLongerResolvesPublic(t *testing.T) {
+	orgUpstream, orgHits, _ := recordingUpstream(t)
+	_, port, _ := net.SplitHostPort(strings.TrimPrefix(orgUpstream.URL, "http://"))
+	stubLookupIP(t, map[string][]string{"localhost": {"203.0.113.7"}})
+
+	for _, allowPrivate := range []bool{false, true} {
+		cache := NewOrgProviderCache(nil)
+		cache.SetAllowPrivateBaseURLs(allowPrivate)
+		p, err := cache.GetOrCreateWithTenantConfig("org-1", "custom", "org-key", &tenant.ProviderConfig{
+			APIKey:    "org-key",
+			BaseURL:   "http://localhost:" + port,
+			APIFormat: "openai",
+			Enabled:   true,
+		})
+		if err != nil {
+			t.Fatalf("GetOrCreateWithTenantConfig: %v", err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err = p.ChatCompletion(ctx, &models.ChatCompletionRequest{
+			Model:    "mock-gw",
+			Messages: []models.Message{{Role: "user", Content: json.RawMessage(`"hi"`)}},
+		})
+		cancel()
+		if err == nil {
+			t.Errorf("allowPrivate=%v: ChatCompletion succeeded against a loopback upstream", allowPrivate)
+		}
+	}
+	if got := orgHits.Load(); got != 0 {
+		t.Errorf("loopback upstream received %d request(s) carrying the org's key", got)
 	}
 }
 

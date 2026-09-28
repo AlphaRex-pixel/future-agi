@@ -1,10 +1,12 @@
 package config
 
 import (
+	"context"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -363,6 +365,11 @@ type ProviderConfig struct {
 	CredentialsFile    string `yaml:"credentials_file" json:"-"`
 	ServiceAccountJSON string `yaml:"service_account_json" json:"-"`
 	AWSSessionToken    string `yaml:"aws_session_token" json:"-"`
+
+	// DialContext, when set, opens the provider's upstream connections in
+	// place of the default dialer. Set by the gateway, not in config.yaml: org
+	// providers use it to check every address they connect to.
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error) `yaml:"-" json:"-"`
 }
 
 type LoggingConfig struct {

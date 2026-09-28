@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/futureagi/agentcc-gateway/internal/config"
+	"github.com/futureagi/agentcc-gateway/internal/netguard"
 	"github.com/futureagi/agentcc-gateway/internal/tenant"
 )
 
@@ -139,6 +141,9 @@ func (c *OrgProviderCache) GetOrCreateWithTenantConfig(orgID, providerID, apiKey
 	}
 
 	orgCfg := resolveOrgConfig(baseCfg, apiKey, tenantCfg)
+	if tenantCfg != nil && tenantCfg.BaseURL != "" {
+		orgCfg.DialContext = orgDialContext(c.allowPrivateBaseURLs)
+	}
 
 	p, err := createProvider(providerID+"_org_"+orgID, orgCfg)
 	if err != nil {
@@ -267,26 +272,6 @@ func (e *BaseURLError) PublicMessage() string {
 }
 
 var (
-	// Never reachable from an org base_url, whatever the operator allows:
-	// "this network", link-local (cloud metadata answers on 169.254.169.254),
-	// multicast, broadcast, and the metadata services that sit inside ranges
-	// the operator can open (Alibaba in CGNAT, AWS IMDS over IPv6 in
-	// fc00::/7) or in public space (Azure's WireServer).
-	forbiddenNets = mustParseCIDRs(
-		"0.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "255.255.255.255/32",
-		"::/128", "fe80::/10", "ff00::/8",
-		"100.100.100.200/32", "fd00:ec2::254/128", "168.63.129.16/32",
-	)
-
-	// Loopback is the gateway itself (in a container, only the container),
-	// never a model server, so it stays refused even when private addresses
-	// are allowed.
-	loopbackNets = mustParseCIDRs("127.0.0.0/8", "::1/128")
-
-	// Private and LAN ranges (RFC 1918, CGNAT, unique local): refused unless
-	// the operator allows private provider URLs.
-	privateNets = mustParseCIDRs("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "fc00::/7")
-
 	// Metadata endpoints by name, refused before any lookup.
 	metadataHosts = map[string]bool{
 		"metadata":                   true,
@@ -298,48 +283,26 @@ var (
 
 	// lookupIP resolves a base_url host; a variable so tests can stub DNS.
 	lookupIP = net.LookupIP
+
+	// orgDialContext opens the connections of an org provider that names its
+	// own base_url; a variable so tests can reach a test server on loopback.
+	orgDialContext = func(allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return netguard.Dialer(net.Dialer{}, allowPrivate).DialContext
+	}
+
+	baseURLRejections = map[netguard.Class]BaseURLRejection{
+		netguard.Private:   BaseURLPrivate,
+		netguard.Loopback:  BaseURLLoopback,
+		netguard.Forbidden: BaseURLForbidden,
+	}
 )
 
-func mustParseCIDRs(cidrs ...string) []*net.IPNet {
-	nets := make([]*net.IPNet, len(cidrs))
-	for i, c := range cidrs {
-		_, n, err := net.ParseCIDR(c)
-		if err != nil {
-			panic(err)
-		}
-		nets[i] = n
-	}
-	return nets
-}
-
-func inNets(ip net.IP, nets []*net.IPNet) bool {
-	for _, n := range nets {
-		if n.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
-
-// rejectIP classifies one resolved address. IPv4-mapped IPv6 addresses match
-// the IPv4 ranges (net.IPNet.Contains unmaps them).
-func rejectIP(ip net.IP, allowPrivate bool) (BaseURLRejection, bool) {
-	switch {
-	case inNets(ip, forbiddenNets):
-		return BaseURLForbidden, true
-	case inNets(ip, loopbackNets):
-		return BaseURLLoopback, true
-	case inNets(ip, privateNets) && !allowPrivate:
-		return BaseURLPrivate, true
-	}
-	return 0, false
-}
-
 // validateBaseURL checks an org-supplied base URL before the org's key is
-// sent there. Every address the host resolves to must pass. Private and LAN
-// addresses pass only when allowPrivate is set; loopback, link-local, cloud
-// metadata, multicast and unspecified addresses never do. Returns a
-// *BaseURLError.
+// sent there, to refuse it early with the reason. Every address the host
+// resolves to must pass netguard: private and LAN addresses only when
+// allowPrivate is set; loopback, link-local, cloud metadata, multicast and
+// unspecified addresses never. The provider's dialer checks again on every
+// connection. Returns a *BaseURLError.
 func validateBaseURL(baseURL string, allowPrivate bool) error {
 	if baseURL == "" {
 		return nil
@@ -370,8 +333,8 @@ func validateBaseURL(baseURL string, allowPrivate bool) error {
 		}
 	}
 	for _, ip := range ips {
-		if reason, rejected := rejectIP(ip, allowPrivate); rejected {
-			return &BaseURLError{BaseURL: baseURL, Host: host, IP: ip, Reason: reason}
+		if class := netguard.Classify(ip); !class.Allowed(allowPrivate) {
+			return &BaseURLError{BaseURL: baseURL, Host: host, IP: ip, Reason: baseURLRejections[class]}
 		}
 	}
 	return nil
