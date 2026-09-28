@@ -133,6 +133,8 @@ type Logger struct {
 	// channel.
 	mu     sync.RWMutex
 	closed bool // under mu
+
+	warnedClosed atomic.Bool // an Emit after Close has logged the drop
 }
 
 // NewLogger creates an audit logger from config.
@@ -205,11 +207,18 @@ func (l *Logger) Emit(e *Event) {
 	}
 
 	l.mu.RLock()
-	defer l.mu.RUnlock()
 	if l.closed {
+		l.mu.RUnlock()
 		l.dropped.Add(1)
+		if l.warnedClosed.CompareAndSwap(false, true) {
+			slog.Warn("audit: dropping events emitted after close",
+				"category", e.Category,
+				"action", e.Action,
+			)
+		}
 		return
 	}
+	defer l.mu.RUnlock()
 
 	// Assign sequence and timestamp.
 	e.Seq = l.seq.Add(1)
