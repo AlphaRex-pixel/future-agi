@@ -54,7 +54,9 @@ def _bound_by_name(run_test, name):
     "Grade this run" names an eval the environment already has. A person may
     have added it from outside the harness's offer or under a name of their
     own, so the offer's gates would refuse it even though it is bound and
-    gradeable.
+    gradeable. A config's own name wins over any template's name, so a
+    config cannot be shadowed by an older one whose template happens to be
+    called the same; within each, the oldest binding wins.
     """
     from simulate.services.harness_evals import selected_eval_configs
 

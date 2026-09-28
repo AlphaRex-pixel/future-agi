@@ -176,6 +176,14 @@ describe("EvalPickerDrawer — Added evaluations", () => {
     expect(screen.queryByText("Alpha eval")).toBeNull();
   });
 
+  // An empty `addedEvals` still turns the box on (Array.isArray gates it),
+  // but there is nothing to show yet — a "Added evaluations 0" box would be
+  // worse than no box, since there is nothing to expand.
+  it("renders no Added evaluations box when addedEvals is empty", () => {
+    renderDrawer({ addedEvals: [] });
+    expect(screen.queryByText("Added evaluations")).toBeNull();
+  });
+
   // Behaviours already implemented but previously untested.
   it("matches names case-insensitively", () => {
     renderDrawer({ addedEvals: [{ id: "zz", name: "GAMMA EVAL" }] });

@@ -544,4 +544,51 @@ describe("AddEvaluationDrawer — load states", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(axios.get).not.toHaveBeenCalled();
   });
+
+  // The detail query's own `enabled: open` (not just the picker's early
+  // return) must gate the fetch itself, or a drawer mounted closed on every
+  // run page pulls the full environment detail for nothing.
+  it("does not read the environment detail while closed", async () => {
+    rtlRender(
+      withClient(
+        client(),
+        <AddEvaluationDrawer open={false} env={ENV} onClose={vi.fn()} />,
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(getHarnessEnvironment).not.toHaveBeenCalled();
+  });
+
+  // `errorUpdatedAt` is what tells the effect a *new* failure happened, since
+  // `refreshFailed` itself does not change value between two failed refreshes.
+  // Without it, a person told about a stale list once would never be told
+  // again, even after another failed background refetch.
+  it("warns again on a second failed refresh, not just the first", async () => {
+    const c = client();
+    rtlRender(
+      withClient(c, <AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />),
+    );
+    await screen.findByTestId("eval-picker");
+
+    axios.get.mockRejectedValue({ statusCode: 503, detail: "busy" });
+    await act(() =>
+      c.refetchQueries({
+        queryKey: ["simulate-environments", "run-test", "rt-1"],
+      }),
+    );
+    await waitFor(() => expect(enqueueSnackbar).toHaveBeenCalledTimes(1));
+
+    await new Promise((r) => setTimeout(r, 5));
+    await act(() =>
+      c.refetchQueries({
+        queryKey: ["simulate-environments", "run-test", "rt-1"],
+      }),
+    );
+    await waitFor(() => expect(enqueueSnackbar).toHaveBeenCalledTimes(2));
+    expect(enqueueSnackbar).toHaveBeenNthCalledWith(
+      2,
+      "Couldn’t refresh the evaluations already added here, so that list may be out of date.",
+      { variant: "warning" },
+    );
+  });
 });
