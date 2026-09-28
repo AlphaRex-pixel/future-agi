@@ -9,9 +9,7 @@ import { ThemeProvider, createTheme } from "@mui/material/styles";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { endpoints } from "src/utils/axios";
-import { enqueueSnackbar } from "src/components/snackbar";
-import { RESPONSE_CODES } from "src/utils/constants";
-import { getSafeActionErrorMessage } from "src/utils/errorUtils";
+import { handleError } from "src/utils/queryErrorHandler";
 import { palette } from "src/theme/palette";
 
 // Every dataset-create entry point must show the backend's retry message,
@@ -92,50 +90,6 @@ vi.mock("src/sections/develop-detail/states", async (importOriginal) => ({
       resetSelectedRows: () => {},
     }),
 }));
-
-// Mirrors the global handler in src/app.jsx (_extractParts,
-// extractErrorMessage, handleError); keep the two in step.
-const _extractParts = (result) => {
-  if (result == null || result === "") return "";
-  if (typeof result === "string") return result;
-  if (Array.isArray(result)) {
-    return [...new Set(result.map(_extractParts).filter(Boolean))].join(", ");
-  }
-  if (typeof result === "object") {
-    if (result.details && typeof result.details === "object") {
-      return _extractParts(result.details);
-    }
-    return [
-      ...new Set(Object.values(result).map(_extractParts).filter(Boolean)),
-    ].join(", ");
-  }
-  return String(result);
-};
-
-const extractErrorMessage = (result) =>
-  _extractParts(result) || "Something went wrong";
-
-const handleError = (error, variable, context, mutation) => {
-  if (error?.statusCode == RESPONSE_CODES.LIMIT_REACHED) return;
-  if (
-    mutation?.options?.meta?.errorHandled ||
-    variable?.options?.meta?.errorHandled
-  )
-    return;
-  if (error?.result) {
-    const message = getSafeActionErrorMessage(
-      {
-        statusCode: error?.statusCode,
-        code: error?.code,
-        result: extractErrorMessage(error.result),
-      },
-      "Something went wrong",
-    );
-    enqueueSnackbar(message, {
-      variant: "error",
-    });
-  }
-};
 
 // What src/utils/axios.js rejects with: the response body plus statusCode.
 const rejectedWith = (statusCode, code, message) => ({
