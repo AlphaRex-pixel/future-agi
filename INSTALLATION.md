@@ -325,6 +325,17 @@ COMPOSE_PROFILES=ml,sandbox
   `.env`, not only with `--profile` on the command line: the app reads
   `COMPOSE_PROFILES` from `.env` to make that switch.
 
+To turn a profile off, remove it from `COMPOSE_PROFILES` in `.env`, run
+`docker compose up -d`, then remove its container yourself. Compose leaves the
+containers of a profile that is no longer active running, and
+`--remove-orphans` does not count them as orphans, so the privileged
+`code-executor` would keep running although the app no longer uses it:
+
+```bash
+docker compose --profile sandbox rm -sf code-executor   # after turning sandbox off
+docker compose --profile ml rm -sf serving              # after turning ml off
+```
+
 #### Code evals and the sandbox
 
 Custom code evals run user-written Python or JavaScript. In Standalone without
