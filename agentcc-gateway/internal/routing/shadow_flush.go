@@ -71,7 +71,9 @@ func (f *ShadowFlusher) Run(ctx context.Context) {
 }
 
 // Close stops Run and sends the results still buffered, giving up when ctx
-// ends.
+// ends. By design it does not wait for a periodic flush that is already
+// sending, which only the client's 15s timeout bounds, and it has no time of
+// its own: when the caller's ctx is spent, the buffered results are lost.
 func (f *ShadowFlusher) Close(ctx context.Context) {
 	f.stopOnce.Do(func() { close(f.stop) })
 	f.flush(ctx)

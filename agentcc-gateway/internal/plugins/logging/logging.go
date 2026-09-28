@@ -114,13 +114,15 @@ func markRedacted(record *TraceRecord) {
 }
 
 // shutdownFlushTimeout bounds Close's last attempt to deliver request logs,
-// which runs alongside the emitter's drain. A stopping gateway needs
+// which runs alongside the emitter's drain. For the request logs to be sent
+// before SIGKILL, a stopping gateway needs
 //
 //	grace ≥ preStop + shutdown_timeout + max(shutdownFlushTimeout, emitterDrainTimeout)
 //
 // where grace and preStop are the Helm chart's
 // agentccGateway.terminationGracePeriodSeconds and preStopSleepSeconds, and
-// shutdown_timeout is the gateway's server.shutdown_timeout.
+// shutdown_timeout is the gateway's server.shutdown_timeout. The closers that
+// run after Plugin.Close (audit, OTel) are not covered.
 const shutdownFlushTimeout = 4 * time.Second
 
 // Close drains buffered trace records and stops workers while it makes a
