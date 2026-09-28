@@ -9,6 +9,7 @@
 #   * invariants of the rendered manifests (hack/rendered_checks.py), and
 #     the backend's behaviour settings against docker-compose.distributed.yml
 #   * the install notes and hack/support-bundle.sh keep credentials out
+#   * hack/support-bundle.sh stops its port-forward, finished or killed
 #   * values.yaml, values.schema.json and the README values table agree
 #   * the pre-commit Prettier run skips the templates and those generated files
 #   * the ClickHouse config files match the ones the Standalone install uses
@@ -278,6 +279,64 @@ for kept in 'https://licenses' 'noProxy: .corp' 'NO_PROXY:      .corp' 'postgres
   }
 done
 echo "ok   redacts"
+
+echo "== hack/support-bundle.sh leaves no port-forward behind"
+# Against a fake kubectl, helm and curl: kubectl's port-forward is one
+# long-lived process, as the real one is, that records its PID. The script
+# must stop it, and remove its working directory, when it finishes and when
+# it is stopped with SIGTERM.
+fake="$out/support-bundle"
+rm -rf "$fake"
+mkdir -p "$fake/bin" "$fake/tmp"
+cat >"$fake/bin/kubectl" <<'SH'
+#!/bin/sh
+case " $* " in
+  *" port-forward "*) echo $$ >"$FAKE_STATE/port-forward.pid"; exec sleep 300 ;;
+  *" get svc -l "*) printf futureagi-backend ;;
+  *" get svc futureagi-backend "*) printf 8000 ;;
+esac
+SH
+printf '#!/bin/sh\n' >"$fake/bin/helm"
+cat >"$fake/bin/curl" <<'SH'
+#!/bin/sh
+# /health/ answers once FAKE_STATE/healthy exists.
+case " $* " in
+  *"/health/"*) [ -e "$FAKE_STATE/healthy" ] ;;
+  *) echo '{}' ;;
+esac
+SH
+chmod +x "$fake/bin/kubectl" "$fake/bin/helm" "$fake/bin/curl"
+# env execs the script: $! of a background run is the script itself.
+support_bundle=(env FAKE_STATE="$fake" KUBECTL="$fake/bin/kubectl" HELM="$fake/bin/helm" PATH="$fake/bin:$PATH"
+  TMPDIR="$fake/tmp" bash "$chart/hack/support-bundle.sh" -o "$fake/out")
+port_forward_stopped() {
+  local pid
+  pid=$(cat "$fake/port-forward.pid" 2>/dev/null) || fail "support-bundle.sh ($1) did not start its port-forward"
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid"
+    fail "support-bundle.sh ($1) left its port-forward running (PID $pid)"
+  fi
+  [ -z "$(ls -A "$fake/tmp")" ] || fail "support-bundle.sh ($1) left its working directory"
+  rm -f "$fake/port-forward.pid"
+}
+touch "$fake/healthy"
+"${support_bundle[@]}" >"$fake/run.txt" 2>&1 || { cat "$fake/run.txt" >&2; fail "support-bundle.sh against a fake cluster"; }
+ls "$fake/out"/futureagi-support-futureagi-*.tar.gz >/dev/null || fail "support-bundle.sh wrote no bundle"
+port_forward_stopped "finished"
+rm -f "$fake/healthy"
+"${support_bundle[@]}" >"$fake/run.txt" 2>&1 &
+bundle=$!
+for _ in $(seq 1 100); do
+  [ -e "$fake/port-forward.pid" ] && break
+  sleep 0.1
+done
+kill -TERM "$bundle"
+status=0
+wait "$bundle" || status=$?
+[ "$status" -eq 143 ] || { cat "$fake/run.txt" >&2; fail "support-bundle.sh exited $status on SIGTERM, not 143"; }
+port_forward_stopped "stopped with SIGTERM"
+rm -rf "$fake"
+echo "ok   stopped"
 
 echo "== rendered invariants"
 # No manifest may carry an unexpanded template or an empty image.

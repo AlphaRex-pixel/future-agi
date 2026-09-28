@@ -53,7 +53,19 @@ name="futureagi-support-$release-$stamp"
 work=$(mktemp -d)
 dir="$work/$name"
 mkdir -p "$dir/logs" "$dir/describe"
-trap 'rm -rf "$work"' EXIT
+# The port-forward (the only background process) is stopped on every exit:
+# finished, failed, Ctrl-C (a background job ignores SIGINT) or killed.
+forward=""
+stop_forward() {
+  [ -n "$forward" ] || return 0
+  kill "$forward" 2>/dev/null || true
+  wait "$forward" 2>/dev/null || true
+  forward=""
+}
+trap 'stop_forward; rm -rf "$work"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 selector="app.kubernetes.io/instance=$release"
 k() { "$kubectl" -n "$namespace" "$@"; }
 
@@ -171,15 +183,16 @@ if $setup_checks && command -v curl >/dev/null; then
   port=$(k get svc "$svc" -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || true)
   if [ -n "$svc" ] && [ -n "$port" ]; then
     local_port=$((20000 + RANDOM % 20000))
-    k port-forward "svc/$svc" "$local_port:$port" >"$work/port-forward.log" 2>&1 &
+    # kubectl itself in the background, not the function k: $! must be the
+    # process to stop, not a subshell kubectl would outlive.
+    "$kubectl" -n "$namespace" port-forward "svc/$svc" "$local_port:$port" >"$work/port-forward.log" 2>&1 &
     forward=$!
     for _ in $(seq 1 20); do
       curl -fsS -o /dev/null "http://127.0.0.1:$local_port/health/" -H 'Host: localhost' 2>/dev/null && break
       sleep 0.5
     done
     { curl -sS --max-time 60 -H 'Host: localhost' "http://127.0.0.1:$local_port/api/setup-checks/" 2>&1 || true; } | redact_text >"$dir/setup-checks.json"
-    kill "$forward" 2>/dev/null || true
-    wait "$forward" 2>/dev/null || true
+    stop_forward
   else
     echo "no backend Service found for release $release" >"$dir/setup-checks.json"
   fi
