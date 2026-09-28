@@ -12,7 +12,10 @@ import requests
 from jinja2 import Environment
 
 from agentic_eval.core_evals.fi_evals.grounded.similarity import CosineSimilarity
-from agentic_eval.core_evals.fi_utils.exceptions import NoOpenAiApiKeyException
+from agentic_eval.core_evals.fi_utils.exceptions import (
+    CodeEvalSetupError,
+    NoOpenAiApiKeyException,
+)
 from agentic_eval.core_evals.fi_utils.fi_code_execution import CodeExecution
 from agentic_eval.core_evals.fi_utils.json import extract_json_path, validate_json
 from agentic_eval.core_evals.fi_utils.logging import logger
@@ -1720,6 +1723,8 @@ def custom_code_eval(code, language=None, **kwargs):
         raise ValueError("Code eval function returned None (no result produced)")
     if status != "success":
         error_msg = result.get("data", "Unknown error in code eval")
+        if result.get("setup_error") is True and isinstance(error_msg, str):
+            raise CodeEvalSetupError(error_msg)
         raise ValueError(f"Code eval input validation failed: {error_msg}")
 
     data = result.get("data")

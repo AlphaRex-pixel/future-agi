@@ -51,6 +51,7 @@ _UNREACHABLE_ERRNOS = frozenset(
     {errno.ECONNREFUSED, errno.EHOSTUNREACH, errno.ENETUNREACH}
 )
 
+# A setup error: returned with "setup_error": True, which lets callers show it.
 EXECUTOR_UNAVAILABLE_MESSAGE = (
     "Code executor unavailable: the code-executor service could not be reached"
 )
@@ -581,7 +582,7 @@ def execute_sandboxed_python(code: str, input_data: dict, timeout: int = DEFAULT
     if result is not None:
         return result
     if not _local_fallback_allowed("python"):
-        return {"status": "error", "data": EXECUTOR_UNAVAILABLE_MESSAGE}
+        return {"status": "error", "data": EXECUTOR_UNAVAILABLE_MESSAGE, "setup_error": True}
     script = _build_python_sandbox_script(code, input_data)
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, prefix="sandbox_") as f:
@@ -649,7 +650,7 @@ def execute_sandboxed_javascript(code: str, input_data: dict, timeout: int = DEF
     if result is not None:
         return result
     if not _local_fallback_allowed("javascript"):
-        return {"status": "error", "data": EXECUTOR_UNAVAILABLE_MESSAGE}
+        return {"status": "error", "data": EXECUTOR_UNAVAILABLE_MESSAGE, "setup_error": True}
 
     # Fallback: local sandbox
     """

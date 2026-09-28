@@ -265,7 +265,8 @@ def _execute_python_fallback(code: str, input_data: dict, timeout: int) -> dict:
 def _execute_javascript(code: str, input_data: dict, timeout: int) -> dict:
     """Execute JavaScript code in nsjail (or fallback subprocess)."""
     if not NODE_PATH:
-        return {"status": "error", "data": NO_NODE_MESSAGE}
+        # setup_error: the backend may show this message to users as is.
+        return {"status": "error", "data": NO_NODE_MESSAGE, "setup_error": True}
 
     script = _build_js_script(code, input_data)
     if not NSJAIL_AVAILABLE:

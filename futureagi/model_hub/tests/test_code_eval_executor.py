@@ -231,6 +231,7 @@ class TestExecutorUnreachable:
         assert result == {
             "status": "error",
             "data": sandbox.EXECUTOR_UNAVAILABLE_MESSAGE,
+            "setup_error": True,
         }
         assert "code_executor_service_unavailable" in _events(logs, "warning")
 
@@ -262,6 +263,7 @@ class TestExecutorUnreachable:
         assert result == {
             "status": "error",
             "data": sandbox.EXECUTOR_UNAVAILABLE_MESSAGE,
+            "setup_error": True,
         }
         assert "code_executor_local_fallback_refused" in _events(logs, "warning")
 
@@ -276,7 +278,11 @@ def test_unset_opt_in_means_no_local_run(
     result, _ = _run(execute, code)
 
     local_run.assert_not_called()
-    assert result == {"status": "error", "data": sandbox.EXECUTOR_UNAVAILABLE_MESSAGE}
+    assert result == {
+        "status": "error",
+        "data": sandbox.EXECUTOR_UNAVAILABLE_MESSAGE,
+        "setup_error": True,
+    }
 
 
 @pytest.mark.parametrize("execute,code", LANGUAGES)
@@ -295,6 +301,7 @@ class TestNoExecutorConfigured:
         assert result == {
             "status": "error",
             "data": sandbox.EXECUTOR_UNAVAILABLE_MESSAGE,
+            "setup_error": True,
         }
         assert "code_executor_service_unavailable" in _events(logs, "warning")
 

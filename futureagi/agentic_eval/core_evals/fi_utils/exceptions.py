@@ -34,3 +34,9 @@ class MediaNotAccessibleError(ValueError):
             f"The file could not be downloaded — please ensure "
             f"the URL is valid and accessible."
         )
+
+
+class CodeEvalSetupError(ValueError):
+    """Raised when this install cannot run a code eval at all: no code
+    executor, or no Node.js for a JavaScript eval. The message comes from the
+    sandbox and says how to fix the setup, so callers may show it to users."""
