@@ -61,6 +61,29 @@ def test_any_other_usage_stream_cap_refuses_to_load(value):
     assert "ImproperlyConfigured: USAGE_EVENTS_MAX_LEN must be" in loaded.stderr
 
 
+# FRONTEND_BASE_URL: the UI that links leaving the app point at (annotation
+# digests and discussions, rule-run emails, the MCP OAuth consent page).
+
+
+@pytest.mark.parametrize(
+    "frontend_url, expected",
+    [
+        ("https://ui.example.com/", "https://ui.example.com"),
+        # Compose passes an unset variable through as empty.
+        ("", "http://app.example.com"),
+        (" ", "http://app.example.com"),
+    ],
+)
+def test_frontend_url_wins_over_app_url(frontend_url, expected):
+    loaded = _load_settings(
+        ["FRONTEND_BASE_URL"],
+        FRONTEND_URL=frontend_url,
+        APP_URL="http://app.example.com",
+    )
+    assert loaded.returncode == 0, loaded.stderr
+    assert loaded.stdout.splitlines()[-1] == expected
+
+
 # Only a Future AGI Cloud region (US, EU, DEV) is Cloud. Any other non-empty
 # CLOUD_DEPLOYMENT is a self-hosted install: it must not force reCAPTCHA on
 # (every login would be rejected without a key) nor select the Redis channel

@@ -180,9 +180,9 @@ def _verify_unsubscribe_token(token: str) -> Optional[str]:
 
 
 def _frontend_url() -> str:
-    """This install's UI. Future AGI Cloud's APP_URL names app.futureagi.com;
-    a self-hosted install's names its own."""
-    return (os.environ.get("FRONTEND_URL") or settings.APP_BASE_URL).rstrip("/")
+    """This install's UI. Future AGI Cloud's names app.futureagi.com; a
+    self-hosted install's names its own."""
+    return settings.FRONTEND_BASE_URL
 
 
 def _backend_url() -> str:

@@ -3487,8 +3487,6 @@ def send_rule_completion_email(
     continue so the underlying queue writes (which succeeded) aren't rolled
     back.
     """
-    import os
-
     from tfc.utils.email import email_helper
 
     recipients = _rule_completion_recipients(
@@ -3503,9 +3501,8 @@ def send_rule_completion_email(
 
     queue = rule.queue
     queue_id = str(queue.id)
-    # This install's UI: a self-hosted APP_URL never names app.futureagi.com.
-    frontend_url = (os.environ.get("FRONTEND_URL") or settings.APP_BASE_URL).rstrip("/")
-    queue_url = f"{frontend_url}/annotation-queues/{queue_id}"
+    # This install's UI: a self-hosted one never names app.futureagi.com.
+    queue_url = f"{settings.FRONTEND_BASE_URL}/annotation-queues/{queue_id}"
 
     triggered_by_name = "the rule schedule"
     if triggered_by_user_id:

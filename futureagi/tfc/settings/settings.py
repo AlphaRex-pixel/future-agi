@@ -1236,6 +1236,9 @@ def _app_base_url(host, scheme, default_scheme):
 
 # Each region is its own deployment with its own APP_URL.
 APP_BASE_URL = _app_base_url(APP_URL, _APP_URL_SCHEME, _ssl)
+# The UI that links leaving the app point at (emails, the MCP OAuth consent
+# page): FRONTEND_URL when set, else APP_BASE_URL. Empty when neither is set.
+FRONTEND_BASE_URL = (os.getenv("FRONTEND_URL", "").strip() or APP_BASE_URL).rstrip("/")
 
 # Where SSO sends the browser back to the UI.
 default_next_url = f"{APP_BASE_URL}/dashboard/develop"

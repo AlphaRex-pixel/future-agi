@@ -2,7 +2,9 @@
 
 FRONTEND_URL / BACKEND_URL are optional; without them a self-hosted install
 used to link digests, unsubscribe pages and rule-run results to
-app.futureagi.com and api.futureagi.com. No database needed.
+app.futureagi.com and api.futureagi.com. Every UI link reads
+settings.FRONTEND_BASE_URL (FRONTEND_URL, else APP_BASE_URL; see
+tfc/tests/test_settings_env.py). No database needed.
 """
 
 from unittest.mock import MagicMock, patch
@@ -15,7 +17,7 @@ from model_hub.utils.annotation_queue_helpers import send_rule_completion_email
 
 @pytest.fixture(autouse=True)
 def self_hosted_urls(settings):
-    settings.APP_BASE_URL = "http://localhost:3000"
+    settings.FRONTEND_BASE_URL = "http://localhost:3000"
     settings.BASE_URL = "http://localhost:8000"
 
 
@@ -31,12 +33,25 @@ class TestDigestLinks:
         assert annotation_digest._frontend_url() == "http://localhost:3000"
         assert annotation_digest._backend_url() == "http://localhost:8000"
 
-    def test_explicit_urls_win(self, monkeypatch):
-        monkeypatch.setenv("FRONTEND_URL", "https://ai.example.com/")
+    def test_explicit_backend_url_wins(self, monkeypatch):
         monkeypatch.setenv("BACKEND_URL", "https://api.example.com/")
 
-        assert annotation_digest._frontend_url() == "https://ai.example.com"
         assert annotation_digest._backend_url() == "https://api.example.com"
+
+
+@pytest.mark.unit
+def test_every_ui_link_names_the_same_host(settings, no_url_overrides):
+    # FRONTEND_URL set and APP_URL left at its default: digests and
+    # discussion emails used to link to different hosts.
+    from model_hub.views.annotation_queues import _annotation_discussion_url
+
+    settings.APP_BASE_URL = "http://localhost:3000"
+    settings.FRONTEND_BASE_URL = "https://ai.example.com"
+
+    assert annotation_digest._frontend_url() == "https://ai.example.com"
+    assert _annotation_discussion_url(MagicMock(queue_id="q1", id="i1")).startswith(
+        "https://ai.example.com/dashboard/annotations/queues/q1/"
+    )
 
 
 @pytest.mark.unit
@@ -74,7 +89,7 @@ def test_discussion_link_keeps_the_install_scheme(settings, base, expected_prefi
     # A loopback UI stays http even under ENV_TYPE=production (Helm port-forward).
     from model_hub.views.annotation_queues import _annotation_discussion_url
 
-    settings.APP_BASE_URL = base
+    settings.FRONTEND_BASE_URL = base
     url = _annotation_discussion_url(MagicMock(queue_id="q1", id="i1"))
 
     assert url == f"{expected_prefix}dashboard/annotations/queues/q1/annotate?itemId=i1"
