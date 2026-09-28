@@ -94,13 +94,16 @@ const { addRunEvaluation, getHarnessEnvironment } = await import(
 const { enqueueSnackbar } = await import("notistack");
 const { default: AddEvaluationDrawer } = await import("../AddEvaluationDrawer");
 
+// harnessEnvironmentQuery and useEnvironmentRunTest each set their own `retry`
+// (no-retry on 404, up to 3 otherwise), which overrides `retry: false` here —
+// retryDelay:0 is what keeps that non-404 retry path instant in tests.
 const render = (ui) =>
   rtlRender(
     <QueryClientProvider
       client={
         new QueryClient({
           defaultOptions: {
-            queries: { retry: false },
+            queries: { retry: false, retryDelay: 0 },
             mutations: { retry: false },
           },
         })
@@ -214,6 +217,52 @@ describe("AddEvaluationDrawer — Evaluations tab", () => {
     expect(screen.queryByTestId("eval-picker")).toBeNull();
   });
 
+  it("does not open the picker until the run test's evals are known, and offers a retry when they can't be read", async () => {
+    axios.get.mockRejectedValue({
+      statusCode: 503,
+      detail: "Simulations are temporarily unavailable. Please retry.",
+    });
+    render(<AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />);
+    expect(
+      await screen.findByText(
+        "Simulations are temporarily unavailable. Please retry.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("eval-picker")).toBeNull();
+    axios.get.mockResolvedValue({
+      data: { simulate_eval_configs_detail: CONFIGS },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByTestId("eval-picker");
+    await waitFor(() => expect(picker.props.addedEvals).toHaveLength(2));
+  });
+
+  it("shows the detail refusal with a retry", async () => {
+    getHarnessEnvironment.mockRejectedValue({
+      statusCode: 500,
+      detail: "boom",
+    });
+    render(<AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />);
+    expect(await screen.findByText("boom")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("refreshes the Evaluations tab's list when it closes", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, retryDelay: 0 } },
+    });
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    rtlRender(
+      <QueryClientProvider client={client}>
+        <AddEvaluationDrawer open env={ENV} onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(await screen.findByText("close picker"));
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["harness-environment", "env-1"],
+    });
+  });
+
   it("closes through the host", async () => {
     const onClose = vi.fn();
     render(<AddEvaluationDrawer open env={ENV} onClose={onClose} />);
@@ -297,5 +346,39 @@ describe("AddEvaluationDrawer — inside a run", () => {
         "no_misselling",
       ),
     );
+  });
+
+  it("says so when grading an added eval is refused", async () => {
+    addRunEvaluation.mockRejectedValue({
+      detail: "Run is cancelled; nothing will be graded",
+    });
+    renderRun();
+    await waitFor(() => expect(picker.props?.addedEvals).toHaveLength(2));
+    fireEvent.click(screen.getByRole("button", { name: "Grade this run" }));
+    await waitFor(() =>
+      expect(enqueueSnackbar).toHaveBeenCalledWith(
+        "Run is cancelled; nothing will be graded",
+        { variant: "error" },
+      ),
+    );
+  });
+
+  it("marks the row being graded busy and holds the others", async () => {
+    let resolveGrade;
+    addRunEvaluation.mockReturnValue(
+      new Promise((resolve) => {
+        resolveGrade = resolve;
+      }),
+    );
+    renderRun();
+    await waitFor(() => expect(picker.props?.addedEvals).toHaveLength(2));
+    fireEvent.click(screen.getByRole("button", { name: "Grade this run" }));
+    await waitFor(() =>
+      expect(picker.props.addedEvalAction).toMatchObject({
+        busyName: "no_misselling",
+        disabled: true,
+      }),
+    );
+    resolveGrade(COUNTS);
   });
 });

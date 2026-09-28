@@ -587,4 +587,52 @@ describe("useAddRunTestEval", () => {
       queryKey: environmentRunTestKey("rt-1"),
     });
   });
+
+  it("suppresses the global error toast so the drawer's own refusal message is the only one shown", async () => {
+    const axios = (await import("src/utils/axios")).default;
+    axios.post.mockRejectedValueOnce({ detail: "already exists" });
+    const { queryClient, Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useAddRunTestEval(), {
+      wrapper: Wrapper,
+    });
+    await expect(
+      result.current.mutateAsync({ runTestId: "rt-1", body: {} }),
+    ).rejects.toBeTruthy();
+    expect(
+      queryClient.getMutationCache().getAll().at(-1)?.options.meta,
+    ).toEqual({ errorHandled: true });
+  });
+
+  it("does not read the run test until it is known and wanted", async () => {
+    const axios = (await import("src/utils/axios")).default;
+    axios.get.mockClear();
+    const { Wrapper } = makeWrapper();
+    renderHook(() => useEnvironmentRunTest("", { enabled: true }), {
+      wrapper: Wrapper,
+    });
+    renderHook(() => useEnvironmentRunTest("rt-1", { enabled: false }), {
+      wrapper: Wrapper,
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(axios.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("dead offer-list exports", () => {
+  it("no longer exports the offer-list hooks", async () => {
+    const mod = await import("../environments");
+    for (const k of [
+      "useAvailableEvaluations",
+      "availableEvaluationsKey",
+      "useAddEvaluation",
+    ]) {
+      expect(mod[k]).toBeUndefined();
+    }
+    const h = await vi.importActual(
+      "src/api/simulate-environments/harnessEnvironments",
+    );
+    for (const k of ["getAvailableEvaluations", "addEvaluation"]) {
+      expect(h[k]).toBeUndefined();
+    }
+  });
 });

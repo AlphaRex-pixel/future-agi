@@ -444,8 +444,8 @@ export default function EvalsStep({
         )}
       </SectionCard>
 
-      {/* A backed env adds through the real backed picker (available list + the
-          modality input mapping); a forked/template env keeps the store-only
+      {/* A backed env adds from the whole catalogue through the product picker,
+          saved on its run test; a forked/template env keeps the store-only
           product picker. */}
       {backed ? (
         <AddEvaluationDrawer

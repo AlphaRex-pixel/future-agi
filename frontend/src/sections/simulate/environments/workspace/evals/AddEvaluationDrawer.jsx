@@ -31,6 +31,10 @@ const GRADE_FALLBACK = "Couldn’t grade this run. Try again.";
 const DETAIL_FALLBACK = EVALS_COPY.addedError;
 const NO_INPUTS =
   "This evaluation has no inputs to map, so it can't run in an environment.";
+// A stable empty array: `= []` as a hook default is a fresh reference on every
+// render, which would re-run both `useMemo`s below even when the run test's
+// configs have not changed.
+const NO_CONFIGS = [];
 
 /**
  * Adding evaluations to a built environment.
@@ -63,11 +67,24 @@ export default function AddEvaluationDrawer({
     detailQuery.data?.overview?.agent_type === "voice"
       ? voiceEvalColumns
       : chatEvalColumns;
-  const { data: configs = [] } = useEnvironmentRunTest(runTestId, {
+  const runTestQuery = useEnvironmentRunTest(runTestId, {
     enabled: open && Boolean(runTestId),
   });
+  const configs = runTestQuery.data ?? NO_CONFIGS;
   const addToRunTest = useAddRunTestEval();
   const gradeRun = useAddRunEvaluation();
+
+  // The picker needs the run test's own eval list to know what is already
+  // bound (D5: nothing already on the run can be picked again), so it must
+  // wait on that read too, not just the environment detail — a run test with
+  // a big payload can hit the bounded-read wall or a DB hiccup on its own.
+  const pending =
+    detailQuery.isPending || (Boolean(runTestId) && runTestQuery.isPending);
+  const failed = detailQuery.isError
+    ? detailQuery
+    : runTestId && runTestQuery.isError
+      ? runTestQuery
+      : null;
 
   // An eval with no inputs mapped is stored like one of the harness's own
   // result columns and is never graded, so it offers no "Grade this run".
@@ -134,7 +151,7 @@ export default function AddEvaluationDrawer({
     onClose?.();
   };
 
-  if (open && runTestId) {
+  if (open && runTestId && runTestQuery.isSuccess) {
     return (
       <EvalPickerDrawer
         open
@@ -166,20 +183,20 @@ export default function AddEvaluationDrawer({
   return (
     <SideDrawer open={open} onClose={handleClose} width={560}>
       <Box sx={{ p: 3 }}>
-        {detailQuery.isPending ? (
+        {pending ? (
           <Stack alignItems="center" sx={{ py: 6 }}>
             <CircularProgress size={22} />
           </Stack>
-        ) : detailQuery.isError ? (
+        ) : failed ? (
           <EmptyState
             icon="solar:danger-triangle-linear"
             title="Couldn’t load evaluations"
-            body={refusalText(detailQuery.error, DETAIL_FALLBACK)}
+            body={refusalText(failed.error, DETAIL_FALLBACK)}
             action={
               <Button
                 variant="outlined"
                 size="small"
-                onClick={() => detailQuery.refetch()}
+                onClick={() => failed.refetch()}
               >
                 Retry
               </Button>

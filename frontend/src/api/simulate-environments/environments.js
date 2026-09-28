@@ -104,12 +104,9 @@ export function useRenameEnvironment() {
 // reconciles it, and without that the row sits there refusing every retry
 // until something else happens to refetch.
 //
-// Unlike the two add paths this also invalidates the run test's own eval
-// list, which a remove genuinely stales (the eval can be added again). That
-// list is what the picker's "Added evaluations" box reads, and the picker is
-// closed while remove is pressed from the Evaluations tab, so this only
-// marks it stale; there is no open drawer for a refetch to pull a row out
-// from under.
+// This also invalidates every run test's eval list (the remove has only the
+// environment id, not the run test's), which the picker's "Added evaluations"
+// box reads, so a removed eval can be picked again.
 export function useRemoveAppliedEvaluation() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -169,19 +166,16 @@ export function useAddRunTestEval() {
   });
 }
 
-// The run-level add refetches nothing while its picker is open — it is
-// pressed from that drawer, and a same-tick refetch would pull the row it
-// just observed the drawer's own applied list out from under the click that
-// caused it. The drawer refetches once, on the way out, where a stale read
-// costs nothing.
+// The run-level add refetches nothing: its 202 is a receipt of grading counts,
+// not the detail, so there is nothing to seed here, and the drawer refetches
+// the environment detail once, when it closes, where a stale read costs
+// nothing.
 //
-// Add an evaluation from inside a run. Same body as the environment-level add
-// (`{ name }`), same refusals, but the 202 body is the five grading counts
-// rather than the detail — so there is nothing to seed, and by the rule above
-// nothing is invalidated here either. The receipt the counts render is this
-// click's confirmation, and the drawer's close refetches the detail. The
-// counts stay on the mutation (`mutation.data`) for the caller to render;
-// they are a receipt for one click, not cached state.
+// Add an evaluation from inside a run, by name. Same refusals as the other add
+// paths, but the 202 body is the five grading counts rather than the detail.
+// The receipt the counts render is this click's confirmation. The counts stay
+// on the mutation (`mutation.data`) for the caller to render; they are a
+// receipt for one click, not cached state.
 export function useAddRunEvaluation() {
   return useMutation({
     meta: { errorHandled: true },
