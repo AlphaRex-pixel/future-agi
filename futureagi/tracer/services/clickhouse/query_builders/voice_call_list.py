@@ -1195,7 +1195,9 @@ class VoiceCallListQueryBuilder(BaseQueryBuilder):
         payload as ``span_raw_log`` reads it.
         """
         if provider == "vapi":
-            phone = (raw_log.get("customer") or {}).get("number", "")
+            customer = raw_log.get("customer")
+            # Like the SQL's JSONExtractString, a non-object customer has no number.
+            phone = customer.get("number", "") if isinstance(customer, dict) else ""
         elif provider == "retell":
             phone = raw_log.get("from_number", "")
         else:

@@ -227,6 +227,15 @@ def test_is_simulator_call_missing_raw_log():
     assert VoiceCallListQueryBuilder.is_simulator_call({}, "vapi") is False
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("customer", ["+18568806998", ["+18568806998"], 7])
+def test_is_simulator_call_non_object_customer_is_not_a_simulator(customer):
+    # SQL's JSONExtractString(raw_log, 'customer', 'number') reads '' for these
+    # and keeps the row, so the Python check sees them and must not raise.
+    raw_log = {"customer": customer}
+    assert VoiceCallListQueryBuilder.is_simulator_call(raw_log, "vapi") is False
+
+
 # ---------------------------------------------------------------------------
 # build_count_query — Phase-1 total
 # ---------------------------------------------------------------------------
