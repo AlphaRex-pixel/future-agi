@@ -47,6 +47,10 @@ from simulate.services.hosted_harness_conversation import (
     ensure_conversation,
     issue_conversation_capability,
     load_workspace_archive,
+    record_runtime_started,
+    runtime_is_live,
+    runtime_start_pending,
+    settle_interrupted_turn,
 )
 from simulate.services.hosted_harness_diagnostics import (
     SandboxDiagnostics,
@@ -148,6 +152,10 @@ def _authoring_ttl_seconds(provider_name: str | None = None) -> int:
             int(getattr(settings, "ALK_HOSTED_AUTHORING_TTL_MINUTES", 40)) * 60,
         )
     return max(60, int(getattr(settings, "ALK_HOSTED_AUTHORING_TIMEOUT", 3900)))
+
+
+def _chat_idle_seconds() -> int:
+    return max(300, int(getattr(settings, "ALK_HOSTED_CHAT_TTL_SECONDS", 1800)))
 
 
 def _execution_ttl_seconds(
@@ -1952,25 +1960,13 @@ class HostedHarnessGateway:
             attempt.state = HostedHarnessAttempt.State.PROVISIONING
             attempt.save(update_fields=["provider_ref", "state", "updated_at"])
             conversation = ensure_conversation(job)
-            conversation_capability = issue_conversation_capability(
-                conversation,
-                endpoint_base_url=endpoint_base_url,
-                provider_ref=str(sandbox.id),
-                attempt=attempt,
-                ttl_seconds=_execution_ttl_seconds(
-                    payload["runtime"], self.client.name
-                ),
-                control_only=True,
-                runtime_name=self.client.runtime_name,
-                runtime_digest=self.client.runtime_digest,
-            )
-            sandbox.fs.upload_file(
-                json.dumps(
-                    conversation_capability.document,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode(),
-                _CHAT_CAPABILITIES_PATH,
+            # A new attempt is chat's new home. Fence out whatever process held the previous
+            # lease; chat starts here on demand once this attempt is running.
+            HostedHarnessConversationLease.no_workspace_objects.filter(
+                conversation=conversation
+            ).update(
+                state=HostedHarnessConversationLease.State.EXPIRED,
+                updated_at=timezone.now(),
             )
             sandbox.fs.upload_file(_CHAT_POLICY, _CHAT_POLICY_PATH)
             from simulate.services.harness_usage import record_sandbox_runtime
@@ -2054,7 +2050,7 @@ class HostedHarnessGateway:
                 "chmod -R a-w /work/source && "
                 "chmod 0600 /work/job.json /run/futureagi/secrets.json "
                 "/run/futureagi/capabilities.json "
-                f"{_CHAT_CAPABILITIES_PATH} {_CHAT_POLICY_PATH} "
+                f"{_CHAT_POLICY_PATH} "
                 f"{_SIMULATOR_SECRETS_PATH} "
                 + (authoring_secrets_path if authoring_target_secrets else "")
                 + " "
@@ -2125,10 +2121,9 @@ class HostedHarnessGateway:
                 SandboxCommandRequest(
                     command=(
                         "if [ ! -f /work/authoring/contract.json ]; then "
-                        "python -m fi.alk.harness.hosted_authoring_entrypoint "
+                        "ALK_FOREGROUND_COORDINATOR=1 python -m fi.alk.harness.hosted_authoring_entrypoint "
                         "/work/job.json --source /work/source --output /work/authoring "
                         f"--adjustments {_ADJUSTMENTS_PATH} "
-                        f"--conversation-capabilities {_CHAT_CAPABILITIES_PATH} "
                         + provider_profile_args
                         + "; fi && "
                         + ((extend_command + " && ") if extend_command else "")
@@ -2316,11 +2311,7 @@ class HostedHarnessGateway:
             ),
         )
         sandbox.fs.upload_file(str(command.cmd_id).encode(), _CHAT_COMMAND_ID_FILE)
-        capability.lease.state = HostedHarnessConversationLease.State.ACTIVE
-        capability.lease.heartbeat_at = timezone.now()
-        capability.lease.save(update_fields=["state", "heartbeat_at", "updated_at"])
-        conversation.state = HostedHarnessConversation.State.WARM_IDLE
-        conversation.save(update_fields=["state", "updated_at"])
+        record_runtime_started(conversation)
         return capability.lease
 
     def ensure_conversation_runtime(
@@ -2329,178 +2320,189 @@ class HostedHarnessGateway:
         *,
         conversation: HostedHarnessConversation,
         endpoint_base_url: str,
-    ) -> HostedHarnessConversationLease:
-        """Keep one isolated ALK conversation process available for this environment."""
+    ) -> HostedHarnessConversationLease | None:
+        """Keep one live ALK conversation process for this environment, or wait for a home.
+
+        While the job runs, chat lives beside the harness in the current attempt's sandbox;
+        until that sandbox is running, messages stay queued and None is returned. Once the job
+        is terminal, chat gets its own sandbox restored from the latest workspace checkpoint,
+        and every call (one per user message) renews that sandbox's idle window.
+
+        Liveness is the process's own command polling, not a provider probe, and no provider
+        call is made while the conversation row is locked.
+        """
         terminal_states = {
             HostedHarnessJob.State.COMPLETED,
             HostedHarnessJob.State.FAILED,
             HostedHarnessJob.State.CANCELED,
         }
-        active_attempt = (
-            HostedHarnessAttempt.no_workspace_objects.filter(
-                job=job,
-                attempt_number=job.current_attempt_number,
-                state__in=(
-                    HostedHarnessAttempt.State.PROVISIONING,
-                    HostedHarnessAttempt.State.RUNNING,
-                ),
+        attempt = None
+        if job.state not in terminal_states:
+            attempt = (
+                HostedHarnessAttempt.no_workspace_objects.filter(
+                    job=job,
+                    attempt_number=job.current_attempt_number,
+                    state=HostedHarnessAttempt.State.RUNNING,
+                )
+                .exclude(provider_ref__isnull=True)
+                .exclude(provider_ref="")
+                .first()
             )
-            .exclude(provider_ref__isnull=True)
-            .first()
-        )
-        if active_attempt is not None and job.state not in terminal_states:
-            with transaction.atomic():
-                conversation = HostedHarnessConversation.no_workspace_objects.select_for_update().get(
+            if attempt is None:
+                return None
+        now = timezone.now()
+        claim_ref = f"pending:{uuid.uuid4()}"
+        claim_hash = hashlib.sha256(claim_ref.encode()).hexdigest()
+        retired_ref = ""
+        with transaction.atomic():
+            conversation = (
+                HostedHarnessConversation.no_workspace_objects.select_for_update().get(
                     id=conversation.id
                 )
-                stale_lease = (
-                    HostedHarnessConversationLease.no_workspace_objects.filter(
-                        conversation=conversation,
-                        state__in=(
-                            HostedHarnessConversationLease.State.STARTING,
-                            HostedHarnessConversationLease.State.ACTIVE,
-                        ),
-                    )
-                    .exclude(provider_ref=active_attempt.provider_ref)
-                    .first()
-                )
-                if stale_lease is not None:
-                    if not stale_lease.provider_ref.startswith("pending:"):
-                        try:
-                            stale_sandbox = self.client.get(
-                                stale_lease.provider_ref,
-                                request_timeout=_PROVIDER_POLL_TIMEOUT_SECONDS,
-                            )
-                            self.client.delete(stale_sandbox, timeout=120, wait=True)
-                        except SandboxNotFoundError:
-                            pass
-                    stale_lease.state = HostedHarnessConversationLease.State.EXPIRED
-                    stale_lease.save(update_fields=["state", "updated_at"])
-                lease = HostedHarnessConversationLease.no_workspace_objects.filter(
-                    conversation=conversation,
-                    provider_ref=active_attempt.provider_ref,
-                    state__in=(
-                        HostedHarnessConversationLease.State.STARTING,
-                        HostedHarnessConversationLease.State.ACTIVE,
-                    ),
-                    expires_at__gt=timezone.now() + timedelta(seconds=60),
-                ).first()
-                if lease is not None:
-                    if lease.state == HostedHarnessConversationLease.State.ACTIVE:
-                        sandbox = self.client.get(
-                            str(active_attempt.provider_ref),
-                            request_timeout=_PROVIDER_POLL_TIMEOUT_SECONDS,
-                        )
-                        command_id = (
-                            sandbox.fs.download_file(
-                                _CHAT_COMMAND_ID_FILE,
-                                _PROVIDER_POLL_TIMEOUT_SECONDS,
-                            )
-                            .decode()
-                            .strip()
-                        )
-                        command = sandbox.process.get_session_command(
-                            _CHAT_SESSION,
-                            command_id,
-                            request_timeout=_PROVIDER_POLL_TIMEOUT_SECONDS,
-                        )
-                        if command.exit_code is None:
-                            return lease
-                    lease.state = HostedHarnessConversationLease.State.EXPIRED
-                    lease.save(update_fields=["state", "updated_at"])
-                try:
-                    sandbox = self.client.get(
-                        str(active_attempt.provider_ref),
-                        request_timeout=_PROVIDER_POLL_TIMEOUT_SECONDS,
-                    )
-                    return self._start_chat_in_sandbox(
-                        job=job,
-                        conversation=conversation,
-                        attempt=active_attempt,
-                        sandbox=sandbox,
-                        endpoint_base_url=endpoint_base_url,
-                    )
-                except SandboxNotFoundError as exc:
-                    raise HostedHarnessError(
-                        "conversation_runtime_not_ready",
-                        "the active hosted ALK sandbox is no longer available",
-                        status_code=409,
-                        retryable=True,
-                    ) from exc
-
-        lease = HostedHarnessConversationLease.no_workspace_objects.filter(
-            conversation=conversation,
-            state__in=(
-                HostedHarnessConversationLease.State.STARTING,
-                HostedHarnessConversationLease.State.ACTIVE,
-            ),
-            expires_at__gt=timezone.now() + timedelta(seconds=60),
-        ).first()
-        if lease is not None and lease.control_only and job.state in terminal_states:
-            if not lease.provider_ref.startswith("pending:"):
-                try:
-                    sandbox = self.client.get(
-                        lease.provider_ref,
-                        request_timeout=_PROVIDER_POLL_TIMEOUT_SECONDS,
-                    )
-                    self.client.delete(sandbox, timeout=120, wait=True)
-                except SandboxNotFoundError:
-                    pass
-            lease.state = HostedHarnessConversationLease.State.EXPIRED
-            lease.save(update_fields=["state", "updated_at"])
-            lease = None
-        if lease is not None:
-            if lease.provider_ref.startswith("pending:"):
+            )
+            lease = (
+                HostedHarnessConversationLease.no_workspace_objects.select_for_update()
+                .filter(conversation=conversation)
+                .first()
+            )
+            home = attempt.id if attempt is not None else None
+            if (
+                lease is not None
+                and lease.attempt_id == home
+                and runtime_is_live(lease, now=now)
+            ):
+                live = lease
+            elif runtime_start_pending(lease, now=now):
                 return lease
+            else:
+                live = None
+                # A chat sandbox of its own is retired here; an attempt's sandbox belongs to
+                # the attempt, whose cleanup still has to read its spend before deleting it.
+                if (
+                    lease is not None
+                    and lease.attempt_id is None
+                    and not lease.provider_ref.startswith("pending:")
+                ):
+                    retired_ref = lease.provider_ref
+                settle_interrupted_turn(conversation)
+                HostedHarnessConversationLease.no_workspace_objects.update_or_create(
+                    conversation=conversation,
+                    defaults={
+                        "attempt": attempt,
+                        "control_only": attempt is not None,
+                        "provider_ref": claim_ref,
+                        "state": HostedHarnessConversationLease.State.STARTING,
+                        "token_hash": claim_hash,
+                        "fence_hash": claim_hash,
+                        "expires_at": now + timedelta(minutes=10),
+                        "heartbeat_at": now,
+                        "command_watermark": conversation.command_acked_through,
+                        "event_watermark": conversation.event_acked_through,
+                        "snapshot_name": self.client.runtime_name,
+                        "snapshot_digest": self.client.runtime_digest,
+                    },
+                )
+                conversation.policy_hash = hashlib.sha256(_CHAT_POLICY).hexdigest()
+                conversation.state = HostedHarnessConversation.State.STARTING
+                conversation.save(
+                    update_fields=[
+                        "policy_hash",
+                        "state",
+                        "active_invocation_id",
+                        "updated_at",
+                    ]
+                )
+        if live is not None:
+            if attempt is None:
+                self._renew_chat_idle_window(live)
+            return live
+        if retired_ref:
             try:
-                sandbox = self.client.get(
-                    lease.provider_ref,
-                    request_timeout=_PROVIDER_POLL_TIMEOUT_SECONDS,
-                )
-                command_id = (
-                    sandbox.fs.download_file(
-                        _CHAT_COMMAND_ID_FILE,
-                        _PROVIDER_POLL_TIMEOUT_SECONDS,
-                    )
-                    .decode()
-                    .strip()
-                )
-                command = sandbox.process.get_session_command(
-                    _CHAT_SESSION,
-                    command_id,
-                    request_timeout=_PROVIDER_POLL_TIMEOUT_SECONDS,
+                self.client.delete(
+                    self.client.get(
+                        retired_ref, request_timeout=_PROVIDER_POLL_TIMEOUT_SECONDS
+                    ),
+                    timeout=120,
+                    wait=True,
                 )
             except SandboxNotFoundError:
-                lease.state = HostedHarnessConversationLease.State.EXPIRED
-                lease.save(update_fields=["state", "updated_at"])
-            except Exception as exc:
-                raise HostedHarnessError(
-                    "conversation_runtime_probe_failed",
-                    "the hosted ALK conversation runtime could not be inspected",
-                    status_code=503,
-                    retryable=True,
-                ) from exc
-            else:
-                if command.exit_code is None:
-                    return lease
-                lease.state = HostedHarnessConversationLease.State.EXPIRED
-                lease.save(update_fields=["state", "updated_at"])
+                pass
+            except Exception:
+                logger.exception(
+                    "retired conversation sandbox deletion failed conversation=%s",
+                    conversation.id,
+                )
+        try:
+            if attempt is not None:
+                return self._start_chat_in_sandbox(
+                    job=job,
+                    conversation=conversation,
+                    attempt=attempt,
+                    sandbox=self.client.get(
+                        str(attempt.provider_ref),
+                        request_timeout=_PROVIDER_POLL_TIMEOUT_SECONDS,
+                    ),
+                    endpoint_base_url=endpoint_base_url,
+                )
+            return self._start_chat_sandbox(
+                job, conversation=conversation, endpoint_base_url=endpoint_base_url
+            )
+        except Exception as exc:
+            HostedHarnessConversationLease.no_workspace_objects.filter(
+                conversation=conversation,
+                state=HostedHarnessConversationLease.State.STARTING,
+            ).update(state=HostedHarnessConversationLease.State.EXPIRED)
+            HostedHarnessConversation.no_workspace_objects.filter(
+                id=conversation.id
+            ).update(
+                state=HostedHarnessConversation.State.DEGRADED,
+                updated_at=timezone.now(),
+            )
+            if isinstance(exc, HostedHarnessError):
+                raise
+            raise HostedHarnessError(
+                "conversation_runtime_start_failed",
+                "the hosted ALK conversation runtime could not be started",
+                status_code=503,
+                retryable=True,
+            ) from exc
 
+    def _renew_chat_idle_window(self, lease: HostedHarnessConversationLease) -> None:
+        """Keep a chat sandbox for the idle window after the user's latest message."""
+        ttl_seconds = _chat_idle_seconds()
+        try:
+            self.client.renew_ttl(
+                self.client.get(
+                    lease.provider_ref, request_timeout=_PROVIDER_POLL_TIMEOUT_SECONDS
+                ),
+                ttl_seconds,
+            )
+        except Exception:
+            # The process still polls; it simply keeps its previous deadline.
+            logger.exception(
+                "conversation sandbox renewal failed conversation=%s",
+                lease.conversation_id,
+            )
+            return
+        HostedHarnessConversationLease.no_workspace_objects.filter(id=lease.id).update(
+            expires_at=timezone.now() + timedelta(seconds=ttl_seconds),
+            updated_at=timezone.now(),
+        )
+
+    def _start_chat_sandbox(
+        self,
+        job: HostedHarnessJob,
+        *,
+        conversation: HostedHarnessConversation,
+        endpoint_base_url: str,
+    ) -> HostedHarnessConversationLease:
+        """Restore the latest workspace checkpoint into a sandbox of chat's own."""
         workspace_archive = load_workspace_archive(conversation)
         if workspace_archive is None:
             workspace_archive = _authoring_archive_for(job)
         control_only = workspace_archive is None
         if workspace_archive is None:
             workspace_archive = _empty_workspace_archive()
-        active_attempt = (
-            HostedHarnessAttempt.no_workspace_objects.filter(
-                job=job,
-                attempt_number=job.current_attempt_number,
-            ).first()
-            if control_only and job.state not in terminal_states
-            else None
-        )
-
         source_archive, _commit_sha = HostedSourceAcquirer().acquire(job)
         simulator_env, simulator_vertex_credentials = _platform_simulator_material()
         platform_host = _hostname_from_url(endpoint_base_url)
@@ -2513,9 +2515,7 @@ class HostedHarnessGateway:
         _validate_resolved_egress_domains(
             allowed_domains, max_domains=self.client.max_egress_domains
         )
-        ttl_seconds = max(
-            300, int(getattr(settings, "ALK_HOSTED_CHAT_TTL_SECONDS", 1800))
-        )
+        ttl_seconds = _chat_idle_seconds()
         launch_spec = SandboxLaunchSpec(
             cpu_units=2,
             memory_mb=4096,
@@ -2528,49 +2528,6 @@ class HostedHarnessGateway:
             },
             allowed_domains=tuple(sorted(allowed_domains)),
         )
-        claim_ref = f"pending:{uuid.uuid4()}"
-        claim_hash = hashlib.sha256(claim_ref.encode()).hexdigest()
-        claim_now = timezone.now()
-        with transaction.atomic():
-            conversation = (
-                HostedHarnessConversation.no_workspace_objects.select_for_update().get(
-                    id=conversation.id
-                )
-            )
-            existing = (
-                HostedHarnessConversationLease.no_workspace_objects.select_for_update()
-                .filter(
-                    conversation=conversation,
-                    state__in=(
-                        HostedHarnessConversationLease.State.STARTING,
-                        HostedHarnessConversationLease.State.ACTIVE,
-                    ),
-                    expires_at__gt=claim_now + timedelta(seconds=60),
-                )
-                .first()
-            )
-            if existing is not None:
-                return existing
-            HostedHarnessConversationLease.no_workspace_objects.update_or_create(
-                conversation=conversation,
-                defaults={
-                    "attempt": active_attempt,
-                    "control_only": control_only,
-                    "provider_ref": claim_ref,
-                    "state": HostedHarnessConversationLease.State.STARTING,
-                    "token_hash": claim_hash,
-                    "fence_hash": claim_hash,
-                    "expires_at": claim_now + timedelta(minutes=5),
-                    "heartbeat_at": claim_now,
-                    "command_watermark": conversation.command_acked_through,
-                    "event_watermark": conversation.event_acked_through,
-                    "snapshot_name": self.client.runtime_name,
-                    "snapshot_digest": self.client.runtime_digest,
-                },
-            )
-            conversation.policy_hash = hashlib.sha256(_CHAT_POLICY).hexdigest()
-            conversation.state = HostedHarnessConversation.State.STARTING
-            conversation.save(update_fields=["policy_hash", "state", "updated_at"])
 
         sandbox = None
         try:
@@ -2582,7 +2539,7 @@ class HostedHarnessGateway:
                 conversation,
                 endpoint_base_url=endpoint_base_url,
                 provider_ref=str(sandbox.id),
-                attempt=active_attempt,
+                attempt=None,
                 ttl_seconds=ttl_seconds,
                 control_only=control_only,
                 runtime_name=self.client.runtime_name,
@@ -2666,13 +2623,9 @@ class HostedHarnessGateway:
                 ),
             )
             sandbox.fs.upload_file(str(command.cmd_id).encode(), _CHAT_COMMAND_ID_FILE)
-            capability.lease.state = HostedHarnessConversationLease.State.ACTIVE
-            capability.lease.heartbeat_at = timezone.now()
-            capability.lease.save(update_fields=["state", "heartbeat_at", "updated_at"])
-            conversation.state = HostedHarnessConversation.State.WARM_IDLE
-            conversation.save(update_fields=["state", "updated_at"])
+            record_runtime_started(conversation)
             return capability.lease
-        except HostedHarnessError:
+        except Exception:
             if sandbox is not None:
                 try:
                     self.client.delete(sandbox, timeout=120, wait=True)
@@ -2681,36 +2634,7 @@ class HostedHarnessGateway:
                         "conversation sandbox cleanup failed conversation=%s",
                         conversation.id,
                     )
-            provider_refs = {claim_ref, str(getattr(sandbox, "id", "") or "")}
-            HostedHarnessConversationLease.no_workspace_objects.filter(
-                conversation=conversation,
-                provider_ref__in=provider_refs,
-            ).update(state=HostedHarnessConversationLease.State.EXPIRED)
-            conversation.state = HostedHarnessConversation.State.DEGRADED
-            conversation.save(update_fields=["state", "updated_at"])
             raise
-        except Exception as exc:
-            if sandbox is not None:
-                try:
-                    self.client.delete(sandbox, timeout=120, wait=True)
-                except Exception:
-                    logger.exception(
-                        "conversation sandbox cleanup failed conversation=%s",
-                        conversation.id,
-                    )
-            provider_refs = {claim_ref, str(getattr(sandbox, "id", "") or "")}
-            HostedHarnessConversationLease.no_workspace_objects.filter(
-                conversation=conversation,
-                provider_ref__in=provider_refs,
-            ).update(state=HostedHarnessConversationLease.State.EXPIRED)
-            conversation.state = HostedHarnessConversation.State.DEGRADED
-            conversation.save(update_fields=["state", "updated_at"])
-            raise HostedHarnessError(
-                "conversation_runtime_start_failed",
-                "the hosted ALK conversation runtime could not be started",
-                status_code=503,
-                retryable=True,
-            ) from exc
 
     @staticmethod
     def _capture_diagnostics(

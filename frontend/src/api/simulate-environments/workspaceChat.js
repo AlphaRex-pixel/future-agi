@@ -22,15 +22,12 @@ import {
   getScenarioSelection,
   clearScenarioSelection,
 } from "src/sections/simulate/environments/buildEnvironment/console/scenarioSelectionBus";
-import { terminalStages } from "src/pages/dashboard/harness/harnessShared";
 import { harnessJobQuery } from "./environment";
 import {
   projectConversation,
   conversationInFlight,
 } from "./conversationProjection";
 
-const RUNTIME_WARMING =
-  "The agent runtime is warming up. Chat opens once it's ready.";
 const NO_WORKSPACE =
   "This run has no saved workspace to restore, so chat isn't available.";
 const NOT_A_HARNESS_ENV = "Chat connects once this environment is built.";
@@ -252,19 +249,16 @@ export function useWorkspaceChat(env, { source } = {}) {
   // the persistent cue).
   const running = mutation.isPending;
 
+  // A live job always accepts messages (they queue until its sandbox can run chat), so
+  // only a finished run with no saved workspace is unavailable; its send 409s for good.
   const runtimeUnavailable = conversation
     ? conversation.runtime?.available === false
     : false;
-  // A terminal run with no saved workspace is permanently unavailable (send 409s
-  // retryable:false); a live run that's merely cold is still warming up.
-  const terminal = terminalStages.has(jobQuery.data?.status?.stage);
   const frozen = !jobId || runtimeUnavailable;
   const frozenReason = !jobId
     ? NOT_A_HARNESS_ENV
     : runtimeUnavailable
-      ? terminal
-        ? NO_WORKSPACE
-        : RUNTIME_WARMING
+      ? NO_WORKSPACE
       : undefined;
 
   return {

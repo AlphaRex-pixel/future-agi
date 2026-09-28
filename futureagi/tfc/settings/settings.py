@@ -12,7 +12,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 # Structured logging configuration
@@ -1023,7 +1023,8 @@ ALK_HOSTED_SANDBOX_TTL_SECONDS = int(
     os.getenv("ALK_HOSTED_SANDBOX_TTL_SECONDS", "7200")
 )
 # Conversational sandboxes are replaceable warm caches. Their persistent ADK session and
-# workspace checkpoint survive deletion; this only controls the cost/latency window.
+# workspace checkpoint survive deletion; this is the idle window after the user's latest
+# message before a post-run chat sandbox is reclaimed, and only trades cost against latency.
 ALK_HOSTED_CHAT_TTL_SECONDS = int(os.getenv("ALK_HOSTED_CHAT_TTL_SECONDS", "1800"))
 DAYTONA_API_KEY = os.getenv("DAYTONA_API_KEY", "")
 DAYTONA_API_URL = os.getenv("DAYTONA_API_URL") or None

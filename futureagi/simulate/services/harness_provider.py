@@ -1492,8 +1492,9 @@ class HostedHarnessProvider:
             enqueue_message,
             serialize_conversation,
         )
+        from simulate.services.hosted_harness_ingress import _public_base_url
         from simulate.tasks.hosted_harness_conversation import (
-            ensure_hosted_harness_conversation_runtime,
+            schedule_conversation_runtime,
         )
 
         job = self._job(request, pk)
@@ -1528,6 +1529,11 @@ class HostedHarnessProvider:
                     status=status.HTTP_409_CONFLICT,
                 )
         data = request.validated_data
+        # Checked before queueing, so a message never waits on a runtime that cannot call back.
+        try:
+            base_url = _public_base_url(request)
+        except HostedHarnessError as exc:
+            return Response(exc.as_dict(), status=exc.status_code)
         try:
             conversation, _message, _created = enqueue_message(
                 job,
@@ -1539,14 +1545,8 @@ class HostedHarnessProvider:
             )
         except HostedHarnessError as exc:
             return Response(exc.as_dict(), status=exc.status_code)
-        base_url = (
-            getattr(settings, "HARNESS_PUBLIC_BASE_URL", "")
-            or request.build_absolute_uri("/")
-        ).rstrip("/")
         try:
-            ensure_hosted_harness_conversation_runtime.apply_async(
-                args=[str(conversation.id), base_url]
-            )
+            schedule_conversation_runtime(str(conversation.id), base_url)
         except Exception:
             return Response(
                 {

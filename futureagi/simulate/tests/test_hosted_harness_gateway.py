@@ -2450,10 +2450,7 @@ def test_fresh_lease_starts_chat_once_for_concurrent_messages(
 
     from django.db import close_old_connections
 
-    from simulate.services.hosted_harness_conversation import (
-        ensure_conversation,
-        issue_conversation_capability,
-    )
+    from simulate.services.hosted_harness_conversation import ensure_conversation
     from simulate.services.hosted_harness_gateway import _CHAT_SESSION
 
     job, _ = create_hosted_job(organization, _payload(), idempotency_key="fresh-chat")
@@ -2465,14 +2462,6 @@ def test_fresh_lease_starts_chat_once_for_concurrent_messages(
     attempt.save()
     job.refresh_from_db()
     conversation = ensure_conversation(job)
-    issue_conversation_capability(
-        conversation,
-        endpoint_base_url="https://platform.example",
-        provider_ref=attempt.provider_ref,
-        attempt=attempt,
-        ttl_seconds=600,
-        control_only=True,
-    )
     client = _Daytona()
     gateway = object.__new__(HostedHarnessGateway)
     gateway.client = client
@@ -2496,7 +2485,10 @@ def test_fresh_lease_starts_chat_once_for_concurrent_messages(
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(start) for _ in range(2)]
-        assert [future.result(timeout=30) for future in futures] == ["active", "active"]
+        states = [future.result(timeout=30) for future in futures]
+    # The loser of the start claim waits on it instead of launching a second process; the
+    # lease stays starting until the launched process polls.
+    assert states == ["starting", "starting"]
     assert client.sandbox.process.sessions == [_CHAT_SESSION]
     assert "hosted_chat_entrypoint" in client.sandbox.process.session_request.command
     assert client.deleted is False
