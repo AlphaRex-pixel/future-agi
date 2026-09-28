@@ -557,9 +557,11 @@ export function mapCallDetail(raw) {
  * The raw v3 call-detail data source shared by the voice and chat drawers.
  * @param {?string} callExecId
  * @param {boolean} [enabled]
+ * @param {Object} [options]  Extra react-query options (e.g. `retry`, `meta`).
  */
-export function useCallExecutionV3Detail(callExecId, enabled = true) {
+export function useCallExecutionV3Detail(callExecId, enabled = true, options) {
   return useQuery({
+    ...options,
     queryKey: ["simulation-call-detail-v3", callExecId],
     queryFn: () =>
       axios

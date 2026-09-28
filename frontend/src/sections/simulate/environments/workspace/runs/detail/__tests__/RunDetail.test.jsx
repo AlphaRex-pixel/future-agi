@@ -1,14 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import PropTypes from "prop-types";
 import { useEffect } from "react";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import {
+  MemoryRouter,
+  useLocation,
+  useNavigate,
+  useNavigationType,
+} from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const useRunDetail = vi.fn();
 const useOptimizationRuns = vi.fn();
 const useOptimizerAnalysis = vi.fn();
+const useCallExecutionV3Detail = vi.fn();
 vi.mock("src/api/simulate-environments/runDetail", async (importOriginal) => {
   const actual = await importOriginal();
   return {
@@ -16,6 +22,23 @@ vi.mock("src/api/simulate-environments/runDetail", async (importOriginal) => {
     useRunDetail: (...args) => useRunDetail(...args),
     useOptimizationRuns: (...args) => useOptimizationRuns(...args),
     useOptimizerAnalysis: (...args) => useOptimizerAnalysis(...args),
+    useCallExecutionV3Detail: (...args) => useCallExecutionV3Detail(...args),
+  };
+});
+
+// The table's current page, as `?rowId=` reads it to find an on-page row.
+const useRunCalls = vi.fn();
+vi.mock("src/api/simulate-environments/runCalls", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, useRunCalls: (...args) => useRunCalls(...args) };
+});
+
+const enqueueSnackbar = vi.fn();
+vi.mock("notistack", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    enqueueSnackbar: (...args) => enqueueSnackbar(...args),
   };
 });
 
@@ -124,11 +147,17 @@ function RunAnalyticsStub({ onOpenCall }) {
 RunAnalyticsStub.propTypes = { onOpenCall: PropTypes.func };
 vi.mock("../RunAnalytics", () => ({ default: RunAnalyticsStub }));
 
-function CallDrawerStub({ task, hasPrev, hasNext, onPrev, onNext }) {
+function CallDrawerStub({ task, hasPrev, hasNext, onPrev, onNext, onClose }) {
   if (!task) return null;
   return (
     <div>
       {`drawer:${task.id}`}
+      <span>
+        {`task:${task.simulationCallType}|${task.status}|${task.scenario}|${task.persona}`}
+      </span>
+      <button type="button" onClick={onClose}>
+        close call
+      </button>
       <button type="button" onClick={onPrev} disabled={!hasPrev}>
         prev call
       </button>
@@ -144,6 +173,7 @@ CallDrawerStub.propTypes = {
   hasNext: PropTypes.bool,
   onPrev: PropTypes.func,
   onNext: PropTypes.func,
+  onClose: PropTypes.func,
 };
 vi.mock("../CallDrawer", () => ({ default: CallDrawerStub }));
 
@@ -218,6 +248,7 @@ const renderDetail = ({
   backed = true,
   envState = { evals: [] },
   client: passedClient,
+  initialEntries = ["/"],
   ...props
 } = {}) => {
   const client =
@@ -225,7 +256,8 @@ const renderDetail = ({
     new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
+        <LocationProbe />
         <RunDetail
           env={ENV}
           envState={envState}
@@ -239,9 +271,31 @@ const renderDetail = ({
   );
 };
 
+// Shows the URL the page wrote and whether it replaced the entry.
+function LocationProbe() {
+  const location = useLocation();
+  const navigationType = useNavigationType();
+  const navigate = useNavigate();
+  return (
+    <>
+      <div data-testid="location">{`${location.search}|${navigationType}`}</div>
+      <button type="button" onClick={() => navigate("/?rowId=nope")}>
+        follow link
+      </button>
+    </>
+  );
+}
+
+const locationText = () => screen.getByTestId("location").textContent;
+
 const navArgs = () => callListNavigation.mock.calls.at(-1)[0];
 
 beforeEach(() => {
+  enqueueSnackbar.mockReset();
+  useRunCalls.mockReset();
+  useRunCalls.mockReturnValue({ tasks: [], groups: [], isLoading: false });
+  useCallExecutionV3Detail.mockReset();
+  useCallExecutionV3Detail.mockReturnValue({ data: undefined, error: null });
   callListNavigation.mockReset();
   callListNavigation.mockReturnValue({
     hasPrev: false,
@@ -559,5 +613,174 @@ describe("RunDetail", () => {
     expect(navArgs().openCall).toMatchObject({ source: "analytics" });
     // The table unmounted with the tab switch, so it no longer reports a query.
     expect(navArgs().tableQuery).toBeNull();
+  });
+});
+
+// A trimmed v3 call-detail payload for a chat call that isn't on the table's
+// current page.
+const CHAT_DETAIL = {
+  id: "x1",
+  status: "completed",
+  scenario: "Refund request",
+  persona: "Impatient Ian",
+  outcome: "failed",
+  simulation_call_type: "text",
+  evaluations: [],
+  eval_metrics: {},
+};
+
+// Answers the detail fetch only once RunDetail actually enables it.
+const detailFor = (id, result) =>
+  useCallExecutionV3Detail.mockImplementation((callId, enabled) =>
+    callId === id && enabled ? result : { data: undefined, error: null },
+  );
+
+describe("RunDetail ?rowId=", () => {
+  it("opens a voice row on the table's current page from the URL, with prev/next", async () => {
+    // Like react-query: a disabled page query holds no rows and reads pending.
+    useRunCalls.mockImplementation((_, { enabled }) =>
+      enabled
+        ? {
+            tasks: [
+              { id: "c6", simulationCallType: "voice" },
+              { id: "c7", simulationCallType: "voice", status: "passed", scenario: "Billing", persona: "Pat" },
+            ],
+            groups: [],
+            isLoading: false,
+          }
+        : { tasks: [], groups: [], isLoading: true },
+    );
+    renderDetail({ initialEntries: ["/?foo=1&rowId=c7"] });
+
+    expect(await screen.findByText("drawer:c7")).toBeInTheDocument();
+    expect(screen.getByText("task:voice|passed|Billing|Pat")).toBeInTheDocument();
+    expect(navArgs().openCall).toMatchObject({ task: { id: "c7" }, source: "table" });
+    expect(useRunCalls).toHaveBeenCalledWith(
+      "ex1",
+      expect.objectContaining({ ...TABLE_QUERY, enabled: true }),
+    );
+    // The row came off the table page; the detail was never needed.
+    expect(useCallExecutionV3Detail.mock.calls.some(([, enabled]) => enabled)).toBe(false);
+    expect(locationText()).toContain("foo=1");
+    expect(locationText()).toContain("rowId=c7");
+  });
+
+  it("opens an off-page chat row from its detail, with its fields and no prev/next", async () => {
+    detailFor("x1", { data: CHAT_DETAIL, error: null });
+    renderDetail({ initialEntries: ["/?rowId=x1"] });
+
+    expect(await screen.findByText("drawer:x1")).toBeInTheDocument();
+    expect(
+      screen.getByText("task:text|failed|Refund request|Impatient Ian"),
+    ).toBeInTheDocument();
+    expect(navArgs().openCall.source).not.toBe("table");
+    expect(locationText()).toContain("rowId=x1");
+  });
+
+  it("opens an off-page voice row from its detail", async () => {
+    detailFor("v1", {
+      data: { id: "v1", simulation_call_type: "voice", outcome: "passed", scenario: "Billing" },
+      error: null,
+    });
+    renderDetail({ initialEntries: ["/?rowId=v1"] });
+
+    expect(await screen.findByText("drawer:v1")).toBeInTheDocument();
+    expect(screen.getByText(/^task:voice\|passed\|Billing/)).toBeInTheDocument();
+  });
+
+  it("shows no drawer while the table page is still loading", () => {
+    useRunCalls.mockReturnValue({ tasks: [], groups: [], isLoading: true });
+    detailFor("x1", { data: CHAT_DETAIL, error: null });
+    renderDetail({ initialEntries: ["/?rowId=x1"] });
+
+    expect(screen.queryByText(/^drawer:/)).toBeNull();
+    expect(locationText()).toContain("rowId=x1");
+  });
+
+  it("fetches an off-page row once the table page settles without it", async () => {
+    let pageLoading = true;
+    useRunCalls.mockImplementation(() => ({ tasks: [], groups: [], isLoading: pageLoading }));
+    detailFor("x1", { data: CHAT_DETAIL, error: null });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = renderDetail({ client, initialEntries: ["/?rowId=x1"] });
+
+    expect(screen.queryByText(/^drawer:/)).toBeNull();
+    expect(useCallExecutionV3Detail.mock.calls.some(([, enabled]) => enabled)).toBe(false);
+
+    pageLoading = false;
+    rerender(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/?rowId=x1"]}>
+          <LocationProbe />
+          <RunDetail env={ENV} envState={{ evals: [] }} backed testId="rt1" executionId="ex1" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("drawer:x1")).toBeInTheDocument();
+    expect(navArgs().openCall.source).not.toBe("table");
+  });
+
+  it("reports an unknown row and drops the param", async () => {
+    detailFor("nope", { data: undefined, error: { statusCode: 404 } });
+    renderDetail({ initialEntries: ["/?foo=1&rowId=nope"] });
+
+    await waitFor(() => expect(locationText()).not.toContain("rowId"));
+    expect(locationText()).toContain("foo=1");
+    expect(enqueueSnackbar).toHaveBeenCalledWith("Row not found", { variant: "error" });
+    expect(screen.queryByText(/^drawer:/)).toBeNull();
+  });
+
+  it("reports the same unknown row again when its link is followed a second time", async () => {
+    const user = userEvent.setup();
+    detailFor("nope", { data: undefined, error: { statusCode: 404 } });
+    renderDetail({ initialEntries: ["/?rowId=nope"] });
+    await waitFor(() => expect(locationText()).not.toContain("rowId"));
+
+    await user.click(screen.getByRole("button", { name: "follow link" }));
+
+    await waitFor(() => expect(enqueueSnackbar).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(locationText()).not.toContain("rowId"));
+  });
+
+  it("says the row couldn't load when the detail fails for another reason", async () => {
+    detailFor("x9", { data: undefined, error: { statusCode: 500 } });
+    renderDetail({ initialEntries: ["/?rowId=x9"] });
+
+    await waitFor(() => expect(locationText()).not.toContain("rowId"));
+    expect(enqueueSnackbar).toHaveBeenCalledWith("Couldn't load the row", { variant: "error" });
+    expect(screen.queryByText(/^drawer:/)).toBeNull();
+  });
+
+  it("writes the open row to the URL on open, step and close, replacing the entry", async () => {
+    const user = userEvent.setup();
+    renderDetail({ initialEntries: ["/?foo=1"] });
+
+    await user.click(screen.getByRole("button", { name: "open c1" }));
+    expect(locationText()).toBe("?foo=1&rowId=c1|REPLACE");
+
+    act(() =>
+      navArgs().onStep({
+        task: { id: "c51", simulationCallType: "voice" },
+        source: "table",
+        page: 2,
+      }),
+    );
+    expect(screen.getByText("drawer:c51")).toBeInTheDocument();
+    expect(locationText()).toBe("?foo=1&rowId=c51|REPLACE");
+
+    await user.click(screen.getByRole("button", { name: "close call" }));
+    expect(screen.queryByText(/^drawer:/)).toBeNull();
+    expect(locationText()).toBe("?foo=1|REPLACE");
+  });
+
+  it("writes a row opened from Analytics to the URL", async () => {
+    const user = userEvent.setup();
+    renderDetail();
+
+    await user.click(screen.getByRole("tab", { name: "Analytics" }));
+    await user.click(screen.getByRole("button", { name: "open from chart" }));
+
+    expect(locationText()).toBe("?rowId=c9|REPLACE");
   });
 });
