@@ -222,3 +222,42 @@ class TestConsentRedirectBase:
         settings.APP_BASE_URL = "https://app.example.com"
 
         assert FutureAGIOAuthProvider().frontend_url == "https://ui.example.com"
+
+    @pytest.mark.parametrize(
+        "frontend_url, consent_base",
+        [
+            (None, "https://app.example.com"),
+            # An empty value, as a compose file leaves an unset variable.
+            ("", "https://app.example.com"),
+            ("https://ui.example.com", "https://ui.example.com"),
+        ],
+    )
+    def test_the_oauth_app_gives_its_provider_the_consent_base(
+        self, monkeypatch, settings, frontend_url, consent_base
+    ):
+        from mcp_server import mcp_app, oauth_provider
+
+        if frontend_url is None:
+            monkeypatch.delenv("FRONTEND_URL", raising=False)
+        else:
+            monkeypatch.setenv("FRONTEND_URL", frontend_url)
+        settings.APP_BASE_URL = "https://app.example.com"
+        monkeypatch.setattr(mcp_app, "_oauth_app", None)
+        providers = []
+
+        class RecordingProvider(oauth_provider.FutureAGIOAuthProvider):
+            def __init__(self, frontend_url=None):
+                super().__init__(frontend_url=frontend_url)
+                providers.append((frontend_url, self))
+
+        monkeypatch.setattr(oauth_provider, "FutureAGIOAuthProvider", RecordingProvider)
+
+        app = mcp_app.get_mcp_oauth_app()
+
+        [(passed, provider)] = providers
+        assert passed == consent_base
+        assert provider.frontend_url == consent_base
+        paths = {route.path for route in app.routes}
+        assert {"/authorize", "/token", "/register"} <= paths
+        # Built once per process.
+        assert mcp_app.get_mcp_oauth_app() is app and len(providers) == 1
