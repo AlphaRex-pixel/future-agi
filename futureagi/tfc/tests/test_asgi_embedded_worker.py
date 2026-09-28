@@ -64,9 +64,7 @@ async def _get(module, path):
 
 
 @pytest.mark.parametrize("path", ["/health/", "/health"])
-async def test_health_is_503_with_worker_state_while_embedded_worker_is_down(
-    asgi_module, path
-):
+async def test_health_is_503_while_embedded_worker_is_down(asgi_module, path):
     worker = SimpleNamespace(health=_unhealthy_state)
     asgi_module["get_embedded_worker"] = lambda: worker
 
@@ -76,7 +74,10 @@ async def test_health_is_503_with_worker_state_while_embedded_worker_is_down(
     body = json.loads(sent[1]["body"])
     assert body["status"] is False
     assert body["code"] == "service_unavailable"
-    assert body["temporal_worker"]["last_error"] == "ValueError: bad config"
+    # /health/ is unauthenticated: the status only. The worker's error text
+    # (Temporal/gRPC detail) and state are in the logs.
+    assert "temporal_worker" not in body
+    assert b"bad config" not in sent[1]["body"]
     assert asgi_module["django_calls"] == []
 
 

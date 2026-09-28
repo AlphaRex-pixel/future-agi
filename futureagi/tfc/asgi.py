@@ -119,20 +119,16 @@ async def _send_unhealthy_embedded_worker(send) -> bool:
     The API process also runs the worker in the standalone install, so the
     container is not healthy while evals, trace ingestion and schedules have
     stopped. Returns False (Django answers) when embedded mode is off or the
-    worker is healthy.
+    worker is healthy. The route is unauthenticated, so the body is the status
+    only; the worker logs its error and state.
     """
     embedded_worker = get_embedded_worker()
     if embedded_worker is None:
         return False
-    state = embedded_worker.health()
-    if state["healthy"]:
+    if embedded_worker.health()["healthy"]:
         return False
     body = json.dumps(
-        build_error_envelope(
-            "Temporal worker is not running",
-            status_code=503,
-            extra={"temporal_worker": state},
-        )
+        build_error_envelope("Temporal worker is not running", status_code=503)
     ).encode()
     await send(
         {
