@@ -99,8 +99,11 @@ def get_logging_config(base_dir: str) -> dict:
     log_level = os.getenv("LOG_LEVEL", "INFO")
     # stdout, where every service's logs are collected. LOG_STREAM=stderr is for
     # a one-off manage.py command whose stdout is its output (./bin/dev manage).
-    stderr = os.getenv("LOG_STREAM", "").strip().lower() == "stderr"
-    log_stream = "stderr" if stderr else "stdout"
+    log_stream = (
+        "stderr"
+        if os.getenv("LOG_STREAM", "").strip().lower() == "stderr"
+        else "stdout"
+    )
     logs_dir = os.path.join(base_dir, "logs")
 
     # Ensure logs directory exists
