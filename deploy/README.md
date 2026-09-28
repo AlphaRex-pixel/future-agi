@@ -454,17 +454,21 @@ exact image/configuration receipt after approval. Changing tags alone does not
 undo schema/mirror changes or establish a healthy recovery. Preserve old data,
 topics, volumes and obsolete workloads until their explicit retirement is approved.
 
-**Retiring RabbitMQ.** The stack no longer runs RabbitMQ: Redis carries live
-updates (the channel layer), and `RABBITMQ_USER`/`RABBITMQ_PASSWORD` are no
-longer read. `up` leaves the old `rabbitmq` container running, because it
-never removes containers of services the files no longer define. Once the upgraded
-stack is healthy and its retirement is approved, remove it and, when you no longer
-need its data, its volume (the prefix is your Compose project name):
+**Retiring RabbitMQ and the catalog sequencer.** The stack no longer runs
+RabbitMQ: Redis carries live updates (the channel layer), and
+`RABBITMQ_USER`/`RABBITMQ_PASSWORD` are no longer read. Nor does it run v1.41's
+Kafka catalog sequencer (`fi-property-catalog-sequencer`,
+`property-catalog-supervisor`, `property-catalog-postgres-bootstrap`). `up`
+leaves their old containers running, because it never removes containers of
+services the files no longer define. Once the upgraded stack is healthy and
+their retirement is approved, remove them and, when you no longer need their
+data (a rollback to v1.41 does), their volumes, which nothing mounts any more
+(the prefix is your Compose project name):
 
 ```bash
 docker compose --env-file deploy/.env.production \
   -f docker-compose.distributed.yml -f deploy/docker-compose.production.yml up -d --no-build --remove-orphans
-docker volume rm futureagi_rabbitmq-data
+docker volume rm futureagi_rabbitmq-data futureagi_property-catalog-sequencer-data
 ```
 
 ## Resource sizing

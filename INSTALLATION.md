@@ -1010,14 +1010,26 @@ the bootstrap Job migrates before any Deployment is rolled. See the
 > and run `./bin/install` (or `docker compose up -d`), which restores
 > Distributed's settings.
 
-**Retiring RabbitMQ.** Distributed no longer runs RabbitMQ: Redis carries live
-updates. An upgraded install keeps its old `rabbitmq` container running until
-you remove it (`./bin/install` points this out), because `up` leaves
-containers of dropped services alone. Once the upgraded stack is healthy:
+**Retired services (upgrading from v1.41).** Distributed no longer runs
+RabbitMQ (Redis carries live updates) or the Kafka catalog sequencer
+(`fi-property-catalog-sequencer`, with its `property-catalog-supervisor` and
+`property-catalog-postgres-bootstrap` jobs). An upgraded install keeps their
+containers until you remove them (`./bin/install` points out RabbitMQ's),
+because `up` leaves containers of dropped services alone. Once the upgraded
+stack is healthy:
 
 ```bash
-docker compose up -d --remove-orphans      # removes the rabbitmq container
-docker volume rm futureagi_rabbitmq-data   # optional; the prefix is your project name
+docker compose up -d --remove-orphans      # removes the retired containers
+```
+
+Their volumes, `rabbitmq-data` and `property-catalog-sequencer-data`, are
+unused from then on: nothing in the current Compose files mounts them, and
+`docker compose down -v` does not remove them either. Keep them until the
+upgrade has proven itself and you will not roll back to v1.41, then delete
+them (the prefix is your Compose project name):
+
+```bash
+docker volume rm futureagi_rabbitmq-data futureagi_property-catalog-sequencer-data
 ```
 
 **Password-reset links.** `.env.example` used to ship
