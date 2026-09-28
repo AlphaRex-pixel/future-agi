@@ -145,6 +145,127 @@ describe("useCallListNavigation", () => {
     );
   });
 
+  it("walks a to b and back to a when a sits in two groups", async () => {
+    axios.get.mockImplementation((_url, { params }) =>
+      Promise.resolve({
+        data: {
+          ...pageData(params.page),
+          count: 3,
+          total_pages: 1,
+          results: ["a", "b", "c"].map(row),
+          groups: [
+            { key: "g0", label: "Group 0", result_ids: ["a", "b"], total: 2 },
+            { key: "g1", label: "Group 1", result_ids: ["a", "c"], total: 2 },
+          ],
+        },
+      }),
+    );
+    const { result, rerender, onStep } = setup({ callId: "a" });
+    await waitFor(() => expect(result.current.hasNext).toBe(true));
+    expect(result.current.hasPrev).toBe(false);
+
+    act(() => result.current.onNext());
+    expect(onStep).toHaveBeenLastCalledWith(
+      expect.objectContaining({ task: expect.objectContaining({ id: "b" }) }),
+    );
+
+    rerender(open("b"));
+    expect(result.current.hasPrev).toBe(true);
+    act(() => result.current.onPrev());
+    expect(onStep).toHaveBeenLastCalledWith(
+      expect.objectContaining({ task: expect.objectContaining({ id: "a" }) }),
+    );
+
+    rerender(open("a"));
+    expect(result.current.hasPrev).toBe(false);
+    act(() => result.current.onNext());
+    expect(onStep).toHaveBeenLastCalledWith(
+      expect.objectContaining({ task: expect.objectContaining({ id: "b" }) }),
+    );
+    expect(onStep).toHaveBeenCalledTimes(3);
+  });
+
+  // Pages whose groups overlap, given as { page: { results, groups } }.
+  const mockPages = (spec) =>
+    axios.get.mockImplementation((_url, { params }) => {
+      const { results, groups } = spec[params.page];
+      return Promise.resolve({
+        data: {
+          ...pageData(params.page),
+          count: Object.values(spec).flatMap((s) => s.results).length,
+          total_pages: Object.keys(spec).length,
+          results: results.map(row),
+          groups: groups.map((ids, i) => ({
+            key: `g${i}`,
+            label: `Group ${i}`,
+            result_ids: ids,
+            total: ids.length,
+          })),
+        },
+      });
+    });
+  const open = (id, page = 1) => ({
+    openCall: { task: { id }, source: "table", page: null },
+    tableQuery: tableQuery(page),
+  });
+  const lastStep = (onStep) => onStep.mock.calls.at(-1)[0];
+
+  it("ends the list at the last distinct call, even when a repeated call sits below it", async () => {
+    // On screen [b a] [c a] reads b a c: a repeats after c, but c is the end.
+    mockPages({ 1: { results: ["a", "b", "c"], groups: [["b", "a"], ["c", "a"]] } });
+    const { result, rerender, onStep } = setup({ callId: "c" });
+    await waitFor(() => expect(result.current.hasPrev).toBe(true));
+    expect(result.current.hasNext).toBe(false);
+
+    act(() => result.current.onPrev());
+    expect(lastStep(onStep).task.id).toBe("a");
+
+    rerender(open("a"));
+    act(() => result.current.onNext());
+    expect(lastStep(onStep).task.id).toBe("c");
+  });
+
+  it("steps through every distinct call once when one sits in three groups", async () => {
+    mockPages({
+      1: { results: ["a", "b", "c", "d"], groups: [["a", "b"], ["a", "c"], ["a", "d"]] },
+    });
+    const { result, rerender, onStep } = setup({ callId: "a" });
+    await waitFor(() => expect(result.current.hasNext).toBe(true));
+
+    const visited = [];
+    for (const id of ["a", "b", "c"]) {
+      rerender(open(id));
+      act(() => result.current.onNext());
+      visited.push(lastStep(onStep).task.id);
+    }
+    expect(visited).toEqual(["b", "c", "d"]);
+    rerender(open("d"));
+    expect(result.current.hasNext).toBe(false);
+    act(() => result.current.onPrev());
+    expect(lastStep(onStep).task.id).toBe("c");
+  });
+
+  it("crosses pages by distinct calls when both pages have a repeated call", async () => {
+    // page 1 on screen [a c] [b c] reads a c b; page 2 [d e] [d f] reads d e f.
+    mockPages({
+      1: { results: ["a", "b", "c"], groups: [["a", "c"], ["b", "c"]] },
+      2: { results: ["d", "e", "f"], groups: [["d", "e"], ["d", "f"]] },
+    });
+    const { result, onStep } = setup({ callId: "b" });
+    await waitFor(() => expect(result.current.hasNext).toBe(true));
+    await act(() => result.current.onNext());
+    expect(lastStep(onStep)).toEqual(
+      expect.objectContaining({ task: expect.objectContaining({ id: "d" }), page: 2 }),
+    );
+
+    const back = setup({ callId: "d", page: 2 });
+    await waitFor(() => expect(back.result.current.hasPrev).toBe(true));
+    await act(() => back.result.current.onPrev());
+    expect(lastStep(back.onStep)).toEqual(
+      expect.objectContaining({ task: expect.objectContaining({ id: "b" }), page: 1 }),
+    );
+  });
+
   it("crosses from the last row on screen to the next page's first row on screen", async () => {
     const { result, onStep } = setup({ callId: "c3" });
     await waitFor(() => expect(result.current.hasNext).toBe(true));
