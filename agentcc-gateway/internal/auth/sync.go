@@ -14,9 +14,9 @@ import (
 var keySyncHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
 // SyncKeysFromControlPlane fetches all active API key hashes from the Django
-// control plane and loads them into the KeyStore. If the control plane is
-// unreachable, it logs a warning and returns nil (non-fatal — the gateway
-// starts with only config.yaml seed keys).
+// control plane and loads them into the KeyStore. A failure leaves the store
+// as it was (config.yaml seed keys only, on a fresh start) and is returned for
+// the caller to log.
 func SyncKeysFromControlPlane(ctx context.Context, baseURL, adminToken string, ks *KeyStore) error {
 	if baseURL == "" {
 		slog.Info("key sync skipped: no control plane URL configured")
@@ -35,22 +35,13 @@ func SyncKeysFromControlPlane(ctx context.Context, baseURL, adminToken string, k
 
 	resp, err := keySyncHTTPClient.Do(req)
 	if err != nil {
-		slog.Warn("key sync from control plane failed (gateway will start with config keys only)",
-			"url", endpoint,
-			"error", err,
-		)
 		return fmt.Errorf("key sync unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		slog.Warn("key sync returned non-200",
-			"url", endpoint,
-			"status", resp.StatusCode,
-			"body", string(body),
-		)
-		return fmt.Errorf("key sync returned status %d: %s", resp.StatusCode, body)
+		return fmt.Errorf("key sync returned status %d from %s: %s", resp.StatusCode, endpoint, body)
 	}
 
 	// Django response format: {"status": true, "result": [...]}
@@ -59,12 +50,10 @@ func SyncKeysFromControlPlane(ctx context.Context, baseURL, adminToken string, k
 		Result []SyncedKey `json:"result"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 10<<20)).Decode(&envelope); err != nil {
-		slog.Warn("key sync: failed to parse response", "error", err)
 		return fmt.Errorf("parsing key sync response: %w", err)
 	}
 
 	if !envelope.Status {
-		slog.Warn("key sync: response status=false")
 		return fmt.Errorf("key sync: status=false")
 	}
 
