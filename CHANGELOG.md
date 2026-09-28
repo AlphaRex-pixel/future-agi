@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.41.3](https://github.com/future-agi/future-agi/compare/v1.41.2...v1.41.3) (2026-09-28)
+
+
+### Bug Fixes
+
+* **observe:** support 60-second GCP interactive reads ([f271d0d](https://github.com/future-agi/future-agi/commit/f271d0dd6fede6c002fce1f5e6ad068e8cade62e))
+* **observe:** support 60-second GCP read budgets [agent] ([0f9492c](https://github.com/future-agi/future-agi/commit/0f9492c3a1223534018e4201f1c50c5cf7f88639))
+
 ## [1.41.2](https://github.com/future-agi/future-agi/compare/v1.41.1...v1.41.2) (2026-09-28)
 
 
