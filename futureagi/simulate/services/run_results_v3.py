@@ -352,7 +352,11 @@ def build_call_rows(
                 "latency_ms": latency,
                 "turn_count": int(turn_count) if turn_count is not None else None,
                 "tokens": int(tokens) if tokens is not None else None,
-                "cost_cents": call.cost_cents,
+                "cost_cents": (
+                    call.customer_cost_cents
+                    if call.customer_cost_cents is not None
+                    else call.cost_cents
+                ),
                 "cost_breakdown_cents": {
                     "stt": call.stt_cost_cents,
                     "llm": call.llm_cost_cents,

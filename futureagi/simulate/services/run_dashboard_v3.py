@@ -333,6 +333,7 @@ def build_run_dashboard(
     evaluations: list,
     risk: list,
     reliability: dict | None = None,
+    comparison: dict | None = None,
 ) -> dict[str, Any]:
     total = summary["total"]
     end_reason = Case(
@@ -409,6 +410,13 @@ def build_run_dashboard(
         connected=Count(
             "id", filter=Q(message_count__gt=0) | Q(transcript_available=True)
         ),
+        drop_off=Count(
+            "id",
+            filter=Q(
+                dashboard_disconnection="Caller hung up",
+                result_outcome="failed",
+            ),
+        ),
     )
     voice_values = voice.aggregate(
         wpm=Avg("bot_wpm"),
@@ -478,6 +486,14 @@ def build_run_dashboard(
         f"{noun.capitalize()}s with recorded conversation evidence",
     )
     metric(
+        "drop_off",
+        "Drop-off",
+        round(values["drop_off"] * 100 / total, 2) if total else None,
+        "percent",
+        total,
+        "Caller hung up and the call failed its evals; passing hangups and run errors are excluded",
+    )
+    metric(
         "csat",
         "Avg CSAT (0–10)",
         values["csat"],
@@ -531,7 +547,7 @@ def build_run_dashboard(
         {
             "duration_seconds": "duration_seconds",
             "tokens": "result_tokens",
-            "cost_cents": "cost_cents",
+            "cost_cents": "result_cost_cents",
             "turns": "result_turn_count",
         },
     )
@@ -547,15 +563,24 @@ def build_run_dashboard(
         duration_stats["duration_seconds"]["measured"],
         "End-to-end task wall-clock time",
     )
-    passed = summary["outcomes"]["passed"]
     cost = summary["cost_cents"]
+    cost_calls = queryset.filter(result_cost_cents__isnull=False).aggregate(
+        passed=Count("id", filter=Q(result_outcome="passed")),
+    )
     metric(
         "cost_per_pass",
         "Cost / pass",
-        cost["total_value"] / passed if passed and cost["measured"] == total else None,
+        (
+            cost["total_value"] / cost_calls["passed"]
+            if cost_calls["passed"] and cost["total_value"] is not None
+            else None
+        ),
         "cents",
         cost["measured"],
-        "Total run cost divided by successful tasks; requires complete cost coverage",
+        (
+            "Target-agent provider cost divided by passing calls among calls that reported cost; "
+            f"{cost['measured']} of {total} reported"
+        ),
     )
     metric("total_cost", "Total cost", cost["total_value"], "cents", cost["measured"])
 
@@ -594,7 +619,34 @@ def build_run_dashboard(
     )
     component_total = sum(value or 0 for value in costs.values())
     eval_errored = sum(row["errored"] for row in evaluations)
+    ran_cleanly = total - outcomes["error"]
+    run_health = {
+        "show_banner": bool(
+            total
+            and (
+                ran_cleanly * 100 < total * 99
+                or values["connected"] * 100 < total * 99
+                or outcomes["inconclusive"]
+                or eval_errored
+            )
+        ),
+        "attempted": total,
+        "ran_cleanly": ran_cleanly,
+        "connected": values["connected"],
+        "errored": outcomes["error"],
+        "not_evaluated": outcomes["inconclusive"],
+        "eval_errors": eval_errored,
+    }
     return {
+        "run_health": run_health,
+        "comparison": comparison
+        or {
+            "available": False,
+            "previous_execution_id": None,
+            "shared_scenarios": 0,
+            "newly_passing": [],
+            "newly_failing": [],
+        },
         "csat": csat_distribution(queryset, total),
         "agent_response_time": response_time_distribution(
             queryset, total, voice=is_voice
@@ -698,7 +750,7 @@ def build_run_dashboard(
         ],
         "tools": _tool_stats(queryset),
         "slowest_tasks": _tails(queryset, "duration_seconds"),
-        "most_expensive_tasks": _tails(queryset, "cost_cents"),
+        "most_expensive_tasks": _tails(queryset, "result_cost_cents"),
         "unavailable_features": [
             {
                 "key": "failure_attribution",

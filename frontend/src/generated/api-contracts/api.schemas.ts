@@ -22290,6 +22290,8 @@ export interface RunDashboardCsatApi {
   bins: RunDashboardHistogramBinApi[];
   measured: number;
   total: number;
+  satisfied: number;
+  satisfied_percent: number;
   agreement: RunDashboardAgreementApi;
 }
 
@@ -22369,6 +22371,24 @@ export interface RunDashboardRiskApi {
   inconclusive: number;
 }
 
+export interface RunDashboardHealthApi {
+  show_banner: boolean;
+  attempted: number;
+  ran_cleanly: number;
+  connected: number;
+  errored: number;
+  not_evaluated: number;
+  eval_errors: number;
+}
+
+export interface RunDashboardComparisonApi {
+  available: boolean;
+  previous_execution_id: string;
+  shared_scenarios: number;
+  newly_passing: string[];
+  newly_failing: string[];
+}
+
 export interface RunDashboardV3Api {
   metrics: RunDashboardMetricApi[];
   breakdowns: RunDashboardBreakdownApi[];
@@ -22388,6 +22408,8 @@ export interface RunDashboardV3Api {
   unavailable_features: RunDashboardUnavailableApi[];
   evaluation_summary: RunDashboardEvaluationSummaryApi;
   use_case_risk: RunDashboardRiskApi[];
+  run_health: RunDashboardHealthApi;
+  comparison: RunDashboardComparisonApi;
   goal_count: number;
 }
 

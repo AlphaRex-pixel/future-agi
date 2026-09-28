@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from typing import Any
 
 from django.core.cache import cache
@@ -227,6 +227,13 @@ def run_calls_queryset(
             _safe_json_float("conversation_metrics_data", "bot_message_count"),
         ),
         result_tokens=_safe_json_float("conversation_metrics_data", "total_tokens"),
+        # Analytics describes the agent under test, not FutureAGI's simulator.
+        # Native and hosted provider integrations put the target's own cost in
+        # customer_cost_cents; legacy ALK reporters used cost_cents instead.
+        result_cost_cents=Coalesce(
+            Cast("customer_cost_cents", FloatField()),
+            Cast("cost_cents", FloatField()),
+        ),
         result_provider=Case(
             *provider_cases,
             default=Coalesce(
@@ -322,7 +329,7 @@ def apply_run_call_query(queryset: QuerySet, query: dict[str, Any]) -> QuerySet:
         "latency_ms": "result_latency_ms",
         "turn_count": "result_turn_count",
         "tokens": "result_tokens",
-        "cost_cents": "cost_cents",
+        "cost_cents": "result_cost_cents",
         "scenario": "scenario__name",
         "goal": "result_goal",
         "outcome": "result_outcome",
@@ -336,7 +343,7 @@ def _aggregate_expressions(include_percentiles: bool = True) -> dict[str, Any]:
         "total": Count("id"),
         "measured": Count("id", filter=Q(result_outcome__in=EVALUATED_OUTCOMES)),
         "tokens_total_value": Sum("result_tokens"),
-        "cost_cents_total_value": Sum("cost_cents"),
+        "cost_cents_total_value": Sum("result_cost_cents"),
         "csat_average": Avg("result_csat"),
         "turns_average": Avg("result_turn_count"),
     }
@@ -348,7 +355,7 @@ def _aggregate_expressions(include_percentiles: bool = True) -> dict[str, Any]:
         "duration": "duration_seconds",
         "latency": "result_latency_ms",
         "tokens": "result_tokens",
-        "cost_cents": "cost_cents",
+        "cost_cents": "result_cost_cents",
     }.items():
         expressions[f"{name}_average"] = Avg(field)
         expressions[f"{name}_measured"] = Count(field)
@@ -528,6 +535,70 @@ def _breakdown_run_calls(queryset: QuerySet, field: str) -> list[dict[str, Any]]
     return sorted(result, key=lambda row: (-row["total"], row[field].lower()))
 
 
+def build_run_comparison(
+    execution: TestExecution, queryset: QuerySet
+) -> dict[str, Any]:
+    """Compare scenario verdicts with the immediately preceding completed run.
+
+    Only scenarios evaluated in both runs participate. A scenario passes when every
+    evaluated trial passed; any evaluated failure makes it failing. Infrastructure
+    errors and unevaluated trials do not invent a verdict.
+    """
+
+    def verdicts(calls: QuerySet) -> dict[str, bool]:
+        counts: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+        for scenario, outcome in (
+            calls.order_by()
+            .values_list("result_scenario", "result_outcome")
+            .iterator(chunk_size=2000)
+        ):
+            if outcome == "passed":
+                counts[str(scenario)][0] += 1
+            elif outcome == "failed":
+                counts[str(scenario)][1] += 1
+        return {
+            scenario: failed == 0
+            for scenario, (passed, failed) in counts.items()
+            if passed or failed
+        }
+
+    previous = (
+        TestExecution.objects.filter(
+            run_test=execution.run_test,
+            status=TestExecution.ExecutionStatus.COMPLETED,
+            created_at__lt=execution.created_at,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if previous is None:
+        return {
+            "available": False,
+            "previous_execution_id": None,
+            "shared_scenarios": 0,
+            "newly_passing": [],
+            "newly_failing": [],
+        }
+    current_verdicts = verdicts(queryset)
+    previous_verdicts = verdicts(run_calls_queryset(previous))
+    shared = sorted(current_verdicts.keys() & previous_verdicts.keys())
+    return {
+        "available": True,
+        "previous_execution_id": str(previous.id),
+        "shared_scenarios": len(shared),
+        "newly_passing": [
+            scenario
+            for scenario in shared
+            if current_verdicts[scenario] and not previous_verdicts[scenario]
+        ],
+        "newly_failing": [
+            scenario
+            for scenario in shared
+            if not current_verdicts[scenario] and previous_verdicts[scenario]
+        ],
+    }
+
+
 def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
     from simulate.services.run_dashboard_v3 import build_run_dashboard
 
@@ -696,6 +767,7 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
         for sibling in reversed(siblings)
     ]
     reliability = build_reliability(queryset, execution.trials)
+    comparison = build_run_comparison(execution, queryset)
     return {
         "execution": {
             "id": str(execution.id),
@@ -716,7 +788,7 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
             ),
         ),
         "dashboard": build_run_dashboard(
-            queryset, summary, evaluations, risk, reliability
+            queryset, summary, evaluations, risk, reliability, comparison
         ),
         "failure_breakdown": [
             {

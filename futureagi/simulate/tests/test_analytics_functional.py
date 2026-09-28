@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import uuid
+from datetime import timedelta
 
 import pytest
 from rest_framework import status
@@ -941,6 +942,112 @@ class TestRunResultsV3Views:
         assert endings == {"Caller hung up": 6}
         assert dashboard["evaluation_summary"]["pass_rate"] == 60.0
 
+    def test_dashboard_prioritises_decision_metrics_and_shared_scenario_change(
+        self,
+        auth_client,
+        test_execution,
+        analytics_call_executions,
+        scenario,
+    ):
+        def evaluation(passed):
+            return {
+                "policy": {
+                    "name": "Policy",
+                    "output": {"passed": "Passed" if passed else "Failed"},
+                    "source": "harness",
+                }
+            }
+
+        current = [
+            ("shared-pass", True, "customer-ended-call", 10, 9, 500),
+            ("shared-fail", False, "customer-ended-call", 20, 8, 2000),
+            ("current-only", True, "assistant-ended-call", 30, 4, None),
+        ]
+        for call, (key, passed, ended, customer_cost, csat, latency) in zip(
+            analytics_call_executions[:3], current, strict=True
+        ):
+            call.call_metadata = {
+                "harness_scenario_key": key,
+                "harness_outcome_status": "passed" if passed else "failed",
+            }
+            call.eval_outputs = evaluation(passed)
+            call.ended_reason = ended
+            call.customer_cost_cents = customer_cost
+            call.cost_cents = 999
+            call.conversation_metrics_data = {"csat_score": csat}
+            call.avg_agent_latency_ms = latency
+            call.transcript_available = True
+            call.message_count = 2
+            call.save()
+
+        previous = TestExecution.objects.create(
+            run_test=test_execution.run_test,
+            status=TestExecution.ExecutionStatus.COMPLETED,
+            total_scenarios=3,
+            total_calls=3,
+            completed_calls=3,
+            failed_calls=0,
+            simulator_agent=test_execution.simulator_agent,
+            agent_definition=test_execution.agent_definition,
+        )
+        TestExecution.objects.filter(id=previous.id).update(
+            created_at=test_execution.created_at - timedelta(minutes=1)
+        )
+        for index, (key, passed) in enumerate(
+            [
+                ("shared-pass", False),
+                ("shared-fail", True),
+                ("previous-only", True),
+            ]
+        ):
+            CallExecution.objects.create(
+                test_execution=previous,
+                scenario=scenario,
+                phone_number=f"+960000000{index}",
+                status="completed",
+                call_metadata={
+                    "harness_scenario_key": key,
+                    "harness_outcome_status": "passed" if passed else "failed",
+                },
+                eval_outputs=evaluation(passed),
+                transcript_available=True,
+                message_count=2,
+            )
+
+        response = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/analytics/"
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        dashboard = response.json()["dashboard"]
+        metrics = {row["key"]: row for row in dashboard["metrics"]}
+        # Only the failed caller hangup is drop-off; a passing hangup and an
+        # infrastructure failure do not count against the agent.
+        assert metrics["drop_off"]["value"] == 25.0
+        # Spend on the failed call is included, but only the target agent's
+        # provider-reported cost is used: (10 + 20 + 30) / 2 passing calls.
+        assert metrics["cost_per_pass"]["value"] == 30.0
+        assert metrics["cost_per_pass"]["measured"] == 3
+        assert dashboard["csat"]["satisfied"] == 2
+        assert dashboard["csat"]["satisfied_percent"] == 66.67
+        assert dashboard["agent_response_time"]["p95"] == 1925.0
+        assert dashboard["comparison"] == {
+            "available": True,
+            "previous_execution_id": str(previous.id),
+            "shared_scenarios": 2,
+            "newly_passing": ["shared-pass"],
+            "newly_failing": ["shared-fail"],
+        }
+        assert dashboard["run_health"] == {
+            "show_banner": True,
+            "attempted": 4,
+            "ran_cleanly": 3,
+            "connected": 3,
+            "errored": 1,
+            "not_evaluated": 0,
+            "eval_errors": 0,
+        }
+
     def test_export_applies_filters_to_underlying_rows(
         self, auth_client, test_execution, analytics_call_executions
     ):
@@ -1031,6 +1138,7 @@ class TestRunResultsV3Views:
             "total": "Total chats",
             "ran_cleanly": "Chats ran cleanly",
             "connected_rate": "Chats connected (%)",
+            "drop_off": "Drop-off",
             "csat": "Avg CSAT (0–10)",
             "agent_latency": "Agent response time",
             "duration": "Avg chat duration",

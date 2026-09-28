@@ -46642,6 +46642,8 @@ export const SimulateV3TestExecutionAnalyticsResponse = zod.object({
       ),
       measured: zod.number(),
       total: zod.number(),
+      satisfied: zod.number(),
+      satisfied_percent: zod.number(),
       agreement: zod.object({
         compared: zod.number(),
         agreed: zod.number(),
@@ -46742,6 +46744,22 @@ export const SimulateV3TestExecutionAnalyticsResponse = zod.object({
         inconclusive: zod.number(),
       }),
     ),
+    run_health: zod.object({
+      show_banner: zod.boolean(),
+      attempted: zod.number(),
+      ran_cleanly: zod.number(),
+      connected: zod.number(),
+      errored: zod.number(),
+      not_evaluated: zod.number(),
+      eval_errors: zod.number(),
+    }),
+    comparison: zod.object({
+      available: zod.boolean(),
+      previous_execution_id: zod.string().uuid(),
+      shared_scenarios: zod.number(),
+      newly_passing: zod.array(zod.string().min(1)),
+      newly_failing: zod.array(zod.string().min(1)),
+    }),
     goal_count: zod.number(),
   }),
   execution: zod.object({

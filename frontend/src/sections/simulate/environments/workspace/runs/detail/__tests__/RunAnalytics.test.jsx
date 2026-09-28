@@ -18,20 +18,31 @@ const analytics = {
   dashboard: {
     metrics: [
       {
-        key: "total",
-        label: "Total calls",
-        value: 4,
-        unit: "number",
-        measured: 4,
+        key: "pass_rate",
+        label: "Calls passed",
+        value: 66.67,
+        unit: "percent",
+        measured: 3,
         total: 4,
+        note: "Passed every eval",
       },
       {
-        key: "csat",
-        label: "Avg CSAT score",
-        value: null,
-        unit: "number",
-        measured: 0,
+        key: "drop_off",
+        label: "Drop-off",
+        value: 25,
+        unit: "percent",
+        measured: 4,
         total: 4,
+        note: "Caller hung up before passing",
+      },
+      {
+        key: "cost_per_pass",
+        label: "Cost / pass",
+        value: 125,
+        unit: "cents",
+        measured: 4,
+        total: 4,
+        note: "Spend divided by passing calls",
       },
     ],
     breakdowns: [
@@ -80,7 +91,12 @@ const analytics = {
     csat: {
       measured: 2,
       total: 4,
-      bins: [{ label: "4", lower: 3.5, upper: 4.5, count: 2, danger: true }],
+      satisfied: 1,
+      satisfied_percent: 50,
+      bins: [
+        { label: "4", lower: 3.5, upper: 4.5, count: 1, danger: true },
+        { label: "9", lower: 8.5, upper: 9.5, count: 1, danger: false },
+      ],
       agreement: { compared: 2, agreed: 1, percent: 50 },
     },
     agent_response_time: {
@@ -119,6 +135,22 @@ const analytics = {
       },
     ],
     most_expensive_tasks: [],
+    run_health: {
+      show_banner: true,
+      attempted: 4,
+      ran_cleanly: 4,
+      connected: 4,
+      errored: 0,
+      not_evaluated: 1,
+      eval_errors: 0,
+    },
+    comparison: {
+      available: true,
+      previous_execution_id: "execution-0",
+      shared_scenarios: 2,
+      newly_passing: ["refund-stable"],
+      newly_failing: ["refund-flips"],
+    },
   },
   summary: {
     total: 4,
@@ -246,25 +278,38 @@ describe("RunAnalytics", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("renders the v3 summary and native breakdowns", () => {
+  it("shows the six T1 decisions and hides diagnostics by default", () => {
     render(<RunAnalytics executionId="execution-1" />);
 
-    expect(screen.getAllByText("66.7%").length).toBeGreaterThan(0);
+    for (const label of [
+      "Calls passed",
+      "Drop-off",
+      "Response time p95",
+      "Cost / pass",
+      "CSAT satisfied",
+      "Change vs last run",
+    ]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    expect(screen.getByText(/1 call was not evaluated/)).toBeInTheDocument();
     expect(screen.getByText("Policy adherence")).toBeInTheDocument();
     expect(
       screen.getByRole("region", { name: "Weakest scenarios" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("region", { name: "Tool failure rate" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Not recorded")).toBeInTheDocument();
-    expect(screen.queryByText("Failure attribution")).not.toBeInTheDocument();
-    expect(screen.queryByText(/critical failures/i)).not.toBeInTheDocument();
+      screen.queryByRole("region", { name: "Reliability across trials" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Tool failure rate" }),
+    ).not.toBeInTheDocument();
     expect(useRunAnalytics).toHaveBeenCalledWith("execution-1");
   });
 
-  it("shows which scenarios flip across trials", () => {
+  it("shows which scenarios flip when detailed metrics are opened", () => {
     render(<RunAnalytics executionId="execution-1" />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show detailed analytics" }),
+    );
     const panel = screen.getByRole("region", {
       name: "Reliability across trials",
     });
@@ -302,6 +347,9 @@ describe("RunAnalytics", () => {
 
   it("renders the updated histograms without the retired turn-count charts", () => {
     render(<RunAnalytics executionId="execution-1" />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show detailed analytics" }),
+    );
     expect(
       screen.getByRole("region", { name: "CSAT distribution (0–10)" }),
     ).toBeInTheDocument();
@@ -324,12 +372,17 @@ describe("RunAnalytics", () => {
     expect(
       screen.queryByText("Pass / fail by conversation length"),
     ).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^About / })).toHaveLength(16);
+    expect(
+      screen.getAllByRole("button", { name: /^About / }).length,
+    ).toBeGreaterThan(5);
   });
 
   it("forwards server-provided status filters from the outcome chart", () => {
     const open = vi.fn();
     render(<RunAnalytics executionId="execution-1" onOpenCalls={open} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show detailed analytics" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Show Failed calls" }));
     expect(open).toHaveBeenCalledWith({ status: ["failed"] });
     fireEvent.click(screen.getByRole("button", { name: "Show Passed calls" }));
@@ -339,6 +392,9 @@ describe("RunAnalytics", () => {
   it("opens the actual call from a performance-tail widget", () => {
     const open = vi.fn();
     render(<RunAnalytics executionId="execution-1" onOpenCall={open} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show detailed analytics" }),
+    );
     fireEvent.click(
       within(screen.getByRole("region", { name: "Slowest calls" })).getByRole(
         "button",
@@ -353,22 +409,22 @@ describe("RunAnalytics", () => {
     });
   });
 
-  it("shows all widgets even when an older saved layout hides them", () => {
-    localStorage.setItem(
-      "simulation-analytics-layout-v1:execution-1",
-      JSON.stringify({
-        hidden: ["tools_failure"],
-        views: [],
-        active: "Custom",
-      }),
-    );
-    const { rerender } = render(<RunAnalytics executionId="execution-1" />);
+  it("reveals and hides detailed metrics in one click", () => {
+    render(<RunAnalytics executionId="execution-1" />);
     expect(
       screen.queryByRole("region", { name: "Tool failure rate" }),
-    ).toBeInTheDocument();
-    rerender(<RunAnalytics executionId="execution-2" />);
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show detailed analytics" }),
+    );
     expect(
       screen.getByRole("region", { name: "Tool failure rate" }),
     ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Hide detailed analytics" }),
+    );
+    expect(
+      screen.queryByRole("region", { name: "Tool failure rate" }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -40,6 +40,7 @@ def csat_distribution(queryset: QuerySet, total: int) -> dict[str, Any]:
         .annotate(count=Count("id"))
         .values_list("score", "count")
     )
+    satisfied = queryset.filter(dashboard_csat__gte=8).count()
     comparison = queryset.filter(
         dashboard_provider_success__in=["true", "false"],
         result_eval_outcome__in=["passed", "failed"],
@@ -66,6 +67,10 @@ def csat_distribution(queryset: QuerySet, total: int) -> dict[str, Any]:
         ],
         "measured": sum(counts.values()),
         "total": total,
+        "satisfied": satisfied,
+        "satisfied_percent": (
+            round(satisfied * 100 / sum(counts.values()), 2) if counts else None
+        ),
         "agreement": {
             **comparison,
             "percent": (
