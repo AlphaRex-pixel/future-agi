@@ -159,3 +159,13 @@ def span_raw_log(attrs, *, span_id=None) -> dict:
             logger.warning("raw_log_unparseable", span_id=span_id, exc_info=True)
             return {}
     return raw_log if isinstance(raw_log, dict) else {}
+
+
+def vapi_customer(raw_log: dict) -> dict:
+    """A Vapi call payload's ``customer``; ``{}`` when absent or not an object.
+
+    Like ClickHouse's ``JSONExtractString(raw_log, 'customer', 'number')``,
+    a customer that is a string, list or number has no number.
+    """
+    customer = raw_log.get("customer")
+    return customer if isinstance(customer, dict) else {}

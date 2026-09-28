@@ -27,6 +27,7 @@ from tracer.services.clickhouse.query_builders.base import BaseQueryBuilder
 from tracer.services.clickhouse.query_builders.filters import ClickHouseFilterBuilder
 from tracer.services.clickhouse.query_builders.trace_list import TraceListQueryBuilder
 from tracer.services.simulator_phones import SIMULATOR_PHONE_NUMBERS
+from tracer.utils.attribute_accessor import vapi_customer
 
 # Backward-compatible public name used by existing callers and tests.
 VAPI_PHONE_NUMBERS = SIMULATOR_PHONE_NUMBERS
@@ -1195,9 +1196,7 @@ class VoiceCallListQueryBuilder(BaseQueryBuilder):
         payload as ``span_raw_log`` reads it.
         """
         if provider == "vapi":
-            customer = raw_log.get("customer")
-            # Like the SQL's JSONExtractString, a non-object customer has no number.
-            phone = customer.get("number", "") if isinstance(customer, dict) else ""
+            phone = vapi_customer(raw_log).get("number", "")
         elif provider == "retell":
             phone = raw_log.get("from_number", "")
         else:

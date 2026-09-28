@@ -66,6 +66,10 @@ _CALLS = (
     ("retell-caller", "retell", {"from_number": _CALLER}, "collector"),
     ("pg-caller", "vapi", {"customer": {"number": _CALLER}}, "pg"),
     ("malformed", "vapi", _MALFORMED, "collector"),
+    # A customer that is not an object has no number, even the simulator's.
+    ("string-customer", "vapi", {"customer": _SIMULATOR}, "collector"),
+    ("list-customer", "vapi", {"customer": [_SIMULATOR]}, "collector"),
+    ("number-customer", "vapi", {"customer": 7}, "collector"),
 )
 _SIMULATOR_CALLS = {call for call, *_ in _CALLS if call.endswith("-simulator")}
 _ALL_CALLS = {call for call, *_ in _CALLS}

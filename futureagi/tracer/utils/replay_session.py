@@ -22,7 +22,7 @@ from tracer.models.trace import Trace
 from tracer.services.clickhouse.span_attribute_lookups import (
     trace_ids_with_simulator_call_execution_id,
 )
-from tracer.utils.attribute_accessor import span_raw_log
+from tracer.utils.attribute_accessor import span_raw_log, vapi_customer
 from tracer.utils.otel import ConversationAttributes
 from tracer.utils.sql_queries import SQL_query_handler
 
@@ -703,7 +703,7 @@ def _extract_phone_number_from_raw_log(raw_log: dict) -> str:
     phone = raw_log.get("phoneNumber") or {}
     number = phone.get("twilioPhoneNumber") or phone.get("number") or ""
     if not number:
-        number = (raw_log.get("customer") or {}).get("number", "")
+        number = vapi_customer(raw_log).get("number", "")
     return number
 
 

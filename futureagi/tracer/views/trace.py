@@ -6203,7 +6203,8 @@ class TraceView(BaseModelViewSetMixin, ModelViewSet):
             provider = attr_row.get("provider") or provider
 
             raw_log = span_raw_log(span_attrs, span_id=span_id)
-            # Post-filter simulator calls in Python (can't do in CH without OOM)
+            # Parity backstop: simulator_call_sql already dropped these in
+            # ClickHouse when Phase 1 selected the page.
             if sim_flag and VoiceCallListQueryBuilderV2.is_simulator_call(
                 raw_log, provider
             ):

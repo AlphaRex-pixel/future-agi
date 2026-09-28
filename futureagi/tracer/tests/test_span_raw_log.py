@@ -115,11 +115,7 @@ def test_voice_list_parses_each_call_payload_once():
     assert warning["span_id"] == "root-1"
 
 
-@pytest.mark.django_db
-@pytest.mark.parametrize("raw_log", [*_NOT_AN_OBJECT[1:], _UNPARSEABLE])
-def test_voice_detail_reads_a_payload_it_cannot_use_as_absent(
-    auth_client, user, monkeypatch, raw_log
-):
+def _voice_detail(auth_client, user, monkeypatch, raw_log):
     _, workspace, project = _make_org_project(user, "Raw log")
     auth_client.set_workspace(workspace)
     trace_id = str(uuid.uuid4())
@@ -129,9 +125,16 @@ def test_voice_detail_reads_a_payload_it_cannot_use_as_absent(
     monkeypatch.setattr(
         "tracer.views.trace.read_trace_detail", lambda **_kwargs: detail
     )
+    return trace_id, auth_client.get(VOICE_CALL_DETAIL_URL, {"trace_id": trace_id})
 
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("raw_log", [*_NOT_AN_OBJECT[1:], _UNPARSEABLE])
+def test_voice_detail_reads_a_payload_it_cannot_use_as_absent(
+    auth_client, user, monkeypatch, raw_log
+):
     with capture_logs() as logs:
-        response = auth_client.get(VOICE_CALL_DETAIL_URL, {"trace_id": trace_id})
+        trace_id, response = _voice_detail(auth_client, user, monkeypatch, raw_log)
 
     assert response.status_code == status.HTTP_200_OK, response.data
     assert response.data["result"]["trace_id"] == trace_id
@@ -140,3 +143,16 @@ def test_voice_detail_reads_a_payload_it_cannot_use_as_absent(
         assert [w["span_id"] for w in warnings] == ["root"]
     else:
         assert warnings == []
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("customer", ["+15551234567", ["+15551234567"], 7])
+def test_voice_detail_reads_a_customer_that_is_not_an_object_as_absent(
+    auth_client, user, monkeypatch, customer
+):
+    raw_log = json.dumps({**_PAYLOAD, "customer": customer})
+
+    trace_id, response = _voice_detail(auth_client, user, monkeypatch, raw_log)
+
+    assert response.status_code == status.HTTP_200_OK, response.data
+    assert response.data["result"]["trace_id"] == trace_id
