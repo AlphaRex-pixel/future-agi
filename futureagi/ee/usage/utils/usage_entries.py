@@ -2173,7 +2173,14 @@ def check_if_dataset_creation_is_allowed(organization, config=None):
     from model_hub.models.develop_dataset import Dataset
 
     try:
-        from usage.services.entitlements import Entitlements
+        from ee.usage.services.entitlements import Entitlements
+
+        # This check never ran while the import above pointed at a missing
+        # module, so datasets have been uncapped. Keep it that way unless a
+        # plan sets a "datasets" limit: get_limit() reads an unconfigured
+        # feature as 0, i.e. "not available on your plan".
+        if Entitlements.get_entitlement(str(organization.id), "datasets") is None:
+            return True, {}
 
         dataset_count = Dataset.objects.filter(
             organization=organization, source__in=["build", "observe"], deleted=False
