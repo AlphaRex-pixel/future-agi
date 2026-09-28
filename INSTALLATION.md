@@ -56,8 +56,11 @@ This installs the **Standalone** setup: three containers (the app, Postgres
 and ClickHouse) from images published on Docker Hub, about 800 MB to download.
 Give Docker 2 CPUs and 4 GB of memory (3 GB is the minimum). For one container
 per service, run `./bin/install --distributed` instead; see
-[Deployment modes](#deployment-modes). On a branch other than `main`, add
-`--from-source`; see [Installing a branch from source](#installing-a-branch-from-source).
+[Deployment modes](#deployment-modes). Choose before you add data: a
+Standalone install's data cannot move to Distributed or Helm later (see
+[Switching](#switching-between-standalone-and-distributed)). On a branch other
+than `main`, add `--from-source`; see
+[Installing a branch from source](#installing-a-branch-from-source).
 
 `bin/install` does five things:
 
@@ -502,10 +505,14 @@ Standalone the app image `futureagi/standalone:local` from those four
 
 ### Switching between Standalone and Distributed
 
-Moving an existing install from one setup to the other, data included, is not
-supported. The two keep workflows, stored files and the Postgres → ClickHouse
-sync in different places, so the data would not carry over. `bin/install`
-therefore never switches an install that has data:
+Moving an existing install from one setup to another, data included, is not
+supported. That includes growing a Standalone install into Distributed or
+Helm: the only way from Standalone to either is a fresh install, so if you
+expect to outgrow one host, start on Distributed or Helm. Standalone keeps its
+workflows and stored files in its `app-data` volume, and Distributed syncs
+Postgres to ClickHouse through PeerDB instead of the outbox, so the data would
+not carry over. `bin/install` therefore never switches an install that
+has data:
 
 - A re-run keeps whatever `.env` records (`COMPOSE_FILE`).
 - An install made before Standalone existed is recognised by its volumes
@@ -529,6 +536,9 @@ To switch, back up what you need (see [Backups](#backups)), then start fresh:
 # delete the COMPOSE_FILE= line from .env
 ./bin/install
 ```
+
+For Helm, install the chart (see [Helm](#helm-distributed-on-kubernetes)),
+then remove the Compose install with `./bin/uninstall --wipe-data`.
 
 `--wipe-data` keeps `.env`, so the new install reuses its secrets. To try the
 other setup without touching this one, run it as a separate project instead:
