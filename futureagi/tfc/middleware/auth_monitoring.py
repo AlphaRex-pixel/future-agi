@@ -35,12 +35,6 @@ class AuthMonitoringMiddleware:
         global _cache_outage_logged
         try:
             failed_attempts = cache.get(f"failed_auth_{client_ip}", 0)
-
-            if failed_attempts > 5:  # Rate limiting
-                # logger.warning(f"Multiple failed auth attempts from IP: {client_ip}")
-                #     return JsonResponse({'error': 'Too many failed attempts'}, status=429)
-                pass
-
             cache.set(f"failed_auth_{client_ip}", failed_attempts + 1, 300)  # 5 minutes
         except Exception as exc:
             if not _cache_outage_logged:
