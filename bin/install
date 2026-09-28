@@ -549,11 +549,12 @@ fi
 # of the defaults published in the compose files. An existing install keeps
 # every value it has: Postgres stores its password in its volume, and a new
 # SECRET_KEY or gateway key would sign everyone out. Only empty or CHANGEME-*
-# keys are filled, and only on a fresh install. Two keys hold no state and
+# keys are filled, and only on a fresh install. Three keys hold no state and
 # are filled on any install: without INTEGRATION_ENCRYPTION_KEY every process
 # starts with a random key of its own, so nothing encrypted before survives a
-# restart anyway, and the standalone install's Redis keeps nothing across
-# restarts (the distributed stack's Redis takes no password).
+# restart anyway, the standalone install's Redis keeps nothing across
+# restarts (the distributed stack's Redis takes no password), and the gateway
+# and the app read AGENTCC_WEBHOOK_SECRET afresh on every start.
 FRESH_INSTALL=1
 if (( ${#STALE_VOLS[@]} > 0 && WIPE_VOLS == 0 )); then FRESH_INSTALL=0; fi
 
@@ -597,6 +598,7 @@ else
   fi
 fi
 fill_secret INTEGRATION_ENCRYPTION_KEY gen_fernet_key
+fill_secret AGENTCC_WEBHOOK_SECRET gen_secret
 if (( DISTRIBUTED == 0 )); then fill_secret REDIS_PASSWORD gen_secret; fi
 
 # ---------------- sandbox profile ----------------

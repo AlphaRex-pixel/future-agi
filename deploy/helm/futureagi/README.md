@@ -500,7 +500,7 @@ Bracketed names are the environment variables a key sets;
 | `secrets.llm.awsRegion` | `"us-east-1"` | [AWS_REGION] AWS Bedrock region (not secret). |
 | `secrets.eeLicenseKey` | `""` | [EE_LICENSE_KEY] Enterprise Edition license. |
 | `secrets.mailgunApiKey` | `""` | [MAILGUN_API_KEY] turns email on, with `config.email`. |
-| `secrets.agentccWebhookSecret` | `""` | [AGENTCC_WEBHOOK_SECRET] shared secret the gateway sends to the backend's webhooks. |
+| `secrets.agentccWebhookSecret` | `""` | [AGENTCC_WEBHOOK_SECRET] shared secret the gateway sends its request logs to the backend with. Empty generates one. |
 | `secrets.extra` | `{}` | Any other secret environment variables for the backend, workers and bootstrap job, as `NAME: value` (e.g. SENTRY_DSN, DAYTONA_API_KEY). Stored in <fullname>-secrets. |
 | `postgres.mode` | `"external"` | `external` or `bundled`. |
 | `postgres.database` | `"futureagi"` | [PG_DB] database name. |

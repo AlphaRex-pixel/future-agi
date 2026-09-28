@@ -226,7 +226,7 @@
         },
         "agentccWebhookSecret": {
           "type": "string",
-          "description": "[AGENTCC_WEBHOOK_SECRET] shared secret the gateway sends to the backend's webhooks."
+          "description": "[AGENTCC_WEBHOOK_SECRET] shared secret the gateway sends its request logs to the backend with. Empty generates one."
         },
         "extra": {
           "type": "object",

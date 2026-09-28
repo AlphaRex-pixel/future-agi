@@ -193,7 +193,14 @@ services:
 
       # --- LLM gateway, mail, captcha --------------------------------------
       AGENTCC_INTERNAL_API_KEY: ${AGENTCC_INTERNAL_API_KEY:-local-dev-only-shared-secret-replace-me}
+      # Empty: bin/start makes one for this start (the gateway and the API
+      # it posts request logs to both run in this container).
       AGENTCC_WEBHOOK_SECRET: ${AGENTCC_WEBHOOK_SECRET:-}
+      # The gateway loads UI-created keys and org settings from the API with
+      # the admin token, and posts its request logs there.
+      AGENTCC_CONTROL_PLANE_URL: http://127.0.0.1:8000
+      AGENTCC_CONTROL_PLANE_TOKEN: ${AGENTCC_ADMIN_TOKEN:-local-dev-only-admin-token-replace-me}
+      AGENTCC_SYNC_ON_STARTUP: "true"
       AGENTCC_HARNESS_API_KEY: ${AGENTCC_HARNESS_API_KEY:-}
       AGENTCC_BASE_URL: ${AGENTCC_BASE_URL:-}
       AGENTCC_ADMIN_TOKEN: ${AGENTCC_ADMIN_TOKEN:-local-dev-only-admin-token-replace-me}

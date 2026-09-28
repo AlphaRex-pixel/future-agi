@@ -183,6 +183,32 @@ def check_render(name: str, docs: list[dict]) -> list[str]:
                 "the bootstrap job provisions"
             )
 
+    # The gateway's request logs reach the backend only with the secret it
+    # checks them against, and the chart's Secret holds one unless it is given.
+    webhook = {}
+    for doc in workloads:
+        for container in containers(doc):
+            for entry in container.get("env", []):
+                if entry["name"] == "AGENTCC_WEBHOOK_SECRET":
+                    ref = entry.get("valueFrom", {}).get("secretKeyRef", {})
+                    webhook[component(doc)] = (ref.get("name"), ref.get("key"))
+    if "agentcc-gateway" in {component(d) for d in workloads} and (
+        webhook.get("agentcc-gateway") is None
+        or webhook.get("agentcc-gateway") != webhook.get("backend")
+    ):
+        failed.append(
+            f"{name}: the gateway and the backend do not share AGENTCC_WEBHOOK_SECRET"
+        )
+    secret_keys = {
+        (d["metadata"]["name"], key)
+        for d in docs
+        if d["kind"] == "Secret"
+        for key in d.get("data") or {}
+    }
+    for ref in set(webhook.values()):
+        if ref not in secret_keys:
+            failed.append(f"{name}: no Secret holds AGENTCC_WEBHOOK_SECRET {ref}")
+
     # The Secret comes back with `helm rollback`.
     for secret in (d for d in docs if d["kind"] == "Secret"):
         hook = secret["metadata"].get("annotations", {}).get("helm.sh/hook", "")

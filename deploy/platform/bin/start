@@ -166,6 +166,14 @@ else
   unset GOOGLE_APPLICATION_CREDENTIALS
 fi
 
+# The gateway posts its request logs to the API with this shared secret. Both
+# run in this container, so without one in .env, a random one for this start
+# does; unset, the API refuses the logs.
+if [ -z "${AGENTCC_WEBHOOK_SECRET:-}" ]; then
+  AGENTCC_WEBHOOK_SECRET=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+  export AGENTCC_WEBHOOK_SECRET
+fi
+
 # Every probe in this container (the bootstrap's wait for the API and the
 # healthcheck) asks for 127.0.0.1:8000. An ALLOWED_HOSTS that names only the
 # public host names would answer them 400, and the app would never be ready.

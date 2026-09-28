@@ -481,10 +481,11 @@ if ($WipeVolumes) {
 # A fresh install (no volumes of this project) gets its own secrets instead
 # of the defaults published in the compose files. An existing install keeps
 # every value it has: Postgres stores its password in its volume, and a new
-# SECRET_KEY or gateway key would sign everyone out. Two keys hold no state
+# SECRET_KEY or gateway key would sign everyone out. Three keys hold no state
 # and are filled on any install: without INTEGRATION_ENCRYPTION_KEY every
-# process starts with a random key of its own, and the standalone install's
-# Redis keeps nothing across restarts (the distributed stack's Redis takes none).
+# process starts with a random key of its own, the standalone install's Redis
+# keeps nothing across restarts (the distributed stack's Redis takes none),
+# and the gateway and the app read AGENTCC_WEBHOOK_SECRET afresh on every start.
 $freshInstall = ($existingVolumes.Count -eq 0) -or $wipe
 $installSecrets = @('SECRET_KEY', 'PG_PASSWORD', 'MINIO_ROOT_PASSWORD', 'AGENTCC_INTERNAL_API_KEY', 'AGENTCC_ADMIN_TOKEN')
 if ($freshInstall) {
@@ -512,6 +513,10 @@ if ($freshInstall) {
 if (Test-SecretUnset 'INTEGRATION_ENCRYPTION_KEY') {
   Set-EnvValue 'INTEGRATION_ENCRYPTION_KEY' (New-FernetKey)
   Ok "Generated INTEGRATION_ENCRYPTION_KEY"
+}
+if (Test-SecretUnset 'AGENTCC_WEBHOOK_SECRET') {
+  Set-EnvValue 'AGENTCC_WEBHOOK_SECRET' (New-HexSecret 32)
+  Ok "Generated AGENTCC_WEBHOOK_SECRET"
 }
 if (-not $IsDistributed -and (Test-SecretUnset 'REDIS_PASSWORD')) {
   Set-EnvValue 'REDIS_PASSWORD' (New-HexSecret 32)

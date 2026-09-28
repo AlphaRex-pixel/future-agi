@@ -1010,6 +1010,7 @@ def test_a_fresh_install_generates_every_secret_and_a_rerun_keeps_them(
     assert len({first[key] for key in SECRET_KEYS}) == len(SECRET_KEYS)
     fernet_key = first["INTEGRATION_ENCRYPTION_KEY"]
     assert len(base64.urlsafe_b64decode(fernet_key)) == 32
+    assert re.fullmatch(r"[0-9a-f]{64}", first["AGENTCC_WEBHOOK_SECRET"])
     assert "Generated SECRET_KEY" in stdout
 
     code, stdout, stderr = _run_installer(script, environment, "--no-up")
@@ -1046,9 +1047,11 @@ def test_an_existing_install_keeps_its_secrets_and_fills_only_stateless_keys(
         "PG_PASSWORD MINIO_ROOT_PASSWORD AGENTCC_INTERNAL_API_KEY AGENTCC_ADMIN_TOKEN "
         "still use the defaults published in this repository"
     ) in stderr
-    # No state depends on these two, so an existing install gets them too.
+    # No state depends on these three, so an existing install gets them too.
     assert re.fullmatch(r"[0-9a-f]{64}", values["REDIS_PASSWORD"])
     assert len(base64.urlsafe_b64decode(values["INTEGRATION_ENCRYPTION_KEY"])) == 32
+    # Without it the app refuses the gateway's request logs.
+    assert re.fullmatch(r"[0-9a-f]{64}", values["AGENTCC_WEBHOOK_SECRET"])
 
 
 @pytest.mark.parametrize(

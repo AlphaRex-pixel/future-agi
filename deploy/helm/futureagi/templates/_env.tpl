@@ -38,9 +38,7 @@ NO_STARTUP_DB_MUTATIONS is "true" everywhere except the bootstrap job.
 {{- if .catalogWriter -}}
 {{- $secretEnv = append $secretEnv (dict "name" "PROPERTY_CATALOG_CONSUMER_PASSWORD" "secret" $appSecret "key" "PROPERTY_CATALOG_CONSUMER_PASSWORD") -}}
 {{- end -}}
-{{- if $v.secrets.agentccWebhookSecret -}}
 {{- $secretEnv = append $secretEnv (dict "name" "AGENTCC_WEBHOOK_SECRET" "secret" $chartSecret "key" "AGENTCC_WEBHOOK_SECRET") -}}
-{{- end -}}
 {{- if $v.secrets.eeLicenseKey -}}
 {{- $secretEnv = append $secretEnv (dict "name" "EE_LICENSE_KEY" "secret" $chartSecret "key" "EE_LICENSE_KEY") -}}
 {{- end -}}
@@ -318,9 +316,7 @@ and the Service always find it. */}}
 {{- if $g.controlPlaneSync -}}
 {{- $secretEnv = append $secretEnv (dict "name" "AGENTCC_CONTROL_PLANE_TOKEN" "secret" $appSecret "key" "AGENTCC_ADMIN_TOKEN") -}}
 {{- end -}}
-{{- if $v.secrets.agentccWebhookSecret -}}
 {{- $secretEnv = append $secretEnv (dict "name" "AGENTCC_WEBHOOK_SECRET" "secret" (include "futureagi.secretName" $root) "key" "AGENTCC_WEBHOOK_SECRET") -}}
-{{- end -}}
 {{- range $secretEnv }}
 {{- if not (hasKey $overrides .name) }}
 {{ include "futureagi.secretEnv" . }}

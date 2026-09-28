@@ -100,7 +100,8 @@ below, which are published in this repository and therefore not secret.
 | `PG_PASSWORD` | `futureagi` | S D H | Postgres password. Written into the Postgres volume on the first start: changing it later gives `password authentication failed` until you restore the old value or wipe the volume. |
 | `MINIO_ROOT_PASSWORD` | `futureagi` (`.env.example` ships the placeholder `CHANGEME-set-by-bin-install`, which the installer replaces) | S D H | Object storage password: datasets, exports, media. Compose derives `S3_SECRET_KEY` from it. A `CHANGEME-` value next to existing volumes makes the installer stop and ask. |
 | `AGENTCC_INTERNAL_API_KEY` | `local-dev-only-shared-secret-replace-me` | S D H | Shared secret for app-to-gateway calls, and through the gateway your provider keys. Both sides read the same value, so it can change at any time. |
-| `AGENTCC_ADMIN_TOKEN` | `local-dev-only-admin-token-replace-me` | S D H | Bearer token for the LLM gateway's admin API. |
+| `AGENTCC_ADMIN_TOKEN` | `local-dev-only-admin-token-replace-me` | S D H | Bearer token for the LLM gateway's admin API. The gateway also sends it when it loads keys from the app. |
+| `AGENTCC_WEBHOOK_SECRET` | S: a random one on every start; D: empty, and the app refuses the gateway's request logs, so the gateway's logs and analytics stay empty | S D H | Shared secret the LLM gateway sends its request logs to the app with. Both read it on start, so it can change at any time. Helm: generated unless `secrets.agentccWebhookSecret` sets one. |
 | `INTEGRATION_ENCRYPTION_KEY` | Empty. With `ENV_TYPE=local`, every process start makes a throwaway key, so saved integration credentials do not survive a restart. Other `ENV_TYPE`s: connecting an integration fails. | S D H | Fernet key (32 random bytes, URL-safe base64) that encrypts stored integration credentials. Changing it strands what was saved with the old key; those integrations must be connected again. |
 | `REDIS_PASSWORD` | `local-dev-only-redis-password` | S | Password of the Redis inside the `app` container, which code evals can reach. Only letters, digits and `-` `_` `.` `~` (it is part of the Redis URLs); anything else stops the container at start. Distributed runs Redis without a password on the internal network. |
 
@@ -469,7 +470,6 @@ database, override `PG_HOST`, `PGBOUNCER_HOST` or `CH_HOST` in a
 | `CORS_ALLOWED_ORIGIN_REGEXES` | empty | S D H | Same, as regular expressions. |
 | `EXTRA_CSRF_ORIGINS` | empty | S D H | Extra trusted CSRF origins, comma-separated. |
 | `AGENTCC_CONFIG_PATH` | `agentcc-gateway/config.example.yaml` | S D | Gateway provider config, relative to the repository root, mounted into the gateway. Copy the example to enable Anthropic, Gemini, Bedrock, Vertex and others; the copy is git-ignored. A path that does not exist stops the stack from starting. |
-| `AGENTCC_WEBHOOK_SECRET` | empty: the app refuses gateway webhooks | S D H | Shared secret of the gateway's request-log webhook to the app. |
 | `OTEL_ENABLED` | `false` | S D H | Export the platform's own OpenTelemetry traces (monitoring Future AGI itself, not your application's traces). |
 | `FAST_STARTUP` | `false` | D H | Skip start-up checks in the backend containers. |
 | `TEMPORAL_TEST_EXECUTION_ENABLED` | `true` | S D H | Run test executions as Temporal workflows. |
@@ -573,6 +573,7 @@ nothing. Change what they are derived from instead, or use a
 | `FI_EMBEDDED_TEMPORAL_WORKER`, `TEMPORAL_GRACEFUL_SHUTDOWN_TIMEOUT` | fixed | S | The embedded worker and its drain. |
 | `TEMPORAL_TASK_QUEUE` | one queue per worker | D | Per-queue workers. |
 | `GEMINI_API_KEY` | `GOOGLE_API_KEY` | S D | The gateway's name for the Gemini key. |
+| `AGENTCC_CONTROL_PLANE_URL`, `AGENTCC_CONTROL_PLANE_TOKEN`, `AGENTCC_SYNC_ON_STARTUP` | the API (`http://127.0.0.1:8000` in S, `http://backend` in D), `AGENTCC_ADMIN_TOKEN`, `true` | S D | The gateway loads the keys and org settings made in the UI from the app when it starts and every 60 s (`control_plane.sync_interval` in `agentcc-gateway/config.example.yaml`), and posts its request logs there. A gateway config copied from an older example needs that `control_plane` block too, or keys made in the UI stop working when the gateway restarts before the app is up. |
 
 ## Legacy and retired keys
 

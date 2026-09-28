@@ -293,6 +293,58 @@ def test_supervisor_runs_the_contracted_processes() -> None:
             assert int(program.get("priority", 999)) < int(api["priority"]), name
 
 
+def test_the_gateway_loads_keys_from_the_app_and_sends_it_request_logs() -> None:
+    """Without the control plane the gateway forgets keys made in the UI when
+    it restarts, and its request logs and analytics stay empty."""
+    app = _compose(DEFAULT_COMPOSE)["services"]["app"]["environment"]
+    assert app["AGENTCC_CONTROL_PLANE_URL"] == "http://127.0.0.1:8000"
+    assert app["AGENTCC_CONTROL_PLANE_TOKEN"] == app["AGENTCC_ADMIN_TOKEN"]
+    assert app["AGENTCC_SYNC_ON_STARTUP"] == "true"
+    assert app["AGENTCC_WEBHOOK_SECRET"] == "${AGENTCC_WEBHOOK_SECRET:-}"
+    # It loads the keys once the API is up, not during a long bootstrap.
+    assert _programs()["gateway"]["command"].startswith(
+        "/opt/futureagi/bin/after-bootstrap agentcc-gateway "
+    )
+
+    full = _compose(FULL_COMPOSE)
+    gateway = full["services"]["agentcc-gateway"]["environment"]
+    backend = full["x-backend-env"]
+    # The backend's granian listens on :80.
+    assert "${BACKEND_PORT:-8000}:80" in full["services"]["backend"]["ports"]
+    assert gateway["AGENTCC_CONTROL_PLANE_URL"] == "http://backend"
+    assert gateway["AGENTCC_CONTROL_PLANE_TOKEN"] == backend["AGENTCC_ADMIN_TOKEN"]
+    assert gateway["AGENTCC_SYNC_ON_STARTUP"] == "true"
+    assert gateway["AGENTCC_WEBHOOK_SECRET"] == backend["AGENTCC_WEBHOOK_SECRET"]
+
+    # A startup sync that ran before the app was up is caught up with.
+    config = yaml.safe_load(
+        (ROOT / "agentcc-gateway" / "config.example.yaml").read_text(encoding="utf-8")
+    )
+    assert config["control_plane"] == {"sync_interval": "60s"}
+
+
+@pytest.mark.parametrize("configured", ["", "from-dot-env"])
+def test_start_makes_a_webhook_secret_only_when_none_is_set(
+    tmp_path, configured
+) -> None:
+    import subprocess
+
+    section = _start_section('if [ -z "${AGENTCC_WEBHOOK_SECRET:-}" ]; then', "fi\n")
+    script = tmp_path / "webhook.sh"
+    script.write_text(
+        f'set -euo pipefail\n{section}\nprintf %s "$AGENTCC_WEBHOOK_SECRET"\n',
+        encoding="utf-8",
+    )
+    env = {"PATH": os.environ["PATH"], "AGENTCC_WEBHOOK_SECRET": configured}
+    result = subprocess.run(
+        ["bash", str(script)], env=env, capture_output=True, text=True, check=True
+    )
+    if configured:
+        assert result.stdout == configured
+    else:
+        assert re.fullmatch(r"[0-9a-f]{64}", result.stdout)
+
+
 def test_supervisor_keeps_secrets_off_command_lines_and_out_of_tmp() -> None:
     conf = (PLATFORM / "supervisord.conf").read_text(encoding="utf-8")
     programs = _programs()
