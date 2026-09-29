@@ -709,7 +709,7 @@ def _read_slice(
     (``_native_certification_deadline``), the witness estimates at what the
     choice wall has left (``_choose_witness``), and the tail estimate and the
     tail's existence and presence statements at their share of what the probe
-    wall has left (``_tail_is_empty``, ``_tail_has_no_user``). The escape lifts the walls,
+    wall has left (``_probe_tail``, ``_tail_has_no_user``). The escape lifts the walls,
     once per request, for the head-of-line decision: the uncapped slice, its
     survivor statement, the instant read and its survivor statement when the
     slice comes back tied at one instant, and one batch's certification (and
