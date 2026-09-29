@@ -91,8 +91,8 @@ helm install futureagi oci://ghcr.io/future-agi/charts/futureagi --version "$VER
 > (see [Developing from a git checkout](#developing-from-a-git-checkout)),
 > and point `image.tag` (and `image.registry`) at images built from the same
 > branch and pushed where your cluster can pull them. The bootstrap job runs
-> `python manage.py bootstrap_install`, which no published v1.41.x
-> image contains; with such an image it fails with
+> `python manage.py bootstrap_install`, which no image published
+> before this chart contains; with such an image it fails with
 > `Unknown command: 'bootstrap_install'`.
 
 Helm waits for the bootstrap job (migrations and schema, a few minutes on
@@ -1008,7 +1008,7 @@ and upgrade by changing it, following [Upgrading](#upgrading).
 | `helm install` times out | `kubectl logs job/<release>-bootstrap`; let a running job finish before retrying; raise `--timeout` together with `bootstrap.activeDeadlineSeconds` (the first bootstrap migrates an empty database) |
 | bootstrap: `... is not reachable after 600s` | the host and port in the values, NetworkPolicies, DNS, `global.proxy.noProxy` |
 | bootstrap: `native tiered storage policy required` | the ClickHouse [storage policy](#clickhouse) |
-| bootstrap: `Unknown command: 'bootstrap_install'` | the backend image predates this chart (every published v1.41.x image does): set `image.tag` to images built from the chart's checkout |
+| bootstrap: `Unknown command: 'bootstrap_install'` | the backend image predates this chart (every image published before this chart does): set `image.tag` to images built from the chart's checkout |
 | bootstrap or fi-collector: certificate verify failed | `global.caBundle`, or `PGSSLROOTCERT` and the CA mount (see [PostgreSQL](#postgresql)) |
 | `helm upgrade`: `... cannot change` (StatefulSet ...) | [Install-time settings](#install-time-settings) |
 | Workers log `waiting for the database migrations` | the bootstrap job: `kubectl logs job/<release>-bootstrap` |
