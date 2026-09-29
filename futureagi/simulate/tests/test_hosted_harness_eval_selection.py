@@ -1295,7 +1295,7 @@ def test_provision_falls_back_to_the_authored_contract_excerpt(organization, wor
             "kind": "contract",
             "data": {
                 "modality": "voice",
-                "agent": "uber_voice_agent",
+                "agent": "cab_voice_agent",
                 "call_direction": "inbound",
                 "system_prompt_excerpt": "Booked rides only.",
             },
@@ -1310,7 +1310,7 @@ def test_provision_falls_back_to_the_authored_contract_excerpt(organization, wor
     agent = job.run_test.agent_definition
     assert agent.description == "Booked rides only."
     # Base derives human-readable names, so the snake_case value arrives title-cased.
-    assert agent.agent_name == "Uber Voice Agent"
+    assert agent.agent_name == "Cab Voice Agent"
     assert agent.inbound is True
 
 
