@@ -370,6 +370,7 @@ def create_selected_harness_run(
                 "execution_manifest": manifest,
                 "selected_scenario_keys": scenario_keys,
                 "trials": trials,
+                "scenario_edits": _scenario_edits(environment, registrations),
             }
         )
         child_payload.pop("job_id", None)
@@ -458,6 +459,74 @@ def create_selected_harness_run(
             ]
         )
         return child, True
+
+
+def _scenario_edits(
+    environment: HostedHarnessJob, registrations: list[HostedHarnessScenario]
+) -> dict[str, dict[str, Any]]:
+    """Each selected scenario's editable fields as the environment holds them now.
+
+    A run replays the sealed bundle, which keeps every scenario as authored; the call overlays
+    these, so an edit made in the scenarios tab is what the next call plays.
+    """
+    from simulate.models import HostedHarnessStageOutput
+    from simulate.services.harness_provider import HostedHarnessProvider
+    from simulate.services.hosted_harness_gateway import _scenario_token
+
+    suite = (
+        HostedHarnessStageOutput.no_workspace_objects.filter(
+            job=environment, kind="scenarios"
+        )
+        .values_list("data", flat=True)
+        .first()
+    ) or next(
+        (
+            one.get("data")
+            for one in (environment.stage_outputs or [])
+            if isinstance(one, dict) and one.get("kind") == "scenarios"
+        ),
+        None,
+    )
+    by_token = {
+        token: one
+        for one in (suite if isinstance(suite, list) else [])
+        if isinstance(one, dict)
+        for field in ("name", "scenario_key")
+        if (token := _scenario_token(one.get(field)))
+    }
+    fields = (
+        HostedHarnessProvider._DESCRIPTIVE_FIELDS
+        | HostedHarnessProvider._BEHAVIOURAL_FIELDS
+    )
+    edits: dict[str, dict[str, Any]] = {}
+    for registration in registrations:
+        document = next(
+            (
+                by_token[token]
+                for value in (
+                    registration.name,
+                    registration.scenario_key,
+                    registration.folder,
+                )
+                if (token := _scenario_token(value)) in by_token
+            ),
+            None,
+        )
+        if document is None:
+            continue
+        edit = {field: document[field] for field in fields if field in document}
+        persona = document.get("persona")
+        if isinstance(persona, dict):
+            edit["persona"] = {
+                key: value
+                for key, value in persona.items()
+                if key in HostedHarnessProvider._PERSONA_FIELDS
+            }
+        if edit:
+            edits[registration.scenario_key] = edit
+    return edits
+
+
 def _apply_parallelism_admission(
     job: HostedHarnessJob, snapshot_digest: str | None
 ) -> int:
@@ -711,17 +780,13 @@ def delete_environment(job: HostedHarnessJob) -> None:
                 )
 
                 cancel_job = HostedHarnessJob.no_workspace_objects.get(id=job_id)
-                HostedHarnessGateway().cancel(
-                    cancel_job, reason=DELETE_CANCEL_REASON
-                )
+                HostedHarnessGateway().cancel(cancel_job, reason=DELETE_CANCEL_REASON)
             except Exception:
                 logger.exception(
                     "hosted_harness_delete_direct_cancel_failed", job_id=job_id
                 )
                 if job_id == parent_cancel_id:
-                    _soft_delete(
-                        HostedHarnessJob.no_workspace_objects.get(id=job_id)
-                    )
+                    _soft_delete(HostedHarnessJob.no_workspace_objects.get(id=job_id))
 
 
 def _soft_delete(job: HostedHarnessJob) -> None:
@@ -869,10 +934,16 @@ def provision_scenarios(
         with transaction.atomic():
             for persona, (scenario, row) in zip(new_personas, bindings, strict=True):
                 registrations.append(
-                    HostedHarnessScenario.no_workspace_objects.update_or_create(
+                    # A key an amend dropped comes back as its own row, not a duplicate.
+                    HostedHarnessScenario.all_objects.update_or_create(
                         job=job,
                         scenario_key=persona["scenario_key"],
-                        defaults={"scenario": scenario, "dataset_row": row},
+                        defaults={
+                            "scenario": scenario,
+                            "dataset_row": row,
+                            "deleted": False,
+                            "deleted_at": None,
+                        },
                     )[0]
                 )
         return _provision_response(job, registrations)

@@ -6,6 +6,7 @@ from typing import Any
 
 from django.db.models import Q, QuerySet, Value
 from django.db.models.functions import Replace
+from django.utils import timezone
 
 from simulate.models.hosted_harness import HostedHarnessJob, HostedHarnessScenario
 
@@ -260,9 +261,16 @@ def index_scenarios(
     """Persist the authored suite so it can be queried, and return how many rows it holds."""
     if not docs:
         return 0
-    existing = {
-        row.scenario_key: row
-        for row in HostedHarnessScenario.no_workspace_objects.filter(job=job)
+    from simulate.services.hosted_harness_gateway import _scenario_token
+
+    # Dropped rows are hidden, not deleted: a run's history still points at them.
+    rows = list(HostedHarnessScenario.all_objects.filter(job=job))
+    existing = {row.scenario_key: row for row in rows}
+    by_token = {
+        token: row
+        for row in sorted(rows, key=lambda row: not row.deleted)
+        for token in (_scenario_token(row.scenario_key), _scenario_token(row.name))
+        if token
     }
     # Numbers are stable across re-indexing; only a new row gets the next free number.
     taken = max(
@@ -271,11 +279,22 @@ def index_scenarios(
     written = 0
     seen: set[str] = set()
     for position, doc in enumerate(docs, start=1):
-        key = str(doc.get("scenario_key") or doc.get("name") or "").strip()
+        held = next(
+            (
+                by_token[token]
+                for value in (doc.get("scenario_key"), doc.get("name"))
+                if (token := _scenario_token(value)) in by_token
+            ),
+            None,
+        )
+        key = (
+            held.scenario_key
+            if held is not None
+            else str(doc.get("scenario_key") or doc.get("name") or "").strip()
+        )
         if not key:
             continue
         seen.add(key)
-        held = existing.get(key)
         if held is not None and held.number is not None:
             number = held.number
         elif not existing:
@@ -316,6 +335,7 @@ def index_scenarios(
                 job=job, scenario_key=key, **fields
             )
         else:
+            fields.update(deleted=False, deleted_at=None)
             for name, value in fields.items():
                 setattr(row, name, value)
             row.save(update_fields=[*fields, "updated_at"])
@@ -324,7 +344,9 @@ def index_scenarios(
     if prune:
         HostedHarnessScenario.no_workspace_objects.filter(job=job).exclude(
             scenario_key__in=seen
-        ).filter(call_execution__isnull=True).delete()
+        ).filter(call_execution__isnull=True).update(
+            deleted=True, deleted_at=timezone.now()
+        )
     return written
 
 
@@ -474,10 +496,15 @@ def level_labels_for(
     for field in fields or []:
         if field.get("value") == "background_noise":
             beds.update(str(one) for one in field.get("choices") or [])
-        elif str(field.get("value") or "").startswith("coverage.") or field.get("value") == "sub_goals":
+        elif (
+            str(field.get("value") or "").startswith("coverage.")
+            or field.get("value") == "sub_goals"
+        ):
             levels.update(str(one) for one in field.get("choices") or [])
     for row in rows or []:
-        levels.update(str(one) for one in row.get("sub_goals") or [] if str(one).strip())
+        levels.update(
+            str(one) for one in row.get("sub_goals") or [] if str(one).strip()
+        )
         for value in (row.get("coverage") or {}).values():
             said = str(value or "").strip()
             if said:
