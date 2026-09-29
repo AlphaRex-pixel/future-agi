@@ -79,6 +79,15 @@ def _clickhouse_connect_error_code(exc: Exception) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _clickhouse_error_code(exc: Exception) -> int | None:
+    """The server error code of either driver's exception; None otherwise."""
+    if isinstance(exc, ClickHouseError):
+        return getattr(exc, "code", None)
+    if isinstance(exc, ClickHouseConnectDatabaseError):
+        return _clickhouse_connect_error_code(exc)
+    return None
+
+
 class ReadDeadlineExceeded(TimeoutError):
     """A request-owned read pipeline exhausted its single wall deadline."""
 
@@ -127,11 +136,7 @@ def is_read_budget_error(exc: Exception) -> bool:
 
     if isinstance(exc, (ReadDeadlineExceeded, ClickHouseSocketTimeoutError)):
         return True
-    if isinstance(exc, ClickHouseError):
-        return getattr(exc, "code", None) in _READ_BUDGET_ERROR_CODES
-    if isinstance(exc, ClickHouseConnectDatabaseError):
-        return _clickhouse_connect_error_code(exc) in _READ_BUDGET_ERROR_CODES
-    return False
+    return _clickhouse_error_code(exc) in _READ_BUDGET_ERROR_CODES
 
 
 def is_clickhouse_overload_error(exc: Exception) -> bool:
@@ -142,13 +147,10 @@ def is_clickhouse_overload_error(exc: Exception) -> bool:
     writer must retry it rather than split it or blame its rows.
     """
 
-    if is_read_budget_error(exc):
-        return True
-    if isinstance(exc, ClickHouseError):
-        return getattr(exc, "code", None) in _WRITE_BACKPRESSURE_ERROR_CODES
-    if isinstance(exc, ClickHouseConnectDatabaseError):
-        return _clickhouse_connect_error_code(exc) in _WRITE_BACKPRESSURE_ERROR_CODES
-    return False
+    return (
+        is_read_budget_error(exc)
+        or _clickhouse_error_code(exc) in _WRITE_BACKPRESSURE_ERROR_CODES
+    )
 
 
 def is_clickhouse_query_size_error(exc: Exception) -> bool:
@@ -160,13 +162,7 @@ def is_clickhouse_query_size_error(exc: Exception) -> bool:
     syntax errors remain programming failures and fail closed.
     """
 
-    if isinstance(exc, ClickHouseError):
-        code = getattr(exc, "code", None)
-    elif isinstance(exc, ClickHouseConnectDatabaseError):
-        code = _clickhouse_connect_error_code(exc)
-    else:
-        return False
-    return code == ErrorCodes.SYNTAX_ERROR and bool(
+    return _clickhouse_error_code(exc) == ErrorCodes.SYNTAX_ERROR and bool(
         _CLICKHOUSE_MAX_QUERY_SIZE_RE.search(str(exc))
     )
 
@@ -220,10 +216,8 @@ def is_clickhouse_api_read_unavailable_error(exc: Exception) -> bool:
     identifiers/tables, arbitrary runtime errors, and untyped message text.
     """
 
-    if is_read_budget_error(exc) or is_clickhouse_query_error(exc):
-        return True
-    if isinstance(exc, ClickHouseError):
-        return getattr(exc, "code", None) in _API_READ_UNAVAILABLE_ERROR_CODES
-    if isinstance(exc, ClickHouseConnectDatabaseError):
-        return _clickhouse_connect_error_code(exc) in _API_READ_UNAVAILABLE_ERROR_CODES
-    return False
+    return (
+        is_read_budget_error(exc)
+        or is_clickhouse_query_error(exc)
+        or _clickhouse_error_code(exc) in _API_READ_UNAVAILABLE_ERROR_CODES
+    )
