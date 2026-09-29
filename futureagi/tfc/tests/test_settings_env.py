@@ -35,10 +35,10 @@ def _load_settings(names, **env):
 
 
 # USAGE_EVENTS_MAX_LEN, the cap on the usage:events billing stream, is read
-# the way fi-collector reads it (cmd/fi-collector/main.go): blank is the
-# default, anything but a positive integer refuses to start. 0 would trim
-# events the consumer has not read yet, and a negative cap makes every XADD
-# fail, which the emitter only logs.
+# as fi-collector reads it (cmd/fi-collector/main.go): blank is the default,
+# and zero, a negative number or text refuses to start. 0 would trim events
+# the consumer has not read yet, and a negative cap makes every XADD fail,
+# which the emitter only logs.
 
 
 @pytest.mark.parametrize("value", ["", " "])

@@ -336,7 +336,7 @@ func applyEnvOverrides(log *slog.Logger, c *rootConfig) error {
 		}
 		c.Auth.UsageEvents = &on
 	}
-	if v := os.Getenv("USAGE_EVENTS_MAX_LEN"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("USAGE_EVENTS_MAX_LEN")); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil || n <= 0 {
 			return fmt.Errorf("USAGE_EVENTS_MAX_LEN must be a positive integer")

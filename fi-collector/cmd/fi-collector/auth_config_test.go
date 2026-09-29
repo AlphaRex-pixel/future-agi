@@ -100,6 +100,22 @@ func TestUsageEventsMaxLenMustBePositive(t *testing.T) {
 	}
 }
 
+// Blank means the default and surrounding spaces are ignored, as the Django
+// emitter reads it (tfc/utils/env.py).
+func TestUsageEventsMaxLenIgnoresSurroundingSpace(t *testing.T) {
+	for value, want := range map[string]int64{" ": 0, " 250000 ": 250000} {
+		clearCollectorEnv(t)
+		t.Setenv("USAGE_EVENTS_MAX_LEN", value)
+		cfg := rootConfig{}
+		if err := applyEnvOverrides(slog.Default(), &cfg); err != nil {
+			t.Fatalf("USAGE_EVENTS_MAX_LEN=%q: %v", value, err)
+		}
+		if cfg.Auth.UsageEventsMaxLen != want {
+			t.Errorf("USAGE_EVENTS_MAX_LEN=%q read as %d, want %d", value, cfg.Auth.UsageEventsMaxLen, want)
+		}
+	}
+}
+
 // Generate test-only credentials under t.TempDir, never use operator files or
 // contact a database. The leaf is suitable for both offline server trust checks
 // and proving that pgx loaded the configured client certificate/private key.
