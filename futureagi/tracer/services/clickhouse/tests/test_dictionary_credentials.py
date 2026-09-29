@@ -50,7 +50,6 @@ from tracer.services.clickhouse.v2 import apply_schema
 from tracer.services.clickhouse.v2.apply_schema_rewriter import (
     credentials_fingerprint,
     dictionary_credentials_outdated,
-    redact_secret,
     split_statements,
     with_dictionary_credentials,
     without_dictionary_credentials,
@@ -280,13 +279,6 @@ def test_live_metadata_with_a_hidden_password_compares_equal():
     assert not dictionary_credentials_outdated(
         "CREATE TABLE t (x UInt8)", USER, PASSWORD
     )
-
-
-def test_redaction_covers_raw_and_escaped_forms():
-    text = f"failed near PASSWORD {ESCAPED} (raw {PASSWORD})"
-    redacted = redact_secret(text, PASSWORD)
-    assert PASSWORD not in redacted and ESCAPED[1:-1] not in redacted
-    assert redact_secret(text, "") == text
 
 
 # ---------------------------------------------------------------------------

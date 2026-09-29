@@ -467,12 +467,3 @@ def dictionary_credentials_outdated(sql: str, user: str, password: str) -> bool:
             return True
     fingerprints = [value for _, _, value in _fingerprint_comments(sql)]
     return fingerprints != [credentials_fingerprint(user, password)] * len(sources)
-
-
-def redact_secret(text: str, secret: str) -> str:
-    """Replace a secret (raw or SQL-escaped) in text bound for a log."""
-    if not secret:
-        return text
-    for form in (_sql_string(secret)[1:-1], secret):
-        text = text.replace(form, "[HIDDEN]")
-    return text
