@@ -686,6 +686,43 @@ def test_truncate_is_tombstoned_by_the_requested_reconcile(pg, ch, config):
     assert cdc.status(pg, tables=TABLES)["reconcile_requested"] == []
 
 
+@pytest.mark.parametrize(
+    "clock_step",
+    [dt.timedelta(0), dt.timedelta(hours=-1)],
+    ids=["steady clock", "clock stepped back"],
+)
+def test_a_reconcile_requested_during_a_sweep_stays_requested(
+    pg, ch, config, monkeypatch, clock_step
+):
+    _install(pg, ch, config)
+    key = _trace(pg)
+    _drain(pg, ch, config)
+    cdc.reconcile(pg, ch, tables=TABLES)  # settle the post-snapshot sweep
+    cdc.request_reconcile(pg, ("tracer_trace",))  # pending when the sweep starts
+    sweep = cdc.reconcile_table
+
+    def truncated_behind_the_sweep(pg, ch, spec, stats, **kwargs):
+        sweep(pg, ch, spec, stats, **kwargs)
+        # The sweep has read its pages; a TRUNCATE lands and the drain asks
+        # for another sweep, stamped by a server clock that may have stepped.
+        pg.execute("TRUNCATE tracer_trace")
+        _drain(pg, ch, config)
+        pg.execute(
+            "UPDATE fi_cdc_state SET reconcile_requested_at = "
+            "reconcile_requested_at + %s WHERE table_name = 'tracer_trace'",
+            (clock_step,),
+        )
+
+    monkeypatch.setattr(cdc, "reconcile_table", truncated_behind_the_sweep)
+    assert cdc.reconcile(pg, ch, tables=("tracer_trace",))["swept"] == ["tracer_trace"]
+    assert key in ch.live("tracer_trace")  # read before the TRUNCATE
+    assert cdc.status(pg, tables=TABLES)["reconcile_requested"] == ["tracer_trace"]
+
+    monkeypatch.setattr(cdc, "reconcile_table", sweep)
+    assert cdc.reconcile(pg, ch, tables=TABLES)["swept"] == ["tracer_trace"]
+    assert not ch.live("tracer_trace")
+
+
 # ---------------------------------------------------------------------------
 # Snapshot
 # ---------------------------------------------------------------------------
@@ -759,6 +796,55 @@ def test_existing_rows_snapshot_resumably_without_looking_like_new_arrivals(
     assert {r["_peerdb_synced_at"] for r in olds} == {old}
     assert cdc.status(pg, tables=TABLES)["pending_snapshots"] == {}
     assert "tracer_trace" in cdc.status(pg, tables=TABLES)["reconcile_requested"]
+
+
+def test_install_rearms_lost_capture_and_recopies_what_it_missed(pg, ch, config):
+    _install(pg, ch, config)
+    gone, kept = _trace(pg), _trace(pg, name="before")
+    _drain(pg, ch, config)
+    cdc.reconcile(pg, ch, tables=TABLES)  # settle the post-snapshot sweep
+    pg.execute("ALTER TABLE tracer_trace DISABLE TRIGGER fi_cdc_upd")
+    pg.execute("DROP TRIGGER fi_cdc_del ON tracer_trace")
+    pg.execute("UPDATE tracer_trace SET name = 'after'")
+    pg.execute("DELETE FROM tracer_trace WHERE id = %s", (gone,))
+
+    # A restart: install re-arms capture before any drain tick sees it was off.
+    result = _install(pg, ch, config)
+
+    assert result["armed_triggers"] == {"tracer_trace": ["fi_cdc_del", "fi_cdc_upd"]}
+    assert result["resynced"] == ["tracer_trace"]
+    assert ch.live("tracer_trace")[kept]["name"] == "after"
+    # The completed re-snapshot requested the sweep that tombstones the delete.
+    assert cdc.reconcile(pg, ch, tables=TABLES)["swept"] == ["tracer_trace"]
+    assert set(ch.live("tracer_trace")) == {kept}
+
+
+def test_capture_rearmed_by_an_install_that_then_failed_is_still_recopied(
+    pg, ch, config, other, monkeypatch
+):
+    monkeypatch.setattr(cdc, "DDL_LOCK_TIMEOUT_MS", 200)
+    monkeypatch.setattr(cdc.time, "sleep", lambda _: None)
+    _install(pg, ch, config)
+    key = _trace(pg, name="before")
+    _drain(pg, ch, config)
+    for table in ("tracer_trace", "model_hub_score"):
+        pg.execute(f"ALTER TABLE {table} DISABLE TRIGGER fi_cdc_upd")
+    pg.execute("UPDATE tracer_trace SET name = 'after'")
+    with other.transaction():
+        other.execute("LOCK TABLE model_hub_score IN ROW EXCLUSIVE MODE")
+        with pytest.raises(cdc.OutboxCDCError, match="long transaction"):
+            _install(pg, ch, config)
+    # tracer_trace was re-armed before install gave up on the busy table, and
+    # only the arm that committed restarted its table's snapshot...
+    assert list(cdc.broken_capture(cdc.capture_state(pg, TABLES))) == [
+        "model_hub_score"
+    ]
+    assert cdc.status(pg, tables=TABLES)["pending_snapshots"] == {"tracer_trace": ""}
+
+    # ...so the retry finds its capture healthy, and must still re-copy it.
+    _install(pg, ch, config)
+
+    assert ch.live("tracer_trace")[key]["name"] == "after"
 
 
 def test_emptied_or_recreated_clickhouse_table_is_resnapshotted_on_next_install(
@@ -999,6 +1085,70 @@ def test_new_pg_column_is_added_in_clickhouse_at_runtime(pg, ch, config):
     assert ch.live("tracer_trace")[key]["sample_rate"] == 0.25
     assert _drain(pg, ch, config)["drift"] == {}
     assert cdc.install(pg, ch, config=config, apply=False)["ready"]
+
+
+@pytest.mark.parametrize("added_by", ["drain", "install"])
+def test_a_new_pg_column_is_backfilled_into_rows_that_predate_it(
+    pg, ch, config, added_by
+):
+    _install(pg, ch, config)
+    old = _trace(pg, name="old")
+    _drain(pg, ch, config)
+    # What Django's AddField runs: Postgres gives every existing row the
+    # default without firing a capture trigger, then the default is dropped.
+    pg.execute(
+        "ALTER TABLE tracer_trace ADD COLUMN sample_rate double precision "
+        "NOT NULL DEFAULT 0.25"
+    )
+    pg.execute("ALTER TABLE tracer_trace ALTER COLUMN sample_rate DROP DEFAULT")
+    new = _trace(pg, name="new", sample_rate=0.5)
+
+    # At runtime the drain adds the column; after an upgrade, install does.
+    result = _drain(pg, ch, config) if added_by == "drain" else _install(pg, ch, config)
+
+    assert result["added_columns"] == ["tracer_trace.sample_rate"]
+    assert result["pending_snapshots"] == []
+    if added_by == "install":
+        assert result["resynced"] == ["tracer_trace"]
+    live = ch.live("tracer_trace")
+    assert live[old].get("sample_rate") == 0.25
+    assert live[new]["sample_rate"] == 0.5
+
+
+@pytest.mark.parametrize("added_by", ["drain", "install"])
+def test_a_column_added_by_a_call_that_then_failed_is_still_backfilled(
+    pg, ch, config, monkeypatch, added_by
+):
+    _install(pg, ch, config)
+    old = _trace(pg, name="old")
+    _drain(pg, ch, config)
+    pg.execute(
+        "ALTER TABLE tracer_trace ADD COLUMN sample_rate double precision "
+        "NOT NULL DEFAULT 0.25"
+    )
+    pg.execute("ALTER TABLE tracer_trace ALTER COLUMN sample_rate DROP DEFAULT")
+    new = _trace(pg, name="new", sample_rate=0.5)
+    applied = ch.command
+
+    def reply_lost(sql):
+        applied(sql)
+        if "`sample_rate`" in sql:
+            raise CHOperationalError("connection reset after the ALTER ran")
+
+    monkeypatch.setattr(ch, "command", reply_lost)
+    run = _drain if added_by == "drain" else _install
+
+    with pytest.raises(CHOperationalError):
+        run(pg, ch, config)
+    # The retry finds the column present, so it adds nothing and relies on
+    # the snapshot restart the failed call requested before its ALTER.
+    result = run(pg, ch, config)
+
+    assert result["added_columns"] == []
+    assert result["pending_snapshots"] == []
+    live = ch.live("tracer_trace")
+    assert live[old].get("sample_rate") == 0.25
+    assert live[new]["sample_rate"] == 0.5
 
 
 def test_unmappable_new_column_is_reported_and_the_rest_keeps_flowing(pg, ch, config):

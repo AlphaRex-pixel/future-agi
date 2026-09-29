@@ -246,8 +246,16 @@ def test_capture_state_compares_catalog_fields_not_formatted_text(changes, state
 
 def test_arm_only_touches_broken_triggers_in_one_transaction(monkeypatch):
     issued = []
+
+    def ddl(pg, statements, *, attempts, then):
+        issued.append(statements)
+        then()  # last, inside the same transaction
+
+    monkeypatch.setattr(cdc, "_ddl", ddl)
     monkeypatch.setattr(
-        cdc, "_ddl", lambda pg, statements, attempts: issued.append(statements)
+        cdc,
+        "_reset_snapshots",
+        lambda pg, tables: issued.append(("resnapshot", tables)),
     )
     cdc.arm_triggers(
         None,
@@ -265,7 +273,8 @@ def test_arm_only_touches_broken_triggers_in_one_transaction(monkeypatch):
             'DROP TRIGGER fi_cdc_del ON public."t"',
             cdc.create_trigger_sql("t", "fi_cdc_del"),
             cdc.create_trigger_sql("t", "fi_cdc_trunc"),
-        ]
+        ],
+        ("resnapshot", ("t",)),
     ]
     issued.clear()
     cdc.arm_triggers(None, "t", dict.fromkeys(cdc.TRIGGERS, "ok"))
