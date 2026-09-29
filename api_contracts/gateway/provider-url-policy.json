@@ -1,5 +1,5 @@
 {
-  "description": "Which org provider base URLs the gateway calls (validateBaseURL, agentcc-gateway/internal/providers/override_test.go) and the backend's model discovery calls (url_safety, futureagi/agentcc/tests/test_url_safety.py), and how both read AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS (agentcc-gateway/internal/config/config_test.go). Both tests read this file, so the two policies cannot drift apart unnoticed. Host names resolve through the dns table; IP literals resolve to themselves; any other name does not resolve. A public URL always passes; a private one passes only with the opt-in; loopback, forbidden (link-local, cloud metadata, multicast, broadcast, unspecified), invalid and unresolvable ones never pass. backend_class is a known exception: what the backend decides instead.",
+  "description": "Which org provider base URLs the gateway calls (validateBaseURL, agentcc-gateway/internal/providers/override_test.go) and the backend's model discovery calls (url_safety, futureagi/agentcc/tests/test_url_safety.py), and how both read AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS (agentcc-gateway/internal/config/config_test.go). Both tests read this file, so the two policies cannot drift apart unnoticed. Host names resolve through the dns table; IP literals resolve to themselves; any other name does not resolve. The cloud metadata host names resolve to a public address, so only the check by name refuses them. A public URL always passes; a private one passes only with the opt-in; loopback, forbidden (link-local, cloud metadata, multicast, broadcast, unspecified), invalid and unresolvable ones never pass. backend_class is a known exception: what the backend decides instead.",
   "dns": {
     "api.openai.com": ["104.18.6.192"],
     "mock-llm": ["172.20.0.5"],
@@ -9,7 +9,12 @@
     "ula-box": ["fd12:3456::1"],
     "localhost": ["127.0.0.1", "::1"],
     "split-horizon": ["104.18.6.192", "10.0.0.12"],
-    "rebind-to-metadata": ["169.254.169.254"]
+    "rebind-to-metadata": ["169.254.169.254"],
+    "metadata": ["104.18.6.192"],
+    "metadata.google.internal": ["104.18.6.192"],
+    "metadata.goog": ["104.18.6.192"],
+    "instance-data": ["104.18.6.192"],
+    "instance-data.ec2.internal": ["104.18.6.192"]
   },
   "urls": [
     { "url": "https://api.openai.com/v1", "class": "public" },
@@ -43,6 +48,9 @@
     },
     { "url": "http://METADATA.google.internal.", "class": "forbidden" },
     { "url": "http://metadata", "class": "forbidden" },
+    { "url": "http://metadata.goog", "class": "forbidden" },
+    { "url": "http://instance-data", "class": "forbidden" },
+    { "url": "http://instance-data.ec2.internal", "class": "forbidden" },
     { "url": "http://rebind-to-metadata", "class": "forbidden" },
     { "url": "http://100.100.100.200", "class": "forbidden" },
     { "url": "http://[fd00:ec2::254]", "class": "forbidden" },
