@@ -187,7 +187,7 @@ def run_calls_queryset(
         job__simulation_runs__test_execution_id=OuterRef("test_execution_id")
     )
     authored = (
-        HostedHarnessScenario.no_workspace_objects.filter(
+        HostedHarnessScenario.all_objects.filter(
             Q(call_execution_id=OuterRef("pk"))
             | Q(own_run | own_environment, scenario_key=OuterRef("result_scenario_key"))
         )

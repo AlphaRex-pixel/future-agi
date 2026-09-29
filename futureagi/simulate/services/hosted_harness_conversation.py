@@ -380,6 +380,32 @@ def ensure_conversation(job: HostedHarnessJob) -> HostedHarnessConversation:
     return conversation
 
 
+def environment_authoring_revision(job: HostedHarnessJob) -> str:
+    """Revision of the authored files currently accepted by the environment."""
+    environment = job.environment if job.environment_id else job
+    metadata = (environment.payload or {}).get("metadata") or {}
+    revision = str(metadata.get("authoring_revision") or "")
+    if revision:
+        return revision
+    object_key = str(metadata.get("authoring_object_key") or "")
+    if not object_key:
+        return ""
+    try:
+        body = _read_object(object_key)
+    except Exception:  # noqa: BLE001 - a missing archive is handled by the run path
+        logger.warning(
+            "could not derive authoring revision environment=%s",
+            environment.id,
+            exc_info=True,
+        )
+        return f"object:{object_key}"
+    if body is None:
+        return f"object:{object_key}"
+    from simulate.services.hosted_harness_gateway import authoring_content_digest
+
+    return authoring_content_digest(body)
+
+
 def enqueue_message(
     job: HostedHarnessJob,
     *,
@@ -389,6 +415,8 @@ def enqueue_message(
     reply_to: uuid.UUID | None = None,
     payload: dict[str, Any] | None = None,
 ) -> tuple[HostedHarnessConversation, HostedHarnessConversationMessage, bool]:
+    expected_revision = environment_authoring_revision(job)
+    supplied_payload = {"command_kind": kind, **(payload or {})}
     with transaction.atomic():
         conversation = (
             HostedHarnessConversation.no_workspace_objects.select_for_update()
@@ -402,15 +430,23 @@ def enqueue_message(
                 workspace=job.workspace,
                 current_stage=_logical_stage(job.current_stage),
             )
-        command_payload = {"command_kind": kind, **(payload or {})}
+        command_payload = {
+            **supplied_payload,
+            "_environment_revision": expected_revision,
+        }
         existing = conversation.messages.filter(
             client_request_id=client_request_id
         ).first()
         if existing is not None:
+            existing_payload = {
+                key: value
+                for key, value in existing.payload.items()
+                if not key.startswith("_")
+            }
             if (
                 existing.content != content
                 or existing.reply_to != reply_to
-                or existing.payload != command_payload
+                or existing_payload != supplied_payload
             ):
                 raise HostedHarnessError(
                     "conversation_idempotency_conflict",
@@ -711,14 +747,16 @@ def pending_commands(
                 "message_id": str(message.id),
                 "sequence": message.sequence,
                 "kind": message.payload.get("command_kind", "user_message"),
-                "expected_environment_revision": conversation.latest_workspace_digest,
+                "expected_environment_revision": message.payload.get(
+                    "_environment_revision", ""
+                ),
                 "payload": {
                     "content": message.content,
                     "reply_to": str(message.reply_to) if message.reply_to else None,
                     **{
                         key: value
                         for key, value in message.payload.items()
-                        if key != "command_kind"
+                        if key != "command_kind" and not key.startswith("_")
                     },
                 },
             }
@@ -1031,27 +1069,45 @@ def promote_turn_checkpoint(
     conversation = HostedHarnessConversation.no_workspace_objects.get(
         id=conversation_id
     )
+    turn = HostedHarnessConversationEvent.no_workspace_objects.filter(
+        conversation=conversation,
+        kind="turn_completed",
+        sequence=turn_sequence,
+    ).first()
+    if turn is None:
+        return None
+    checkpoints = HostedHarnessConversationEvent.no_workspace_objects.filter(
+        conversation=conversation,
+        kind="checkpoint_committed",
+        sequence__lt=turn_sequence,
+        # A control-only checkpoint stored chat state, not the workspace.
+        payload__has_key="digest",
+    )
+    if turn.invocation_id:
+        checkpoints = checkpoints.filter(invocation_id=turn.invocation_id)
     committed = (
-        HostedHarnessConversationEvent.no_workspace_objects.filter(
-            conversation=conversation,
-            kind="checkpoint_committed",
-            sequence__lt=turn_sequence,
-            # A control-only checkpoint stored chat state, not the workspace.
-            payload__has_key="digest",
-        )
-        .order_by("-sequence")
-        .values_list("sequence", "payload")
-        .first()
+        checkpoints.order_by("-sequence").values_list("sequence", "payload").first()
     )
     if committed is None:
         return None
     sequence, payload = committed
     digest = str(payload["digest"])
+    command = HostedHarnessConversationMessage.no_workspace_objects.filter(
+        conversation=conversation,
+        id=(turn.payload or {}).get("command_message_id"),
+        role=HostedHarnessConversationMessage.Role.USER,
+    ).first()
+    expected_revision = (
+        str((command.payload or {}).get("_environment_revision") or "")
+        if command is not None
+        else ""
+    )
     return promote_conversation_checkpoint(
         conversation,
         object_key=_workspace_object_key(conversation, digest),
         digest=digest,
         sequence=sequence,
+        expected_revision=expected_revision,
     )
 
 
@@ -1069,12 +1125,26 @@ def promote_latest_checkpoint(
             status_code=409,
             retryable=True,
         )
+    command = (
+        conversation.messages.filter(
+            role=HostedHarnessConversationMessage.Role.USER,
+            sequence__lte=conversation.command_acked_through,
+        )
+        .order_by("-sequence")
+        .first()
+    )
+    expected_revision = (
+        str((command.payload or {}).get("_environment_revision") or "")
+        if command is not None
+        else environment_authoring_revision(conversation.job)
+    )
     return promote_conversation_checkpoint(
         conversation,
         object_key=conversation.latest_workspace_object_key,
         digest=conversation.latest_workspace_digest,
         # Every event acknowledged so far was emitted before this checkpoint was taken.
         sequence=conversation.event_acked_through,
+        expected_revision=expected_revision,
     )
 
 
@@ -1084,6 +1154,7 @@ def promote_conversation_checkpoint(
     object_key: str,
     digest: str,
     sequence: int,
+    expected_revision: str,
 ) -> HostedHarnessJob | None:
     """Make a chat checkpoint the environment's authored snapshot: the archive Runs replay,
     the documents the environment shows, and the scenarios a Run can select.
@@ -1095,6 +1166,8 @@ def promote_conversation_checkpoint(
     from simulate.services.harness_scenarios import index_scenarios
     from simulate.services.hosted_harness_gateway import (
         _scenario_token,
+        authoring_basis,
+        authoring_content_digest,
         authoring_stage_outputs_from_archive,
         store_authoring_archive,
     )
@@ -1113,6 +1186,8 @@ def promote_conversation_checkpoint(
             status_code=409,
         )
     archive = _authoring_archive(checkpoint)
+    content_revision = authoring_content_digest(archive)
+    checkpoint_basis = authoring_basis(checkpoint)
     outputs = {
         output["kind"]: output
         for output in authoring_stage_outputs_from_archive(archive)
@@ -1136,45 +1211,148 @@ def promote_conversation_checkpoint(
             status_code=422,
         )
 
+    observed_revision = environment_authoring_revision(environment)
+    stale_revision = None
     with transaction.atomic():
         environment = HostedHarnessJob.no_workspace_objects.select_for_update().get(
             id=environment.id
         )
         if environment.state != HostedHarnessJob.State.COMPLETED:
             return None
-        published = ((environment.payload or {}).get("metadata") or {}).get(
-            "conversation_checkpoint"
-        ) or {}
-        if published.get("digest") == digest or sequence < published.get(
-            "sequence", -1
-        ):
+        payload = dict(environment.payload or {})
+        metadata = dict(payload.get("metadata") or {})
+        current_revision = str(metadata.get("authoring_revision") or observed_revision)
+        checkpoints = dict(metadata.get("conversation_checkpoints") or {})
+        conversation_id = str(conversation.id)
+        published = dict(checkpoints.get(conversation_id) or {})
+        published_sequence = int(published.get("sequence") or 0)
+        if published.get("digest") == digest:
             return environment
-        store_authoring_archive(environment, archive, advance_lifecycle=False)
-        environment.payload["metadata"]["conversation_checkpoint"] = {
-            "digest": digest,
-            "sequence": sequence,
-        }
-        fresh = dict(outputs)
-        stage_outputs = [
-            fresh.pop(item["kind"])
-            if isinstance(item, dict) and item.get("kind") in fresh
-            else item
-            for item in environment.stage_outputs or []
-        ]
-        environment.stage_outputs = stage_outputs + list(fresh.values())
-        environment.scenario_count = len(suite)
-        environment.save(
-            update_fields=["payload", "stage_outputs", "scenario_count", "updated_at"]
+        if sequence < published_sequence:
+            return environment
+        if sequence == published_sequence and published:
+            raise HostedHarnessError(
+                "conversation_checkpoint_conflict",
+                "the conversation sequence is already bound to another checkpoint",
+                status_code=409,
+            )
+        basis = checkpoint_basis or expected_revision
+        if basis != current_revision:
+            stale_revision = current_revision
+        else:
+            checkpoints[conversation_id] = {
+                "digest": digest,
+                "sequence": sequence,
+                "content_revision": content_revision,
+            }
+            if content_revision == current_revision:
+                metadata["conversation_checkpoints"] = checkpoints
+                metadata.pop("conversation_checkpoint", None)
+                payload["metadata"] = metadata
+                environment.payload = payload
+                environment.save(update_fields=["payload", "updated_at"])
+                return environment
+
+            store_authoring_archive(environment, archive, advance_lifecycle=False)
+            metadata = dict(environment.payload["metadata"])
+            metadata["conversation_checkpoints"] = checkpoints
+            metadata.pop("conversation_checkpoint", None)
+            environment.payload["metadata"] = metadata
+            fresh = dict(outputs)
+            stage_outputs = [
+                (
+                    fresh.pop(item["kind"])
+                    if isinstance(item, dict) and item.get("kind") in fresh
+                    else item
+                )
+                for item in environment.stage_outputs or []
+            ]
+            environment.stage_outputs = stage_outputs + list(fresh.values())
+            environment.scenario_count = len(suite)
+            environment.save(
+                update_fields=[
+                    "payload",
+                    "stage_outputs",
+                    "scenario_count",
+                    "updated_at",
+                ]
+            )
+            for output in HostedHarnessStageOutput.no_workspace_objects.filter(
+                job=environment, kind__in=list(outputs)
+            ):
+                output.data = outputs[output.kind]["data"]
+                output.summary = outputs[output.kind]["summary"]
+                output.save(update_fields=["data", "summary", "updated_at"])
+            index_scenarios(environment, suite, prune=True)
+            _bind_added_scenarios(environment)
+    if stale_revision is not None:
+        _rebase_conversation_workspace(
+            conversation,
+            environment,
+            current_revision=stale_revision,
+            expected_key=object_key,
         )
-        for output in HostedHarnessStageOutput.no_workspace_objects.filter(
-            job=environment, kind__in=list(outputs)
-        ):
-            output.data = outputs[output.kind]["data"]
-            output.summary = outputs[output.kind]["summary"]
-            output.save(update_fields=["data", "summary", "updated_at"])
-        index_scenarios(environment, suite, prune=True)
-        _bind_added_scenarios(environment)
+        raise HostedHarnessError(
+            "conversation_checkpoint_stale",
+            "the environment changed after this chat workspace was loaded",
+            status_code=409,
+        )
     return environment
+
+
+def _rebase_conversation_workspace(
+    conversation: HostedHarnessConversation,
+    environment: HostedHarnessJob,
+    *,
+    current_revision: str,
+    expected_key: str,
+) -> None:
+    """Replace a stale chat workspace with the environment's accepted files."""
+    from simulate.services.hosted_harness_gateway import (
+        _scenario_token,
+        authoring_stage_outputs_from_archive,
+        replace_conversation_workspace,
+        with_authoring_basis,
+    )
+
+    object_key = str(
+        ((environment.payload or {}).get("metadata") or {}).get("authoring_object_key")
+        or ""
+    )
+    body = _read_object(object_key) if object_key else None
+    if body is None:
+        return
+    suite = next(
+        (
+            output.get("data")
+            for output in authoring_stage_outputs_from_archive(body)
+            if output.get("kind") == "scenarios"
+        ),
+        [],
+    )
+    replace_conversation_workspace(
+        conversation,
+        with_authoring_basis(body, current_revision),
+        expected_key=expected_key,
+        scenario_count=len(
+            {
+                _scenario_token(one.get("scenario_key") or one.get("name"))
+                for one in suite
+                if isinstance(one, dict)
+            }
+        ),
+    )
+    HostedHarnessConversationLease.no_workspace_objects.filter(
+        conversation=conversation,
+        attempt__isnull=True,
+        state__in=(
+            HostedHarnessConversationLease.State.STARTING,
+            HostedHarnessConversationLease.State.ACTIVE,
+        ),
+    ).update(
+        state=HostedHarnessConversationLease.State.EXPIRED,
+        updated_at=timezone.now(),
+    )
 
 
 def _authoring_archive(checkpoint: bytes) -> bytes:
