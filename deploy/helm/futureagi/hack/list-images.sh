@@ -4,7 +4,9 @@
 # line, sorted, `registry/repository:tag@sha256:...` when the digest is known.
 # helm-release.yml builds the Release's images lock (futureagi-images-X.Y.Z.txt)
 # and Hauler manifest with it; mirror these references into a private registry
-# for an air-gapped install.
+# for an air-gapped install. List them before global.imageRegistry points at
+# the mirror (or pass --set global.imageRegistry=), so they name the upstream
+# images.
 #
 #   deploy/helm/futureagi/hack/list-images.sh [options] [CHART] [-- HELM_ARGS...]
 #

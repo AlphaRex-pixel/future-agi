@@ -3,10 +3,12 @@
 # and is retried). Layer it over examples/external.yaml (datastores inside
 # your network).
 #
-# 1. Mirror the chart and every image it pulls, keeping digests and signatures:
+# 1. Mirror the chart and every image it pulls, keeping digests and signatures.
+#    List the upstream images (global.imageRegistry reset: this file points
+#    it at the mirror) and copy each into the mirror under its own path:
 #      helm pull oci://ghcr.io/future-agi/charts/futureagi --version X.Y.Z
 #      deploy/helm/futureagi/hack/list-images.sh futureagi-X.Y.Z.tgz -- \
-#        -f external.yaml -f airgap.yaml > images.txt
+#        -f external.yaml -f airgap.yaml --set global.imageRegistry= > images.txt
 #      (or the futureagi-images-X.Y.Z.txt release asset, or its Hauler manifest)
 #      while read -r ref; do crane copy "$ref" "registry.example.com/futureagi-mirror/${ref#*/}"; done < images.txt
 #      helm push futureagi-X.Y.Z.tgz oci://registry.example.com/charts

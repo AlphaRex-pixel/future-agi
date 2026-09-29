@@ -691,7 +691,9 @@ turns on the Enterprise features in the public `futureagi/future-agi` image.
   id, version and deployment type); offline it fails harmlessly and is
   retried. Mirror the chart and its images with the release's
   `futureagi-images-X.Y.Z.txt` or Hauler manifest, or with
-  `hack/list-images.sh` for your own values; `crane copy` and
+  `hack/list-images.sh` for your own values (add
+  `--set global.imageRegistry=` if they already name the mirror, so that it
+  lists the upstream images); `crane copy` and
   `oras copy -r` keep the digests, and a mirror that re-pushes images needs
   `image.pinDigests=false`. Then set `global.imageRegistry` (it rewrites
   every image, datastores included, whichever registry they come from) and

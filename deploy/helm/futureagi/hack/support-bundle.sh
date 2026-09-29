@@ -10,7 +10,8 @@
 # What it collects:
 #   helm status, history and user-supplied values (keys matching PASSWORD,
 #   SECRET, TOKEN, KEY, DSN, CREDENTIAL or HTTP(S)_PROXY redacted, with any
-#   block under them, and the user:password@ part of every URL);
+#   block under them, and PEM blocks and the user:password@ part of every URL
+#   under any key);
 #   kubectl get of the release's workloads, Services, PVCs, routes, network
 #   policies, ExternalSecrets and the namespace's events; describe output of
 #   pods that are not ready; current and previous logs of every Future AGI
@@ -19,9 +20,10 @@
 #   port-forward to the backend.
 #
 # It never reads Secret objects, never runs `helm get manifest/hooks` (which
-# can hold inline secrets), and redacts `NAME: value` / `NAME=value` pairs
-# with a sensitive name, and credentials in URLs (scheme://user:pass@host), in
-# the status, describe output and logs. Needs kubectl and helm
+# can hold inline secrets), and redacts the whole value of `NAME: value` /
+# `NAME=value` pairs with a sensitive name, PEM blocks (private keys) under
+# any name, and credentials in URLs (scheme://user:pass@host), in the status,
+# describe output and logs. Needs kubectl and helm
 # with access to the namespace; curl for the setup checks.
 set -uo pipefail
 
@@ -83,29 +85,52 @@ redact_urls() {
   sed -E 's#([A-Za-z][A-Za-z0-9+.-]*://)[^/[:space:]]*@#\1<redacted>@#g'
 }
 
+# A PEM block (a private key) goes from BEGIN to END whatever its name: over
+# lines (describe output, logs, a YAML block) or on one (\n-escaped in JSON).
+# A marker's label is optional: Helm folds a long values string at 80
+# columns, and may split -----BEGIN or -----END from it.
+redact_pem() {
+  awk '
+    in_pem {
+      if ($0 ~ /-----END/) in_pem = 0
+      next
+    }
+    {
+      line = $0
+      while (match(line, /-----BEGIN/)) {
+        head = substr(line, 1, RSTART - 1)
+        tail = substr(line, RSTART + RLENGTH)
+        if (!match(tail, /-----END[A-Z0-9 ]*(-----)?/)) {
+          line = head "<redacted>"
+          in_pem = 1
+          break
+        }
+        line = head "<redacted>" substr(tail, RSTART + RLENGTH)
+      }
+      print line
+    }
+  '
+}
+
 redact_yaml() {
-  awk -v pat="$sensitive" '
+  redact_pem | awk -v pat="$sensitive" '
     function indent_of(s) { match(s, /^ */); return RLENGTH }
     {
       line = $0
       ind = indent_of(line)
       if (skip >= 0) {
-        # the redacted key block: deeper lines, and a list at its own indent
+        # the rest of the redacted value: lines deeper than its key (a block,
+        # or a long string Helm folds at 80 columns), and a list at its indent
         if (line ~ /^[[:space:]]*$/ || ind > skip || (ind == skip && line ~ /^ *- /)) next
         skip = -1
       }
       if (match(line, /^ *(- )?["'\'']?[A-Za-z0-9_.\/-]+["'\'']?:/)) {
         key = substr(line, RSTART, RLENGTH)
         gsub(/^ *(- )?["'\'']?|["'\'']?:$/, "", key)
-        rest = substr(line, RSTART + RLENGTH)
         if (toupper(key) ~ pat) {
-          sub(/[[:space:]]+$/, "", rest)
-          if (rest == "" || rest ~ /^ *[|>]/) {
-            print substr(line, 1, RSTART + RLENGTH - 1) " <redacted>"
-            skip = ind
-          } else {
-            print substr(line, 1, RSTART + RLENGTH - 1) " <redacted>"
-          }
+          print substr(line, 1, RSTART + RLENGTH - 1) " <redacted>"
+          match(line, /^ *(- )?/)
+          skip = RLENGTH
           next
         }
       }
@@ -115,22 +140,75 @@ redact_yaml() {
   ' | redact_urls
 }
 
-# The same names in any case, for sed (BSD sed has no case-insensitive flag).
-any_case() {
-  local out="" c i
-  for ((i = 0; i < ${#1}; i++)); do
-    c=${1:i:1}
-    case $c in
-      [A-Za-z]) out+="[$(printf '%s' "$c" | tr '[:lower:]' '[:upper:]')$(printf '%s' "$c" | tr '[:upper:]' '[:lower:]')]" ;;
-      *) out+=$c ;;
-    esac
-  done
-  printf '%s' "$out"
-}
-sensitive_any_case=$(any_case "$sensitive")
-
+# A pair with a sensitive name, in any case, loses its whole value. After an
+# unquoted NAME: (kubectl describe's env var, whose quotes are part of the
+# value) it runs to the end of the line. Otherwise a quoted value goes up to
+# its closing quote; an unquoted one after a quoted name (a JSON number) up
+# to the next , } ] or space, in a URL query up to the next &, and any other
+# to the end of the line. A value that ends its line, an empty one included,
+# takes the lines indented under its name with it: kubectl describe continues
+# a multiline env value so (its first line may be empty), and Python's pprint
+# a long string. kubectl's "<set to the key 'k' in secret 's'>" names the
+# value's Secret and stays.
 redact_text() {
-  sed -E "s/([A-Za-z0-9_]*($sensitive_any_case)[A-Za-z0-9_]*[\"']?[[:space:]]*[:=][[:space:]]*[\"']?)[^[:space:],}\"']+/\1<redacted>/g" | redact_urls
+  redact_pem | awk -v pat="$sensitive" '
+    function indent_of(s) { match(s, /^[[:space:]]*/); return RLENGTH }
+    # Length of the quoted string s starts with, closing quote included (a
+    # backslash escapes the next character); 0 if it does not close.
+    function quoted_length(s,    q, i, c) {
+      q = substr(s, 1, 1)
+      for (i = 2; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == "\\") i++
+        else if (c == q) return i
+      }
+      return 0
+    }
+    BEGIN {
+      # NAME, its closing quote (\" in a JSON string inside JSON), : or =
+      pair = "[A-Z0-9_]*(" pat ")[A-Z0-9_]*(\\\\?[\"'\''])?[[:space:]]*[:=][[:space:]]*"
+      under = -1
+    }
+    under >= 0 {
+      if ($0 ~ /^[[:space:]]*$/ || indent_of($0) > under) next
+      under = -1
+    }
+    {
+      out = ""
+      rest = $0
+      while (match(toupper(rest), pair)) {
+        name_column = length($0) - length(rest) + RSTART - 1
+        before = RSTART > 1 ? substr(rest, RSTART - 1, 1) : ""
+        name = substr(rest, RSTART, RLENGTH)
+        quoted_name = name ~ /["'\'']/
+        out = out substr(rest, 1, RSTART + RLENGTH - 1)
+        rest = substr(rest, RSTART + RLENGTH)
+        if (rest ~ /^<set to the key /) break
+        first = substr(rest, 1, 1)
+        mask = "<redacted>"
+        value_length = length(rest)
+        if (!quoted_name && name ~ /:/) {
+          # NAME: value: the rest of the line, quotes and all
+        } else if (substr(rest, 1, 2) == "\\\"") {
+          n = index(substr(rest, 3), "\\\"")
+          if (n) { value_length = n + 3; mask = "\\\"" mask "\\\"" }
+        } else if (first == "\"" || first == "'\''") {
+          n = quoted_length(rest)
+          if (n) { value_length = n; mask = first mask first }
+        } else if (before == "?" || before == "&") {
+          match(rest, /^[^&#"[:space:]]*/)
+          value_length = RLENGTH
+        } else if (quoted_name && first != "{" && first != "[") {
+          match(rest, /^[^],}[:space:]]*/)
+          value_length = RLENGTH
+        }
+        if (rest != "") out = out mask
+        rest = substr(rest, value_length + 1)
+        if (rest ~ /^[[:space:]]*$/) under = name_column
+      }
+      print out rest
+    }
+  ' | redact_urls
 }
 
 run() { # run FILE CMD... : output (and errors) to FILE, never failing the bundle
@@ -207,7 +285,7 @@ fi
   echo "namespace: $namespace"
   echo "collected: $stamp"
   echo "Secret objects are never read; values, status, describe output and logs are"
-  echo "redacted by name ($sensitive) and URL credentials."
+  echo "redacted by name ($sensitive), PEM blocks and URL credentials."
   echo "Review the files before sending them."
 } >"$dir/README.txt"
 

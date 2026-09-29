@@ -8,6 +8,7 @@
 #   * kubeconform -strict on every rendered manifest, per Kubernetes version
 #   * invariants of the rendered manifests (hack/rendered_checks.py), and
 #     the backend's behaviour settings against docker-compose.distributed.yml
+#   * examples/airgap.yaml's mirror commands copy the images the chart pulls
 #   * the install notes and hack/support-bundle.sh keep credentials out
 #   * hack/support-bundle.sh stops its port-forward, finished or killed
 #   * values.yaml, values.schema.json and the README values table agree
@@ -254,27 +255,143 @@ for file in "$chart"/examples/gitops/*.yaml; do
     fail "kubeconform ($file)"
 done
 
+echo "== examples/airgap.yaml: its mirror commands copy each image the chart then pulls"
+# Its list-images.sh arguments and crane copy destination, run on this chart:
+# the destinations must be exactly the images external.yaml and airgap.yaml
+# pull. A list made with the mirror already set names the mirror as the
+# source, and the copy nests it a second time.
+airgap=$chart/examples/airgap.yaml
+list_args=$(sed -n 's/^#//; /list-images\.sh/,/> images\.txt/p' "$airgap" | tr -d '\\\n' |
+  sed -nE 's/.*list-images\.sh [^ ]+ -- +(.*) > images\.txt.*/\1/p')
+# shellcheck disable=SC2016 # the example's own $ref, not this script's
+mirror_prefix=$(sed -nE 's/.*crane copy "\$ref" "(.*)\$\{ref#\*\/\}".*/\1/p' "$airgap")
+if [ -z "$list_args" ] || [ -z "$mirror_prefix" ]; then
+  fail "examples/airgap.yaml no longer lists and copies the images the way this check reads them: update it"
+fi
+list_words=()
+# shellcheck disable=SC2086 # list_args is a word list
+for word in $list_args; do
+  case $word in *.yaml) list_words+=("$chart/examples/$word") ;; *) list_words+=("$word") ;; esac
+done
+sources=$(HELM="$helm" "$chart/hack/list-images.sh" "$chart" -- "${list_words[@]}")
+pulled=$(HELM="$helm" "$chart/hack/list-images.sh" "$chart" -- -f "$chart/examples/external.yaml" -f "$airgap")
+copied=$(while read -r ref; do echo "$mirror_prefix${ref#*/}"; done <<<"$sources" | sort)
+if [ "$copied" != "$pulled" ]; then
+  echo "sources:" >&2
+  echo "$sources" >&2
+  diff -u <(echo "$pulled") <(echo "$copied") >&2 || true
+  fail "examples/airgap.yaml copies its images to other references than the chart pulls"
+fi
+echo "ok   $(wc -l <<<"$sources" | tr -d ' ') images"
+
 echo "== hack/support-bundle.sh parses and redacts"
 bash -n "$chart/hack/support-bundle.sh" || fail "support-bundle.sh does not parse"
 if command -v shellcheck >/dev/null; then
   shellcheck "$chart/hack/support-bundle.sh" || fail "shellcheck support-bundle.sh"
 fi
 # Its redaction functions, on values, log lines, describe output and the
-# install notes with secrets in them: by name, and credentials in URLs (a
-# proxy login, a DATABASE_URL in extraEnv) under any name.
+# install notes with secrets in them: by name, and PEM blocks and credentials
+# in URLs (a proxy login, a DATABASE_URL in extraEnv) under any name, the
+# values included. Each value goes whole (spaces, commas, quotes, a long
+# value Helm or pprint folds, the continuation lines of a describe env value,
+# a PEM block) and what follows it stays. Each sample is its own call, as
+# each file of the bundle is; every secret in them ends in -123.
 redactors=$(sed -n '/^sensitive=/,/^run() {/p' "$chart/hack/support-bundle.sh" | sed '$d')
-redacted=$(bash -c "$redactors"'
+IFS= read -r -d '' samples <<'SAMPLES' || true
 printf "license:\n  key: lic-123\n  url: https://licenses\npostgres:\n  password: pg-123\nsecrets:\n  extra:\n    SENTRY_DSN: dsn-123\n" | redact_yaml
 printf "global:\n  proxy:\n    httpsProxy: http://corp:proxy-123@proxy.corp:3128\n    noProxy: .corp\nconfig:\n  extraEnv:\n    DATABASE_URL: postgres://app:url-123@db.corp:5432/app\n" | redact_yaml
 printf "PG_PASSWORD:  env-123\napi_key=\"log-123\" user=bob\n" | redact_text
 printf "      HTTPS_PROXY:   http://corp:describe-123@proxy.corp:3128\n      NO_PROXY:      .corp\n      DATABASE_URL:  postgres://app:dburl-123@db.corp:5432/app\n" | redact_text
 printf "NOTE     Outbound traffic goes through http://corp:status-123@proxy.corp:3128; NO_PROXY covers\n" | redact_text
-printf "config:\n  extraEnv:\n    DB_URL: postgres://app:p@ss-123@db.corp:5432/app\n" | redact_yaml')
-if grep -qE 'lic-123|pg-123|dsn-123|env-123|log-123|proxy-123|url-123|describe-123|status-123|ss-123' <<<"$redacted"; then
+printf "config:\n  extraEnv:\n    DB_URL: postgres://app:p@ss-123@db.corp:5432/app\n" | redact_yaml
+redact_yaml <<'EOF'
+postgres:
+  password: correct horse battery staple and more words past eighty columns fold-123
+    folded tail-123
+  host: db.corp
+bootstrap:
+  users:
+  - password: item-123
+    name: kept-name
+config:
+  extraEnv:
+    GOOGLE_SA_JSON: '{"type":"service_account","project":"p","private_key":"-----BEGIN
+      PRIVATE KEY-----\nsa-pem-123\n-----END PRIVATE KEY-----\n","client_email":"x@y"}'
+    JWT_SIGNING_PEM: |
+      -----BEGIN EC PRIVATE KEY-----
+      block-pem-123
+      -----END EC PRIVATE KEY-----
+    LOG_LEVEL: info
+    SA_JSON: '{"type":"service_account","private_key":"-----BEGIN PRIVATE KEY-----\nfolded-pem-123\n-----END
+      PRIVATE KEY-----\n","client_email":"x@y"}'
+EOF
+redact_text <<'EOF'
+    Environment:
+      SERVICE_PASSWORD:  correct-123 horse, battery staple-123
+      PG_PASSWORD:       <set to the key 'password' in secret 'futureagi-postgres'>  Optional: false
+      TLS_PRIVATE_KEY:   -----BEGIN RSA PRIVATE KEY-----
+                         describe-pem-123
+                         -----END RSA PRIVATE KEY-----
+      SIGNING_SECRET:    first-line-123
+                         second-line-123
+
+      QUOTED_TOKEN:      "open-123
+                         close-123"
+      QUOTED_PASSWORD:   "quoted-123 horse" battery-123
+      SIGNING_KEYS:      "k1-123"
+                         k2-123
+      API_KEYS:
+                         empty-first-line-123
+      LOG_LEVEL:         info
+    Mounts:
+Volumes:
+  gcp-credentials:
+    Type:        Secret (a volume populated by a Secret)
+    SecretName:  futureagi-gcp
+    Optional:    false
+EOF
+redact_text <<'EOF'
+2026-09-29T10:00:00.000000000Z loaded -----BEGIN PRIVATE KEY-----
+2026-09-29T10:00:00.000000000Z log-pem-123
+2026-09-29T10:00:00.000000000Z -----END PRIVATE KEY-----
+2026-09-29T10:00:01.000000000Z worker ready
+EOF
+redact_text <<'EOF'
+{"event": "login", "password": "first,second two-123", "user": "bob"}
+{"msg": "{\"token\": \"nested value-123\", \"n\": 1}", "level": "info"}
+{"max_tokens": 1024, "model": "m1"}
+{"credentials": {"id": "a", "key": "obj-123"}, "level": "info"}
+{'secret': 'py value-123', 'n': 1}
+{'client_secret': 'pprint wraps a long string into parts-123 on the lines '
+                  'under its name-123',
+ 'user': 'bob'}
+{"cert": "-----BEGIN CERTIFICATE-----\nMIIC-123\n-----END CERTIFICATE-----\n", "x": 1}
+"GET /api/traces/?page=2&api_key=query-123&q=x HTTP/1.1" 200
+Annotations:  checksum/secrets: 0f1e2d
+              kubectl.kubernetes.io/restartedAt: 2026-09-29T10:00:00Z
+EOF
+SAMPLES
+redacted=$(bash -c "$redactors"$'\n'"$samples")
+if grep -qF -- '-123' <<<"$redacted"; then
   echo "$redacted" >&2
   fail "support-bundle.sh redaction leaves a secret"
 fi
-for kept in 'https://licenses' 'noProxy: .corp' 'NO_PROXY:      .corp' 'postgres://<redacted>@db.corp:5432/app' 'http://<redacted>@proxy.corp:3128;'; do
+kept_after_redaction=(
+  'https://licenses' 'noProxy: .corp' 'NO_PROXY:      .corp' 'postgres://<redacted>@db.corp:5432/app' 'http://<redacted>@proxy.corp:3128;'
+  'api_key="<redacted>" user=bob'
+  '  host: db.corp' '    name: kept-name'
+  '"private_key":"<redacted>' '    JWT_SIGNING_PEM: |' '    LOG_LEVEL: info'
+  "      PG_PASSWORD:       <set to the key 'password' in secret 'futureagi-postgres'>  Optional: false"
+  '      SERVICE_PASSWORD:  <redacted>' '      TLS_PRIVATE_KEY:   <redacted>' '      LOG_LEVEL:         info' '    Mounts:'
+  '    Type:        Secret (a volume populated by a Secret)' '    Optional:    false'
+  'loaded <redacted>' '2026-09-29T10:00:01.000000000Z worker ready'
+  '"password": "<redacted>", "user": "bob"}' '\"token\": \"<redacted>\", \"n\": 1}", "level": "info"}'
+  '{"max_tokens": <redacted>, "model": "m1"}' '{"credentials": <redacted>' "{'secret': '<redacted>', 'n': 1}"
+  "{'client_secret': '<redacted>'" " 'user': 'bob'}"
+  '{"cert": "<redacted>\n", "x": 1}' '&api_key=<redacted>&q=x HTTP/1.1" 200'
+  '              kubectl.kubernetes.io/restartedAt: 2026-09-29T10:00:00Z'
+)
+for kept in "${kept_after_redaction[@]}"; do
   grep -qF -- "$kept" <<<"$redacted" || {
     echo "$redacted" >&2
     fail "support-bundle.sh redaction removes: $kept"
