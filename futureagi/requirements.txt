@@ -5,7 +5,9 @@ absl-py==2.3.1
 aiohappyeyeballs==2.6.1
     # via aiohttp
 aiohttp==3.14.3
-    # via litellm
+    # via
+    #   core-backend
+    #   litellm
 aiosignal==1.4.0
     # via aiohttp
 amqp==5.3.1
@@ -48,6 +50,8 @@ attrs==25.4.0
     #   aiohttp
     #   jsonschema
     #   referencing
+audioop-lts==0.2.2 ; python_full_version >= '3.13'
+    # via core-backend
 backoff==2.2.1
     # via
     #   langfuse

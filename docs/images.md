@@ -57,7 +57,7 @@ build argument, `IMAGE_VARIANT`:
 |---|---|---|
 | Published as | `futureagi/future-agi:vX.Y.Z` (and `vX.Y`, `latest`) | `futureagi/future-agi:vX.Y.Z-slim` (and `vX.Y-slim`, `latest-slim`) |
 | Used by | Distributed, Helm, the simulation runner, and the EE and cloud images; `./bin/install --distributed --from-source` and `./bin/e2e` build it | the base of `futureagi/standalone`, so Standalone; `./bin/install --from-source` and `./bin/dev` build it for Standalone |
-| Contents | what earlier releases shipped: the `sandbox` (Daytona, E2B), `billing`, `ops` (Flower), `gcp` (Vertex AI SDK), `langchain` and `rabbitmq` dependency groups, `uv`, git, Debian's ffmpeg, every NLTK package and untrimmed site-packages. Only development tools (type stubs, the debug toolbar) moved to the `dev` group | base dependencies only, no `uv` or git, a minimal LGPL ffmpeg build, the English NLTK data the app loads, and trimmed site-packages |
+| Contents | what earlier releases shipped: the `sandbox` (Daytona, E2B), `billing`, `ops` (Flower), `gcp` (Vertex AI SDK), `langchain`, `rabbitmq` and `localizer` (Claude Agent SDK) dependency groups, `uv`, git, Debian's ffmpeg, every NLTK package and untrimmed site-packages. Only development tools (type stubs, the debug toolbar) moved to the `dev` group | base dependencies only, no `uv` or git, a minimal LGPL ffmpeg build, the English NLTK data the app loads, and trimmed site-packages |
 | Size | about the size of earlier releases | budget 376 MB compressed (measured 341) |
 
 Both run the same code and dependency versions (from `uv.lock`). What the
@@ -65,9 +65,11 @@ slim variant leaves out shows up in a Standalone install as: hosted agent
 runs on Daytona or E2B answer `501 sandbox_sdk_missing`, and from a GitHub
 source `501 git_unavailable`; the Vertex AI partner models (Model Garden,
 Gemma, Claude, Llama and Mistral on Vertex) are hidden from the model picker;
-`SERVICE_TYPE=flower` and the RabbitMQ channel layer are unavailable; an audio
-upload in an exotic codec (AV1, WavPack, ProRes) fails with "Decoder not
-found".
+`SERVICE_TYPE=flower` and the RabbitMQ channel layer are unavailable; error
+localization runs its original backend (`ERROR_LOCALIZER_BACKEND=legacy`,
+which cannot localize simulation call audio) instead of the Claude Agent SDK
+one; an audio upload in an exotic codec (AV1, WavPack, ProRes) fails with
+"Decoder not found".
 
 `IMAGE_VARIANT` only sets the defaults of the per-feature build arguments
 ([Build arguments](#build-arguments)); one passed explicitly wins. A
@@ -296,7 +298,7 @@ Per image:
 | Image | Argument | Default | Effect |
 |---|---|---|---|
 | `future-agi` | `IMAGE_VARIANT` | `standard` | `standard` or `slim` ([Backend variants](#backend-variants)); sets the default of each argument below that is left empty |
-| | `EXTRAS` | `standard`: `sandbox,billing,ops,gcp,langchain,rabbitmq`; `slim`: none | optional dependency groups, comma-separated: `audio`, `ml`, `voice`, `pii`, `prompt-opt`, `vectordb`, `rabbitmq`, `gcp`, `sandbox`, `billing`, `ops`, `langchain` (pinned by `uv.lock`). A value replaces the variant's list (include its groups to keep them); `none` installs no group |
+| | `EXTRAS` | `standard`: `sandbox,billing,ops,gcp,langchain,rabbitmq,localizer`; `slim`: none | optional dependency groups, comma-separated: `audio`, `ml`, `voice`, `pii`, `prompt-opt`, `vectordb`, `rabbitmq`, `gcp`, `sandbox`, `billing`, `ops`, `langchain`, `localizer` (pinned by `uv.lock`). A value replaces the variant's list (include its groups to keep them); `none` installs no group |
 | | `FFMPEG_FLAVOR` | `standard`: `debian`; `slim`: `minimal` | `minimal` (LGPL build, ~9 MB), `debian` (Debian's ffmpeg, about +145 MB), `none` (audio upload and video thumbnails fail) |
 | | `WITH_GIT` | `standard`: `true`; `slim`: `false` | git (+29 MB) for hosted-harness GitHub sources, which otherwise answer 501 |
 | | `WITH_UV` | `standard`: `true`; `slim`: `false` | ships `uv` and `uvx` for images that install packages on top |

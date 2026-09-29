@@ -19,7 +19,7 @@ case "${IMAGE_VARIANT:=standard}" in
     standard)
         # The groups that were base dependencies before the image-size split
         # (pyproject.toml [project.optional-dependencies]).
-        : "${EXTRAS:=sandbox,billing,ops,gcp,langchain,rabbitmq}"
+        : "${EXTRAS:=sandbox,billing,ops,gcp,langchain,rabbitmq,localizer}"
         : "${FFMPEG_FLAVOR:=debian}"
         : "${WITH_GIT:=true}"
         : "${WITH_UV:=true}"

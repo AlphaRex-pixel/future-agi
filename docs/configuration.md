@@ -268,15 +268,17 @@ the default backend ([docs/images.md](images.md#backend-variants)).
 | `ALK_HOSTED_AGENTCC_BASE_URL`, `AGENTCC_BASE_URL` | empty | S D H | Gateway URL reachable from inside the sandbox, for authoring through the gateway. The first wins. |
 | `ALK_HOSTED_AGENTCC_MODEL` | `vertex_ai/gemini-3.7-flash` | S D H | Model requested through that gateway. |
 | `AGENTCC_HARNESS_API_KEY` | empty (falls back to `AGENTCC_INTERNAL_API_KEY`) | S D H | Platform-owned gateway key for sandbox authoring. |
-| `SIMULATOR_LLM_PROVIDER`, `SIMULATOR_LLM_MODEL` | `vertex`, `gemini-3.7-flash` | S D H | LLM that plays the simulated user. |
+| `SIMULATOR_LLM_PROVIDER`, `SIMULATOR_LLM_MODEL` | `vertex`, `gemini-3.8-flash` | S D H | LLM that plays the simulated user. |
 | `ALK_HOSTED_BASE_EGRESS_DOMAINS` | empty | S D H | Extra domains a sandbox may reach, comma-separated. |
 | `ALK_HOSTED_WEBRTC_EGRESS_CIDRS` | empty | S D H | CIDRs a sandbox may reach for WebRTC media, comma-separated. |
 | `ALK_HOSTED_EGRESS_UNRESTRICTED` | `false` | S D H | `true` lifts the sandbox egress allow-list. |
 | `ALK_HOSTED_AUTHORING_MAX_DURATION_SECONDS` | `3600` | S D H | Longest an authoring run may take. |
 | `ALK_HOSTED_AUTHORING_TIMEOUT` | empty: `ALK_HOSTED_AUTHORING_MAX_DURATION_SECONDS` + 300 | S D H | Timeout of the whole authoring step, in seconds. |
 | `ALK_HOSTED_SANDBOX_TTL_SECONDS` | `7200` | S D H | Lifetime of a job's sandbox. |
+| `ALK_HOSTED_PROVIDER_UNREACHABLE_GRACE_SECONDS` | `180` | S D H | Seconds a running sandbox may stay unreachable through its provider's API before the job fails it (`sandbox_unreachable`) and replaces it from its infrastructure retries. Raise it for long runs that must ride out a brief provider outage. |
 | `ALK_HOSTED_CHAT_TTL_SECONDS` | `1800` | S D H | Lifetime of an interactive chat sandbox. |
 | `ALK_HOSTED_BUNDLE_DIR` | empty | S D H | Directory of pre-authored environment bundles (`<dir>/<owner>__<repo>/manifest.json`). |
+| `ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER`, `ALK_UBER_GUEST_POC_PIN` | empty: off | S D H | Temporary proof-of-concept scenario policy of Future AGI's hosted service (an E.164 target and its PIN), passed to sandboxes on the platform's simulator-secret channel. Leave empty when self-hosting. |
 
 ### Voice simulations (Distributed)
 
@@ -287,12 +289,18 @@ Check the runner's effective environment with
 runner `FI_API_KEY` or `FI_SECRET_KEY`: results would be filed under the wrong
 organization.
 
+The LiveKit and SIP trunk keys (`S` below) also reach the API: phone runs in
+hosted sandboxes ([above](#agent-simulations-in-hosted-sandboxes)) dial out
+through the platform's trunk, never a customer's, so Standalone's `app` and
+Distributed's `backend` read them too.
+
 | Key | Default | Setups | What it does |
 | --- | --- | --- | --- |
-| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | empty | D H | LiveKit project the simulator joins. Must own the SIP trunk below. |
+| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | empty | S D H | LiveKit project the simulator joins. Must own the SIP trunk below. The API also hands it to phone runs in hosted sandboxes, which is why Standalone's `app` reads it. |
 | `INTERNAL_API_SECRET` | empty | D H | Bearer the runner uses to report results to the platform. |
-| `LIVEKIT_OUTBOUND_TRUNK_ID` | empty | D H | Outbound SIP trunk (the platform dials the customer's agent). |
-| `PSTN_CALLER_NUMBER` | empty | D H | E.164 caller id provisioned on that trunk. |
+| `LIVEKIT_OUTBOUND_TRUNK_ID` | empty | S D H | Outbound SIP trunk (the platform dials the customer's agent). |
+| `PSTN_CALLER_NUMBER` | empty | S D H | E.164 caller id provisioned on that trunk. |
+| `SIP_OUTBOUND_TRUNK_ID`, `SIP_OUTBOUND_FROM_NUMBER` | empty | S D H | Fallbacks for `LIVEKIT_OUTBOUND_TRUNK_ID` and `PSTN_CALLER_NUMBER` when a phone run in a hosted sandbox dials out; those two win when set. |
 | `ALK_SIM_SLOT_LEASE_SCRIPT` | empty | D H | Path inside the runner to the lease script for inbound (Retell) runs. Unset: the SDK provisions a dispatch rule per run. |
 | `SIM_SLOT_LEASE_STORE` | the lease script's own per-container default | D H | Where that script records leases; point every runner at one shared location. Read by the lease script, not by the platform. |
 | `HOSTED_RUNNER_ENABLED` | `false` (the runner container: `true`) | D H | Send eligible simulation runs to the runner. |
@@ -479,6 +487,7 @@ database, override `PG_HOST`, `PGBOUNCER_HOST` or `CH_HOST` in a
 | `OTEL_ENABLED` | `false` | S D H | Export the platform's own OpenTelemetry traces (monitoring Future AGI itself, not your application's traces). |
 | `FAST_STARTUP` | `false` | D H | Skip start-up checks in the backend containers. |
 | `TEMPORAL_TEST_EXECUTION_ENABLED` | `true` | S D H | Run test executions as Temporal workflows. |
+| `ERROR_LOCALIZER_BACKEND` | S: `legacy`; D H: `claude_agent_sdk` | S D H | Which error localizer explains a failed eval. `claude_agent_sdk` needs the `localizer` extra, which Standalone's slim image leaves out ([docs/images.md](images.md#backend-variants)); `legacy` is the original localizer and cannot localize simulation call audio. |
 | `EXACT_AGGREGATION_TASK_QUEUE` | `exact_aggregation` | S D H | Queue of exact analytics, which a dedicated single-slot worker serves. |
 | `TEMPORAL_EXCLUDED_QUEUES` | `simulation_runner` | S D H | Queues the general worker does not poll. The runner queue needs its own image. |
 | `TEMPORAL_NAMESPACE` | `default` | D H | Temporal namespace. |
@@ -488,7 +497,6 @@ database, override `PG_HOST`, `PGBOUNCER_HOST` or `CH_HOST` in a
 | `CODE_EXECUTOR_LOCAL_FALLBACK` | `false` (Standalone: fixed `false`) | D H | `true` runs code evals inside the worker when `code-executor` cannot be reached, next to the platform's secrets. Off, they fail with `Code executor unavailable`. Only for installs that cannot run the privileged `code-executor` and where everyone who can write code evals is trusted; ignored on Future AGI Cloud. See [INSTALLATION.md](../INSTALLATION.md#code-evals-fail-with-code-executor-unavailable). Helm: `codeExecutor.localFallback`. |
 | `MODEL_SERVING_URL` | `http://serving:8080` | S D H | Embedding model server. Without the `ml` profile the features that need it are unavailable. |
 | `WEBSOCKET_ENDPOINT` | `http://backend/call-websocket/` | D H | Where workers post live updates for browsers. It must reach the backend from every container; change it only when the backend runs under another name or port. Standalone fixes it inside the container. |
-| `AGENTCC_INTERNAL_URL`, `AGENTCC_GATEWAY_INTERNAL_URL` | `http://agentcc-gateway:8080` | D H | Gateway address inside the Compose network. Standalone fixes it inside the container. |
 | `ALK_RUNNER_API_URL` | S: `http://127.0.0.1:8000`; D: `http://backend` | S D H | Platform URL the simulation runner reports results to. |
 
 ### Observed-attribute catalog
@@ -580,6 +588,7 @@ nothing. Change what they are derived from instead, or use a
 | `FI_EMBEDDED_TEMPORAL_WORKER`, `TEMPORAL_GRACEFUL_SHUTDOWN_TIMEOUT` | fixed | S | The embedded worker and its drain. |
 | `TEMPORAL_TASK_QUEUE` | one queue per worker | D | Per-queue workers. |
 | `GEMINI_API_KEY` | `GOOGLE_API_KEY` | S D | The gateway's name for the Gemini key. |
+| `AGENTCC_INTERNAL_URL`, `AGENTCC_GATEWAY_INTERNAL_URL` | `http://127.0.0.1:8080` (S), `http://agentcc-gateway:8080` (D) | S D | The gateway's container port, where the app and workers call it. A host-facing URL (the published `AGENTCC_GATEWAY_PORT`, `:8090`) exported in the shell must not replace this service-to-service route. Helm sets both to the gateway's Service. |
 | `AGENTCC_CONTROL_PLANE_URL`, `AGENTCC_CONTROL_PLANE_TOKEN`, `AGENTCC_SYNC_ON_STARTUP` | the API (`http://127.0.0.1:8000` in S, `http://backend` in D), `AGENTCC_ADMIN_TOKEN`, `true` | S D | The gateway loads the keys and org settings made in the UI from the app: on start, retrying while the app comes up, and then every minute (`AGENTCC_SYNC_INTERVAL`, on a gateway that reads it). It posts its request logs there too. Standalone starts its gateway after the bootstrap, so the app is up by then. |
 
 ## Legacy and retired keys

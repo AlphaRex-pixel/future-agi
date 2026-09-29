@@ -330,7 +330,7 @@ VARIANT_ARGS = (
 )
 # The groups that were base dependencies before the image-size split, so the
 # default variant ships what earlier releases did.
-STANDARD_EXTRAS = "sandbox,billing,ops,gcp,langchain,rabbitmq"
+STANDARD_EXTRAS = "sandbox,billing,ops,gcp,langchain,rabbitmq,localizer"
 
 
 def resolve_variant(**env: str) -> subprocess.CompletedProcess:

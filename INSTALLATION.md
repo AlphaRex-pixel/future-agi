@@ -575,8 +575,8 @@ does not read `.env`: carry what you need from it over in the chart's values.
 Standalone's `app` image is built on the **slim** backend: heavy ML, audio
 and voice dependencies and several SDKs are not installed, which keeps that
 backend around 340 MB to download. Distributed and Helm run the default
-backend, which also has the `sandbox`, `billing`, `ops`, `gcp`, `langchain` and
-`rabbitmq` extras, `uv`, git and Debian's ffmpeg
+backend, which also has the `sandbox`, `billing`, `ops`, `gcp`, `langchain`,
+`rabbitmq` and `localizer` extras, `uv`, git and Debian's ffmpeg
 ([docs/images.md](docs/images.md#backend-variants)). Neither has `audio`,
 `ml`, `voice`, `pii`, `prompt-opt` or `vectordb`. Most features work out of
 the box. The ones below need an optional dependency group ("extra") baked into
@@ -593,6 +593,7 @@ the image:
 | Vertex AI partner models (Claude, Llama, Mistral, Jamba and Codestral on Vertex), Model Garden, Gemma and PaLM, and Vertex tracing. Gemini, Imagen and embeddings on Vertex work without it | `gcp` |
 | Hosted agent runs on Daytona or E2B sandboxes | `sandbox` |
 | RabbitMQ channel layer (`CHANNEL_LAYER_BACKEND=rabbitmq`) | `rabbitmq` |
+| Error localization with the Claude Agent SDK (`ERROR_LOCALIZER_BACKEND=claude_agent_sdk`, the default outside Standalone; needed to localize simulation call audio). Standalone runs the `legacy` localizer, which needs no extra | `localizer` |
 | Stripe billing tooling, Celery Flower, LangChain (none are used by the open-source app) | `billing`, `ops`, `langchain` |
 
 **What happens without the extra:** most optional features fail with an
@@ -613,7 +614,7 @@ groups, so name every group you want:
 ```bash
 # Distributed and Helm: the default backend's groups plus yours
 docker build -f futureagi/Dockerfile.oss \
-  --build-arg EXTRAS=sandbox,billing,ops,gcp,langchain,rabbitmq,audio,pii \
+  --build-arg EXTRAS=sandbox,billing,ops,gcp,langchain,rabbitmq,localizer,audio,pii \
   -t future-agi-backend:with-extras ./futureagi
 
 # Standalone: the slim backend with just the groups you add

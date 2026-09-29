@@ -62,7 +62,7 @@ MODULES = (
     "humanize",
 )
 # What each optional dependency group (EXTRAS) must make importable; the
-# standard variant installs the first six, the groups that were base
+# standard variant installs these seven, the groups that were base
 # dependencies before the image-size split (pyproject.toml).
 EXTRA_MODULES = {
     "sandbox": ("daytona", "e2b", "httpx_ws"),
@@ -71,6 +71,7 @@ EXTRA_MODULES = {
     "gcp": ("vertexai", "traceai_vertexai"),
     "langchain": ("langchain", "langchain_community"),
     "rabbitmq": ("channels_rabbitmq",),
+    "localizer": ("claude_agent_sdk",),
 }
 # What bin/install_nltk_data.py installs in the `minimal` profile.
 NLTK_RESOURCES = (
