@@ -749,12 +749,6 @@ FUTUREAGI_CLOUD_GATEWAY_URL = os.environ.get(
     "FUTUREAGI_CLOUD_GATEWAY_URL", "https://gateway.futureagi.com"
 )
 
-# Internal Agentcc gateway (cloud deployment only)
-INTERNAL_GATEWAY_URL = os.environ.get(
-    "INTERNAL_GATEWAY_URL", "http://agentcc-internal:8090"
-)
-INTERNAL_GATEWAY_KEY = os.environ.get("INTERNAL_GATEWAY_KEY", "")
-
 # ── Multi-Region ──────────────────────────────────────────────
 REGION = os.environ.get("REGION", "us")
 CLOUD_DEPLOYMENT = os.environ.get("CLOUD_DEPLOYMENT", "")
@@ -796,6 +790,15 @@ TEMPORAL_TEST_EXECUTION_ENABLED = os.getenv(
 # button) unless a deployment opts in here.
 EVAL_TASK_SWEEP_RECOVER_FAILED = os.getenv(
     "EVAL_TASK_SWEEP_RECOVER_FAILED", "false"
+).lower() in ("true", "1", "yes")
+
+# Run code evals inside the worker when the code-executor service cannot be
+# reached (DNS failure, connection refused, no route). Default OFF: code evals
+# then fail with "Code executor unavailable". Only for self-hosted installs that
+# cannot run the privileged code-executor container and where every user who
+# can author code evals is trusted. Ignored when CLOUD_DEPLOYMENT is US, EU or DEV.
+CODE_EXECUTOR_LOCAL_FALLBACK = os.getenv(
+    "CODE_EXECUTOR_LOCAL_FALLBACK", "false"
 ).lower() in ("true", "1", "yes")
 
 # Hosted simulation runner (plan §9): when enabled, eligible runs are dispatched
@@ -1141,8 +1144,17 @@ _is_local = _IS_LOCAL
 _ssl = "http://" if _is_local else "https://"
 ssl = _ssl  # exported — used by accounts.utils, accounts.views.workspace_management
 
+# Only Future AGI Cloud defaults to its public API. A self-hosted install
+# defaults to its own, whatever its ENV_TYPE: WEBSOCKET_ENDPOINT and the
+# gateway's futureagi-eval guardrail derive from BASE_URL, and both authenticate
+# with the org's system API key and secret.
 BASE_URL = os.getenv(
-    "BASE_URL", "http://localhost:8000" if _is_local else "https://api.futureagi.com"
+    "BASE_URL",
+    (
+        "https://api.futureagi.com"
+        if CLOUD_DEPLOYMENT and not _is_local
+        else "http://localhost:8000"
+    ),
 )
 WEBSOCKET_ENDPOINT = os.getenv("WEBSOCKET_ENDPOINT", f"{BASE_URL}/call-websocket/")
 MINIO_URL = os.getenv(
