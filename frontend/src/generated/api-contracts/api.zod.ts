@@ -4310,7 +4310,7 @@ export const AgentccApiKeysBulkListResponse = zod.object({
       models: zod.array(zod.string().min(1)),
       providers: zod.array(zod.string().min(1)),
       metadata: zod.record(zod.string(), zod.string()),
-      expires_at: zod.string().datetime({ offset: true }),
+      expires_at: zod.string().datetime({ offset: true }).nullable(),
     }),
   ),
 });

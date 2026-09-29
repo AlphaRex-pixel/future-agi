@@ -2431,7 +2431,7 @@ export interface APIKeyBulkItemApi {
   models: string[];
   providers: string[];
   metadata: APIKeyBulkItemApiMetadata;
-  expires_at: string;
+  expires_at: string | null;
 }
 
 export interface APIKeyBulkResponseApi {
