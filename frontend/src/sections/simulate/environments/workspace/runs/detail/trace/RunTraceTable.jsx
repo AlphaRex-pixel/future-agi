@@ -1,6 +1,13 @@
 import PropTypes from "prop-types";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Box, Stack, Button, Pagination, Typography } from "@mui/material";
+import {
+  Box,
+  Stack,
+  Button,
+  Chip,
+  Pagination,
+  Typography,
+} from "@mui/material";
 
 import Iconify from "src/components/iconify";
 import { FilterPanel } from "src/components/filter-panel";
@@ -63,6 +70,8 @@ export default function RunTraceTable({
 
   const serverFilters = useMemo(() => {
     const next = {};
+    if (filters.callExecutionId?.length)
+      next.call_execution_id = filters.callExecutionId;
     if (filters.goal?.length) next.goal = filters.goal;
     if (filters.subGoal?.length) next.sub_goal = filters.subGoal;
     if (filters.status?.length) next.status = filters.status;
@@ -169,6 +178,9 @@ export default function RunTraceTable({
     ],
     [goalOptions, subGoalOptions],
   );
+  // Calls handed over from a diagnosis issue; shown as their own chip rather than
+  // a Filter-panel field, since the panel cannot express an id list.
+  const affectedCalls = filters.callExecutionId?.length || 0;
   const filterCount = Object.values(filters).reduce(
     (a, v) => a + (v?.length || 0),
     0,
@@ -188,9 +200,14 @@ export default function RunTraceTable({
     };
   }, [facets.status]);
 
+  // The panel edits its own fields; the affected-calls scope stays until its chip
+  // is dismissed.
+  const { callExecutionId, ...panelFilters } = filters;
+  const keepScope = (next) =>
+    callExecutionId ? { ...next, callExecutionId } : next;
   const applyFilters = (result) => {
     if (!result) {
-      setFilters({});
+      setFilters(keepScope({}));
       return;
     }
     if (Array.isArray(result)) {
@@ -204,9 +221,9 @@ export default function RunTraceTable({
         if (values.length)
           flat[r.field] = [...(flat[r.field] || []), ...values];
       });
-      setFilters(flat);
+      setFilters(keepScope(flat));
     } else {
-      setFilters(result);
+      setFilters(keepScope(result));
     }
     setStatusChip("all");
   };
@@ -241,7 +258,7 @@ export default function RunTraceTable({
         sx={filterButtonSx}
       >
         Filter
-        {filterCount > 0 && (
+        {filterCount - affectedCalls > 0 && (
           <>
             <Box
               component="span"
@@ -254,11 +271,22 @@ export default function RunTraceTable({
               ·
             </Box>
             <Box component="span" sx={{ color: "primary.main" }}>
-              {filterCount}
+              {filterCount - affectedCalls}
             </Box>
           </>
         )}
       </Button>
+      {affectedCalls > 0 && (
+        <Chip
+          size="small"
+          label={`${affectedCalls} affected call${affectedCalls === 1 ? "" : "s"}`}
+          onDelete={() => {
+            setFilters(({ callExecutionId: _ids, ...rest }) => rest);
+            setPage(1);
+          }}
+          sx={{ typography: "s2", fontWeight: 600 }}
+        />
+      )}
     </Stack>
   );
 
@@ -372,7 +400,7 @@ export default function RunTraceTable({
         open={!!filterAnchor}
         onClose={() => setFilterAnchor(null)}
         filterFields={filterFields}
-        currentFilters={filters}
+        currentFilters={panelFilters}
         onApply={(result) => {
           applyFilters(result);
           setPage(1);

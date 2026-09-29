@@ -5,7 +5,7 @@
 export const API_SURFACE_CONTRACT = Object.freeze({
   generatedFrom: "api_contracts/openapi/swagger.json",
   swaggerVersion: "2.0",
-  endpointCount: 1053,
+  endpointCount: 1055,
   groups: {
     accounts: {
       "/accounts/2fa/recovery-codes/": ["get"],
@@ -995,6 +995,10 @@ export const API_SURFACE_CONTRACT = Object.freeze({
       "/simulate/test-executions/{test_execution_id}/chat/call-executions/batch/":
         ["post"],
       "/simulate/test-executions/{test_execution_id}/column-order/": ["put"],
+      "/simulate/test-executions/{test_execution_id}/debug-analysis/": [
+        "get",
+        "post",
+      ],
       "/simulate/test-executions/{test_execution_id}/delete/": ["delete"],
       "/simulate/test-executions/{test_execution_id}/eval-explanation-summary/":
         ["get"],
@@ -1076,6 +1080,8 @@ export const API_SURFACE_CONTRACT = Object.freeze({
       "/tracer/get-annotation-labels/": ["get"],
       "/tracer/imagine-analysis/": ["get", "post"],
       "/tracer/internal/error-feed-v2/attempts/{attempt_id}/": ["patch"],
+      "/tracer/internal/error-feed-v2/attempts/{attempt_id}/simulation-evidence/":
+        ["post"],
       "/tracer/internal/error-feed-v2/claims/": ["post"],
       "/tracer/internal/error-feed-v2/grouping/attempts/{attempt_id}/": [
         "patch",
@@ -2257,6 +2263,10 @@ export const API_SURFACE_PATHS = Object.freeze({
     "post",
   ],
   "/simulate/test-executions/{test_execution_id}/column-order/": ["put"],
+  "/simulate/test-executions/{test_execution_id}/debug-analysis/": [
+    "get",
+    "post",
+  ],
   "/simulate/test-executions/{test_execution_id}/delete/": ["delete"],
   "/simulate/test-executions/{test_execution_id}/eval-explanation-summary/": [
     "get",
@@ -2332,6 +2342,9 @@ export const API_SURFACE_PATHS = Object.freeze({
   "/tracer/get-annotation-labels/": ["get"],
   "/tracer/imagine-analysis/": ["get", "post"],
   "/tracer/internal/error-feed-v2/attempts/{attempt_id}/": ["patch"],
+  "/tracer/internal/error-feed-v2/attempts/{attempt_id}/simulation-evidence/": [
+    "post",
+  ],
   "/tracer/internal/error-feed-v2/claims/": ["post"],
   "/tracer/internal/error-feed-v2/grouping/attempts/{attempt_id}/": ["patch"],
   "/tracer/internal/error-feed-v2/grouping/attempts/{attempt_id}/checkpoint/": [

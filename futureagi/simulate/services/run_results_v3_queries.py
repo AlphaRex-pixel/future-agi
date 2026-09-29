@@ -325,6 +325,8 @@ def apply_run_call_query(queryset: QuerySet, query: dict[str, Any]) -> QuerySet:
             | Q(error_message__icontains=search)
         )
 
+    if values := filters.get("call_execution_id"):
+        queryset = queryset.filter(id__in=values)
     if values := filters.get("goal"):
         queryset = queryset.filter(result_goal__in=values)
     if values := filters.get("status"):

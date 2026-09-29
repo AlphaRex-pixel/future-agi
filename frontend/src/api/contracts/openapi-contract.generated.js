@@ -5,7 +5,7 @@
 export const OPENAPI_CONTRACT = Object.freeze({
   generatedFrom: "api_contracts/openapi/swagger.json",
   swaggerVersion: "2.0",
-  endpointCount: 1053,
+  endpointCount: 1055,
   endpoints: {
     "/accounts/2fa/recovery-codes/": {
       get: {
@@ -31530,6 +31530,49 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    "/simulate/test-executions/{test_execution_id}/debug-analysis/": {
+      get: {
+        operationId: "simulate_test_execution_debug_analysis_retrieve",
+        runtimeRequestValidation: false,
+        runtimeResponseValidation: false,
+        requestBody: null,
+        queryParameters: {},
+        responses: {
+          200: {
+            $ref: "#/definitions/TestExecutionDebugAnalysisResponse",
+          },
+          404: {
+            $ref: "#/definitions/TestExecutionDebugAnalysisNotFound",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+      post: {
+        operationId: "simulate_test_execution_debug_analysis_create",
+        runtimeRequestValidation: true,
+        runtimeResponseValidation: true,
+        requestBody: {
+          $ref: "#/definitions/EmptyRequest",
+        },
+        queryParameters: {},
+        responses: {
+          202: {
+            $ref: "#/definitions/TestExecutionDebugAnalysisResponse",
+          },
+          404: {
+            $ref: "#/definitions/TestExecutionDebugAnalysisNotFound",
+          },
+          409: {
+            $ref: "#/definitions/TestExecutionDebugAnalysisError",
+          },
+          default: {
+            $ref: "#/definitions/ManagementAPIErrorResponse",
+          },
+        },
+      },
+    },
     "/simulate/test-executions/{test_execution_id}/delete/": {
       delete: {
         operationId: "simulate_test-executions_delete_delete",
@@ -34572,6 +34615,30 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    "/tracer/internal/error-feed-v2/attempts/{attempt_id}/simulation-evidence/":
+      {
+        post: {
+          operationId:
+            "tracer_internal_error-feed-v2_attempts_simulation-evidence_create",
+          runtimeRequestValidation: true,
+          runtimeResponseValidation: true,
+          requestBody: {
+            $ref: "#/definitions/SimulationEvidenceRequest",
+          },
+          queryParameters: {},
+          responses: {
+            201: {
+              $ref: "#/definitions/SimulationEvidenceRequest",
+            },
+            409: {
+              $ref: "#/definitions/InvestigationControlError",
+            },
+            default: {
+              $ref: "#/definitions/ManagementAPIErrorResponse",
+            },
+          },
+        },
+      },
     "/tracer/internal/error-feed-v2/claims/": {
       post: {
         operationId: "tracer_internal_error-feed-v2_claims_create",
@@ -46763,7 +46830,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         livekit_max_concurrency: {
           title: "Livekit max concurrency",
           type: "integer",
-          maximum: 25,
+          maximum: 5,
           minimum: 1,
           "x-nullable": true,
         },
@@ -46917,7 +46984,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         livekit_max_concurrency: {
           title: "Livekit max concurrency",
           type: "integer",
-          maximum: 25,
+          maximum: 5,
           minimum: 1,
           "x-nullable": true,
         },
@@ -47908,7 +47975,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         livekit_max_concurrency: {
           title: "Livekit max concurrency",
           type: "integer",
-          maximum: 25,
+          maximum: 5,
           minimum: 1,
         },
         commit_message: {
@@ -75065,6 +75132,23 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
       },
     },
+    SimulationEvidenceRequest: {
+      required: ["lease_token", "cursor"],
+      type: "object",
+      properties: {
+        lease_token: {
+          title: "Lease token",
+          type: "string",
+          maxLength: 255,
+          minLength: 1,
+        },
+        cursor: {
+          title: "Cursor",
+          type: "integer",
+          minimum: 0,
+        },
+      },
+    },
     SimulationPreviewError: {
       required: ["code", "detail"],
       type: "object",
@@ -77005,6 +77089,101 @@ export const OPENAPI_CONTRACT = Object.freeze({
             $ref: "#/definitions/ColumnOrder",
           },
           readOnly: true,
+        },
+      },
+    },
+    TestExecutionDebugAnalysisError: {
+      required: ["code", "detail"],
+      type: "object",
+      properties: {
+        code: {
+          title: "Code",
+          type: "string",
+          minLength: 1,
+        },
+        detail: {
+          title: "Detail",
+          type: "string",
+          minLength: 1,
+        },
+      },
+    },
+    TestExecutionDebugAnalysisNotFound: {
+      required: ["detail"],
+      type: "object",
+      properties: {
+        detail: {
+          title: "Detail",
+          type: "string",
+          minLength: 1,
+        },
+      },
+    },
+    TestExecutionDebugAnalysisResponse: {
+      required: [
+        "test_execution_id",
+        "status",
+        "generation",
+        "job_id",
+        "error_message",
+        "report",
+        "findings",
+        "summary",
+        "goals",
+        "one_offs",
+      ],
+      type: "object",
+      properties: {
+        test_execution_id: {
+          title: "Test execution id",
+          type: "string",
+          format: "uuid",
+        },
+        status: {
+          title: "Status",
+          type: "string",
+          enum: ["not_requested", "pending", "running", "completed", "failed"],
+        },
+        generation: {
+          title: "Generation",
+          type: "integer",
+          "x-nullable": true,
+        },
+        job_id: {
+          title: "Job id",
+          type: "string",
+          format: "uuid",
+          "x-nullable": true,
+        },
+        error_message: {
+          title: "Error message",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        report: {
+          $ref: "#/definitions/DebugAnalysisReport",
+        },
+        findings: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/DebugAnalysisFinding",
+          },
+        },
+        summary: {
+          $ref: "#/definitions/DebugAnalysisSummary",
+        },
+        goals: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/DebugAnalysisGoal",
+          },
+        },
+        one_offs: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/DebugAnalysisWay",
+          },
         },
       },
     },
@@ -84922,7 +85101,6 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "workspace_id",
         "project_id",
         "job_id",
-        "trace_id",
         "generation",
         "attempt_id",
         "lease_token",
@@ -84958,10 +85136,22 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "string",
           format: "uuid",
         },
+        workload_type: {
+          title: "Workload type",
+          type: "string",
+          enum: ["trace", "simulation_test_execution"],
+        },
         trace_id: {
           title: "Trace id",
           type: "string",
           format: "uuid",
+          "x-nullable": true,
+        },
+        test_execution_id: {
+          title: "Test execution id",
+          type: "string",
+          format: "uuid",
+          "x-nullable": true,
         },
         generation: {
           title: "Generation",
@@ -96064,7 +96254,6 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "job_id",
         "generation",
         "attempt_id",
-        "trace_id",
         "engine_version",
         "read_cutoff",
         "memory_snapshot_id",
@@ -96086,7 +96275,13 @@ export const OPENAPI_CONTRACT = Object.freeze({
         contract_version: {
           title: "Contract version",
           type: "string",
-          enum: ["omega-investigation/v1"],
+          enum: ["omega-investigation/v1", "omega-simulation/v1"],
+        },
+        workload_type: {
+          title: "Workload type",
+          type: "string",
+          enum: ["trace", "simulation_test_execution"],
+          default: "trace",
         },
         organization_id: {
           title: "Organization id",
@@ -96123,6 +96318,13 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Trace id",
           type: "string",
           format: "uuid",
+          "x-nullable": true,
+        },
+        test_execution_id: {
+          title: "Test execution id",
+          type: "string",
+          format: "uuid",
+          "x-nullable": true,
         },
         engine_version: {
           title: "Engine version",
@@ -96162,6 +96364,11 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Outcome",
           type: "string",
           enum: ["success", "failure", "unknown"],
+        },
+        error_message: {
+          title: "Error message",
+          type: "string",
+          "x-nullable": true,
         },
         findings: {
           type: "array",
@@ -100748,6 +100955,260 @@ export const OPENAPI_CONTRACT = Object.freeze({
         visible: {
           title: "Visible",
           type: "boolean",
+        },
+      },
+    },
+    DebugAnalysisFinding: {
+      required: [
+        "id",
+        "kind",
+        "statement",
+        "recovery",
+        "category",
+        "group_label",
+        "fix_layer",
+        "confidence",
+        "goal",
+        "cluster",
+        "evidence",
+      ],
+      type: "object",
+      properties: {
+        id: {
+          title: "Id",
+          type: "string",
+          format: "uuid",
+        },
+        kind: {
+          title: "Kind",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        statement: {
+          title: "Statement",
+          type: "string",
+          minLength: 1,
+        },
+        recovery: {
+          title: "Recovery",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        category: {
+          title: "Category",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        group_label: {
+          title: "Group label",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        fix_layer: {
+          title: "Fix layer",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        confidence: {
+          title: "Confidence",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        goal: {
+          title: "Goal",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        cluster: {
+          $ref: "#/definitions/DebugAnalysisCluster",
+        },
+        evidence: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/DebugAnalysisEvidence",
+          },
+        },
+      },
+    },
+    DebugAnalysisGoal: {
+      required: [
+        "goal",
+        "label",
+        "criteria",
+        "broken_call_ids",
+        "tested_call_count",
+        "ways",
+        "unexplained_call_ids",
+      ],
+      type: "object",
+      properties: {
+        goal: {
+          title: "Goal",
+          type: "string",
+          minLength: 1,
+        },
+        label: {
+          title: "Label",
+          type: "string",
+          minLength: 1,
+        },
+        criteria: {
+          title: "Criteria",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        broken_call_ids: {
+          type: "array",
+          items: {
+            type: "string",
+            format: "uuid",
+          },
+        },
+        tested_call_count: {
+          title: "Tested call count",
+          type: "integer",
+        },
+        ways: {
+          type: "array",
+          items: {
+            $ref: "#/definitions/DebugAnalysisWay",
+          },
+        },
+        unexplained_call_ids: {
+          type: "array",
+          items: {
+            type: "string",
+            format: "uuid",
+          },
+        },
+      },
+    },
+    DebugAnalysisReport: {
+      required: [
+        "id",
+        "execution_status",
+        "outcome",
+        "coverage",
+        "error_message",
+        "grouping_status",
+        "recorded_at",
+      ],
+      type: "object",
+      properties: {
+        id: {
+          title: "Id",
+          type: "string",
+          format: "uuid",
+        },
+        execution_status: {
+          title: "Execution status",
+          type: "string",
+          minLength: 1,
+        },
+        outcome: {
+          title: "Outcome",
+          type: "string",
+          minLength: 1,
+        },
+        coverage: {
+          $ref: "#/definitions/DebugAnalysisCoverage",
+        },
+        error_message: {
+          title: "Error message",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        grouping_status: {
+          title: "Grouping status",
+          type: "string",
+          minLength: 1,
+        },
+        recorded_at: {
+          title: "Recorded at",
+          type: "string",
+          format: "date-time",
+        },
+      },
+      "x-nullable": true,
+    },
+    DebugAnalysisSummary: {
+      required: [
+        "measured_call_count",
+        "broken_goal_count",
+        "broken_call_count",
+        "one_off_count",
+        "excluded_call_ids",
+        "unanalyzed_call_ids",
+      ],
+      type: "object",
+      properties: {
+        measured_call_count: {
+          title: "Measured call count",
+          type: "integer",
+        },
+        broken_goal_count: {
+          title: "Broken goal count",
+          type: "integer",
+        },
+        broken_call_count: {
+          title: "Broken call count",
+          type: "integer",
+        },
+        one_off_count: {
+          title: "One off count",
+          type: "integer",
+        },
+        excluded_call_ids: {
+          type: "array",
+          items: {
+            type: "string",
+            format: "uuid",
+          },
+        },
+        unanalyzed_call_ids: {
+          type: "array",
+          items: {
+            type: "string",
+            format: "uuid",
+          },
+        },
+      },
+      "x-nullable": true,
+    },
+    DebugAnalysisWay: {
+      required: ["id", "title", "phrase", "call_ids"],
+      type: "object",
+      properties: {
+        id: {
+          title: "Id",
+          type: "string",
+          minLength: 1,
+        },
+        title: {
+          title: "Title",
+          type: "string",
+          minLength: 1,
+        },
+        phrase: {
+          title: "Phrase",
+          type: "string",
+          minLength: 1,
+        },
+        call_ids: {
+          type: "array",
+          items: {
+            type: "string",
+            format: "uuid",
+          },
         },
       },
     },
@@ -109814,12 +110275,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
       },
     },
     InvestigationCoverage: {
-      required: [
-        "scope",
-        "observed_span_count",
-        "read_complete",
-        "future_arrivals_known",
-      ],
+      required: ["read_complete"],
       type: "object",
       properties: {
         scope: {
@@ -109830,6 +110286,11 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         observed_span_count: {
           title: "Observed span count",
+          type: "integer",
+          minimum: 0,
+        },
+        observed_call_count: {
+          title: "Observed call count",
           type: "integer",
           minimum: 0,
         },
@@ -109844,7 +110305,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
       },
     },
     InvestigationEvidenceReceipt: {
-      required: ["evidence_id", "span_id", "excerpt"],
+      required: ["evidence_id", "excerpt"],
       type: "object",
       properties: {
         evidence_id: {
@@ -109858,6 +110319,13 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "string",
           maxLength: 64,
           minLength: 1,
+          "x-nullable": true,
+        },
+        call_execution_id: {
+          title: "Call execution id",
+          type: "string",
+          format: "uuid",
+          "x-nullable": true,
         },
         parent_span_id: {
           title: "Parent span id",
@@ -109930,6 +110398,34 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "string",
           maxLength: 64,
           minLength: 1,
+        },
+        category: {
+          title: "Category",
+          type: "string",
+          maxLength: 100,
+          minLength: 1,
+          "x-nullable": true,
+        },
+        group_label: {
+          title: "Group label",
+          type: "string",
+          maxLength: 100,
+          minLength: 1,
+          "x-nullable": true,
+        },
+        fix_layer: {
+          title: "Fix layer",
+          type: "string",
+          maxLength: 50,
+          minLength: 1,
+          "x-nullable": true,
+        },
+        confidence: {
+          title: "Confidence",
+          type: "string",
+          maxLength: 2,
+          minLength: 1,
+          "x-nullable": true,
         },
         attribution: {
           $ref: "#/definitions/FindingAttribution",
@@ -112033,6 +112529,75 @@ export const OPENAPI_CONTRACT = Object.freeze({
           items: {
             $ref: "#/definitions/TeamWorkspaceSummary",
           },
+        },
+      },
+    },
+    DebugAnalysisCluster: {
+      required: ["id", "cluster_id", "title", "error_type"],
+      type: "object",
+      properties: {
+        id: {
+          title: "Id",
+          type: "string",
+          format: "uuid",
+        },
+        cluster_id: {
+          title: "Cluster id",
+          type: "string",
+          minLength: 1,
+        },
+        title: {
+          title: "Title",
+          type: "string",
+          minLength: 1,
+          "x-nullable": true,
+        },
+        error_type: {
+          title: "Error type",
+          type: "string",
+          minLength: 1,
+        },
+      },
+      "x-nullable": true,
+    },
+    DebugAnalysisEvidence: {
+      required: ["evidence_id", "call_execution_id", "excerpt"],
+      type: "object",
+      properties: {
+        evidence_id: {
+          title: "Evidence id",
+          type: "string",
+          minLength: 1,
+        },
+        call_execution_id: {
+          title: "Call execution id",
+          type: "string",
+          format: "uuid",
+          "x-nullable": true,
+        },
+        excerpt: {
+          title: "Excerpt",
+          type: "string",
+          minLength: 1,
+        },
+      },
+    },
+    DebugAnalysisCoverage: {
+      required: ["scope", "observed_call_count", "read_complete"],
+      type: "object",
+      properties: {
+        scope: {
+          title: "Scope",
+          type: "string",
+          minLength: 1,
+        },
+        observed_call_count: {
+          title: "Observed call count",
+          type: "integer",
+        },
+        read_complete: {
+          title: "Read complete",
+          type: "boolean",
         },
       },
     },
@@ -115211,6 +115776,12 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "string",
           maxLength: 64,
           minLength: 1,
+          "x-nullable": true,
+        },
+        call_execution_id: {
+          title: "Call execution id",
+          type: "string",
+          format: "uuid",
           "x-nullable": true,
         },
         evidence_ids: {
