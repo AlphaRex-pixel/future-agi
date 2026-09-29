@@ -276,9 +276,10 @@ class EmbeddingManager:
         """Whether model serving answers its health check, i.e. text can be embedded.
 
         data_formatter logs and swallows embedding errors, so callers that must
-        not report success without vectors ask this first.
+        not report success without vectors ask this first. It is the cached
+        ``serving_available()`` probe every other serving-gated path shares.
         """
-        return get_serving_client().health_check()
+        return serving_available()
 
     def get_image_query_embedding(self, type, query):
         if type == "image":

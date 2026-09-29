@@ -281,6 +281,21 @@ def test_rag_retrieval_returns_nothing_without_model_serving(model_serving_down)
     per_input.assert_not_called()
 
 
+def test_the_knowledge_base_gate_is_the_shared_serving_probe(monkeypatch):
+    """The indexer's up-front check reads the same cached verdict as every
+    other serving-gated path, so it costs no extra lookup per file."""
+    from agentic_eval.core.embeddings import embedding_manager as em
+
+    monkeypatch.setenv("MODEL_SERVING_URL", "http://serving:8080")
+    calls = _counting_probe(monkeypatch, False)
+    with patch.object(em, "ClickHouseVectorDB"):
+        manager = em.EmbeddingManager()
+
+    assert serving_available() is False
+    assert [manager.text_embeddings_available() for _ in range(3)] == [False] * 3
+    assert calls == ["http://serving:8080"]
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Annotation summary: the similarity metric is skipped, the rest stays
 # ─────────────────────────────────────────────────────────────────────
