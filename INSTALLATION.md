@@ -678,20 +678,24 @@ later are in
 [docs/configuration.md](docs/configuration.md#1-generated-by-the-installer).
 
 `CH_PASSWORD` is the password of ClickHouse's `default` user. ClickHouse
-reads it at every start, as do the app, the collector and PeerDB, so a new
-value would take effect at once, except where it was stored: the
-dictionaries ClickHouse reads spans through, and on Distributed PeerDB's
-`ch_dest` peer. The installer therefore generates it on a fresh install
-only. An install created before it did keeps running without a password:
-the installer leaves it empty, warns, and stops if `.env` holds a value
-such an install never used (delete that line, or re-run with `--force`
-once you mean it). To give such an install a password, set `CH_PASSWORD`
-and run `docker compose up -d`: the bootstrap then re-creates the
-dictionaries with it. On Distributed the Postgres → ClickHouse sync stops
-until the `ch_dest` peer in PeerDB carries the new password too, so leave
-it empty there unless you update that peer. Changing a password that is
-already set is not supported yet: the dictionaries keep the old one. No
-`<`, `>` or `&` in it: ClickHouse reads it into its XML configuration.
+reads it at every start, as do the app, the collector and the bootstrap
+jobs, so a new value would take effect at once, except where it was
+stored: the dictionaries ClickHouse reads spans through, and on
+Distributed the `ch_dest` peer, which PeerDB's init job creates with it
+once. The installer therefore generates it on a fresh install only. On an
+existing install it stops whenever `CH_PASSWORD` (in `.env`, or exported
+in the shell) differs from the password ClickHouse runs with, which
+`docker compose exec clickhouse printenv CLICKHOUSE_PASSWORD` prints: set
+it back, or re-run with `--force` once you mean it. An install created
+before the installer generated one keeps running without a password: the
+installer leaves it empty and warns. To give such an install a password,
+set `CH_PASSWORD` and run `docker compose up -d`: the bootstrap then
+re-creates the dictionaries with it. On Distributed the Postgres →
+ClickHouse sync stops until the `ch_dest` peer in PeerDB carries the new
+password too, so leave it empty there unless you update that peer.
+Changing a password that is already set is not supported yet: the
+dictionaries keep the old one. No `<`, `>` or `&` in it: ClickHouse reads
+it into its XML configuration.
 
 ### Ports reference
 

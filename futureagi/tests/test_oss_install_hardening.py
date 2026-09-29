@@ -397,8 +397,11 @@ fi
 
 case "$1" in
   inspect)
-    # The environment of the project's clickhouse container, as JSON.
-    case " $* " in *".Config.Env"*) printf '%s\n' "$FAGI_STUB_CLICKHOUSE_ENV"; exit 0 ;; esac
+    # The environment of the project's clickhouse container, a line an entry.
+    case " $* " in *".Config.Env"*)
+      for entry in $FAGI_STUB_CLICKHOUSE_ENV; do printf '%s\n' "$entry"; done
+      exit 0 ;;
+    esac
     case "${last_arg#cid-}" in
       property-catalog-kafka)
         printf 'running|0|0|%s|%s\n' "$FAGI_STUB_KAFKA_HEALTH" "$started" ;;
@@ -566,7 +569,8 @@ def _installer_sandbox(
         "FAGI_STUB_PULL": "ok",
         "FAGI_STUB_MANIFEST": "found",
         "FAGI_STUB_BUSY_PORTS": "",
-        # Empty: this project has no clickhouse container.
+        # Its clickhouse container's environment, space-separated. Empty: this
+        # project has no clickhouse container.
         "FAGI_STUB_CLICKHOUSE_ENV": "",
     }
     environment.update(stub_env)
@@ -1183,23 +1187,88 @@ def test_an_existing_install_keeps_its_secrets_and_fills_only_stateless_keys(
 
 
 CLICKHOUSE_BEFORE_CH_PASSWORD = (
-    '["CLICKHOUSE_SKIP_USER_SETUP=1","CLICKHOUSE_DB=default"]'
+    "PATH=/usr/bin CLICKHOUSE_SKIP_USER_SETUP=1 CLICKHOUSE_DB=default"
 )
+RUNNING_PASSWORD = "ch-running-4f2a"
+DOT_ENV_PASSWORD = "ch-dot-env-9b1c"
+SHELL_PASSWORD = "ch-shell-7d3e"
+
+
+def _clickhouse_running(password: str) -> str:
+    return f"{CLICKHOUSE_BEFORE_CH_PASSWORD} CLICKHOUSE_PASSWORD={password}"
+
+
+# The clickhouse container's environment ("": no container), CH_PASSWORD in
+# .env, the one exported in the shell, and whether the installer refuses.
+CLICKHOUSE_PASSWORD_CASES = [
+    pytest.param(
+        CLICKHOUSE_BEFORE_CH_PASSWORD,
+        DOT_ENV_PASSWORD,
+        None,
+        True,
+        id="release-ignored-it",
+    ),
+    pytest.param(
+        _clickhouse_running(""), DOT_ENV_PASSWORD, None, True, id="recreated-empty"
+    ),
+    pytest.param(
+        _clickhouse_running(RUNNING_PASSWORD),
+        DOT_ENV_PASSWORD,
+        None,
+        True,
+        id="rotated",
+    ),
+    pytest.param(_clickhouse_running(RUNNING_PASSWORD), "", None, True, id="lost"),
+    pytest.param(
+        _clickhouse_running(RUNNING_PASSWORD),
+        RUNNING_PASSWORD.upper(),
+        None,
+        True,
+        id="differs-in-case",
+    ),
+    pytest.param(
+        _clickhouse_running(DOT_ENV_PASSWORD), DOT_ENV_PASSWORD, None, False, id="same"
+    ),
+    pytest.param(CLICKHOUSE_BEFORE_CH_PASSWORD, "", None, False, id="both-empty"),
+    # Compose takes the exported one over .env's.
+    pytest.param(
+        _clickhouse_running(SHELL_PASSWORD),
+        DOT_ENV_PASSWORD,
+        SHELL_PASSWORD,
+        False,
+        id="shell-same",
+    ),
+    pytest.param(
+        _clickhouse_running(DOT_ENV_PASSWORD),
+        DOT_ENV_PASSWORD,
+        SHELL_PASSWORD,
+        True,
+        id="shell-differs",
+    ),
+    # No container to tell by (after `docker compose down`).
+    pytest.param("", DOT_ENV_PASSWORD, None, False, id="no-container"),
+]
+CLICKHOUSE_PASSWORD_REFUSAL = (
+    "Set CH_PASSWORD back to the password ClickHouse runs with"
+)
+
+
+def _no_password_in(output: str) -> None:
+    for password in (RUNNING_PASSWORD, DOT_ENV_PASSWORD, SHELL_PASSWORD):
+        assert password not in output
+        assert password.upper() not in output
 
 
 @pytest.mark.parametrize(
-    ("container_env", "refused"),
-    [
-        # Created by a release whose compose file ignored CH_PASSWORD.
-        (CLICKHOUSE_BEFORE_CH_PASSWORD, True),
-        # Already started with it.
-        ('["CLICKHOUSE_DB=default","CLICKHOUSE_PASSWORD=from-dot-env"]', False),
-        # No container to tell by (after `docker compose down`).
-        ("", False),
-    ],
+    ("container_env", "dot_env_password", "shell_password", "refused"),
+    CLICKHOUSE_PASSWORD_CASES,
 )
 def test_a_clickhouse_password_never_changes_an_existing_install_silently(
-    tmp_path: Path, container_env: str, refused: bool
+    tmp_path: Path,
+    container_env: str,
+    dot_env_password: str,
+    shell_password: str | None,
+    refused: bool,
 ) -> None:
     script, environment, _ = _installer_sandbox(
         tmp_path,
@@ -1207,41 +1276,28 @@ def test_a_clickhouse_password_never_changes_an_existing_install_silently(
         FAGI_STUB_VOLUMES="futureagi_app-data futureagi_postgres-data",
         FAGI_STUB_CLICKHOUSE_ENV=container_env,
     )
+    if shell_password is not None:
+        environment["CH_PASSWORD"] = shell_password
     repo = script.parents[1]
     (repo / ".env").write_text(
-        SANDBOX_ENV_EXAMPLE + "CH_PASSWORD=from-dot-env\n", encoding="utf-8"
+        SANDBOX_ENV_EXAMPLE + f"CH_PASSWORD={dot_env_password}\n", encoding="utf-8"
     )
 
-    code, _, stderr = _run_installer(script, environment, "--no-up")
+    code, stdout, stderr = _run_installer(script, environment, "--no-up")
 
     assert code == (1 if refused else 0), stderr
-    assert ("Delete the CH_PASSWORD line from .env" in stderr) == refused
-    assert _env_values(repo)["CH_PASSWORD"] == "from-dot-env"
+    assert (CLICKHOUSE_PASSWORD_REFUSAL in stderr) == refused
+    _no_password_in(stdout + stderr)
+    assert _env_values(repo)["CH_PASSWORD"] == dot_env_password
     if refused:
         code, _, stderr = _run_installer(script, environment, "--force", "--no-up")
         assert code == 0, stderr
         assert "(continuing: --force)" in stderr
 
 
-@pytest.mark.parametrize(
-    ("fresh", "dot_env", "container_env", "expected"),
-    [
-        (True, "", "", "Generated CH_PASSWORD"),
-        (False, "", "", "CH_PASSWORD still use the defaults published"),
-        (
-            False,
-            "CH_PASSWORD=from-dot-env\n",
-            CLICKHOUSE_BEFORE_CH_PASSWORD,
-            "PREFLIGHT CH_PASSWORD is set in .env",
-        ),
-    ],
-)
-def test_power_shell_installer_writes_the_same_secrets(
-    tmp_path: Path, fresh: bool, dot_env: str, container_env: str, expected: str
-) -> None:
-    if shutil.which("pwsh") is None:
-        pytest.skip("pwsh is unavailable")
-    (tmp_path / ".env").write_text(dot_env, encoding="utf-8")
+def _power_shell_write_secrets(
+    directory: Path, fresh: bool, container_env: str, shell_password: str | None = None
+) -> subprocess.CompletedProcess[str]:
     script = "\n".join(
         [
             f". '{INSTALL_LIB / 'env.ps1'}'; . '{INSTALL_LIB / 'secrets.ps1'}'",
@@ -1252,20 +1308,40 @@ def test_power_shell_installer_writes_the_same_secrets(
             f"$containerEnv = '{container_env}'",
             "function docker {",
             "  if ($args[0] -eq 'ps' -and $containerEnv) { 'cid-clickhouse' }",
-            "  elseif ($args[0] -eq 'inspect') { $containerEnv }",
+            "  elseif ($args[0] -eq 'inspect') { $containerEnv -split ' ' }",
             "}",
             f"Write-Secrets ${str(fresh).lower()} $false 'futureagi'",
         ]
     )
-
-    result = subprocess.run(
+    environment = {k: v for k, v in os.environ.items() if k != "CH_PASSWORD"}
+    if shell_password is not None:
+        environment["CH_PASSWORD"] = shell_password
+    return subprocess.run(
         ["pwsh", "-NoProfile", "-Command", script],
-        cwd=tmp_path,
+        cwd=directory,
+        env=environment,
         check=False,
         capture_output=True,
         text=True,
         timeout=120,
     )
+
+
+@pytest.mark.parametrize(
+    ("fresh", "dot_env", "expected"),
+    [
+        (True, "", "Generated CH_PASSWORD"),
+        (False, "", "CH_PASSWORD still use the defaults published"),
+    ],
+)
+def test_power_shell_installer_writes_the_same_secrets(
+    tmp_path: Path, fresh: bool, dot_env: str, expected: str
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("pwsh is unavailable")
+    (tmp_path / ".env").write_text(dot_env, encoding="utf-8")
+
+    result = _power_shell_write_secrets(tmp_path, fresh, "")
 
     assert result.returncode == 0, result.stderr
     assert expected in result.stdout
@@ -1275,7 +1351,33 @@ def test_power_shell_installer_writes_the_same_secrets(
         for key in SECRET_KEYS:
             assert re.fullmatch(r"[0-9a-f]{64}", values[key]), key
     else:
-        assert values.get("CH_PASSWORD", "") == dot_env.partition("=")[2].strip()
+        assert values.get("CH_PASSWORD", "") == ""
+
+
+@pytest.mark.parametrize(
+    ("container_env", "dot_env_password", "shell_password", "refused"),
+    CLICKHOUSE_PASSWORD_CASES,
+)
+def test_power_shell_installer_compares_the_clickhouse_password_the_same_way(
+    tmp_path: Path,
+    container_env: str,
+    dot_env_password: str,
+    shell_password: str | None,
+    refused: bool,
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("pwsh is unavailable")
+    (tmp_path / ".env").write_text(
+        f"CH_PASSWORD={dot_env_password}\n", encoding="utf-8"
+    )
+
+    result = _power_shell_write_secrets(tmp_path, False, container_env, shell_password)
+
+    assert result.returncode == 0, result.stderr
+    assert ("PREFLIGHT CH_PASSWORD differs" in result.stdout) == refused
+    assert (CLICKHOUSE_PASSWORD_REFUSAL in result.stdout) == refused
+    _no_password_in(result.stdout + result.stderr)
+    assert _env_values(tmp_path)["CH_PASSWORD"] == dot_env_password
 
 
 @pytest.mark.parametrize(

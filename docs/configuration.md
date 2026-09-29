@@ -110,7 +110,7 @@ once in use: their rows say what breaks.
 | `AGENTCC_WEBHOOK_SECRET` | S: a random one on every start; D: empty, and the app refuses the gateway's request logs, so the gateway's logs and analytics stay empty | S D H | Shared secret the LLM gateway sends its request logs to the app with. Both read it on start, so it can change at any time. Helm: `secrets.agentccWebhookSecret` when set, else the key of that name in `secrets.existingSecret` when that is set, else generated. |
 | `INTEGRATION_ENCRYPTION_KEY` | Empty. With `ENV_TYPE=local`, every process start makes a throwaway key, so saved integration credentials do not survive a restart. Other `ENV_TYPE`s: connecting an integration fails. | S D H | Fernet key (32 random bytes, URL-safe base64) that encrypts stored integration credentials. Changing it strands what was saved with the old key; those integrations must be connected again. |
 | `REDIS_PASSWORD` | `local-dev-only-redis-password` | S | Password of the Redis inside the `app` container, which code evals can reach. Only letters, digits and `-` `_` `.` `~` (it is part of the Redis URLs); anything else stops the container at start. Distributed runs Redis without a password on the internal network. |
-| `CH_PASSWORD` | Empty: ClickHouse's `default` user has no password, and code evals can then read and change every trace | S D | Password of ClickHouse's `default` user. ClickHouse reads it at every start, and the app, the collector, the bootstrap jobs and PeerDB log in with it. Generated on a fresh install only: an install made before the installer generated one keeps running without it, and the installer stops when `.env` holds a value such an install never used. No `<`, `>` or `&`: ClickHouse reads it into its XML configuration. To set one later, see [INSTALLATION.md](../INSTALLATION.md#secrets-that-must-be-changed). Helm: `clickhouse.password`, else generated. |
+| `CH_PASSWORD` | Empty: ClickHouse's `default` user has no password, and code evals can then read and change every trace | S D H | Password of ClickHouse's `default` user. ClickHouse reads it at every start, and the app, the collector and the bootstrap jobs log in with it; PeerDB's init job stores it in the `ch_dest` peer when it creates that. Generated on a fresh install only: an install made before the installer generated one keeps running without it, and on an existing install the installer stops whenever the value differs from the password ClickHouse runs with. No `<`, `>` or `&`: ClickHouse reads it into its XML configuration. To set one later, see [INSTALLATION.md](../INSTALLATION.md#secrets-that-must-be-changed). Helm: `clickhouse.password`, else generated. |
 
 ### Choices the installer records
 
@@ -603,9 +603,10 @@ Start from Distributed with the production overlay (`deploy/README.md`) or the
 Helm chart. Standalone suits a single host; the same checklist applies to it.
 
 - [ ] **Real secrets.** `SECRET_KEY`, `PG_PASSWORD`, `MINIO_ROOT_PASSWORD`,
-      `AGENTCC_INTERNAL_API_KEY`, `AGENTCC_ADMIN_TOKEN`: 32 random bytes each,
-      none left at a published default. `INTEGRATION_ENCRYPTION_KEY` set once
-      and kept. `./bin/install` does this on a fresh Compose install.
+      `AGENTCC_INTERNAL_API_KEY`, `AGENTCC_ADMIN_TOKEN`, `CH_PASSWORD`: 32
+      random bytes each, none left at a published default.
+      `INTEGRATION_ENCRYPTION_KEY` set once and kept. `./bin/install` does
+      this on a fresh Compose install.
 - [ ] **Not local mode.** `ENV_TYPE=production` (the production overlay sets
       it), which also turns `DEBUG` off.
 - [ ] **Public URLs.** `VITE_HOST_API`, `BASE_URL`, `FRONTEND_URL`, `APP_URL`
