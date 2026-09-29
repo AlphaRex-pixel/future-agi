@@ -110380,7 +110380,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         requirement_id: {
           title: "Requirement id",
           type: "string",
-          maxLength: 128,
+          maxLength: 256,
           minLength: 1,
           "x-nullable": true,
         },
@@ -110439,7 +110439,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         requirement_id: {
           title: "Requirement id",
           type: "string",
-          maxLength: 128,
+          maxLength: 256,
           minLength: 1,
         },
         requirement: {

@@ -55876,7 +55876,7 @@ export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemKindMax
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemStatementMax = 8000;
 
-export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemRequirementIdMax = 128;
+export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemRequirementIdMax = 256;
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemEvidenceIdsItemMax = 128;
 
@@ -55916,7 +55916,7 @@ export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemAttribu
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemAttributionSymptomExplanationMax = 600;
 
-export const tracerInternalErrorFeedV2ReportsCreateBodyResultRequirementChecksItemRequirementIdMax = 128;
+export const tracerInternalErrorFeedV2ReportsCreateBodyResultRequirementChecksItemRequirementIdMax = 256;
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultRequirementChecksItemRequirementMax = 8000;
 

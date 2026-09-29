@@ -353,7 +353,7 @@ class TraceInvestigationRequirementCheck(BaseModel):
         on_delete=models.CASCADE,
         related_name="requirement_checks",
     )
-    requirement_id = models.CharField(max_length=128)
+    requirement_id = models.CharField(max_length=256)
     ordinal = models.PositiveIntegerField()
     requirement = models.TextField()
     status = models.CharField(max_length=64)

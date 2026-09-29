@@ -143769,7 +143769,7 @@
                 "requirement_id": {
                     "title": "Requirement id",
                     "type": "string",
-                    "maxLength": 128,
+                    "maxLength": 256,
                     "minLength": 1,
                     "x-nullable": true
                 },
@@ -143833,7 +143833,7 @@
                 "requirement_id": {
                     "title": "Requirement id",
                     "type": "string",
-                    "maxLength": 128,
+                    "maxLength": 256,
                     "minLength": 1
                 },
                 "requirement": {
