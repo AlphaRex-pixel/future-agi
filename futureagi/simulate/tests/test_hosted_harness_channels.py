@@ -13,6 +13,7 @@ from rest_framework.test import APIClient
 
 from simulate.models import CallExecution, HostedHarnessJob, HostedHarnessReceipt
 from simulate.models.chat_message import ChatMessageModel
+from simulate.services.harness_scenarios import index_scenarios
 from simulate.services.hosted_harness import (
     HostedHarnessError,
     activate_attempt_capability,
@@ -33,7 +34,6 @@ from simulate.services.hosted_harness_ingestion import (
     ingest_artifact,
     ingest_result_receipt,
 )
-from simulate.services.harness_scenarios import index_scenarios
 
 BASE = "/simulate/api/harness/attempts"
 
@@ -554,21 +554,26 @@ def test_hosted_text_transcript_is_materialized_for_chat_ui(organization, worksp
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
-    ("call_start_offset", "expected_starts"),
+    ("call_start_offset", "recording_offset_ms", "expected_starts"),
     [
-        # The recording starts at the call start, 6.8s before the first word.
-        (-6.8, [6800, 10540, 13800]),
+        # The runner reports how long the recording ran before the first word;
+        # that anchors the turns even though the call started 6.8s earlier.
+        (-6.8, 3000, [3000, 6740, 10000]),
+        # Without it, the recording is taken to start at the call start.
+        (-6.8, None, [6800, 10540, 13800]),
         # A call start after the first word (clock skew) falls back to it.
-        (1.0, [0, 3740, 7000]),
+        (1.0, None, [0, 3740, 7000]),
     ],
 )
 def test_hosted_voice_transcript_offsets_follow_the_recording(
-    organization, workspace, call_start_offset, expected_starts
+    organization, workspace, call_start_offset, recording_offset_ms, expected_starts
 ):
     job, _ = create_hosted_job(
         organization,
         _payload(),
-        idempotency_key=f"hosted-voice-transcript-{call_start_offset}",
+        idempotency_key=(
+            f"hosted-voice-transcript-{call_start_offset}-{recording_offset_ms}"
+        ),
         workspace=workspace,
     )
     capability = register_attempt(job.id, endpoint_base_url="https://platform.example")
@@ -608,27 +613,28 @@ def test_hosted_voice_transcript_offsets_follow_the_recording(
     call.started_at = first_word + timedelta(seconds=call_start_offset)
     call.save(update_fields=["simulation_call_type", "started_at"])
     at = first_word.timestamp()
+    document = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": "Hi. This is Byte from QuickByte support.",
+                "started_speaking_at": at,
+                "stopped_speaking_at": at + 3.74,
+            },
+            # Untimed: sits where the greeting ended.
+            {"role": "assistant", "content": "How can I help you today?"},
+            {
+                "role": "user",
+                "content": "I need to cancel my order.",
+                "started_speaking_at": at + 7.0,
+                "stopped_speaking_at": at + 14.18,
+            },
+        ]
+    }
+    if recording_offset_ms is not None:
+        document["recording_offset_ms"] = recording_offset_ms
     response = MagicMock()
-    response.read.return_value = json.dumps(
-        {
-            "messages": [
-                {
-                    "role": "assistant",
-                    "content": "Hi. This is Byte from QuickByte support.",
-                    "started_speaking_at": at,
-                    "stopped_speaking_at": at + 3.74,
-                },
-                # Untimed: sits where the greeting ended.
-                {"role": "assistant", "content": "How can I help you today?"},
-                {
-                    "role": "user",
-                    "content": "I need to cancel my order.",
-                    "started_speaking_at": at + 7.0,
-                    "stopped_speaking_at": at + 14.18,
-                },
-            ]
-        }
-    ).encode()
+    response.read.return_value = json.dumps(document).encode()
     storage = MagicMock()
     storage.get_object.return_value = response
 

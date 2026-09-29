@@ -1298,11 +1298,13 @@ def _ingest_hosted_transcript(
             # derived from these and collapse to zero when every turn shares
             # the row index.
             #
-            # The offsets are measured from the call start, where the
-            # recording begins, so the drawer's transcript highlight follows
-            # playback. Measuring from the first spoken word shifted every turn
-            # early by the ring/connect time before it. A call start after the
-            # first word (clock skew) falls back to that word.
+            # The offsets are measured from where the recording begins, so the
+            # drawer's transcript highlight follows playback. The runner reports
+            # that point as ``recording_offset_ms``: how long the recording ran
+            # before the first word. Without it, the call start is the anchor
+            # (the recorder attaches after the call starts, so this lands
+            # late), and a call start after the first word (clock skew) falls
+            # back to that word.
             speech_starts = [
                 message["started_speaking_at"]
                 for message in messages
@@ -1310,14 +1312,22 @@ def _ingest_hosted_transcript(
                 and isinstance(message.get("started_speaking_at"), (int, float))
             ]
             first_speech = min(speech_starts) if speech_starts else None
+            recording_offset = (
+                payload.get("recording_offset_ms")
+                if isinstance(payload, dict)
+                else None
+            )
             call_start = _epoch_seconds(call.started_at)
-            base_time = (
-                call_start
-                if first_speech is not None
+            if first_speech is not None and isinstance(recording_offset, (int, float)):
+                base_time = first_speech - max(0.0, float(recording_offset)) / 1000
+            elif (
+                first_speech is not None
                 and call_start is not None
                 and call_start <= first_speech
-                else first_speech
-            )
+            ):
+                base_time = call_start
+            else:
+                base_time = first_speech
             previous_end_ms = 0
             valid_roles = {
                 choice for choice, _label in CallTranscript.SpeakerRole.choices
