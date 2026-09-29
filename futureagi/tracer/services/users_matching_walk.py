@@ -1935,7 +1935,7 @@ def walk_matching_activity_page(
     exhausted = manager.empty_scope or decided_from <= window_start
     # A first page with two or more eligible witnesses costs them first
     # (``_choose_witness``); those estimates come on top of its count.
-    candidates = (
+    witness_candidates = (
         _witness_candidates(manager) if cursor_order is None and not exhausted else []
     )
     budget = _statement_budget(manager)
@@ -1949,15 +1949,16 @@ def walk_matching_activity_page(
         frozen_filters=frozen_filters,
         budget=_WalkBudget(
             wall_ms=USER_LIST_PAGE_WALL_MS,
-            max_statements=budget + len(candidates),
-            ceiling=budget * USER_LIST_WALK_EMPTY_PAGE_BUDGETS + len(candidates),
+            max_statements=budget + len(witness_candidates),
+            ceiling=budget * USER_LIST_WALK_EMPTY_PAGE_BUDGETS
+            + len(witness_candidates),
         ),
         last_key=last_key,
         last_id=last_id,
         decided_from=decided_from,
     )
-    if candidates:
-        sent = _choose_witness(state, candidates)
+    if witness_candidates:
+        sent = _choose_witness(state, witness_candidates)
         # The chosen witness's own count (a typed raw witness certifies on
         # one statement of its own), with the estimates on top.
         budget = _statement_budget(manager)
