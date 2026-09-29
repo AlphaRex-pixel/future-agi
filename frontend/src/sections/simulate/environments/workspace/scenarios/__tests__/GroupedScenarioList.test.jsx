@@ -2,11 +2,12 @@ import { describe, it, expect } from "vitest";
 import { render, screen } from "src/utils/test-utils";
 import GroupedScenarioList from "../GroupedScenarioList";
 
-// jsdom can't hover, so read the :hover rule emotion generated for the element.
-function hoverRules(el) {
+// jsdom can't hover, so read the rules emotion generated for the element:
+// its base rule (suffix "") and its :hover rule (suffix ":hover").
+function rules(el, suffix) {
   const css = [...document.querySelectorAll("style")].map((s) => s.textContent).join("\n");
   return [...el.classList]
-    .flatMap((cls) => [...css.matchAll(new RegExp(`\\.${cls}:hover\\{([^}]*)\\}`, "g"))])
+    .flatMap((cls) => [...css.matchAll(new RegExp(`\\.${cls}${suffix}\\{([^}]*)\\}`, "g"))])
     .map((m) => m[1])
     .join(";");
 }
@@ -20,7 +21,9 @@ describe("GroupedScenarioList — sticky group header", () => {
       />,
     );
     const header = screen.getByText("Handle admin inquiries").closest('[role="button"]');
-    const hover = hoverRules(header);
+    // Solid base, so the tint has something opaque to sit on.
+    expect(rules(header, "")).toMatch(/background-color/);
+    const hover = rules(header, ":hover");
     expect(hover).toMatch(/background-image/);
     expect(hover).not.toMatch(/background-color/);
   });
