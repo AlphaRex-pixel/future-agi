@@ -8,17 +8,25 @@ The seeder replaces a YAML's ``eval_tags`` with the entry in
 ``evaluations/catalog/system_evals.yaml`` whenever the eval name is listed
 there, so a tag added only to the YAML of a catalog-listed eval is silently
 dropped at seed time. The override tests pin that the tags land in both.
+
+The ten are also catalog entries, which is what makes the environments harness
+offer them; the last tests check that without a database.
 """
 
 import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from model_hub.management.commands.seed_system_evals import (
+    CATALOG_YAML,
+    SYSTEM_EVALS_DIR,
     _yaml_to_template_fields,
     load_yaml_evals,
 )
+from model_hub.models.evals_metric import EvalTemplate
+from simulate.services import harness_evals
 
 NEW_EVALS = {
     209: "identity_verification_compliance",
@@ -105,3 +113,55 @@ def test_every_new_eval_tag_has_a_filter_chip(evals_by_name):
     for name in NEW_EVALS.values():
         missing = set(evals_by_name[name]["eval_tags"]) - chip_labels
         assert not missing, f"{name}: tags without a filter chip: {missing}"
+
+
+# --- Environments: the catalog lists them, the harness offers them -------------
+
+
+@pytest.fixture(scope="module")
+def catalog():
+    return yaml.safe_load(Path(CATALOG_YAML).read_text()) or {}
+
+
+@pytest.mark.parametrize("name", sorted(NEW_EVALS.values()))
+def test_catalog_entry_mirrors_the_legacy_yaml(catalog, name):
+    """The catalog is what the environments harness offers from and where the
+    seeder takes tags from, so each entry must match its legacy YAML."""
+    legacy = yaml.safe_load(
+        (Path(SYSTEM_EVALS_DIR) / "agent" / f"{name}.yaml").read_text()
+    )
+    entry = catalog[name]
+    assert entry["eval_type"] == "agent"
+    assert entry["output"] == legacy["config"]["output"]
+    assert entry["required_keys"] == legacy["config"]["required_keys"]
+    assert entry["tags"] == legacy["eval_tags"]
+    assert entry["description"] == legacy["description"]
+    assert entry["rule_prompt"] == legacy["config"]["rule_prompt"]
+
+
+@pytest.mark.parametrize("name", sorted(NEW_EVALS.values()))
+def test_offered_to_the_right_agent_kinds(evals_by_name, name):
+    """Built from the seeded fields (catalog tags merged), without a database."""
+    e = evals_by_name[name]
+    template = EvalTemplate(
+        name=name, config=e["config"], eval_tags=list(e["eval_tags"]), owner="system"
+    )
+    assert name in harness_evals.offerable_eval_names()
+    for modality in ("voice", "text"):
+        offered = (
+            harness_evals._has_relevant_tag(template, modality)
+            and harness_evals.resolve_eval_mapping(template, modality) is not None
+        )
+        # Audio-only: a chat run has no recording, so it is never offered there.
+        expected = not (name == "unclear_audio_handling" and modality == "text")
+        assert offered is expected, f"{name} on {modality}"
+
+
+def test_consent_gets_recording_and_transcript_on_voice(evals_by_name):
+    template = EvalTemplate(
+        name="action_confirmation_gating",
+        config=evals_by_name["action_confirmation_gating"]["config"],
+    )
+    mapping = harness_evals.resolve_eval_mapping(template, "voice")
+    assert mapping["conversation"] == "voice_recording"
+    assert mapping["transcript"] == "transcript"
