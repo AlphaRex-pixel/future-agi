@@ -650,9 +650,9 @@ class TestTraceSessionGraphAPI:
     def test_session_latency_response_names_the_mean(
         self, auth_client, observe_project
     ):
+        # Unmarked, so only the stamp can name the statistic.
         snapshot = {
             "metric_name": "latency",
-            "metric_statistic": "mean",
             "data": [{"timestamp": "2026-06-18T00:00:00", "value": 120.0}],
             "query_complete": True,
             "query_status": "complete",
