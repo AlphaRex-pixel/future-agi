@@ -15,11 +15,7 @@ import { startOfToday, startOfTomorrow, startOfYesterday, sub } from "date-fns";
 import { fireEvent, render, screen, waitFor } from "src/utils/test-utils";
 import axios from "src/utils/axios";
 import { formatDate } from "src/utils/report-utils";
-import {
-  ROLLING_PRESET_START_STEP_MS,
-  observePresetDateFilter,
-  presetToRange,
-} from "../timeWindowPresets";
+import { observePresetDateFilter, presetToRange } from "../timeWindowPresets";
 import { getDefaultDateRange } from "../dateRangeDefaults";
 import { dateFilterForOption } from "../LLMTracing/DateRangePill";
 import ObserveToolbar from "../LLMTracing/ObserveToolbar";
@@ -89,7 +85,6 @@ const appliedFilter = (setDateFilter) => {
 
 describe("observePresetDateFilter", () => {
   it("floors every rolling start to the hour and ends at startOfTomorrow", () => {
-    expect(ROLLING_PRESET_START_STEP_MS).toBe(HOUR_MS);
     for (const option of ROLLING) {
       const [start, end] = observePresetDateFilter(option, NOW);
       const [rawStart] = presetToRange(option, NOW);

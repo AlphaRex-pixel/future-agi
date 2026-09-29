@@ -64,7 +64,7 @@ export const tokenToPreset = (token) => TITLE_BY_TOKEN[token] || null;
 // Observe's exact charts cache one snapshot per window, so a rolling preset's
 // start moves in whole hours rather than every second: every visit in the same
 // hour sends the same window and can be served from that snapshot.
-export const ROLLING_PRESET_START_STEP_MS = 60 * 60 * 1000;
+const ROLLING_PRESET_START_STEP_MS = 60 * 60 * 1000;
 
 // Floors on epoch milliseconds, i.e. on UTC hours: every viewer in one UTC
 // hour shares the start. The window's identity is still per timezone, since
@@ -76,9 +76,7 @@ const floorToStep = (date, stepMs) =>
 
 // Every bound is derived from `now` so a caller can compute a window without
 // the global clock; defaulting it keeps the live behaviour identical.
-// `startStepMs` floors the start of a day-or-longer rolling preset (7D .. 12M);
-// Today, Yesterday and the sub-day presets are never rounded.
-export function presetToRange(key, now = new Date(), { startStepMs } = {}) {
+export function presetToRange(key, now = new Date()) {
   const dayStart = startOfDay(now);
   const nextDayStart = addDays(dayStart, 1);
   if (key === "Today") return [dayStart, nextDayStart];
@@ -88,8 +86,7 @@ export function presetToRange(key, now = new Date(), { startStepMs } = {}) {
   }
   const duration = DURATIONS[key];
   if (!duration) return null;
-  const start = sub(now, duration);
-  return [startStepMs ? floorToStep(start, startStepMs) : start, nextDayStart];
+  return [sub(now, duration), nextDayStart];
 }
 
 // The presets an Observe date site offers: Today, Yesterday and the rolling
@@ -108,14 +105,17 @@ const OBSERVE_PRESETS = new Set([
 // The one window every Observe preset site sends (default load, toolbar pick,
 // compare pills, DateRangePill), formatted as the list/graph date filter.
 // A default "Past 7D" and a picked "Past 7D" are therefore byte-identical: the
-// start is floored to the UTC hour and the end is the next local midnight.
+// start of a rolling preset (7D .. 12M) is floored to the UTC hour and the
+// end is the next local midnight; Today and Yesterday are never rounded.
 // Returns null for Custom, the sub-day presets and unknown keys.
 export function observePresetDateFilter(key, now = new Date()) {
   if (!OBSERVE_PRESETS.has(key)) return null;
-  const range = presetToRange(key, now, {
-    startStepMs: ROLLING_PRESET_START_STEP_MS,
-  });
-  return range ? range.map(formatDate) : null;
+  const [start, end] = presetToRange(key, now);
+  const rolling = key in DURATIONS;
+  return [
+    rolling ? floorToStep(start, ROLLING_PRESET_START_STEP_MS) : start,
+    end,
+  ].map(formatDate);
 }
 
 // Presets end at startOfTomorrow so the query covers all of today; showing that
