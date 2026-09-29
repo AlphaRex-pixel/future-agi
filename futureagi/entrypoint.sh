@@ -185,9 +185,6 @@ export ENV_PROJECT_ROOT
 # Change to the backend directory
 cd /app/backend
 
-# Install any missing dependencies (2FA/WebAuthn added after Docker image build)
-pip install --quiet "pyotp>=2.9.0" "qrcode[pil]>=7.4" "webauthn>=2.2.0" 2>/dev/null || true
-
 # Create logs directory if it doesn't exist
 mkdir -p logs media static
 
@@ -363,7 +360,13 @@ should_register_temporal_schedules() {
 }
 
 if should_register_temporal_schedules; then
-    python manage.py register_temporal_schedules || echo "WARNING: Temporal schedule registration failed (non-fatal), continuing startup..."
+    if ! python manage.py register_temporal_schedules; then
+        if [ "$SERVICE_TYPE" = "bootstrap" ]; then
+            echo "ERROR: Temporal schedule registration failed; bootstrap is incomplete"
+            exit 1
+        fi
+        echo "WARNING: Temporal schedule registration failed (non-fatal), continuing startup..."
+    fi
 else
     echo "Temporal schedule registration disabled for service type: $SERVICE_TYPE"
 fi
