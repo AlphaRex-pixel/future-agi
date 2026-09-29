@@ -776,13 +776,17 @@ def delete_environment(job: HostedHarnessJob) -> None:
                 )
 
                 cancel_job = HostedHarnessJob.no_workspace_objects.get(id=job_id)
-                HostedHarnessGateway().cancel(cancel_job, reason=DELETE_CANCEL_REASON)
+                HostedHarnessGateway().cancel(
+                    cancel_job, reason=DELETE_CANCEL_REASON
+                )
             except Exception:
                 logger.exception(
                     "hosted_harness_delete_direct_cancel_failed", job_id=job_id
                 )
                 if job_id == parent_cancel_id:
-                    _soft_delete(HostedHarnessJob.no_workspace_objects.get(id=job_id))
+                    _soft_delete(
+                        HostedHarnessJob.no_workspace_objects.get(id=job_id)
+                    )
 
 
 def _soft_delete(job: HostedHarnessJob) -> None:

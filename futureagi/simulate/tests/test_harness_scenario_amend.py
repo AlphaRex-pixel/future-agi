@@ -296,3 +296,25 @@ def test_an_edit_that_breaks_the_gates_is_still_refused(user, workspace):
     assert response.json()["receipts"][0]["outcome"] == "refused"
     output = HostedHarnessStageOutput.no_workspace_objects.get(job=job, kind="scenarios")
     assert output.data[0]["tests"] == "the agent holds the line"
+
+
+def test_an_archive_that_cannot_take_the_edit_leaves_everything_unchanged(
+    user, workspace
+):
+    from simulate.services.hosted_harness_gateway import AuthoringArchiveKept
+
+    job = _job(user, workspace, SUITE)
+    with patch(
+        "simulate.services.hosted_harness_gateway.push_scenarios_into_live_sandbox",
+        return_value=False,
+    ) as pushed, patch(
+        "simulate.services.hosted_harness_gateway.rewrite_authoring_scenarios",
+        side_effect=AuthoringArchiveKept("the change would lose files a run needs"),
+    ):
+        response = _post(user, job, [{"op": "drop", "scenario": "two"}])
+    receipt = response.json()["receipts"][0]
+    assert receipt["outcome"] == "refused"
+    assert "nothing changed" in receipt["why"]
+    output = HostedHarnessStageOutput.no_workspace_objects.get(job=job, kind="scenarios")
+    assert [one["name"] for one in output.data] == ["one", "two"]
+    pushed.assert_not_called()

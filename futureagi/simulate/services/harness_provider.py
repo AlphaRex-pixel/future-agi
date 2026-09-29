@@ -1853,6 +1853,7 @@ class HostedHarnessProvider:
     def amend_scenarios(self, request, pk) -> Response:
         """Edit a finished run's authored suite, one receipt per requested change."""
         from simulate.services.hosted_harness_gateway import (
+            AuthoringArchiveKept,
             push_scenarios_into_live_sandbox,
             rewrite_authoring_scenarios,
         )
@@ -2080,6 +2081,24 @@ class HostedHarnessProvider:
                         }
                     )
             if touched:
+                # The archive a run replays changes first; if it cannot, nothing changes.
+                try:
+                    rewrite_authoring_scenarios(job, suite)
+                except AuthoringArchiveKept as kept:
+                    return Response(
+                        {
+                            "receipts": [
+                                {
+                                    **one,
+                                    "outcome": "refused",
+                                    "why": f"nothing changed: {kept}",
+                                }
+                                if one.get("outcome") == "applied"
+                                else one
+                                for one in receipts
+                            ]
+                        }
+                    )
                 if output is not None:
                     output.data = suite
                     output.summary = f"{len(suite)} pre-authored scenarios"
@@ -2103,7 +2122,6 @@ class HostedHarnessProvider:
                         job.id,
                         exc_info=True,
                     )
-                rewrite_authoring_scenarios(job, suite)
                 delivered = push_scenarios_into_live_sandbox(job, suite)
                 if delivered:
                     receipts = [

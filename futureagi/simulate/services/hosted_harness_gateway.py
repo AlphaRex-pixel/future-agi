@@ -4709,6 +4709,10 @@ def push_scenarios_into_live_sandbox(job: HostedHarnessJob, suite: list[dict]) -
     return True
 
 
+class AuthoringArchiveKept(Exception):
+    """The edited suite could not be written into the archive without breaking a run."""
+
+
 def rewrite_authoring_scenarios(job: HostedHarnessJob, suite: list[dict]) -> str | None:
     """Write an edited suite back into the sealed archive a rerun replays."""
     metadata = (job.payload or {}).get("metadata") or {}
@@ -4720,9 +4724,9 @@ def rewrite_authoring_scenarios(job: HostedHarnessJob, suite: list[dict]) -> str
     try:
         response = client.get_object(UPLOAD_BUCKET_NAME, object_key)
         body = response.read()
-    except Exception:  # noqa: BLE001 - an unreadable archive leaves the stage output as the record
+    except Exception as exc:  # noqa: BLE001 - an archive we cannot read cannot take the edit
         logger.exception("could not read authoring archive for amend job=%s", job.id)
-        return None
+        raise AuthoringArchiveKept("the saved scenarios could not be read") from exc
     finally:
         if response is not None:
             response.close()
@@ -4734,7 +4738,7 @@ def rewrite_authoring_scenarios(job: HostedHarnessJob, suite: list[dict]) -> str
             "harness_amend_archive_kept job=%s: the rewrite would lose files a run needs",
             job.id,
         )
-        return None
+        raise AuthoringArchiveKept("the change would lose files a run needs")
     client.put_object(
         bucket_name=UPLOAD_BUCKET_NAME,
         object_name=object_key,
