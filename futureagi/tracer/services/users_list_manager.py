@@ -593,8 +593,9 @@ class UsersListManager:
         # ``matching_activity_walk_applies`` for the page it applies to.
         self._walked_typed_filter: WalkedTypedFilter | None = None
         # The witness the current walk discovers on: the first eligible one
-        # (``matching_activity_walk_applies``) until the walk selects the one
-        # a cursor binds (``use_walk_witness``); the walk's builder reads it.
+        # (``matching_activity_walk_applies``) until the walk chooses one on a
+        # first page (``_choose_witness``) or selects the one a cursor binds
+        # (``_bound_witness``); the walk hands it to its builder.
         self._walk_witness: MatchingActivityWitness | None = None
         # Every witness the walk may discover on, in static rank order, with
         # the typed predicate a typed raw witness is decided on.

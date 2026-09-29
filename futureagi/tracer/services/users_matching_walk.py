@@ -247,9 +247,8 @@ logger = structlog.get_logger(__name__)
 # and coverage as another leaf's. v1 cursors carried no fingerprint and chose
 # native witnesses by request position, so they restart.
 USER_LIST_MATCHING_CURSOR_ORDER = "matching_activity_users_v2"
-# Newest activity matching the WITNESS leaf: the raw attribute leaf when the
-# walk accepts one, otherwise an eligible native leaf
-# (``UsersListManager.matching_activity_walk_applies`` says which).
+# Newest activity matching the leaf the walk discovers on: the eligible
+# witness a first page chooses (``_choose_witness``), bound into its cursor.
 USER_LIST_MATCHING_ORDERING = "latest_matching_activity"
 USER_LIST_MATCHING_PROVENANCE = "matching_activity_walk"
 USER_LIST_PAGE_WALL_MS = settings.USER_LIST_PAGE_WALL_MS
@@ -458,7 +457,7 @@ class _WalkState:
     # (``_read_native_certification``).
     uncapped_native: bool = False
     # The tail's witness-free presence statement was sent: once per request
-    # (``_tail_is_empty``), whatever populated slices re-arm.
+    # (``_tail_has_no_user``), whatever populated slices re-arm.
     presence_checked: bool = False
     # The tied instant being decided, the id below which it was entered, and
     # the resolved ids it returned (certified), in descending order.
@@ -1430,10 +1429,11 @@ def _certify(state: _WalkState, batch: list[_Candidate]) -> int:
 class _NativeCertificationStopped(Exception):
     """The server stopped a native certification statement at its own cap.
 
-    A read-budget failure (``is_read_budget_error``), not the request's wall:
-    ``_certify`` certifies the batch's head-of-line user alone and stops the
-    request above a user that fails alone. The head-of-line user's own stop
-    is not raised: that user's statement is sent once more without the cap
+    Not the request's wall. ``_certify`` handles it as a read-budget failure,
+    though ``is_read_budget_error`` does not recognise it: it certifies the
+    batch's head-of-line user alone and stops the request above a user that
+    fails alone. The head-of-line user's own stop is not raised: that user's
+    statement is sent once more without the cap
     (``_read_native_certification``).
     """
 
