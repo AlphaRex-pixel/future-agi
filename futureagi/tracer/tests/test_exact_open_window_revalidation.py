@@ -544,6 +544,58 @@ def test_claimer_whose_own_revalidation_already_failed_gets_the_hit_plain(
     assert temporal_status == []
 
 
+class _TokenCacheFailure:
+    """The Django cache, except that one operation on the revalidation token key raises."""
+
+    def __init__(self, operation: str):
+        self._operation = operation
+
+    def __getattr__(self, name):
+        real = getattr(cache, name)
+        if name != self._operation:
+            return real
+
+        def failing(key, *args, **kwargs):
+            if str(key).endswith(":revalidate-token"):
+                raise ConnectionError("cache unavailable")
+            return real(key, *args, **kwargs)
+
+        return failing
+
+
+@pytest.mark.parametrize(
+    ("operation", "event"),
+    [
+        ("get", "exact_aggregation_revalidation_token_read_failed"),
+        ("set", "exact_aggregation_revalidation_token_write_failed"),
+    ],
+)
+def test_unknown_revalidation_provenance_reports_the_failure_and_logs(
+    monkeypatch, queue, operation, event
+):
+    """Without its token a failed refresh may be the user's: it is shown."""
+
+    import structlog
+
+    identity = _identity()
+    _seed(SESSION_NS, identity, age=OLD)
+    monkeypatch.setattr(eac, "cache", _TokenCacheFailure(operation))
+    with structlog.testing.capture_logs() as records:
+        assert _read(SESSION_NS, identity)["query_refreshing"] is True
+        (job,) = queue
+        eac.finish_exact_refresh(
+            SESSION_NS, job["identity"], job["refresh_token"], succeeded=False
+        )
+        served = _read(SESSION_NS, identity)
+
+    assert served["query_status"] == "complete"
+    assert served["query_refresh_failed"] is True
+    assert any(
+        record["event"] == event and record["log_level"] == "warning"
+        for record in records
+    )
+
+
 def test_failed_explicit_refresh_still_reports_the_failure(queue):
     identity = _identity()
     _seed(SESSION_NS, identity, age=OLD)

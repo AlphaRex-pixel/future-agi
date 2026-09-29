@@ -1669,6 +1669,13 @@ def _served_refresh_state(
     try:
         automatic = cache.get(_revalidation_token_key(namespace, identity))
     except Exception:
+        # Unknown provenance: report the failure rather than hide one the
+        # user may have asked for.
+        logger.warning(
+            "exact_aggregation_revalidation_token_read_failed",
+            namespace=namespace,
+            exc_info=True,
+        )
         return state
     return None if automatic == token else state
 
