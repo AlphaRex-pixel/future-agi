@@ -264,7 +264,8 @@ describe("WorkspaceHeader", () => {
   it("hides the header Run + Repeats while a scenario selection is active", () => {
     render(withRouter(<WorkspaceHeader {...baseProps} canRun selectionActive />));
     expect(screen.queryByRole("button", { name: "Run simulation" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Repeats:/ })).toBeNull();
+    // The Repeats button's accessible name is its tooltip, so match its text.
+    expect(screen.queryByText(/^Repeats:/)).toBeNull();
   });
 
   it("disables Run simulation with a reason tooltip when the env cannot run", async () => {
