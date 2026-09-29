@@ -579,8 +579,8 @@ def _kinds(engine: Engine) -> list[str]:
 
 
 # The statement count alone ends a request, as it did before an empty page's
-# count could grow to its wall (``_WalkBudget.affords``): for tests of what a
-# request does when its count, not its wall, runs out.
+# count could grow to its wall (``_WalkBudget.grow_to_fit``): for tests of what
+# a request does when its count, not its wall, runs out.
 _plain_count = patch.object(walk, "USER_LIST_WALK_EMPTY_PAGE_BUDGETS", 1)
 
 

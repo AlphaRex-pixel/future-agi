@@ -118,8 +118,8 @@ Budget. The walk owns a wall (``USER_LIST_PAGE_WALL_MS``) and a statement
 budget (``USER_LIST_WALK_MAX_STATEMENTS``, never less than one batch's
 decision: ``_statement_budget``). Until it publishes a user, the count grows
 one budget at a time while the wall lasts, up to
-``USER_LIST_WALK_EMPTY_PAGE_BUDGETS`` budgets (``_WalkBudget.affords``): an
-empty page is returned when the wall is spent, not when fast statements
+``USER_LIST_WALK_EMPTY_PAGE_BUDGETS`` budgets (``_WalkBudget.grow_to_fit``):
+an empty page is returned when the wall is spent, not when fast statements
 spent a count. On exhaustion it returns the users certified so far, in
 order, with a cursor; it never falls back to the whole-window statement. A slice that fails on a read budget is retried narrower, never
 wider. Until a request decides something, its search is admitted against the
@@ -266,8 +266,8 @@ USER_LIST_WALK_FINISH_WALL_MS = settings.INTERACTIVE_ANALYTICS_DEFAULT_WALL_MS
 USER_LIST_WALK_MAX_STATEMENTS = settings.USER_LIST_WALK_MAX_STATEMENTS
 # A request that has published nothing is not ended by its statement count
 # while its page wall lasts: the count grows one budget at a time, up to this
-# many budgets (``_WalkBudget.affords``). An empty degraded page is what the
-# UI shows as "preparing exact results", so it should cost the wall, not a
+# many budgets (``_WalkBudget.grow_to_fit``). An empty degraded page is what
+# the UI shows as "preparing exact results", so it should cost the wall, not a
 # count the fast statements of a dense, rejecting slice spend in a fraction
 # of it.
 USER_LIST_WALK_EMPTY_PAGE_BUDGETS = settings.USER_LIST_WALK_EMPTY_PAGE_BUDGETS
@@ -323,7 +323,7 @@ class _WalkBudget:
     out grows by one budget at a time while the page wall has time left, up
     to ``ceiling``: a request that has only rejected users goes on deciding
     until its wall, instead of returning an empty page after a count its
-    statements spent in a fraction of it (``affords``).
+    statements spent in a fraction of it (``grow_to_fit``).
     """
 
     def __init__(
@@ -338,11 +338,12 @@ class _WalkBudget:
         # "statements" (sticky), "wall", or "read_budget" (``_certify``).
         self.exhausted_by: str | None = None
 
-    def affords(self, statements: int) -> bool:
-        """Whether ``statements`` more fit the count, growing it first if it may.
+    def grow_to_fit(self, statements: int) -> bool:
+        """Grow the count if it may, then say whether ``statements`` more fit.
 
         It may grow while the page has published nothing and the page wall
-        has time left, never past ``ceiling``.
+        has time left, never past ``ceiling``. The growth stays even when
+        they still do not fit.
         """
         from tracer.services.users_list_manager import _page_wall_stopped
 
@@ -371,7 +372,7 @@ class _WalkBudget:
 
         if self.exhausted_by == "statements":
             return False
-        if not self.affords(statements):
+        if not self.grow_to_fit(statements):
             self.exhausted_by = "statements"
             return False
         if not finish:
@@ -1334,7 +1335,7 @@ def _certify(state: _WalkState, batch: list[_Candidate]) -> int:
     if state.certify_singly:
         batch = batch[:1]
     statements = _enrichment_statement_count(manager)
-    if not state.progress_owed and not state.budget.affords(
+    if not state.progress_owed and not state.budget.grow_to_fit(
         statements + _materialisation_statement_count(manager)
     ):
         # Off the head of line, only when one materialisation is paid too. On
