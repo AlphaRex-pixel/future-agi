@@ -17,6 +17,7 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
+from minio.error import S3Error
 
 from simulate.models import (
     HostedHarnessAttempt,
@@ -86,10 +87,13 @@ def serialize_conversation(
         conversation=conversation
     ).first()
     # A live job always accepts messages: they wait in order until its sandbox can run chat.
-    chat_available = bool(
-        conversation.job.state not in _TERMINAL_JOB_STATES
-        or conversation.latest_workspace_object_key
-        or job_metadata.get("authoring_object_key")
+    chat_available = (
+        conversation.state != HostedHarnessConversation.State.RETIRED
+        and bool(
+            conversation.job.state not in _TERMINAL_JOB_STATES
+            or conversation.latest_workspace_object_key
+            or job_metadata.get("authoring_object_key")
+        )
     )
     return {
         "conversation_id": str(conversation.id),
@@ -269,6 +273,24 @@ def _settle_idle(conversation_id) -> int:
         return 1
 
 
+def retire_without_saved_workspace(conversation_id) -> int:
+    """Fail waiting messages for good: the run's saved files are gone, so no restart can work."""
+    with transaction.atomic():
+        conversation = (
+            HostedHarnessConversation.no_workspace_objects.select_for_update().get(
+                id=conversation_id
+            )
+        )
+        return _fail_outstanding(
+            conversation,
+            state=HostedHarnessConversation.State.RETIRED,
+            reply=(
+                "This environment's saved files are no longer available, so chat "
+                "can't start. Rebuild the environment to chat with it again."
+            ),
+        )
+
+
 def _abandon_outstanding(conversation_id) -> int:
     with transaction.atomic():
         conversation = (
@@ -288,17 +310,29 @@ def _abandon_outstanding(conversation_id) -> int:
             <= timedelta(seconds=RUNTIME_GIVE_UP_SECONDS)
         ):
             return 0
-        if lease is not None:
-            lease.state = HostedHarnessConversationLease.State.EXPIRED
-            lease.save(update_fields=["state", "updated_at"])
-        abandoned = _unacked_commands(conversation).update(
-            state=HostedHarnessConversationMessage.State.FAILED,
-            updated_at=timezone.now(),
+        return _fail_outstanding(
+            conversation,
+            state=HostedHarnessConversation.State.DEGRADED,
+            reply=(
+                "The environment chat could not start, so your message was not "
+                "delivered. Send it again to retry."
+            ),
         )
-        if not abandoned:
-            return 0
-        settle_interrupted_turn(conversation)
-        conversation.state = HostedHarnessConversation.State.DEGRADED
+
+
+def _fail_outstanding(
+    conversation: HostedHarnessConversation, *, state: str, reply: str
+) -> int:
+    HostedHarnessConversationLease.no_workspace_objects.filter(
+        conversation=conversation
+    ).update(state=HostedHarnessConversationLease.State.EXPIRED)
+    abandoned = _unacked_commands(conversation).update(
+        state=HostedHarnessConversationMessage.State.FAILED,
+        updated_at=timezone.now(),
+    )
+    settle_interrupted_turn(conversation)
+    conversation.state = state
+    if abandoned:
         HostedHarnessConversationMessage.no_workspace_objects.create(
             conversation=conversation,
             sequence=conversation.next_message_sequence,
@@ -306,21 +340,18 @@ def _abandon_outstanding(conversation_id) -> int:
             kind=HostedHarnessConversationMessage.Kind.MESSAGE,
             state=HostedHarnessConversationMessage.State.FAILED,
             stage=conversation.current_stage,
-            content=(
-                "The environment chat could not start, so your message was not "
-                "delivered. Send it again to retry."
-            ),
+            content=reply,
         )
         conversation.next_message_sequence += 1
-        conversation.save(
-            update_fields=[
-                "state",
-                "next_message_sequence",
-                "active_invocation_id",
-                "updated_at",
-            ]
-        )
-        return abandoned
+    conversation.save(
+        update_fields=[
+            "state",
+            "next_message_sequence",
+            "active_invocation_id",
+            "updated_at",
+        ]
+    )
+    return abandoned
 
 
 def record_runtime_started(conversation: HostedHarnessConversation) -> None:
@@ -1065,9 +1096,20 @@ def store_workspace_archive(
 def load_workspace_archive(conversation: HostedHarnessConversation) -> bytes | None:
     if not conversation.latest_workspace_object_key:
         return None
-    response = get_storage_client().get_object(
-        UPLOAD_BUCKET_NAME, conversation.latest_workspace_object_key
-    )
+    try:
+        response = get_storage_client().get_object(
+            UPLOAD_BUCKET_NAME, conversation.latest_workspace_object_key
+        )
+    except S3Error as exc:
+        if exc.code != "NoSuchKey":
+            raise
+        # The checkpoint object is gone; treat it like no checkpoint so chat falls back
+        # to the authoring archive rather than retiring. The user's edits are lost.
+        logger.warning(
+            "conversation checkpoint object missing; falling back to authoring archive conversation=%s",
+            conversation.id,
+        )
+        return None
     try:
         return response.read()
     finally:
