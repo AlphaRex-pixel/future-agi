@@ -17,14 +17,7 @@ describe("latencyChartLabels", () => {
     });
   });
 
-  it.each([
-    undefined,
-    null,
-    {},
-    // Retired: no server publishes it; never labelled as an average.
-    { latency: "median" },
-    { latency: "p95" },
-  ])(
+  it.each([undefined, null, {}, { latency: "median" }, { latency: "p95" }])(
     "keeps the plain label when latency is not a declared mean (%j)",
     (statistics) => {
       expect(latencyChartLabels(statistics)).toEqual({

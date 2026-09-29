@@ -36,7 +36,7 @@ export const generateAllColors = (paletteFn, newBaseKey = baseKeys) => {
 /**
  * Labels of the project latency chart. The server declares each series'
  * statistic in `system_metric_statistics`; latency is the mean. Without that
- * declaration (an older server), or with a retired or unknown statistic, the
+ * declaration (an older server), or with any other statistic, the
  * chart keeps the plain label rather than guessing a statistic.
  */
 export const latencyChartLabels = (systemMetricStatistics) =>
