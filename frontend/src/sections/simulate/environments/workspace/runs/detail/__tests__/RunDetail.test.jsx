@@ -201,7 +201,6 @@ CallDrawerStub.propTypes = {
 vi.mock("../CallDrawer", () => ({ default: CallDrawerStub }));
 
 const { default: RunDetail } = await import("../RunDetail");
-const { default: StatusChip } = await import("../../StatusChip");
 
 const IDENTITY = {
   id: "ex1",
@@ -399,24 +398,6 @@ describe("RunDetail", () => {
     expect(
       screen.getByRole("tab", { name: /Test runs \(12\)/ }),
     ).toBeInTheDocument();
-  });
-
-  it("colours the header's Completed chip green, like the runs table's", () => {
-    useRunDetail.mockReturnValue({
-      identity: IDENTITY,
-      stats: STATS,
-      isLoading: false,
-    });
-    renderDetail();
-    const headerChip = screen.getByText("Completed").parentElement;
-
-    // The runs table shows a finished run with the "finished" chip.
-    const { container } = render(<StatusChip status="finished" />);
-    const tableChip = container.firstChild;
-
-    expect(window.getComputedStyle(headerChip).color).toBe(
-      window.getComputedStyle(tableChip).color,
-    );
   });
 
   it("does not show a Failed verdict while the run is still loading", () => {

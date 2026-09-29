@@ -32,8 +32,9 @@ export const STATUS_META = {
   passed: { color: BUILD_TONES.green, label: "Passed" },
   flaky: { color: BUILD_TONES.amberBright, label: "Flaky" },
   unmeasured: { color: BUILD_TONES.ash, label: "Not measured" },
-  // A finished run — the runs table's status and the run header's verdict
-  // for a run with mixed results. Green like the design.
+  completed: { color: BUILD_TONES.zinc, label: "Completed" },
+  // The runs table's lifecycle "Completed" — green like the design. Kept apart from
+  // `completed` above, which the run header uses for "finished with findings".
   finished: { color: BUILD_TONES.green, label: "Completed" },
   failed: { color: BUILD_TONES.red, label: "Failed" },
   error: { color: BUILD_TONES.orange, label: "Error" },

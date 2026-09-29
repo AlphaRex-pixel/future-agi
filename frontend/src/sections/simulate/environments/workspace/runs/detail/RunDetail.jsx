@@ -46,8 +46,7 @@ function headerStatus(identity, stats) {
   }
   if (stats.passed === 0) return "failed";
   if (stats.failed === 0) return "passed";
-  // The green "Completed" the runs table shows for a finished run.
-  return "finished";
+  return "completed";
 }
 
 /**
