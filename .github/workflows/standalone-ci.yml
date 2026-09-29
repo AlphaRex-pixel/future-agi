@@ -546,7 +546,7 @@ jobs:
           fetch-depth: 0 # the v1.41.1 tag
 
       - name: Reclaim runner disk
-        # Same move as default-install: two releases' images and a build.
+        # Same move as standalone-install: two releases' images and a build.
         run: scripts/reclaim-runner-disk.sh
 
       - uses: docker/setup-buildx-action@v3
