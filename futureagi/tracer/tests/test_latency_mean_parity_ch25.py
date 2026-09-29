@@ -514,10 +514,12 @@ def _background_harness(patcher, analytics):
     state = {"background": False}
 
     # Background mode: the interactive wall never fits, the worker's does.
-    def raw_fits(rows, *, remaining_ms):
+    def raw_fits(rows, *, remaining_ms, raw_log_marks=None):
         if state["background"]:
             return remaining_ms > interactive_ms
-        return real_raw_fits(rows, remaining_ms=remaining_ms)
+        return real_raw_fits(
+            rows, remaining_ms=remaining_ms, raw_log_marks=raw_log_marks
+        )
 
     def user_fits(rows, *, remaining_ms):
         if state["background"]:
