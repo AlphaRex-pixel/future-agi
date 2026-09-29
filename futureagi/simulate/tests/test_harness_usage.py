@@ -615,3 +615,120 @@ def test_successful_admission_clears_persisted_budget_refusal(
     assert harness_usage.check_harness_usage(capability.attempt, "text_call")["allowed"]
     capability.attempt.job.refresh_from_db()
     assert "usage_limit" not in capability.attempt.job.payload["metadata"]
+
+
+@pytest.fixture
+def required_actions(monkeypatch):
+    actions = []
+    monkeypatch.setattr(
+        harness_usage,
+        "_require_harness_action",
+        lambda organization_id, action: actions.append(action),
+    )
+    return actions
+
+
+@pytest.mark.parametrize(
+    ("agent", "metadata", "expected"),
+    [
+        ({"connector": "phone"}, {}, ["harness_authoring", "voice_call"]),
+        ({"connector": "livekit"}, {}, ["harness_authoring", "voice_call"]),
+        ({"connector": "retell_chat"}, {}, ["harness_authoring", "text_call"]),
+        (
+            {"connector": "auto"},
+            {"modality": "voice"},
+            ["harness_authoring", "voice_call"],
+        ),
+        ({"connector": "auto"}, {}, ["harness_authoring"]),
+        ({}, {}, ["harness_authoring"]),
+    ],
+)
+def test_run_usage_checks_the_rail_the_connector_names(
+    required_actions, agent, metadata, expected
+):
+    harness_usage.require_harness_run_usage(
+        "org-1", {"agent": agent, "metadata": metadata}
+    )
+
+    assert required_actions == expected
+
+
+@pytest.mark.parametrize(
+    ("payload", "detected", "expected"),
+    [
+        ({"agent": {"connector": "auto"}}, ["livekit"], ["voice_call"]),
+        ({"agent": {"connector": "auto"}}, ["phone", "openai"], ["voice_call"]),
+        ({"agent": {"connector": "auto"}}, ["openai"], []),
+        ({"agent": {"connector": "auto"}}, [], []),
+        (
+            {"agent": {"connector": "auto"}, "metadata": {"modality": "text"}},
+            ["livekit"],
+            [],
+        ),
+        ({"agent": {"connector": "livekit"}}, ["livekit"], []),
+        ({}, ["livekit"], []),
+    ],
+)
+def test_source_scan_checks_voice_minutes_only_for_an_undecided_source(
+    required_actions, payload, detected, expected
+):
+    harness_usage.require_harness_source_call_usage("org-1", payload, detected)
+
+    assert required_actions == expected
+
+
+@pytest.mark.django_db
+def test_selected_run_checks_the_rail_of_the_authored_modality(
+    hosted_attempt, required_actions
+):
+    job = hosted_attempt.attempt.job
+
+    harness_usage.require_harness_call_usage(job)
+    assert required_actions == ["text_call"]
+
+    job.stage_outputs = [{"kind": "contract", "data": {"modality": "voice"}}]
+    job.save(update_fields=["stage_outputs", "updated_at"])
+    required_actions.clear()
+
+    harness_usage.require_harness_call_usage(job)
+    assert required_actions == ["voice_call"]
+
+
+@pytest.mark.django_db
+def test_selected_run_reads_the_modality_past_malformed_contract_outputs(
+    hosted_attempt, required_actions
+):
+    job = hosted_attempt.attempt.job
+    job.stage_outputs = [
+        None,
+        "contract",
+        {"kind": "contract"},
+        {"kind": "contract", "data": "voice"},
+        {"kind": "contract", "data": {"modality": "VOICE"}},
+    ]
+    job.save(update_fields=["stage_outputs", "updated_at"])
+
+    harness_usage.require_harness_call_usage(job)
+
+    assert required_actions == ["voice_call"]
+
+
+@pytest.mark.django_db
+def test_oss_call_and_source_usage_checks_never_refuse(hosted_attempt, monkeypatch):
+    monkeypatch.setattr(harness_usage, "is_oss", lambda: True)
+    job = hosted_attempt.attempt.job
+    organization_id = str(job.organization_id)
+    job.stage_outputs = [{"kind": "contract", "data": {"modality": "voice"}}]
+    job.save(update_fields=["stage_outputs", "updated_at"])
+
+    harness_usage.require_harness_call_usage(job)
+    harness_usage.require_harness_source_call_usage(
+        organization_id, {"agent": {"connector": "auto"}}, ["livekit"]
+    )
+    harness_usage.require_harness_run_usage(
+        organization_id, {"agent": {"connector": "phone"}}
+    )
+
+    assert harness_usage.check_harness_action(organization_id, "voice_call") == {
+        "allowed": True
+    }
