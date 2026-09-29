@@ -344,13 +344,13 @@ class _WalkBudget:
         It may grow while the page has published nothing and the page wall
         has time left, never past ``ceiling``.
         """
+        from tracer.services.users_list_manager import _page_wall_stopped
+
         if self.statements + statements <= self.max_statements:
             return True
         if not self.growable or self.max_statements >= self.ceiling:
             return False
-        try:
-            self.deadline.remaining_ms()
-        except ReadDeadlineExceeded:
+        if _page_wall_stopped(self.deadline):
             return False
         while (
             self.statements + statements > self.max_statements
@@ -367,6 +367,8 @@ class _WalkBudget:
         per page, and a page that has found its users should publish them
         rather than return empty because the search used the whole wall.
         """
+        from tracer.services.users_list_manager import _page_wall_stopped
+
         if self.exhausted_by == "statements":
             return False
         if not self.affords(statements):
@@ -375,9 +377,7 @@ class _WalkBudget:
         if not finish:
             if self.exhausted_by == "wall":
                 return False
-            try:
-                self.deadline.remaining_ms()
-            except ReadDeadlineExceeded:
+            if _page_wall_stopped(self.deadline):
                 self.exhausted_by = "wall"
                 return False
         self.statements += statements
@@ -930,10 +930,53 @@ def _probe_wall_spent(state: _WalkState) -> None:
     deadline; that ends the probe, never the page. Only a page wall that is
     really spent stops the walk.
     """
-    try:
-        state.budget.deadline.remaining_ms()
-    except ReadDeadlineExceeded:
+    from tracer.services.users_list_manager import _page_wall_stopped
+
+    if _page_wall_stopped(state.budget.deadline):
         state.budget.exhausted_by = "wall"
+
+
+def _send_capped_probe(query: str, params: dict[str, Any], cap_ms: int) -> Any:
+    """One one-row probe statement that the server stops at ``cap_ms``.
+
+    The application read path sends no other time, row or byte cap, and
+    ``timeout_ms`` never reaches ClickHouse.
+    """
+    from tracer.services import users_list_manager as ulm
+
+    return ulm.V2AnalyticsQueryService().execute_ch_query(
+        query,
+        params,
+        timeout_ms=cap_ms,
+        settings=ulm._page_replay_read_settings(max_result_rows=1),
+        server_execution_cap_ms=cap_ms,
+    )
+
+
+def _answered_probe(
+    state: _WalkState,
+    query: str,
+    params: dict[str, Any],
+    cap_ms: int,
+    *,
+    failed_event: str,
+) -> Any | None:
+    """``_send_capped_probe``'s result; ``None`` when it cannot answer.
+
+    A stop at the cap or a read-budget failure licenses nothing: it ends the
+    probe, not the page, unless the page's own wall is what ran out
+    (``_probe_wall_spent``). Any other failure propagates.
+    """
+    try:
+        return _send_capped_probe(query, params, cap_ms)
+    except ReadDeadlineExceeded:
+        _probe_wall_spent(state)
+        return None
+    except Exception as exc:
+        if not is_read_budget_error(exc):
+            raise
+        logger.warning(failed_event, error_type=type(exc).__name__)
+        return None
 
 
 def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
@@ -968,8 +1011,6 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
     slow estimate cannot starve it): no row proves the tail exhausted; a
     row, or a statement that cannot answer, licenses nothing.
     """
-    from tracer.services import users_list_manager as ulm
-
     if not state.budget.take(1):
         return None
     # The probe's budget runs on the clock the walk schedules on: the
@@ -985,19 +1026,12 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
     # statement, which a slow estimate then cannot starve.
     estimate_cap_ms = max(25, probe_wall_ms // 2)
     presence_floor_ms = probe_wall_ms - estimate_cap_ms
-    settings = ulm._page_replay_read_settings(max_result_rows=1)
     query, params = state.builder.build_matching_activity_existence_estimate_query(
         range_start=state.window_start, range_end=below
     )
     started = time.monotonic()
     try:
-        estimate = ulm.V2AnalyticsQueryService().execute_ch_query(
-            query,
-            params,
-            timeout_ms=estimate_cap_ms,
-            settings=settings,
-            server_execution_cap_ms=estimate_cap_ms,
-        )
+        estimate = _send_capped_probe(query, params, estimate_cap_ms)
     except Exception as exc:
         if not is_read_budget_error(exc):
             raise
@@ -1045,28 +1079,15 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
     query, params = state.builder.build_matching_activity_existence_query(
         range_start=state.window_start, range_end=below
     )
-    # The server stops it at what the estimate left of the probe wall: the
-    # application read path sends no other time, row or byte cap, and
-    # ``timeout_ms`` never reaches ClickHouse. A stop licenses nothing: it
-    # ends the probe, not the page.
-    cap_ms = max(25, int(probe_left_ms))
-    try:
-        result = ulm.V2AnalyticsQueryService().execute_ch_query(
-            query,
-            params,
-            timeout_ms=cap_ms,
-            settings=settings,
-            server_execution_cap_ms=cap_ms,
-        )
-    except ReadDeadlineExceeded:
-        _probe_wall_spent(state)
-        return None
-    except Exception as exc:
-        if not is_read_budget_error(exc):
-            raise
-        logger.warning(
-            "users_matching_walk_tail_probe_failed", error_type=type(exc).__name__
-        )
+    # The server stops it at what the estimate left of the probe wall.
+    result = _answered_probe(
+        state,
+        query,
+        params,
+        max(25, int(probe_left_ms)),
+        failed_event="users_matching_walk_tail_probe_failed",
+    )
+    if result is None:
         return None
     return not list(result.data or ())
 
@@ -1095,8 +1116,6 @@ def _tail_has_no_user(
     failed on a read budget, no wall or count left, or a request that asked
     already - and the walk slices on at the cap.
     """
-    from tracer.services import users_list_manager as ulm
-
     left_ms = min(left_ms, state.budget.remaining_ms())
     if state.presence_checked or left_ms < 25:
         return None
@@ -1112,23 +1131,14 @@ def _tail_has_no_user(
         range_start=state.window_start, range_end=below
     )
     started = time.monotonic()
-    try:
-        result = ulm.V2AnalyticsQueryService().execute_ch_query(
-            query,
-            params,
-            timeout_ms=cap_ms,
-            settings=ulm._page_replay_read_settings(max_result_rows=1),
-            server_execution_cap_ms=cap_ms,
-        )
-    except ReadDeadlineExceeded:
-        _probe_wall_spent(state)
-        return None
-    except Exception as exc:
-        if not is_read_budget_error(exc):
-            raise
-        logger.warning(
-            "users_matching_walk_tail_presence_failed", error_type=type(exc).__name__
-        )
+    result = _answered_probe(
+        state,
+        query,
+        params,
+        cap_ms,
+        failed_event="users_matching_walk_tail_presence_failed",
+    )
+    if result is None:
         return None
     present = bool(list(result.data or ()))
     logger.info(
@@ -1211,8 +1221,6 @@ def _choose_witness(
     this cursor walks (``_bound_witness`` continues it). Returns the
     estimates sent.
     """
-    from tracer.services import users_list_manager as ulm
-
     builder = state.builder
     wall_ms = min(USER_LIST_WALK_PROBE_WALL_MS, int(state.budget.remaining_ms()))
     spent_ms = 0.0
@@ -1220,7 +1228,6 @@ def _choose_witness(
     measured: list[dict[str, Any]] = []
     unanswered: list[dict[str, Any]] = []
     stop: str | None = None
-    settings = ulm._page_replay_read_settings(max_result_rows=1)
     order = sorted(
         range(len(candidates)),
         key=lambda index: (candidates[index][0].family == "raw", index),
@@ -1243,13 +1250,7 @@ def _choose_witness(
         described = {"family": witness.family, "column": witness.key}
         started = time.monotonic()
         try:
-            estimate = ulm.V2AnalyticsQueryService().execute_ch_query(
-                query,
-                params,
-                timeout_ms=left_ms,
-                settings=settings,
-                server_execution_cap_ms=left_ms,
-            )
+            estimate = _send_capped_probe(query, params, left_ms)
         except Exception as exc:
             if not is_read_budget_error(exc):
                 raise
@@ -1499,12 +1500,11 @@ def _read_native_certification(
         )
         return
     except ReadDeadlineExceeded as exc:
+        from tracer.services.users_list_manager import _page_wall_stopped
+
         admission = _admission_deadline(state)
-        if admission is not None:
-            try:
-                admission.remaining_ms()
-            except ReadDeadlineExceeded:
-                raise exc from None
+        if admission is not None and _page_wall_stopped(admission):
+            raise exc from None
         logger.info(
             "users_matching_walk_native_certification_stopped",
             users=len(rows),
