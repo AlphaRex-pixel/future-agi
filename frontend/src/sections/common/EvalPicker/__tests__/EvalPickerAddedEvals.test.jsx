@@ -265,10 +265,12 @@ describe("EvalPickerDrawer — Added evaluations", () => {
     expect(screen.queryByText("Gamma eval")).toBeNull();
   });
 
-  it("says every match is already added when the box takes the whole page", () => {
+  it("says every match on this page is already added when the box takes the whole page", () => {
     renderDrawer({ addedEvals: ITEMS.map(({ id, name }) => ({ id, name })) });
     expect(
-      screen.getByText("Every matching evaluation is already added."),
+      screen.getByText(
+        "Every matching evaluation on this page is already added.",
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText("No evaluations found")).toBeNull();
   });

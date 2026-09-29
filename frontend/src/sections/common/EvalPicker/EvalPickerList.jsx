@@ -999,7 +999,7 @@ const EvalPickerList = ({ onSelectEval }) => {
                   sx={{ py: 6, color: "text.disabled" }}
                 >
                   {items.length > 0
-                    ? "Every matching evaluation is already added."
+                    ? "Every matching evaluation on this page is already added."
                     : "No evaluations found"}
                 </TableCell>
               </TableRow>
