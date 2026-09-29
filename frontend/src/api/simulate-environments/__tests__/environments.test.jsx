@@ -14,9 +14,16 @@ vi.mock("src/api/simulate-environments/harnessEnvironments", () => ({
   renameHarnessEnvironment: vi.fn(),
   getHarnessEnvironment: vi.fn(),
   deleteAppliedEvaluation: vi.fn(),
-  getAvailableEvaluations: vi.fn(),
-  addEvaluation: vi.fn(),
   addRunEvaluation: vi.fn(),
+}));
+vi.mock("src/utils/axios", () => ({
+  default: { get: vi.fn(), post: vi.fn() },
+  endpoints: {
+    runTests: {
+      detail: (id) => `/simulate/run-tests/${id}/`,
+      addEvals: (id) => `/simulate/run-tests/${id}/eval-configs/`,
+    },
+  },
 }));
 
 const { createHarnessJob, uploadHarnessSecretFile } = await import(
@@ -26,7 +33,6 @@ const {
   listHarnessEnvironments,
   deleteHarnessEnvironment,
   deleteAppliedEvaluation,
-  addEvaluation,
   addRunEvaluation,
 } = await import("src/api/simulate-environments/harnessEnvironments");
 const {
@@ -36,11 +42,12 @@ const {
   useUploadSecretFile,
   useRunSimulation,
   useAdoptTemplate,
-  useAddEvaluation,
   useAddRunEvaluation,
   useRemoveAppliedEvaluation,
+  useEnvironmentRunTest,
+  useAddRunTestEval,
+  environmentRunTestKey,
   SIMULATE_ENVIRONMENTS_KEY,
-  availableEvaluationsKey,
   myEnvironmentsQueryKey,
 } = await import("../environments");
 
@@ -104,12 +111,18 @@ beforeEach(() => {
 describe("useMyEnvironments", () => {
   it("maps the harness-environments results into a page of flat rows + total", async () => {
     const { Wrapper } = makeWrapper();
-    const { result } = renderHook(() => useMyEnvironments({ page: 0, pageSize: 25 }), {
-      wrapper: Wrapper,
-    });
+    const { result } = renderHook(
+      () => useMyEnvironments({ page: 0, pageSize: 25 }),
+      {
+        wrapper: Wrapper,
+      },
+    );
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     // The endpoint is 1-indexed; the table pager is 0-indexed.
-    expect(listHarnessEnvironments).toHaveBeenCalledWith({ page: 1, limit: 25 });
+    expect(listHarnessEnvironments).toHaveBeenCalledWith({
+      page: 1,
+      limit: 25,
+    });
     expect(result.current.data.total).toBe(2);
     expect(result.current.data.rows).toHaveLength(2);
     expect(result.current.data.rows[0]).toMatchObject({
@@ -137,7 +150,10 @@ describe("useMyEnvironments", () => {
       wrapper: Wrapper,
     });
     await waitFor(() =>
-      expect(listHarnessEnvironments).toHaveBeenCalledWith({ page: 3, limit: 10 }),
+      expect(listHarnessEnvironments).toHaveBeenCalledWith({
+        page: 3,
+        limit: 10,
+      }),
     );
   });
 
@@ -251,7 +267,10 @@ describe("useBuildEnvironment", () => {
 
     expect(createHarnessJob).toHaveBeenCalledTimes(1);
     const [body, idem] = createHarnessJob.mock.calls[0];
-    expect(body.source).toMatchObject({ kind: "github", repository: "acme/agent" });
+    expect(body.source).toMatchObject({
+      kind: "github",
+      repository: "acme/agent",
+    });
     expect(body.agent.connector).toBe("auto");
     expect(idem).toBe("idem-test");
     // The real job id is returned, never the raw draft.
@@ -304,7 +323,12 @@ describe("useBuildEnvironment", () => {
 describe("useUploadSecretFile", () => {
   it("posts the file as multipart and returns the real ref, never the contents", async () => {
     uploadHarnessSecretFile.mockResolvedValue({
-      secret_ref: { manager: "platform-vault", key: "ref-9", version: "1", purpose: "target_provider" },
+      secret_ref: {
+        manager: "platform-vault",
+        key: "ref-9",
+        version: "1",
+        purpose: "target_provider",
+      },
       environment_name: "GOOGLE_APPLICATION_CREDENTIALS_JSON",
       size: 42,
     });
@@ -327,7 +351,12 @@ describe("useUploadSecretFile", () => {
     expect(form.get("environment_name")).toBe("GOOGLE_APPLICATION_CREDENTIALS");
     expect(out.environment_name).toBe("GOOGLE_APPLICATION_CREDENTIALS_JSON");
 
-    expect(out.secret_ref).toEqual({ manager: "platform-vault", key: "ref-9", version: "1", purpose: "target_provider" });
+    expect(out.secret_ref).toEqual({
+      manager: "platform-vault",
+      key: "ref-9",
+      version: "1",
+      purpose: "target_provider",
+    });
     expect(out.environment_name).toBe("GOOGLE_APPLICATION_CREDENTIALS_JSON");
     expect(out.name).toBe("creds.json");
     expect(out.size).toBe(42);
@@ -335,7 +364,10 @@ describe("useUploadSecretFile", () => {
   });
 
   it("surfaces a rejected upload rather than swallowing it", async () => {
-    const rejection = { statusCode: 422, message: "Hosted credential uploads…" };
+    const rejection = {
+      statusCode: 422,
+      message: "Hosted credential uploads…",
+    };
     uploadHarnessSecretFile.mockRejectedValue(rejection);
     const { Wrapper } = makeWrapper();
     const { result } = renderHook(() => useUploadSecretFile(), {
@@ -373,46 +405,6 @@ describe("useAdoptTemplate", () => {
   });
 });
 
-describe("useAddEvaluation", () => {
-  it("seeds the detail from the 201 body and does NOT invalidate it in the same tick", async () => {
-    const detail = { evaluations: { selected: [{ id: "cfg-1", name: "no_misselling" }] } };
-    addEvaluation.mockResolvedValue(detail);
-    const { queryClient, Wrapper } = makeWrapper();
-    const setData = vi.spyOn(queryClient, "setQueryData");
-    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useAddEvaluation(), { wrapper: Wrapper });
-
-    result.current.mutate({ id: "env-1", name: "no_misselling" });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(setData).toHaveBeenCalledWith(["harness-environment", "env-1"], detail);
-    // A refetch here races the write it is meant to confirm and can flip the
-    // row back from "Added"; the drawer refetches on close instead.
-    expect(invalidate).not.toHaveBeenCalledWith({
-      queryKey: ["harness-environment", "env-1"],
-    });
-  });
-
-  // `available` is the drawer's only active observer of this query, so
-  // invalidating it here would refetch it in the same tick and drop the
-  // just-added row off the offer. `boundEntries`'s filter in
-  // `AddEvaluationDrawer.jsx` already prevents the duplicate without this.
-  it("does NOT invalidate the available list on add — the offer stays in place, marked Added", async () => {
-    const detail = { evaluations: { selected: [{ id: "cfg-1", name: "no_misselling" }] } };
-    addEvaluation.mockResolvedValue(detail);
-    const { queryClient, Wrapper } = makeWrapper();
-    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useAddEvaluation(), { wrapper: Wrapper });
-
-    result.current.mutate({ id: "env-1", name: "no_misselling" });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(invalidate).not.toHaveBeenCalledWith({
-      queryKey: availableEvaluationsKey("env-1"),
-    });
-  });
-});
-
 describe("useAddRunEvaluation", () => {
   it("posts the name on the run and returns the five counts", async () => {
     addRunEvaluation.mockResolvedValue({
@@ -423,13 +415,26 @@ describe("useAddRunEvaluation", () => {
       completed_calls: 16,
     });
     const { Wrapper } = makeWrapper();
-    const { result } = renderHook(() => useAddRunEvaluation(), { wrapper: Wrapper });
+    const { result } = renderHook(() => useAddRunEvaluation(), {
+      wrapper: Wrapper,
+    });
 
-    result.current.mutate({ id: "env-1", executionId: "ex-1", name: "no_misselling" });
+    result.current.mutate({
+      id: "env-1",
+      executionId: "ex-1",
+      name: "no_misselling",
+    });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(addRunEvaluation).toHaveBeenCalledWith("env-1", "ex-1", "no_misselling");
-    expect(result.current.data).toMatchObject({ queued: 12, completed_calls: 16 });
+    expect(addRunEvaluation).toHaveBeenCalledWith(
+      "env-1",
+      "ex-1",
+      "no_misselling",
+    );
+    expect(result.current.data).toMatchObject({
+      queued: 12,
+      completed_calls: 16,
+    });
   });
 
   // The same rule the environment-level add follows, for the same reason:
@@ -437,7 +442,7 @@ describe("useAddRunEvaluation", () => {
   // open picker is observing. The run path has no body to seed from either —
   // its receipt is the click's confirmation, and the drawer's close is what
   // refetches the detail.
-  it("refetches neither list while the picker that triggered it can still be open", async () => {
+  it("does not refetch the detail while the picker that triggered it can still be open", async () => {
     addRunEvaluation.mockResolvedValue({
       queued: 1,
       skipped_existing: 0,
@@ -447,16 +452,19 @@ describe("useAddRunEvaluation", () => {
     });
     const { queryClient, Wrapper } = makeWrapper();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useAddRunEvaluation(), { wrapper: Wrapper });
+    const { result } = renderHook(() => useAddRunEvaluation(), {
+      wrapper: Wrapper,
+    });
 
-    result.current.mutate({ id: "env-1", executionId: "ex-1", name: "no_misselling" });
+    result.current.mutate({
+      id: "env-1",
+      executionId: "ex-1",
+      name: "no_misselling",
+    });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(invalidate).not.toHaveBeenCalledWith({
       queryKey: ["harness-environment", "env-1"],
-    });
-    expect(invalidate).not.toHaveBeenCalledWith({
-      queryKey: availableEvaluationsKey("env-1"),
     });
   });
 
@@ -472,9 +480,15 @@ describe("useAddRunEvaluation", () => {
     });
     const { queryClient, Wrapper } = makeWrapper();
     const setData = vi.spyOn(queryClient, "setQueryData");
-    const { result } = renderHook(() => useAddRunEvaluation(), { wrapper: Wrapper });
+    const { result } = renderHook(() => useAddRunEvaluation(), {
+      wrapper: Wrapper,
+    });
 
-    result.current.mutate({ id: "env-1", executionId: "ex-1", name: "no_misselling" });
+    result.current.mutate({
+      id: "env-1",
+      executionId: "ex-1",
+      name: "no_misselling",
+    });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(setData).not.toHaveBeenCalled();
@@ -482,36 +496,172 @@ describe("useAddRunEvaluation", () => {
 });
 
 describe("useRemoveAppliedEvaluation", () => {
-  const KEYS = (id) => [["harness-environment", id], availableEvaluationsKey(id)];
+  const KEYS = (id) => [
+    ["harness-environment", id],
+    [...SIMULATE_ENVIRONMENTS_KEY, "run-test"],
+  ];
 
-  it("refetches the applied list and stales the offer list after a remove", async () => {
+  it("refetches the applied list and the run test's evals after a remove", async () => {
     deleteAppliedEvaluation.mockResolvedValue(undefined);
     const { queryClient, Wrapper } = makeWrapper();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useRemoveAppliedEvaluation(), { wrapper: Wrapper });
+    const { result } = renderHook(() => useRemoveAppliedEvaluation(), {
+      wrapper: Wrapper,
+    });
 
     result.current.mutate({ id: "env-1", evalConfigId: "cfg-1" });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(deleteAppliedEvaluation).toHaveBeenCalledWith("env-1", "cfg-1");
-    // The removed eval can be added again, so the offer list is stale too.
-    // Nothing observes it here (remove is pressed with the picker closed), so
-    // this only marks it.
-    KEYS("env-1").forEach((queryKey) => expect(invalidate).toHaveBeenCalledWith({ queryKey }));
+    KEYS("env-1").forEach((queryKey) =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey }),
+    );
   });
 
   // A 404 means the row is already gone server-side, so the list on screen is
   // the stale one — refetching is exactly what reconciles it. Invalidating
   // only on success left the row there, refusing every retry the same way.
   it("still reconciles the list when the remove 404s because the row is already gone", async () => {
-    deleteAppliedEvaluation.mockRejectedValue({ detail: "Not found", statusCode: 404 });
+    deleteAppliedEvaluation.mockRejectedValue({
+      detail: "Not found",
+      statusCode: 404,
+    });
     const { queryClient, Wrapper } = makeWrapper();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useRemoveAppliedEvaluation(), { wrapper: Wrapper });
+    const { result } = renderHook(() => useRemoveAppliedEvaluation(), {
+      wrapper: Wrapper,
+    });
 
     result.current.mutate({ id: "env-1", evalConfigId: "cfg-1" });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
-    KEYS("env-1").forEach((queryKey) => expect(invalidate).toHaveBeenCalledWith({ queryKey }));
+    KEYS("env-1").forEach((queryKey) =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey }),
+    );
+  });
+});
+
+describe("useEnvironmentRunTest", () => {
+  it("reads the run test's own eval configs, result columns included", async () => {
+    const axios = (await import("src/utils/axios")).default;
+    axios.get.mockResolvedValue({
+      data: {
+        simulate_eval_configs_detail: [
+          { id: "c1", name: "a", template_id: "t1", mapping: {} },
+        ],
+      },
+    });
+    const { Wrapper } = makeWrapper();
+    const { result } = renderHook(
+      () => useEnvironmentRunTest("rt-1", { enabled: true }),
+      { wrapper: Wrapper },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(axios.get).toHaveBeenCalledWith("/simulate/run-tests/rt-1/");
+    expect(result.current.data).toEqual([
+      { id: "c1", name: "a", template_id: "t1", mapping: {} },
+    ]);
+  });
+});
+
+describe("useAddRunTestEval", () => {
+  it("posts one config to the run test's add endpoint and refreshes its eval list", async () => {
+    const axios = (await import("src/utils/axios")).default;
+    axios.post.mockResolvedValue({ data: {} });
+    const { queryClient, Wrapper } = makeWrapper();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useAddRunTestEval(), {
+      wrapper: Wrapper,
+    });
+    const body = {
+      template_id: "t1",
+      name: "mine",
+      mapping: { output: "call.transcript" },
+    };
+    await result.current.mutateAsync({ runTestId: "rt-1", body });
+    expect(axios.post).toHaveBeenCalledWith(
+      "/simulate/run-tests/rt-1/eval-configs/",
+      { evaluations_config: [body] },
+    );
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: environmentRunTestKey("rt-1"),
+    });
+  });
+
+  it("suppresses the global error toast so the drawer's own refusal message is the only one shown", async () => {
+    const axios = (await import("src/utils/axios")).default;
+    axios.post.mockRejectedValueOnce({ detail: "already exists" });
+    const { queryClient, Wrapper } = makeWrapper();
+    const { result } = renderHook(() => useAddRunTestEval(), {
+      wrapper: Wrapper,
+    });
+    await expect(
+      result.current.mutateAsync({ runTestId: "rt-1", body: {} }),
+    ).rejects.toBeTruthy();
+    expect(
+      queryClient.getMutationCache().getAll().at(-1)?.options.meta,
+    ).toEqual({ errorHandled: true });
+  });
+
+  it("does not read the run test until it is known and wanted", async () => {
+    const axios = (await import("src/utils/axios")).default;
+    axios.get.mockClear();
+    const { Wrapper } = makeWrapper();
+    renderHook(() => useEnvironmentRunTest("", { enabled: true }), {
+      wrapper: Wrapper,
+    });
+    renderHook(() => useEnvironmentRunTest("rt-1", { enabled: false }), {
+      wrapper: Wrapper,
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(axios.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("dead offer-list exports", () => {
+  it("no longer exports the offer-list hooks", async () => {
+    const mod = await import("../environments");
+    for (const k of [
+      "useAvailableEvaluations",
+      "availableEvaluationsKey",
+      "useAddEvaluation",
+    ]) {
+      expect(mod[k]).toBeUndefined();
+    }
+    const h = await vi.importActual(
+      "src/api/simulate-environments/harnessEnvironments",
+    );
+    for (const k of ["getAvailableEvaluations", "addEvaluation"]) {
+      expect(h[k]).toBeUndefined();
+    }
+  });
+});
+
+describe("useRemoveAppliedEvaluation — effect on a cached run test", () => {
+  it("marks a cached run test's eval list stale after a remove", async () => {
+    deleteAppliedEvaluation.mockResolvedValue(undefined);
+    const { queryClient, Wrapper } = makeWrapper();
+    queryClient.setQueryData(environmentRunTestKey("rt-1"), {
+      simulate_eval_configs_detail: [],
+    });
+    const { result } = renderHook(() => useRemoveAppliedEvaluation(), {
+      wrapper: Wrapper,
+    });
+    await result.current.mutateAsync({ id: "env-1", evalConfigId: "cfg-1" });
+    expect(
+      queryClient.getQueryState(environmentRunTestKey("rt-1")).isInvalidated,
+    ).toBe(true);
+  });
+});
+
+describe("useEnvironmentRunTest — failure display", () => {
+  it("leaves a failed read to the drawer's own message, without the global toast", async () => {
+    const { queryClient, Wrapper } = makeWrapper();
+    renderHook(() => useEnvironmentRunTest("rt-1"), { wrapper: Wrapper });
+    expect(
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: environmentRunTestKey("rt-1") }).options.meta,
+    ).toEqual({ errorHandled: true });
   });
 });

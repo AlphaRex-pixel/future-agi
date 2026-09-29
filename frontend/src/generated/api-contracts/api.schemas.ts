@@ -17342,20 +17342,11 @@ export const HarnessEnvironmentSelectedEvalApiModality = {
   any: "any",
 } as const;
 
-export type HarnessEnvironmentEvalInputApiSource =
-  (typeof HarnessEnvironmentEvalInputApiSource)[keyof typeof HarnessEnvironmentEvalInputApiSource];
-
-export const HarnessEnvironmentEvalInputApiSource = {
-  voice_recording: "voice_recording",
-  transcript: "transcript",
-  agent_prompt: "agent_prompt",
-  scenario_columnssituationvalue: "scenario_columns.situation.value",
-} as const;
-
 export interface HarnessEnvironmentEvalInputApi {
   /** @minLength 1 */
   key: string;
-  source: HarnessEnvironmentEvalInputApiSource;
+  /** @minLength 1 */
+  source: string;
   /** @minLength 1 */
   label: string;
 }

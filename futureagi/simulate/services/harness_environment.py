@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from typing import Any
 
 from django.db.models import Count, Prefetch, Q, QuerySet
@@ -569,7 +570,9 @@ def _selected_evals(job: HostedHarnessJob) -> list[dict[str, Any]]:
         return []
     modality = eval_modality(job)
     rows: list[dict[str, Any]] = []
-    for config in selected_eval_configs(run_test, mapping_only=True):
+    configs = selected_eval_configs(run_test, mapping_only=True)
+    labels = _scenario_column_labels(run_test, configs)
+    for config in configs:
         # `eval_template` is a non-nullable FK joined by `select_related`, so
         # this is never `None` regardless of the template's own soft-delete
         # state.
@@ -582,11 +585,12 @@ def _selected_evals(job: HostedHarnessJob) -> list[dict[str, Any]]:
         entry = eval_entry(
             template,
             {
-                key: value
+                key: value if isinstance(value, str) else json.dumps(value)
                 for key, value in (config.mapping or {}).items()
                 if key in required_keys
             },
             modality,
+            labels,
         )
         # The name a person added is the config's own, which is what add and
         # remove address; for a row this endpoint created the two are equal.
@@ -603,6 +607,34 @@ def _selected_evals(job: HostedHarnessJob) -> list[dict[str, Any]]:
         ]
         rows.append({**entry, "id": str(config.id), "runnable": True})
     return rows
+
+
+def _scenario_column_labels(run_test, configs) -> dict[str, str]:
+    """Column names for the mapping values that are ids of this run's scenario columns.
+
+    The picker stores a scenario column by its id; the name is what a person
+    recognises. Only columns of this run's own scenario datasets are named, so
+    an id pointing anywhere else is shown as it was stored.
+    """
+    from model_hub.models.develop_dataset import Column
+
+    raw_by_id: dict[str, set[str]] = {}
+    for config in configs:
+        for value in (config.mapping or {}).values():
+            try:
+                raw_by_id.setdefault(str(uuid.UUID(str(value))), set()).add(value)
+            except ValueError:
+                continue
+    if not raw_by_id:
+        return {}
+    dataset_ids = run_test.scenarios.values_list("dataset_id", flat=True)
+    return {
+        raw: str(name)
+        for column_id, name in Column.objects.filter(
+            id__in=raw_by_id, dataset_id__in=dataset_ids
+        ).values_list("id", "name")
+        for raw in raw_by_id[str(column_id)]
+    }
 
 
 def _results(receipts: dict[str, HostedHarnessReceipt]) -> list[dict[str, Any]]:

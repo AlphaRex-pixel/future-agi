@@ -21,10 +21,6 @@ const environmentPath = (id) =>
   apiPath("/simulate/api/harness-environments/{id}/", { id });
 const environmentRunPath = (id) =>
   apiPath("/simulate/api/harness-environments/{id}/run/", { id });
-const environmentEvaluationsPath = (id) =>
-  apiPath("/simulate/api/harness-environments/{id}/evaluations/", { id });
-const environmentEvaluationsAvailablePath = (id) =>
-  apiPath("/simulate/api/harness-environments/{id}/evaluations/available/", { id });
 const environmentEvaluationPath = (id, evalConfigId) =>
   apiPath(
     "/simulate/api/harness-environments/{id}/evaluations/{eval_config_id}/",
@@ -73,20 +69,6 @@ export const renameHarnessEnvironment = async (id, name) =>
 export const deleteAppliedEvaluation = async (id, evalConfigId) =>
   (await axios.delete(environmentEvaluationPath(id, evalConfigId))).data;
 
-// The evals this environment can still add — the catalogue filtered to its
-// modality and minus what is already selected. Each entry is the full
-// shape (name, description, source, tags, required_keys, agent_type,
-// modality, credits_per_run, charges_judge_tokens, inputs[]). Every entry is
-// addable as-is (no client filtering).
-export const getAvailableEvaluations = async (id) =>
-  (await axios.get(environmentEvaluationsAvailablePath(id))).data;
-
-// Add one evaluation by name. The body is `{ name }` only — the input
-// mapping is resolved server-side by modality. The 201 body is the full
-// detail, already updated, so the caller seeds the detail cache from it.
-export const addEvaluation = async (id, name) =>
-  (await axios.post(environmentEvaluationsPath(id), { name })).data;
-
 // Turn the tool-call judge on or off. PUT with the whole state of the switch;
 // the 200 body is the full detail (`settings.enable_tool_evaluation`), so the
 // caller seeds the detail cache from it. 409 turning it on for a voice
@@ -94,7 +76,10 @@ export const addEvaluation = async (id, name) =>
 export const setToolCallEvaluation = async (id, enabled) =>
   (
     await axios.put(
-      apiPath("/simulate/api/harness-environments/{id}/evaluations/tool-call/", { id }),
+      apiPath(
+        "/simulate/api/harness-environments/{id}/evaluations/tool-call/",
+        { id },
+      ),
       { enable_tool_evaluation: enabled },
     )
   ).data;

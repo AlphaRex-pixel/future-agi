@@ -8,7 +8,6 @@ import {
   STOPPABLE_EXECUTION_STATUSES,
   runColor,
 } from "src/sections/simulate/environments/workspace/runs/runs.constants";
-import useKpis from "src/hooks/useKpis";
 
 /**
  * The run/execution DETAIL data source.
@@ -179,11 +178,6 @@ export function useRunDetail(runTestId, executionId, { envName } = {}) {
         : false,
     staleTime: 1000 * 60 * 5,
   });
-  // `completed` is its own KPI field, cached under the key `useRunsSummary`
-  // primes (`useKpis`), so reading it here shares that entry rather than
-  // refetching. Stays null — never 0 — until the KPIs load, per the RunStats
-  // contract. Everything else on `stats` comes from the run-results summary.
-  const kpisQuery = useKpis(executionId);
   const execution = query.data?.execution;
   const summary = execution?.summary;
   const identity = useMemo(() => {
@@ -222,7 +216,6 @@ export function useRunDetail(runTestId, executionId, { envName } = {}) {
       passed: summary?.outcomes?.passed ?? 0,
       failed:
         (summary?.outcomes?.failed ?? 0) + (summary?.outcomes?.error ?? 0),
-      completed: kpisQuery.data?.completed_calls ?? null,
       passRate: summary?.pass_rate ?? 0,
       durationS: summary?.duration?.average ?? null,
       avgDurationMs:
@@ -246,7 +239,7 @@ export function useRunDetail(runTestId, executionId, { envName } = {}) {
       dropped: 0,
       failedCritical: 0,
     }),
-    [execution, summary, kpisQuery.data],
+    [execution, summary],
   );
 
   const isLoading = !!executionId && query.isPending;
