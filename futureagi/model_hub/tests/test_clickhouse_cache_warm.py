@@ -341,6 +341,19 @@ def test_schedule_registrar_cannot_delete_pause_or_narrow_schedules(
         ModelHubConfig("model_hub", sys.modules["model_hub"]).ready()
 
 
+@pytest.mark.parametrize("action", ["--pause", "--unpause"])
+def test_hosted_operator_job_may_pause_or_unpause_a_schedule(monkeypatch, action):
+    # Registration keeps a schedule's paused state, so this is how an operator
+    # turns one off or back on for good.
+    _hosted_schedule_registrar(monkeypatch, "bootstrap")
+    monkeypatch.setenv("STARTUP_DB_MUTATION_MODE", "operator")
+    argv = ["manage.py", "register_temporal_schedules", action, "recover-stale-work"]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    assert explicit_management_mutation_authorized(argv) is True
+    ModelHubConfig("model_hub", sys.modules["model_hub"]).ready()
+
+
 @pytest.mark.parametrize(
     "command", ["migrate", "seed_system_evals", "createcachetable", "shell"]
 )
