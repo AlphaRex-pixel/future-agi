@@ -37,21 +37,18 @@ count on the statement while the shared interactive pin stays at one.
 
 from __future__ import annotations
 
-import os
 import random
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from conftest import (
-    _ch_test_http_port,
+    _ch_test_apply_v2_schema,
     _ch_test_native_client,
     _ch_test_owned_database,
-    _open_ch_test_http_client,
 )
 
 pytestmark = pytest.mark.integration
@@ -77,9 +74,6 @@ METRICS = (
     "avg_traces_per_session",
 )
 
-_SCHEMA_DIR = (
-    Path(__file__).resolve().parents[1] / "services" / "clickhouse" / "v2" / "schema"
-)
 
 _WINDOW_FILTER = {
     "column_id": "created_at",
@@ -452,29 +446,6 @@ def _load(client, seed):
     )
 
 
-def _apply_v2_schema(database):
-    from tracer.services.clickhouse.v2 import apply_schema
-
-    _open_ch_test_http_client(database=database).close()
-    rc = apply_schema.main(
-        [
-            "--schema-dir",
-            str(_SCHEMA_DIR),
-            "--ch-host",
-            os.environ.get("CH25_HOST", "127.0.0.1"),
-            "--ch-http-port",
-            str(_ch_test_http_port().port),
-            "--ch-user",
-            os.environ.get("CH25_USER") or os.environ.get("CH_USERNAME") or "default",
-            "--ch-password",
-            os.environ.get("CH25_PASSWORD") or os.environ.get("CH_PASSWORD") or "",
-            "--ch-database",
-            database,
-        ]
-    )
-    assert rc == 0, f"v2 schema apply failed with rc={rc}"
-
-
 # ---------------------------------------------------------------------------
 # Live reader
 # ---------------------------------------------------------------------------
@@ -644,7 +615,7 @@ def store():
 
     seed = _build_seed()
     with _ch_test_owned_database("test_session_lean_") as database:
-        _apply_v2_schema(database)
+        _ch_test_apply_v2_schema(database)
         with _ch_test_native_client(database=database) as client:
             _load(client, seed)
             reads = {}
@@ -1076,7 +1047,7 @@ def tie_store():
     from tracer.services.clickhouse import exact_graph_reads as graph
 
     with _ch_test_owned_database("test_session_ties_") as database:
-        _apply_v2_schema(database)
+        _ch_test_apply_v2_schema(database)
         with _ch_test_native_client(database=database) as client:
             client.execute("SYSTEM STOP MERGES spans")
             insert = f"INSERT INTO spans ({', '.join(_TIE_COLUMNS)}) VALUES"

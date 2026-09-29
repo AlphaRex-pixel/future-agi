@@ -24,18 +24,16 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import structlog
 
 from conftest import (
-    _ch_test_http_port,
+    _ch_test_apply_v2_schema,
     _ch_test_native_client,
     _ch_test_native_port,
     _ch_test_owned_database,
-    _open_ch_test_http_client,
 )
 
 pytestmark = pytest.mark.integration
@@ -45,9 +43,6 @@ ORGANIZATION_ID = "7c3a2b11-0000-4000-8000-00000000d0a1"
 LO = datetime(2026, 6, 10, 0, tzinfo=UTC)
 HI = LO + timedelta(days=2)
 NAMESPACE = "observe-session-system-graph"
-_SCHEMA_DIR = (
-    Path(__file__).resolve().parents[1] / "services" / "clickhouse" / "v2" / "schema"
-)
 
 
 def _window(hi):
@@ -138,33 +133,10 @@ def _rows():
     return rows
 
 
-def _apply_v2_schema(database):
-    from tracer.services.clickhouse.v2 import apply_schema
-
-    _open_ch_test_http_client(database=database).close()
-    rc = apply_schema.main(
-        [
-            "--schema-dir",
-            str(_SCHEMA_DIR),
-            "--ch-host",
-            os.environ.get("CH25_HOST", "127.0.0.1"),
-            "--ch-http-port",
-            str(_ch_test_http_port().port),
-            "--ch-user",
-            os.environ.get("CH25_USER") or os.environ.get("CH_USERNAME") or "default",
-            "--ch-password",
-            os.environ.get("CH25_PASSWORD") or os.environ.get("CH_PASSWORD") or "",
-            "--ch-database",
-            database,
-        ]
-    )
-    assert rc == 0, f"v2 schema apply failed with rc={rc}"
-
-
 @pytest.fixture(scope="module")
 def store():
     with _ch_test_owned_database("test_worker_cap_") as database:
-        _apply_v2_schema(database)
+        _ch_test_apply_v2_schema(database)
         with _ch_test_native_client(database=database) as client:
             client.execute(f"INSERT INTO spans ({', '.join(_COLUMNS)}) VALUES", _rows())
             yield SimpleNamespace(database=database, client=client)

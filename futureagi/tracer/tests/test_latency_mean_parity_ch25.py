@@ -50,24 +50,21 @@ value unfiltered and with an always-true filter.
 from __future__ import annotations
 
 import math
-import os
 import random
 import statistics
 import uuid
 from collections import defaultdict
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from django.test import override_settings
 
 from conftest import (
-    _ch_test_http_port,
+    _ch_test_apply_v2_schema,
     _ch_test_native_client,
     _ch_test_owned_database,
-    _open_ch_test_http_client,
 )
 
 pytestmark = pytest.mark.integration
@@ -114,9 +111,6 @@ _ALWAYS_TRUE = {
 }
 FILTER_CASES = ("none", *_ALWAYS_TRUE)
 
-_SCHEMA_DIR = (
-    Path(__file__).resolve().parents[1] / "services" / "clickhouse" / "v2" / "schema"
-)
 _TIMEOUT_MS = 60_000
 
 
@@ -471,29 +465,6 @@ class _LiveAnalytics:
         )
 
 
-def _apply_v2_schema(database):
-    from tracer.services.clickhouse.v2 import apply_schema
-
-    _open_ch_test_http_client(database=database).close()
-    rc = apply_schema.main(
-        [
-            "--schema-dir",
-            str(_SCHEMA_DIR),
-            "--ch-host",
-            os.environ.get("CH25_HOST", "127.0.0.1"),
-            "--ch-http-port",
-            str(_ch_test_http_port().port),
-            "--ch-user",
-            os.environ.get("CH25_USER") or os.environ.get("CH_USERNAME") or "default",
-            "--ch-password",
-            os.environ.get("CH25_PASSWORD") or os.environ.get("CH_PASSWORD") or "",
-            "--ch-database",
-            database,
-        ]
-    )
-    assert rc == 0, f"v2 schema apply failed with rc={rc}"
-
-
 def _by_hour(points, field="value"):
     values = {}
     for point in points:
@@ -703,7 +674,7 @@ def _store(merged):
     live = _live([*base, *newer])
     prefix = "test_latency_mean_" + ("merged_" if merged else "unmerged_")
     with _ch_test_owned_database(prefix) as database:
-        _apply_v2_schema(database)
+        _ch_test_apply_v2_schema(database)
         with _ch_test_native_client(database=database) as client:
             physical = _load(client, base, newer, merged=merged)
             analytics = _LiveAnalytics(client)
