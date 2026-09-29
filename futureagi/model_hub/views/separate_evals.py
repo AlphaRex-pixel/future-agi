@@ -48,6 +48,7 @@ from model_hub.selectors.eval_list_charts import read_eval_list_charts
 from model_hub.selectors.eval_usage import (
     EvalUsageReadCompleteness,
     EvalUsageReadError,
+    eval_usage_snapshot_is_stale,
     read_eval_usage,
 )
 from model_hub.selectors.feedback import resolve_feedback_edit_contexts
@@ -5841,6 +5842,14 @@ class EvalUsageStatsView(APIView):
     The response is rendered through
     ``EvalUsageStatsResponseResultSerializer(instance=...).data`` at the
     boundary so shape drift surfaces here instead of shipping silently.
+
+    Counts and lists only successful runs from the usage ledger
+    (``APICallLog`` rows with status ``success``), from every source: tasks,
+    playground, composites, datasets and experiments. Errored and skipped runs
+    are not usage but stay in the eval logs (task logs, template eval logs);
+    an in-flight run counts once it succeeds. ``error_count`` is therefore 0
+    and ``pass_rate`` 100 whenever there are runs; both remain for
+    compatibility.
     """
 
     _gm = GeneralMethods()
@@ -5942,6 +5951,9 @@ class EvalUsageStatsView(APIView):
                 "period": period,
                 "start_date": query.get("start_date"),
                 "end_date": query.get("end_date"),
+                # Snapshots computed before usage became successful runs only
+                # still count errors; a new identity never serves them.
+                "runs": APICallStatusChoices.SUCCESS.value,
             }
             clickhouse_usage_enabled = (
                 settings.EVAL_USAGE_CLICKHOUSE_ENABLED and is_clickhouse_enabled()
@@ -5953,7 +5965,16 @@ class EvalUsageStatsView(APIView):
                         read_or_schedule_exact_snapshot(
                             "eval-usage",
                             cache_identity,
-                            refresh=bool(query["refresh"]),
+                            # Serve the snapshot, refreshing it in the
+                            # background once newer runs exist.
+                            refresh=bool(query["refresh"])
+                            or eval_usage_snapshot_is_stale(
+                                usage_log_model=APICallLog,
+                                organization=organization,
+                                template_id=template_id,
+                                cache_identity=cache_identity,
+                                snapshot=previous_exact,
+                            ),
                             pending_payload=_pending_eval_usage_payload(
                                 template_id,
                                 page,
@@ -6002,8 +6023,6 @@ class EvalUsageStatsView(APIView):
                 )
                 total_runs = usage_read.total_runs
                 runs_period = usage_read.runs_period
-                success_count = usage_read.success_count
-                error_count = usage_read.error_count
                 read_completeness = usage_read.completeness.value
                 unavailable_fields = list(usage_read.unavailable_fields)
             else:
@@ -6014,6 +6033,7 @@ class EvalUsageStatsView(APIView):
                 base_qs = APICallLog.objects.filter(
                     organization=organization,
                     source_id=str(template_id),
+                    status=APICallStatusChoices.SUCCESS.value,
                     deleted=False,
                 )
                 if workspace:
@@ -6023,12 +6043,6 @@ class EvalUsageStatsView(APIView):
                     created_at__gte=start_date, created_at__lte=end_date
                 )
                 runs_period = period_qs.count()
-                success_count = period_qs.filter(
-                    status=APICallStatusChoices.SUCCESS.value
-                ).count()
-                error_count = period_qs.filter(
-                    status=APICallStatusChoices.ERROR.value
-                ).count()
 
             # Chart data — aggregate by time bucket
             from collections import defaultdict
@@ -6413,14 +6427,13 @@ class EvalUsageStatsView(APIView):
 
                 table_rows.append(row)
 
+            # Usage is successful runs only, so these three are constant.
             stats_response = {
                 "total_runs": total_runs,
                 "runs_period": runs_period,
-                "success_count": success_count,
-                "error_count": error_count,
-                "pass_rate": round(
-                    (success_count / runs_period * 100) if runs_period > 0 else 0, 2
-                ),
+                "success_count": runs_period,
+                "error_count": 0,
+                "pass_rate": 100.0 if runs_period else 0,
             }
             response = {
                 "template_id": str(template_id),
@@ -8195,7 +8208,7 @@ def populate_log_row_data(
                         case "Updated At":
                             value = log.updated_at.strftime("%Y-%m-%d %H:%M:%S")
                         case "Evaluation ID":
-                            value = log.log_id
+                            value = str(log.log_id)
                         case "Source":
                             config_source = config.get("source")
                             value = (
@@ -8219,7 +8232,7 @@ def populate_log_row_data(
                     "search_results": {},
                 }
 
-            column_config["log_id"] = log.log_id
+            column_config["log_id"] = str(log.log_id)
             column_config["input_data_types"] = config.get("input_data_types", {})
 
             row_data.append(column_config)
