@@ -1,15 +1,18 @@
 """The environment-variable reference stays complete and honest.
 
-docs/configuration.md is the one place a self-hoster looks up a key. These
-tests fail when a compose file starts reading a ``${VAR}`` the page does not
-document, when .env.example shows a key the page does not document, or when
-.env.example carries a key that nothing reads any more.
+deploy/env-reference.toml is the one place a self-hoster's key is described:
+scripts/docs_site.py renders it as the configuration reference page of
+docs.futureagi.com. These tests fail when a compose file starts reading a
+``${VAR}`` the reference has no row for, when .env.example shows a key it has
+no row for, when .env.example carries a key that nothing reads any more, or
+when the reference data would not render as a sound page.
 
 Files are parsed, never run: no Docker, no services, no database.
 """
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import os
 import re
@@ -28,12 +31,13 @@ ENV_EXAMPLE = ROOT / ".env.example"
 INSTALLER_SECRETS = ROOT / "bin" / "lib" / "secrets.sh"
 BACKEND_CI = ROOT / ".github" / "workflows" / "backend-ci.yml"
 
-# The compose files and the ${VAR} and docs-table parsers are the ones
+# The compose files, the ${VAR} parser and the reference data are the ones
 # scripts/env_reference.py reports with, so the test and the script agree.
 _spec = importlib.util.spec_from_file_location("env_reference", SCRIPT)
 env_reference = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(env_reference)
-DOCS = env_reference.DOCS
+docs_site = env_reference.docs_site
+DATA = env_reference.DATA
 COMPOSE_FILES = tuple(env_reference.COMPOSE_FILES.values())
 
 # Read by Docker Compose itself rather than by anything in this repository.
@@ -42,8 +46,8 @@ COMPOSE_BUILTINS = frozenset(
 )
 
 # Keys .env.example may keep although nothing reads them any more, each with
-# the reason. Every entry must also have a row in the "Legacy and retired
-# keys" section of docs/configuration.md.
+# the reason. Every entry must also have a row in the part of
+# deploy/env-reference.toml with role = "legacy" ("Legacy and retired keys").
 LEGACY_ENV_EXAMPLE_KEYS: dict[str, str] = {}
 
 # Where a key counts as read. Python and Go sources match on a quoted literal
@@ -109,30 +113,19 @@ def env_example_keys() -> set[str]:
     return {key for key, _ in assigned} | set(commented)
 
 
-def _section(markdown: str, heading_prefix: str) -> str:
-    lines = markdown.splitlines()
-    start = next(
-        (i for i, line in enumerate(lines) if line.startswith(f"## {heading_prefix}")),
-        None,
-    )
-    assert start is not None, (
-        f"docs/configuration.md has no '## {heading_prefix}' section"
-    )
-    end = next(
-        (i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
-        len(lines),
-    )
-    return "\n".join(lines[start:end])
-
-
 @lru_cache(maxsize=1)
-def docs_text() -> str:
-    return DOCS.read_text(encoding="utf-8")
+def reference() -> dict:
+    return env_reference.load()
 
 
 @lru_cache(maxsize=1)
 def documented_keys() -> set[str]:
-    return env_reference.documented()
+    return env_reference.documented(reference())
+
+
+def role_keys(role: str) -> set[str]:
+    """Keys of the part with that role: generated, internal or legacy."""
+    return env_reference.section_keys(reference(), role)
 
 
 def _walk(root: Path, suffix: str):
@@ -216,14 +209,15 @@ def test_every_compose_variable_is_documented() -> None:
     }
     assert not missing, (
         "These ${VAR}s are read by a compose file but have no row in "
-        f"docs/configuration.md (first column, in backticks): {missing}"
+        f"{DATA.relative_to(ROOT)} (a row's keys): {missing}. "
+        "`python3 scripts/env_reference.py --missing` lists them with their defaults."
     )
 
 
 def test_every_env_example_key_is_documented() -> None:
     missing = sorted(env_example_keys() - documented_keys())
     assert not missing, (
-        f".env.example shows keys docs/configuration.md does not document: {missing}"
+        f".env.example shows keys {DATA.relative_to(ROOT)} has no row for: {missing}"
     )
 
 
@@ -233,21 +227,19 @@ def test_env_example_carries_no_key_that_nothing_reads() -> None:
     assert not unread, (
         f".env.example carries keys nothing reads: {unread}. Remove them, or keep "
         "one on purpose by adding it to LEGACY_ENV_EXAMPLE_KEYS with a reason and "
-        "to the 'Legacy and retired keys' section of docs/configuration.md."
+        f"a row to the legacy part of {DATA.relative_to(ROOT)}."
     )
 
 
 def test_legacy_allowlist_is_current_and_documented_as_legacy() -> None:
-    legacy_rows = env_reference.row_keys(
-        _section(docs_text(), "Legacy and retired keys")
-    )
+    legacy_rows = role_keys("legacy")
     for key, reason in LEGACY_ENV_EXAMPLE_KEYS.items():
         assert reason.strip(), f"{key} needs a reason in LEGACY_ENV_EXAMPLE_KEYS"
         assert key in env_example_keys(), (
             f"{key} left .env.example; drop it from the allowlist"
         )
         assert key in legacy_rows, (
-            f"{key} is kept as legacy but not listed as legacy in the docs"
+            f"{key} is kept as legacy but has no row in the legacy part of the reference"
         )
 
 
@@ -275,9 +267,7 @@ def test_installer_generated_secrets_ship_empty_and_documented_in_section_one() 
     generated = installer_generated_keys()
     assert {"SECRET_KEY", "PG_PASSWORD", "INTEGRATION_ENCRYPTION_KEY"} <= generated
     values = dict(env_example()[0])
-    section_one = env_reference.row_keys(
-        _section(docs_text(), "1. Generated by the installer")
-    )
+    section_one = role_keys("generated")
     for key in sorted(generated):
         assert key in values, (
             f"{key} is generated by bin/install but not listed in .env.example"
@@ -287,12 +277,13 @@ def test_installer_generated_secrets_ship_empty_and_documented_in_section_one() 
             f"installer generates it; .env.example has {values[key]!r}"
         )
         assert key in section_one, (
-            f"{key} is generated by bin/install; document it in section 1"
+            f"{key} is generated by bin/install; give it a row in the part with "
+            'role = "generated" (1. Generated by the installer)'
         )
 
 
 def test_internal_keys_are_not_offered_in_env_example() -> None:
-    internal = env_reference.row_keys(_section(docs_text(), "5. Internal"))
+    internal = role_keys("internal")
     offered = sorted(env_example_keys() & internal)
     assert not offered, (
         f".env.example offers keys the compose files override, so setting them does nothing: {offered}"
@@ -320,21 +311,32 @@ def test_env_example_never_turns_on_a_risky_opt_in(key: str, why: str) -> None:
 
 
 def test_backend_ci_runs_when_a_file_read_here_changes() -> None:
-    """A PR that edits only docs/configuration.md, .env.example,
-    scripts/env_reference.py or bin/dev (which test_log_stream.py runs) still
-    runs these tests. The Go sources are
+    """A PR that edits only deploy/env-reference.toml, .env.example, the two
+    scripts, a file the reference links to, or bin/dev (which
+    test_log_stream.py runs) still runs these tests. The Go sources are
     left out: their own CI covers them, and every push to dev runs this suite."""
     workflow = yaml.safe_load(BACKEND_CI.read_text(encoding="utf-8"))
     steps = workflow["jobs"]["changes"]["steps"]
     filters = next(step for step in steps if step.get("id") == "filter")["with"]
     patterns = yaml.safe_load(filters["filters"])["backend"]
     names = [*COMPOSE_FILES, *WORD_READER_FILES]
-    names += [str(path.relative_to(ROOT)) for path in (DOCS, ENV_EXAMPLE, SCRIPT)]
+    names += [
+        str(path.relative_to(ROOT))
+        for path in (DATA, ENV_EXAMPLE, SCRIPT, Path(docs_site.__file__))
+    ]
     names += [
         str(path.relative_to(ROOT))
         for directory in WORD_READER_DIRS
         for path in (ROOT / directory).iterdir()
     ]
+    names += sorted(
+        {
+            target.removeprefix("repo:").partition("#")[0]
+            for _, text in docs_site.reference_texts(reference())
+            for target in docs_site.links(str(text))
+            if target.startswith("repo:")
+        }
+    )
     missed = sorted(
         name
         for name in names
@@ -343,3 +345,85 @@ def test_backend_ci_runs_when_a_file_read_here_changes() -> None:
     assert not missed, (
         f"add these to the backend paths filter in {BACKEND_CI.name}: {missed}"
     )
+
+
+# --------------------------------------------------------------------------
+# The reference data renders as a sound docs page
+# --------------------------------------------------------------------------
+
+
+def test_the_reference_data_is_sound() -> None:
+    """Setup codes, fields, MDX-safe prose, links, headings, links into the
+    page from this repository, and a deterministic render: see
+    env_reference.validate()."""
+    problems = env_reference.validate(reference())
+    assert not problems, "\n".join(problems)
+
+
+def _broken(change) -> list[str]:
+    data = copy.deepcopy(reference())
+    change(data)
+    return env_reference.validate(data)
+
+
+def _first_row(data: dict) -> dict:
+    return data["part"][0]["section"][0]["row"][0]
+
+
+def _set(target: dict, key: str, value):
+    target[key] = value
+
+
+@pytest.mark.parametrize(
+    "change, expected",
+    [
+        (lambda d: _set(_first_row(d), "setups", ["S", "X"]), "unknown setup 'X'"),
+        (
+            lambda d: _set(_first_row(d), "default", {"S": "a", "Q": "b"}),
+            "default for unknown setup 'Q'",
+        ),
+        (lambda d: _set(_first_row(d), "keys", []), "a row needs keys or a label"),
+        (lambda d: _set(_first_row(d), "keys", ["lower_case"]), "KEY_NAMEs"),
+        (lambda d: _set(_first_row(d), "text", "a \u2014 b"), "em dash"),
+        (lambda d: _set(_first_row(d), "text", "see <http://x>"), "autolink"),
+        (lambda d: _set(_first_row(d), "text", "a {b} c"), "outside code breaks MDX"),
+        (
+            lambda d: _set(_first_row(d), "text", "[x](repo:no/such/file.md)"),
+            "no such file",
+        ),
+        (
+            lambda d: _set(
+                _first_row(d), "text", "[x](repo:INSTALLATION.md#no-such-heading)"
+            ),
+            "has no heading with that anchor",
+        ),
+        (
+            lambda d: _set(_first_row(d), "text", "[x](#no-such-heading)"),
+            "not a heading",
+        ),
+        (
+            lambda d: _set(_first_row(d), "text", "[x](../INSTALLATION.md)"),
+            "use /docs/",
+        ),
+        (lambda d: _set(_first_row(d), "surprise", 1), "unknown field 'surprise'"),
+        (
+            lambda d: _set(d["part"][1], "heading", d["part"][0]["heading"]),
+            "share the anchor",
+        ),
+        (lambda d: _set(d["part"][0], "role", "other"), "role = 'generated'"),
+        (lambda d: _set(d, "title", 'a "b"'), "no double quotes"),
+    ],
+)
+def test_validate_catches_broken_reference_data(change, expected: str) -> None:
+    problems = _broken(change)
+    assert any(expected in problem for problem in problems), problems
+
+
+def test_the_page_shows_public_rows_only() -> None:
+    page = docs_site.render_reference(reference())
+    for row in env_reference.rows(reference()):
+        cell = docs_site.key_cell(row)
+        if docs_site.is_public(row):
+            assert f"| {cell} |" in page, cell
+        else:
+            assert cell not in page, cell
