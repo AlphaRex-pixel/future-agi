@@ -100,12 +100,18 @@ export const isBad = (metric, value) => {
 };
 
 /*
-  Group-by axes backed by native run fields. Persona remains available as a
-  column, but is intentionally not a grouping or filtering axis.
+  Group-by axes, keyed by the server's `group_by` value: the Scenarios tab's
+  axes (read from each call's authored scenario) plus the run's own status.
 */
 export const GROUPINGS = [
-  { id: "useCase", label: "Goal", icon: "solar:target-linear" },
+  { id: "goal", label: "Use case", icon: "solar:target-linear" },
+  { id: "sub_goal", label: "Sub-goal", icon: "solar:map-linear" },
+  { id: "accent", label: "Accent", icon: "solar:soundwave-linear" },
+  { id: "age", label: "Age", icon: "solar:user-rounded-linear" },
+  { id: "attack", label: "Attack", icon: "solar:shield-warning-linear" },
+  { id: "task", label: "Task", icon: "solar:checklist-minimalistic-linear" },
   { id: "status", label: "Status", icon: "solar:check-circle-linear" },
+  { id: "", label: "No grouping", icon: "solar:list-linear" },
 ];
 
 export const STATUS_CHIPS = [
@@ -122,6 +128,11 @@ export const neutralCheckboxSx = {
   "&.MuiCheckbox-indeterminate": { color: "text.primary" },
 };
 
+// The head row stays pinned while the calls scroll and the group rows pin just
+// below it, so they need its height. Both measured in the browser.
+export const HEAD_ROW_PX = 44;
+export const GROUP_ROW_PX = 57;
+
 // Shared cell sx. A hairline left border between columns and a bottom divider per
 // row give the table its grid without a heavy outline.
 export const headCellSx = {
@@ -130,7 +141,10 @@ export const headCellSx = {
   color: "text.secondary",
   whiteSpace: "nowrap",
   bgcolor: "background.paper",
-  height: 44,
+  height: HEAD_ROW_PX,
+  position: "sticky",
+  top: 0,
+  zIndex: 3,
   py: 0,
   borderBottom: "1px solid",
   borderColor: "divider",

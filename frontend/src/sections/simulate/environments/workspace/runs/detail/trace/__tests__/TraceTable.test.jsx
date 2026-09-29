@@ -91,3 +91,33 @@ describe("TraceTable — the open call's row scrolls into view", () => {
     expect(activeRow()).toBeNull();
   });
 });
+
+// Scrolling a long run must keep the column names and the current group's
+// scores on screen, or the eval columns become unlabeled numbers.
+describe("TraceTable — sticky header and group rows", () => {
+  const position = (el) => window.getComputedStyle(el).position;
+
+  it("pins every column header cell", () => {
+    render(table());
+    const heads = document.querySelectorAll("thead th");
+    expect(heads.length).toBeGreaterThan(0);
+    heads.forEach((th) => expect(position(th)).toBe("sticky"));
+  });
+
+  it("pins every group row just under the header", () => {
+    render(table({ activeCallId: "a1" }));
+    ["A", "B"].forEach((label) => {
+      const td = screen.getByText(label).closest("td");
+      expect(position(td)).toBe("sticky");
+      expect(window.getComputedStyle(td).top).toBe("44px");
+    });
+  });
+
+  it("scrolls inside the table box, not the page", () => {
+    render(table());
+    const scroller = document.querySelector("table").parentElement;
+    expect(window.getComputedStyle(scroller).getPropertyValue("overflow")).toBe(
+      "auto",
+    );
+  });
+});

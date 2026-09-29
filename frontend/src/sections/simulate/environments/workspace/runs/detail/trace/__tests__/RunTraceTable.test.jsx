@@ -214,7 +214,13 @@ describe("RunTraceTable", () => {
     const onQueryChange = vi.fn();
     const { unmount } = renderTable({ onQueryChange });
 
-    const base = { page: 1, limit: 50, search: "", filters: {}, groupBy: "goal" };
+    const base = {
+      page: 1,
+      limit: 50,
+      search: "",
+      filters: {},
+      groupBy: "goal",
+    };
     expect(onQueryChange).toHaveBeenLastCalledWith(base);
     // What it reports is what it asked the list for — the drawer reads the
     // same cache entry.
@@ -222,7 +228,10 @@ describe("RunTraceTable", () => {
 
     await user.click(screen.getByRole("button", { name: /Group by/ }));
     await user.click(screen.getByRole("menuitem", { name: "Status" }));
-    expect(onQueryChange).toHaveBeenLastCalledWith({ ...base, groupBy: "status" });
+    expect(onQueryChange).toHaveBeenLastCalledWith({
+      ...base,
+      groupBy: "status",
+    });
 
     await user.click(screen.getByRole("button", { name: "Failing" }));
     expect(onQueryChange).toHaveBeenLastCalledWith({
@@ -293,6 +302,43 @@ describe("RunTraceTable", () => {
     );
   });
 
+  it("scopes to handed-over calls until the affected-calls chip is dismissed", async () => {
+    const user = userEvent.setup();
+    const { container } = renderTable({
+      initialFilters: { callExecutionId: ["t1", "t2"] },
+    });
+
+    expect(useRunCalls).toHaveBeenLastCalledWith(
+      "ex1",
+      expect.objectContaining({ filters: { call_execution_id: ["t1", "t2"] } }),
+    );
+    expect(screen.getByText("2 affected calls")).toBeInTheDocument();
+    // The Filter button counts only the panel's own filters.
+    expect(screen.getByRole("button", { name: "Filter" })).toBeInTheDocument();
+
+    await user.click(container.querySelector(".MuiChip-deleteIcon"));
+
+    expect(screen.queryByText("2 affected calls")).toBeNull();
+    expect(useRunCalls).toHaveBeenLastCalledWith(
+      "ex1",
+      expect.objectContaining({ filters: {} }),
+    );
+  });
+
+  it("keeps the affected-calls scope while a status chip narrows within it", async () => {
+    const user = userEvent.setup();
+    renderTable({ initialFilters: { callExecutionId: ["t1", "t2"] } });
+
+    await user.click(screen.getByRole("button", { name: "Failing" }));
+
+    expect(useRunCalls).toHaveBeenLastCalledWith(
+      "ex1",
+      expect.objectContaining({
+        filters: { call_execution_id: ["t1", "t2"], status: ["failed"] },
+      }),
+    );
+  });
+
   it("exposes later server pages for runs with more than 100 trials", async () => {
     const user = userEvent.setup();
     const finalTrial = {
@@ -327,6 +373,33 @@ describe("RunTraceTable", () => {
     expect(screen.getByText("Showing 51–100 of 200")).toBeInTheDocument();
   });
 
+  it("opens a new page at the top of the table's own scroll box", async () => {
+    const user = userEvent.setup();
+    useRunCalls.mockImplementation((_executionId, opts = {}) => ({
+      tasks: TASKS,
+      columns: COLUMNS,
+      groups: groupsFor(TASKS, opts.groupBy),
+      facets: FACETS,
+      count: 200,
+      totalPages: 2,
+      isLoading: false,
+    }));
+    const scrollTo = vi.fn();
+    const original = Element.prototype.scrollTo;
+    Element.prototype.scrollTo = scrollTo;
+    try {
+      renderTable();
+      await user.click(screen.getByRole("button", { name: "Go to page 2" }));
+
+      expect(scrollTo).toHaveBeenCalledWith({ top: 0 });
+      // The box holding the table, not the card around it.
+      const scrolled = scrollTo.mock.contexts.at(-1);
+      expect(scrolled.querySelector(":scope > table")).not.toBeNull();
+    } finally {
+      Element.prototype.scrollTo = original;
+    }
+  });
+
   it("applies column picker choices to the rendered table", async () => {
     const user = userEvent.setup();
     renderTable();
@@ -355,6 +428,51 @@ describe("RunTraceTable", () => {
     expect(screen.getByText("Passed")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getAllByText("Errored")).not.toHaveLength(0);
+  });
+
+  it("offers the Scenarios tab's axes plus Status and requests the chosen one", async () => {
+    const user = userEvent.setup();
+    renderTable();
+
+    expect(useRunCalls).toHaveBeenLastCalledWith(
+      "ex1",
+      expect.objectContaining({ groupBy: "goal" }),
+    );
+    await user.click(screen.getByRole("button", { name: /Group by/ }));
+    expect(
+      screen.getAllByRole("menuitem").map((item) => item.textContent),
+    ).toEqual([
+      "Use case",
+      "Sub-goal",
+      "Accent",
+      "Age",
+      "Attack",
+      "Task",
+      "Status",
+      "No grouping",
+    ]);
+    await user.click(screen.getByRole("menuitem", { name: "Task" }));
+
+    expect(useRunCalls).toHaveBeenLastCalledWith(
+      "ex1",
+      expect.objectContaining({ groupBy: "task" }),
+    );
+  });
+
+  it("lists every call flat, without group rows, under No grouping", async () => {
+    const user = userEvent.setup();
+    renderTable();
+    await user.click(screen.getByRole("button", { name: /Group by/ }));
+    await user.click(screen.getByRole("menuitem", { name: "No grouping" }));
+
+    expect(useRunCalls).toHaveBeenLastCalledWith(
+      "ex1",
+      expect.objectContaining({ groupBy: "" }),
+    );
+    expect(screen.queryByText(/Expand all|Collapse all/)).toBeNull();
+    TASKS.forEach((task) => {
+      expect(screen.getAllByText(task.scenario).length).toBeGreaterThan(0);
+    });
   });
 
   it("has no AI filter box — it isn't wired for run calls", async () => {

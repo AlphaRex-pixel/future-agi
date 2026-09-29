@@ -21,6 +21,8 @@ import { BUILD_TONES } from "../../../../buildEnvironment/buildTones";
 import {
   defaultTraceColumns,
   headCellSx,
+  HEAD_ROW_PX,
+  GROUP_ROW_PX,
   numCellSx,
   bodyCellSx,
   runOutcome,
@@ -31,10 +33,13 @@ import TraceGroupHeaderRow from "./TraceGroupHeaderRow";
 // The theme hides every border on a table's last row, which here is the head
 // row and the final call row. The column dividers are cell left borders, so put
 // those back, and the head's bottom line; the body's last bottom line stays
-// hidden so it doesn't double up with the container edge.
+// hidden so it doesn't double up with the container edge. Separate borders,
+// because collapsed ones stay behind when the head and group rows stick.
 const lastRowDividersSx = {
   minWidth: 1000,
   tableLayout: "auto",
+  borderCollapse: "separate",
+  borderSpacing: 0,
   [`& .${tableRowClasses.root}:last-of-type .${tableCellClasses.root}:not(:first-of-type)`]:
     { borderLeftColor: "divider" },
   [`& .${tableHeadClasses.root} .${tableCellClasses.root}`]: {
@@ -68,10 +73,12 @@ const clampSx = {
 
 export default function TraceTable({
   groups,
+  rows = null,
   evals,
   onOpen,
   columns,
   activeCallId = null,
+  scrollRef,
 }) {
   const [collapsed, setCollapsed] = useState(null);
   const activeRowRef = useRef(null);
@@ -129,6 +136,8 @@ export default function TraceTable({
         sx={{
           cursor: "pointer",
           bgcolor: active ? "action.selected" : "transparent",
+          // Scrolled into view below the pinned head and group rows, not under.
+          scrollMarginTop: HEAD_ROW_PX + GROUP_ROW_PX,
         }}
       >
         {show("callDetails") && (
@@ -304,47 +313,52 @@ export default function TraceTable({
     );
   };
 
+  // The table scrolls both ways in its own box, below the "Collapse all" bar,
+  // so the head and group rows stick to it rather than to the page.
   return (
-    <Box>
-      <Stack
-        direction="row"
-        alignItems="center"
-        spacing={1}
-        sx={{
-          px: 1.5,
-          py: 1,
-          borderBottom: "1px solid",
-          borderColor: "divider",
-        }}
-      >
-        <Button
-          size="small"
-          variant="text"
-          onClick={toggleAllGroups}
-          startIcon={
-            <Iconify
-              icon={
-                allCollapsed
-                  ? "solar:alt-arrow-down-linear"
-                  : "solar:alt-arrow-right-linear"
-              }
-              width={14}
-            />
-          }
+    <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      {!rows && (
+        <Stack
+          direction="row"
+          alignItems="center"
+          spacing={1}
           sx={{
-            typography: "s3",
-            fontWeight: "fontWeightSemiBold",
-            color: "text.secondary",
-            "&:hover": { bgcolor: "action.hover" },
+            flexShrink: 0,
+            px: 1.5,
+            py: 1,
+            borderBottom: "1px solid",
+            borderColor: "divider",
           }}
         >
-          {allCollapsed ? "Expand all" : "Collapse all"}
-        </Button>
-        <Typography sx={{ typography: "s3", color: "text.subtitle" }}>
-          {groups.length} {groups.length === 1 ? "group" : "groups"}
-        </Typography>
-      </Stack>
-      <Box sx={{ overflowX: "auto" }}>
+          <Button
+            size="small"
+            variant="text"
+            onClick={toggleAllGroups}
+            startIcon={
+              <Iconify
+                icon={
+                  allCollapsed
+                    ? "solar:alt-arrow-down-linear"
+                    : "solar:alt-arrow-right-linear"
+                }
+                width={14}
+              />
+            }
+            sx={{
+              typography: "s3",
+              fontWeight: "fontWeightSemiBold",
+              color: "text.secondary",
+              "&:hover": { bgcolor: "action.hover" },
+            }}
+          >
+            {allCollapsed ? "Expand all" : "Collapse all"}
+          </Button>
+          <Typography sx={{ typography: "s3", color: "text.subtitle" }}>
+            {groups.length} {groups.length === 1 ? "group" : "groups"}
+          </Typography>
+        </Stack>
+      )}
+      <Box ref={scrollRef} sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <Table size="small" sx={lastRowDividersSx}>
           <TableHead>
             <TableRow>
@@ -403,19 +417,21 @@ export default function TraceTable({
             </TableRow>
           </TableHead>
           <TableBody>
-            {groups.map((g) => (
-              <React.Fragment key={g.label}>
-                <TraceGroupHeaderRow
-                  group={g}
-                  collapsed={collapsedSet.has(g.label)}
-                  onToggle={() => toggleCollapsed(g.label)}
-                  show={show}
-                  showEvals={showEvals}
-                  evals={evals}
-                />
-                {!collapsedSet.has(g.label) && g.rows.map(renderRow)}
-              </React.Fragment>
-            ))}
+            {rows
+              ? rows.map(renderRow)
+              : groups.map((g) => (
+                  <React.Fragment key={g.label}>
+                    <TraceGroupHeaderRow
+                      group={g}
+                      collapsed={collapsedSet.has(g.label)}
+                      onToggle={() => toggleCollapsed(g.label)}
+                      show={show}
+                      showEvals={showEvals}
+                      evals={evals}
+                    />
+                    {!collapsedSet.has(g.label) && g.rows.map(renderRow)}
+                  </React.Fragment>
+                ))}
           </TableBody>
         </Table>
       </Box>
@@ -424,8 +440,10 @@ export default function TraceTable({
 }
 TraceTable.propTypes = {
   groups: PropTypes.array.isRequired,
+  rows: PropTypes.array,
   evals: PropTypes.array.isRequired,
   onOpen: PropTypes.func,
   columns: PropTypes.instanceOf(Set),
   activeCallId: PropTypes.string,
+  scrollRef: PropTypes.oneOfType([PropTypes.func, PropTypes.object]),
 };
