@@ -663,7 +663,10 @@ def test_after_an_inline_read_fails_the_same_scope_goes_straight_to_the_worker(
 
 
 @pytest.mark.unit
-def test_the_inline_failure_backoff_expires(scheduled, monkeypatch):
+@pytest.mark.parametrize("configured", [None, 600])
+def test_the_inline_failure_backoff_expires(scheduled, monkeypatch, configured):
+    """The backoff is the configured failed-refresh TTL (300 s by default)."""
+
     from tracer.services.clickhouse import session_graph
 
     ttls = []
@@ -676,10 +679,11 @@ def test_the_inline_failure_backoff_expires(scheduled, monkeypatch):
     monkeypatch.setattr(session_graph.cache, "set", recording_set)
     stopped = ServerException("stopped", code=ErrorCodes.TIMEOUT_EXCEEDED)
 
-    _fetch(_Analytics(graph=_raises(stopped)), [WINDOW])
+    overrides = {"EXACT_AGGREGATION_REFRESH_FAILURE_SECONDS": configured}
+    with override_settings(**(overrides if configured else {})):
+        _fetch(_Analytics(graph=_raises(stopped)), [WINDOW])
 
-    assert ttls == [session_graph.SESSION_GRAPH_INLINE_FAILURE_BACKOFF_SECONDS]
-    assert 0 < ttls[0] <= 15 * 60
+    assert ttls == [configured or 5 * 60]
 
 
 @pytest.mark.unit

@@ -383,8 +383,11 @@ def normalize_exact_observe_identity(identity: Any) -> Any:
     return normalized_identity
 
 
-def _observe_identity_alias_key(namespace: str, identity: Any) -> str | None:
-    """Address the frozen window chosen for one stable raw Observe request."""
+def raw_observe_identity_key(namespace: str, identity: Any, suffix: str) -> str | None:
+    """Address a side record of one raw (unfrozen) Observe request's scope.
+
+    ``None`` when the identity carries no filters to key the scope by.
+    """
 
     normalized_identity = normalized_snapshot_identity(identity)
     if (
@@ -397,7 +400,13 @@ def _observe_identity_alias_key(namespace: str, identity: Any) -> str | None:
     normalized_identity["filters"] = normalize_filter_conjunction(
         normalized_identity.get("filters") or []
     )
-    return f"{snapshot_cache_key(namespace, normalized_identity)}:frozen-identity"
+    return f"{snapshot_cache_key(namespace, normalized_identity)}:{suffix}"
+
+
+def _observe_identity_alias_key(namespace: str, identity: Any) -> str | None:
+    """Address the frozen window chosen for one stable raw Observe request."""
+
+    return raw_observe_identity_key(namespace, identity, "frozen-identity")
 
 
 def _resolve_exact_observe_identity(

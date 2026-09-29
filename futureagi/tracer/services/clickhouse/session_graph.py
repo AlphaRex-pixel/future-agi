@@ -58,9 +58,9 @@ from tracer.services.clickhouse.v2.query_builders.trace_list import (
     TraceListQueryBuilderV2,
 )
 from tracer.services.exact_aggregation_cache import (
-    normalized_snapshot_identity,
+    _refresh_failure_seconds,
+    raw_observe_identity_key,
     read_or_schedule_exact_snapshot,
-    snapshot_cache_key,
 )
 
 logger = structlog.get_logger(__name__)
@@ -104,10 +104,6 @@ _SESSION_ROLLUP_METRICS = SESSION_SYSTEM_METRICS - {"avg_traces_per_session"}
 # leave the fallback time to answer. Basis: 2 M live roots - the default
 # threshold - take ~4 s on one thread at the largest tenant's measured rate.
 SESSION_GRAPH_INLINE_WALL_MS = 15_000
-# After an inline read of a scope fails, that scope goes straight to the
-# worker for this long (the failed-refresh backoff's default), instead of
-# every poll and reload paying the estimate and the inline wall again.
-SESSION_GRAPH_INLINE_FAILURE_BACKOFF_SECONDS = 5 * 60
 _SESSION_GRAPH_NAMESPACE = "observe-session-system-graph"
 
 _SESSION_GRAPH_READ_CAPS = {
@@ -741,21 +737,16 @@ def session_latency_may_inline(
     return session_graph_reads_lean_roots(project_id=project_id, filters=filters)
 
 
-def _inline_failure_key(identity: dict[str, Any]) -> str:
+def _inline_failure_key(identity: dict[str, Any]) -> str | None:
     """The backoff marker of one requested scope (its raw, unfrozen filters)."""
 
-    from tracer.services.clickhouse.list_cursor import normalize_filter_conjunction
-
-    normalized = normalized_snapshot_identity(identity)
-    normalized["filters"] = normalize_filter_conjunction(
-        normalized.get("filters") or []
-    )
-    return f"{snapshot_cache_key(_SESSION_GRAPH_NAMESPACE, normalized)}:inline-failed"
+    return raw_observe_identity_key(_SESSION_GRAPH_NAMESPACE, identity, "inline-failed")
 
 
 def _inline_failed_recently(identity: dict[str, Any]) -> bool:
+    key = _inline_failure_key(identity)
     try:
-        return cache.get(_inline_failure_key(identity)) is not None
+        return key is not None and cache.get(key) is not None
     except Exception:
         # No marker store means no memory, not a failed request: the attempt
         # below is still bounded by its own share of the wall.
@@ -764,12 +755,15 @@ def _inline_failed_recently(identity: dict[str, Any]) -> bool:
 
 
 def _remember_inline_failure(identity: dict[str, Any]) -> None:
+    """Send the scope straight to the worker for the failed-refresh backoff,
+    instead of every poll and reload paying the estimate and the inline wall
+    again."""
+
+    key = _inline_failure_key(identity)
+    if key is None:
+        return
     try:
-        cache.set(
-            _inline_failure_key(identity),
-            1,
-            timeout=SESSION_GRAPH_INLINE_FAILURE_BACKOFF_SECONDS,
-        )
+        cache.set(key, 1, timeout=_refresh_failure_seconds())
     except Exception:
         logger.warning("session_graph_inline_backoff_unavailable", exc_info=True)
 
