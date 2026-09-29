@@ -2204,7 +2204,7 @@
             "pre-install",
             "post-install"
           ],
-          "description": "When the job runs on install. `auto`: pre-install when every datastore is external (the app starts on a ready schema), post-install when any is bundled (they must exist first). It always runs pre-upgrade."
+          "description": "When the job runs on install. `auto`: pre-install when every datastore is external (the app starts on a ready schema), post-install when any is bundled (they must exist first). It always runs pre-upgrade. Argo CD runs a pre-install job in PreSync, a post-install one after the bundled datastores and before the rest of the release."
         },
         "propertyCatalog": {
           "type": "boolean",

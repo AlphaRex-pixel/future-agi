@@ -290,6 +290,13 @@ REDIS_PASSWORD variable defined earlier in the same env list. */}}
 {{- end -}}
 {{- end -}}
 
+{{/* The Argo CD sync wave of the bundled datastores: before the bootstrap
+job's (-1, bootstrap/job.yaml), which waits for them, and the rest of the
+release's (0). Helm and Flux ignore it. */}}
+{{- define "futureagi.datastoreSyncWave" -}}
+argocd.argoproj.io/sync-wave: "-2"
+{{- end -}}
+
 {{/* =====================================================================
 Public URLs
 ===================================================================== */}}

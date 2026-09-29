@@ -151,6 +151,30 @@ grep -qF "no Secret holds AGENTCC_WEBHOOK_SECRET ('futureagi-app'" "$out/broken.
 }
 rm -rf "$out/broken" "$out/broken.txt"
 echo "ok   a webhook secret no Secret holds is caught"
+# ... and a bootstrap job Argo CD would run by its Helm hooks alone: in
+# PreSync, before the bundled datastores it waits for exist.
+mkdir -p "$out/broken"
+"$python" - "$out/bundled.yaml" >"$out/broken/bundled.yaml" <<'EOF'
+import sys
+
+import yaml
+
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+for doc in docs:
+    annotations = doc["metadata"].get("annotations") or {}
+    for key in [k for k in annotations if k.startswith("argocd.argoproj.io/")]:
+        del annotations[key]
+yaml.safe_dump_all(docs, sys.stdout)
+EOF
+if "$python" "$chart/hack/rendered_checks.py" "$out/broken" >"$out/broken.txt" 2>&1; then
+  fail "rendered_checks.py passes a bootstrap job Argo CD runs before the bundled datastores"
+fi
+grep -qF "Argo CD runs it in PreSync wave 0, not after ConfigMap futureagi-clickhouse (Sync wave 0)" "$out/broken.txt" || {
+  cat "$out/broken.txt" >&2
+  fail "rendered_checks.py does not name the datastores the bootstrap job runs before"
+}
+rm -rf "$out/broken" "$out/broken.txt"
+echo "ok   a bootstrap job Argo CD runs before the bundled datastores is caught"
 
 echo "== values, schema and README"
 "$python" "$chart/hack/values_docs.py" --check

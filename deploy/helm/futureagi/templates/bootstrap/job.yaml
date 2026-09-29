@@ -10,6 +10,13 @@ external, and after the release's resources (post-install) when a datastore
 is bundled, since the job must reach it. Helm waits for the job either way:
 give `helm install/upgrade` a --timeout above bootstrap.activeDeadlineSeconds,
 so Helm sees how the job ended instead of leaving it running.
+
+Argo CD cannot tell an install from an upgrade: by the Helm hooks alone it
+would run a post-install job in PreSync and PostSync on every sync, the
+PreSync run before any bundled datastore exists. Its own hook takes their
+place: PreSync for a pre-install job, else a Sync hook in wave -1, after the
+bundled datastores (wave -2) are ready and before the rest of the release
+(wave 0).
 */ -}}
 {{- $bs := .Values.bootstrap -}}
 {{- $b := .Values.backend -}}
@@ -39,6 +46,12 @@ metadata:
     helm.sh/hook: {{ $installHook }},pre-upgrade
     helm.sh/hook-weight: "0"
     helm.sh/hook-delete-policy: before-hook-creation
+    {{- if eq $installHook "pre-install" }}
+    argocd.argoproj.io/hook: PreSync
+    {{- else }}
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "-1"
+    {{- end }}
 spec:
   backoffLimit: {{ $bs.backoffLimit }}
   activeDeadlineSeconds: {{ $bs.activeDeadlineSeconds }}

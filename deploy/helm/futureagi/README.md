@@ -429,8 +429,13 @@ change on every sync. Set `secrets.existingSecret` (with all seven keys,
 passwords (`postgres.password`, ...) or existing Secrets. Flux's
 helm-controller runs Helm against the cluster, where `lookup` works, so there
 the generated keys and passwords persist without these settings.
-Argo CD maps the chart's hooks to sync phases: the Secret and the bootstrap
-job to PreSync (PostSync for the job when a datastore is bundled).
+Argo CD cannot tell an install from an upgrade, so it runs every Helm install
+and upgrade hook on every sync: the Secret and the bootstrap ServiceAccount in
+PreSync. The bootstrap job carries Argo CD's own hook, which takes precedence:
+PreSync when it is a pre-install hook (every datastore external); otherwise a
+Sync hook in wave -1, which runs once the bundled datastores (wave -2) are
+ready and before the rest of the release (wave 0), on the first sync and every
+later one. Helm and Flux ignore these annotations.
 
 ## Troubleshooting
 
@@ -794,7 +799,7 @@ Bracketed names are the environment variables a key sets;
 | `codeExecutor.nodeSelector` | `{}` | Node selector. Empty: the top-level `nodeSelector`. |
 | `codeExecutor.tolerations` | `[]` | Tolerations. Empty: the top-level `tolerations`. |
 | `codeExecutor.affinity` | `{}` | Affinity. Empty: the top-level `affinity`. |
-| `bootstrap.installHook` | `"auto"` | When the job runs on install. `auto`: pre-install when every datastore is external (the app starts on a ready schema), post-install when any is bundled (they must exist first). It always runs pre-upgrade. |
+| `bootstrap.installHook` | `"auto"` | When the job runs on install. `auto`: pre-install when every datastore is external (the app starts on a ready schema), post-install when any is bundled (they must exist first). It always runs pre-upgrade. Argo CD runs a pre-install job in PreSync, a post-install one after the bundled datastores and before the rest of the release. |
 | `bootstrap.propertyCatalog` | `true` | Create the observed-attribute index database and its two ClickHouse users (needs CREATE USER and GRANT). `false`: create them yourself. |
 | `bootstrap.waitTimeoutSeconds` | `600` | Seconds to wait for each datastore to accept connections. |
 | `bootstrap.clickhouseTimeoutSeconds` | `600` | Deadline of the ClickHouse schema step, in seconds. |

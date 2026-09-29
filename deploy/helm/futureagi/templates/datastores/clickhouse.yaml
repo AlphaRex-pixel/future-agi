@@ -11,6 +11,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "futureagi.componentLabels" $ctx | nindent 4 }}
+  annotations:
+    {{- include "futureagi.datastoreSyncWave" . | nindent 4 }}
 data:
   # The `tiered` storage policy the v2 spans schema requires (futureagi/.ci).
   storage-policy.xml: |
@@ -45,6 +47,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "futureagi.componentLabels" $ctx | nindent 4 }}
+  annotations:
+    {{- include "futureagi.datastoreSyncWave" . | nindent 4 }}
 spec:
   type: ClusterIP
   selector:
@@ -66,6 +70,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "futureagi.componentLabels" $ctx | nindent 4 }}
+  annotations:
+    {{- include "futureagi.datastoreSyncWave" . | nindent 4 }}
 spec:
   replicas: 1
   serviceName: {{ $name }}
