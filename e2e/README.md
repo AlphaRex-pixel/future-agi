@@ -144,6 +144,7 @@ bin/e2e test flows/observe/trace-ingestion.spec.ts
 | `E2E_COLLECTOR_URL`        | `http://localhost:24318`                                     | OTLP trace seeding                        |
 | `E2E_GATEWAY_URL`          | `http://localhost:28090`                                     | the mock-LLM harness self-test            |
 | `E2E_CH_URL` / `E2E_CH_DB` | `http://localhost:28123` / `default`                         | storage-lane ClickHouse assertions        |
+| `E2E_CH_PASSWORD`          | `e2e-clickhouse-password`, the managed stacks' `CH_PASSWORD` | the same, as ClickHouse user `default`    |
 | `E2E_CATALOG_CH_URL`       | `E2E_CH_URL` (or its default above)                          | optional separate catalog ClickHouse host |
 | `E2E_CATALOG_CH_DB`        | `property_catalog`                                           | optional catalog database override        |
 | `E2E_PG_URL`               | `postgresql://futureagi:futureagi@localhost:25432/futureagi` | storage-lane Postgres assertions          |
