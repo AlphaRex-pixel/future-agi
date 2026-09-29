@@ -4,9 +4,9 @@ This directory holds the production overlay for self-hosted Future AGI on Docker
 
 Before you start:
 
-- Every setting, its default and what breaks when it is wrong: [docs/configuration.md](../docs/configuration.md). Work through its [minimal production checklist](../docs/configuration.md#minimal-production-checklist).
-- What an install sends to Future AGI, and how to turn it off (`FUTURE_AGI_TELEMETRY_DISABLED=true` in `deploy/.env.production`): [docs/telemetry.md](../docs/telemetry.md).
-- The images, their tags and how to verify one: [docs/images.md](../docs/images.md).
+- Every setting, its default and what breaks when it is wrong: [Configuration reference](https://docs.futureagi.com/docs/self-hosting/configuration/reference). Work through the [production checklist](https://docs.futureagi.com/docs/self-hosting/production/checklist).
+- What an install sends to Future AGI, and how to turn it off (`FUTURE_AGI_TELEMETRY_DISABLED=true` in `deploy/.env.production`): [Telemetry and outbound connections](https://docs.futureagi.com/docs/self-hosting/configuration/telemetry).
+- The images, their tags and how to verify one: [Container images](https://docs.futureagi.com/docs/self-hosting/images).
 
 ## Quickstart
 
@@ -327,7 +327,7 @@ GPU nodes pin `SERVING_VERSION=<version>-gpu` and reserve the GPU for the servic
 `FUTURE_AGI_VERSION` names the default, feature-complete backend
 (`futureagi/future-agi:<version>`: Debian's ffmpeg, git, the Vertex AI and
 hosted-sandbox SDKs); its `-slim` tags are the base of Standalone's app image,
-not for this overlay ([docs/images.md](../docs/images.md#backend-variants)).
+not for this overlay ([Backend variants](https://docs.futureagi.com/docs/self-hosting/images#backend-variants)).
 Features that need a further optional extra are listed in
 [INSTALLATION.md](../INSTALLATION.md#optional-feature-extras).
 None of these image variables has a production fallback; missing/empty pins fail
@@ -338,7 +338,7 @@ collector services select the same image, and the production overlay removes the
 inherited build configuration. `up --no-build` additionally forbids source builds.
 To pin image content, name the verified digest in the image reference through one
 more Compose file (`image: futureagi/future-agi:<tag>@sha256:<digest>` per service; see
-[docs/images.md](../docs/images.md#verifying-an-image)) rather than in the version
+[Verifying an image](https://docs.futureagi.com/docs/self-hosting/images#verifying-an-image)) rather than in the version
 variables, which are also reported as the version in telemetry and licence activation.
 No example tag or digest here is a qualified release. Backend, all applicable
 workers and frontend must match the reviewed source; unchanged dependencies need
@@ -527,6 +527,6 @@ docker volume rm futureagi_property-catalog-sequencer-data
 - [ ] Postgres, ClickHouse, MinIO data volumes are on persistent storage
 - [ ] Backup crons (Postgres + ClickHouse) scheduled and tested with restore dry-run
 - [ ] Docker daemon and host OS get security patches on a known cadence
-- [ ] The rest of the [minimal production checklist](../docs/configuration.md#minimal-production-checklist) holds: `ENV_TYPE=production`, public URLs, locked-down origins, email or share-by-link invites
+- [ ] The rest of the [production checklist](https://docs.futureagi.com/docs/self-hosting/production/checklist) holds: `ENV_TYPE=production`, public URLs, locked-down origins, email or share-by-link invites
 - [ ] `OSS_RETURN_PASSWORD_RESET_LINK` is unset or `false`
-- [ ] Telemetry decided: left on, or `FUTURE_AGI_TELEMETRY_DISABLED=true` ([what is sent](../docs/telemetry.md))
+- [ ] Telemetry decided: left on, or `FUTURE_AGI_TELEMETRY_DISABLED=true` ([what is sent](https://docs.futureagi.com/docs/self-hosting/configuration/telemetry))

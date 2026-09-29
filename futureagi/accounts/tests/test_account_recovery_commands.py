@@ -1,6 +1,7 @@
 """The account commands self-hosted installs tell an operator to run.
 
-"Forgot password" without email, INSTALLATION.md and docs/configuration.md
+"Forgot password" without email, INSTALLATION.md and the configuration
+reference (deploy/env-reference.toml, "Email")
 name ``manage.py reset_password``. Each command runs here as the operator runs
 it, in a fresh process, so the mutation-free startup guard in
 ``model_hub.apps`` sees the real argv.

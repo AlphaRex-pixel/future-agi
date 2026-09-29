@@ -10,7 +10,8 @@
 #   examples/ingress.yaml    public UI, API and OTLP endpoints with TLS
 #
 # Environment variable names in [brackets] are what each key sets in the
-# application; docs/configuration.md explains every one of them.
+# application; https://docs.futureagi.com/docs/self-hosting/configuration/reference
+# explains every one of them.
 # =============================================================================
 
 # -- Override the chart name used in resource names.
@@ -81,7 +82,7 @@ config:
     replyTo: ""
     # -- [SERVER_EMAIL] sender of error emails.
     serverEmail: ""
-  # -- Extra environment variables for the backend, workers and bootstrap job, as `NAME: value`. Every supported key is in docs/configuration.md.
+  # -- Extra environment variables for the backend, workers and bootstrap job, as `NAME: value`. Every supported key: https://docs.futureagi.com/docs/self-hosting/configuration/reference (rows marked H).
   extraEnv: {}
   # -- Extra `envFrom` sources for the backend, workers and bootstrap job, e.g. `[{secretRef: {name: my-env}}]`.
   extraEnvFrom: []

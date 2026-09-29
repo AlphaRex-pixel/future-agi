@@ -23,7 +23,7 @@
 # job after adding it).
 #
 # Labels: all five images get the VERSION/REVISION/CREATED build args a
-# release passes (docs/images.md), and the job checks that each one carries
+# release passes (TESTING.md › Image conventions), and the job checks that each one carries
 # the org.opencontainers.image.* labels, as build-image-multiarch.yml does.
 #
 # The default (standard) backend variant is not built here: e2e-ci.yml builds
@@ -358,7 +358,7 @@ jobs:
 
       - name: OCI labels on every image
         # The same check build-image-multiarch.yml runs before a release
-        # tags anything (docs/images.md).
+        # tags anything (TESTING.md › Image conventions).
         shell: bash
         env:
           REVISION: ${{ steps.labels.outputs.revision }}

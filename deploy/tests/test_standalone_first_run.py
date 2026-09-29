@@ -107,7 +107,9 @@ class BootSummaryTest(RunDir):
         self.assertIn("http://localhost:3300", text)
         self.assertIn("http://localhost:8000", text)
         self.assertIn("http://localhost:4318", text)
-        self.assertIn("docs/configuration.md", text)
+        self.assertIn(
+            "https://docs.futureagi.com/docs/self-hosting/configuration/reference", text
+        )
 
     def test_traces_name_the_url_sdks_send_to(self):
         self.assertTrue(self.row("Traces").startswith("http://localhost:4318 "))
@@ -204,7 +206,7 @@ class BootSummaryTest(RunDir):
                 "Telemetry", FUTURE_AGI_TELEMETRY_URL="https://t.example.com:8443/in/"
             ),
         )
-        # What the opt-out still sends, as docs/telemetry.md lists it.
+        # What the opt-out still sends (wire_reference.toml [opt_out], the telemetry page).
         self.assertEqual(
             self.row("Telemetry", FUTURE_AGI_TELEMETRY_DISABLED="true"),
             "off: one registration ping (instance id, version, deployment type, "

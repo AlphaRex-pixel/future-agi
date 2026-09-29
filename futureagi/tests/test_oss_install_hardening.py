@@ -2146,7 +2146,7 @@ def test_the_telemetry_notice_comes_before_the_admin_email_is_asked(
     assert code == 0, stderr
     notice = stdout.index("this install registers with api.futureagi.com")
     assert notice < stdout.index("Email    : ")
-    # Worded as docs/telemetry.md.
+    # Worded as the telemetry page (https://docs.futureagi.com/docs/self-hosting/configuration/telemetry).
     for fact in (
         "instance id, version, deployment type, and the emails and domains of owners,",
         "admins and staff/superuser accounts",

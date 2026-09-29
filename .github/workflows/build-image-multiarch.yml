@@ -23,7 +23,7 @@
 # The check prints that upgrade delta. A failed cache write fails the leg
 # (no ignore-error), so a release can never silently lose the cache.
 #
-# Image labels (docs/images.md): every image gets VERSION (the version
+# Image labels (TESTING.md › Image conventions): every image gets VERSION (the version
 # input), REVISION (the commit, resolved once so both architectures build the
 # same one) and CREATED (one UTC timestamp per run) as build args, which its
 # Dockerfile turns into the org.opencontainers.image.* labels; each leg
@@ -229,7 +229,7 @@ jobs:
           cache-to: ${{ steps.cache.outputs.to }}
       - name: OCI labels (linux/${{ matrix.arch }})
         # The Dockerfile must turn the three build args into labels
-        # (docs/images.md); a Dockerfile without them would publish an image
+        # (TESTING.md › Image conventions); a Dockerfile without them would publish an image
         # nobody can trace back to its commit.
         shell: bash
         env:

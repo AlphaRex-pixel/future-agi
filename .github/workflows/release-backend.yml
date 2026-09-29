@@ -3,7 +3,8 @@
 # build-image-multiarch.yml (native linux/amd64 + linux/arm64, registry layer
 # cache) so the two paths cannot drift. The size budget only reports here: an
 # ad-hoc build is never blocked by it. `variant` picks the backend variant
-# (futureagi/Dockerfile.oss IMAGE_VARIANT, docs/images.md): standard publishes
+# (futureagi/Dockerfile.oss IMAGE_VARIANT;
+# docs.futureagi.com/docs/self-hosting/images#backend-variants): standard publishes
 # <version>, slim publishes <version>-slim.
 name: Release backend
 

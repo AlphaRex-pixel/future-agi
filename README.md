@@ -161,7 +161,7 @@ install's data to Distributed or Helm later
 ([Switching](INSTALLATION.md#switching-between-standalone-and-distributed)).
 
 - **Configure:** every variable in `.env` is described in
-  [docs/configuration.md](docs/configuration.md). Nothing is required for a
+  [the configuration reference](https://docs.futureagi.com/docs/self-hosting/configuration/reference). Nothing is required for a
   local install; add LLM provider keys, a public URL or email when you need them.
 - **Manage:** `docker compose logs -f app` (Distributed: `backend`); stop with
   `docker compose down` or `./bin/uninstall` (both keep your data); upgrade
@@ -169,7 +169,7 @@ install's data to Distributed or Helm later
   `./bin/uninstall --purge`.
 - **Develop:** on a branch other than `main`, add `--from-source` to build the
   images from your checkout; `./bin/dev` runs it with hot reload
-  ([docs/development.md](docs/development.md)).
+  ([Local development](https://docs.futureagi.com/docs/self-hosting/development)).
 - **More:** the [self-hosting guide](https://docs.futureagi.com/docs/self-hosting),
   [INSTALLATION.md](INSTALLATION.md) (every option and troubleshooting) and
   [deploy/README.md](deploy/README.md) (production).
@@ -311,8 +311,8 @@ Six prompt-optimization algorithms (GEPA, PromptWizard, ProTeGi, Bayesian, Meta-
 |  AWS Marketplace | ⏳ | Coming soon |
 |  Air-gapped / on-prem | ✅ | Mirror the images, set `FUTURE_AGI_TELEMETRY_DISABLED=true` and block outbound traffic ([Telemetry](#telemetry)); [contact sales](mailto:sales@futureagi.com) for support |
 
-Every image, tag and size: [docs/images.md](docs/images.md). Every setting:
-[docs/configuration.md](docs/configuration.md).
+Every image, tag and size: [Container images](https://docs.futureagi.com/docs/self-hosting/images). Every setting:
+[Configuration reference](https://docs.futureagi.com/docs/self-hosting/configuration/reference).
 
 ---
 
@@ -547,7 +547,7 @@ Self-hosted Future AGI sends deployment telemetry, **on by default**, so we can 
 
 To opt out, install with `./bin/install --no-telemetry`, or set `FUTURE_AGI_TELEMETRY_DISABLED=true` in `.env` (`deploy/.env.production` for the production overlay, `config.telemetry=false` for Helm) and run `docker compose up -d`. Opting out still sends one registration, without email addresses; block `api.futureagi.com` to send nothing. Everything else that could leave your install (HubSpot, Slack, Mixpanel, PostHog, reCAPTCHA, Sentry, Mailgun) is **off until you set its key**.
 
-[docs/telemetry.md](docs/telemetry.md) has the exact payloads, what the opt-out still sends, every setting, and every outbound connection, with what an install that allows no outbound traffic must also set.
+[Telemetry and outbound connections](https://docs.futureagi.com/docs/self-hosting/configuration/telemetry) has the exact payloads, what the opt-out still sends, every setting, and every outbound connection, with what an install that allows no outbound traffic must also set.
 
 ---
 

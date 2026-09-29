@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Docker HEALTHCHECK of the futureagi/future-agi image (docs/images.md).
+"""Docker HEALTHCHECK of the futureagi/future-agi image
+(https://docs.futureagi.com/docs/self-hosting/images#health-checks).
 
 One image runs every backend role (entrypoint.sh reads SERVICE_TYPE). Only
 the roles that listen are probed:

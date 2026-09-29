@@ -128,7 +128,7 @@ print_summary() { # frontend port, backend port
   say "     Start        $DC up -d"
   say "     Upgrade      ${upgrade_cmd}"
   say "     Uninstall    ./bin/uninstall  ${DIM}(keeps your data; --wipe-data deletes it)${RESET}"
-  say "     Settings     .env  ${DIM}(every variable: docs/configuration.md)${RESET}"
+  say "     Settings     .env  ${DIM}(every variable: https://docs.futureagi.com/docs/self-hosting/configuration/reference)${RESET}"
   say "     Install log  $LOG_FILE"
   if (( DISTRIBUTED == 1 )); then
     say ""

@@ -304,8 +304,8 @@ def email_summary() -> str:
 
 def telemetry_summary() -> str:
     """When and where tfc.deployment_telemetry sends, by its own rules; what
-    it sends is docs/configuration.md's (Telemetry: what this install sends
-    to Future AGI)."""
+    it sends is the telemetry page's
+    (https://docs.futureagi.com/docs/self-hosting/configuration/telemetry)."""
     config = telemetry_config()
     if config.telemetry_is_disabled():
         return (
@@ -321,7 +321,8 @@ def telemetry_summary() -> str:
 
 
 # Hooks of Future AGI's hosted service; each sends data out when set, and is
-# skipped when empty (docs/configuration.md).
+# skipped when empty (deploy/env-reference.toml, "Integrations of Future
+# AGI's hosted service").
 OUTBOUND_HOOKS = (
     ("HubSpot", "HUBSPOT_API_TOKEN"),
     ("Slack", "SLACK_WEBHOOK_CHANNEL"),
@@ -411,7 +412,9 @@ def boot_summary() -> list[str]:
     return (
         [f"Future AGI · {setup} · {version()}"]
         + [f"  {label.ljust(width)}  {value}" for label, value in rows]
-        + ["  Every setting: docs/configuration.md"]
+        + [
+            "  Every setting: https://docs.futureagi.com/docs/self-hosting/configuration/reference"
+        ]
     )
 
 

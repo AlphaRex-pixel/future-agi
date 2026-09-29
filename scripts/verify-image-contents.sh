@@ -7,7 +7,7 @@ set -euo pipefail
 # Usage: ./scripts/verify-image-contents.sh [version] [oss|ee|cloud|all]
 # Overrides: OSS_IMAGE, EE_IMAGE, CLOUD_IMAGE, CLOUD_DEPLOYMENT_SECRET,
 #   OSS_VARIANT: the backend variant OSS_IMAGE was built as
-#   (futureagi/Dockerfile.oss IMAGE_VARIANT, docs/images.md). standard is
+#   (futureagi/Dockerfile.oss IMAGE_VARIANT; https://docs.futureagi.com/docs/self-hosting/images#backend-variants). standard is
 #   feature-complete (uv, git, the sandbox SDKs, Debian ffmpeg, every NLTK
 #   package); slim is the lean base of futureagi/standalone. Default: slim for a
 #   tag ending in -slim, else standard. Standalone local builds

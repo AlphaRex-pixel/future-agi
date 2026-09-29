@@ -55,7 +55,7 @@ account); give Docker 8 GB of memory for that build. After that, the UI is at
 
 Everyday commands: `./bin/dev logs`, `./bin/dev shell`,
 `./bin/dev manage migrate`, `./bin/dev rebuild` after a dependency change,
-`./bin/dev down`. [docs/development.md](docs/development.md) covers what
+`./bin/dev down`. [Local development](https://docs.futureagi.com/docs/self-hosting/development) covers what
 reloads, migrations, tests, when to use `./bin/dev --distributed`, and
 troubleshooting.
 
@@ -171,6 +171,7 @@ Before requesting review:
 - [ ] `make check-all` (backend) or `yarn check-all` (frontend) passes
 - [ ] Docstrings on new public APIs
 - [ ] [CHANGELOG](https://futureagi.com/changelog) updated if user-facing
+- [ ] User docs changed in [future-agi/docs](https://github.com/future-agi/docs) (docs.futureagi.com), not under `docs/`. A new environment variable is a row in `deploy/env-reference.toml`, which the [configuration reference](https://docs.futureagi.com/docs/self-hosting/configuration/reference) is generated from; telemetry fields and image facts likewise live in `wire_reference.toml` and `deploy/images.toml` ([TESTING.md](TESTING.md#images-docs-and-the-helm-chart))
 - [ ] No hardcoded secrets, URLs, or PII
 - [ ] `AI use:` line filled in (tool and extent, or `none`)
 - [ ] Linked issue is labelled `accepted` (or the change is a small fix)
@@ -197,7 +198,7 @@ future-agi/
 ├── agentcc-gateway/  # LLM gateway (Go)
 ├── deploy/           # Standalone app image (standalone/), production overlay, Helm chart (helm/futureagi/)
 ├── bin/              # install, uninstall, dev, e2e
-├── docs/             # configuration, telemetry, images, development
+├── docs/             # maintainer notes; user docs live in future-agi/docs
 └── e2e/              # Playwright end-to-end flows
 ```
 
