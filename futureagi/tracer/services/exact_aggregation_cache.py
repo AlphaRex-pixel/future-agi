@@ -545,6 +545,26 @@ def _scope_admission_timeout(members: dict[str, int], now_ms: int) -> int:
     return remaining_seconds + 5 * 60
 
 
+def _admission_ceiling(limit: int | None) -> int:
+    """The per-scope ceiling, lowered (never raised) by ``limit``."""
+
+    ceiling = _max_inflight_per_scope()
+    if limit is None:
+        return ceiling
+    return max(1, min(ceiling, int(limit)))
+
+
+def _live_admission_members(raw_members: Any, now_ms: int) -> dict[str, int]:
+    """Fallback-store members whose lease is later than now (the claim script's rule)."""
+
+    members = raw_members if isinstance(raw_members, dict) else {}
+    return {
+        member: expiry
+        for member, expiry in members.items()
+        if isinstance(expiry, int) and expiry > now_ms
+    }
+
+
 def _revalidation_admission_limit() -> int:
     """Admission ceiling for a background revalidation: leave one slot free."""
 
@@ -562,7 +582,7 @@ def _scope_admission_has_capacity(identity: Any, *, limit: int) -> bool:
     admission_key = _scope_admission_key(identity)
     if admission_key is None:
         return True
-    max_inflight = max(1, min(_max_inflight_per_scope(), int(limit)))
+    max_inflight = _admission_ceiling(limit)
     now_ms = int(time.time() * 1000)
     try:
         redis_client = _redis_cache_client()
@@ -574,14 +594,8 @@ def _scope_admission_has_capacity(identity: Any, *, limit: int) -> bool:
                 redis_client.make_key(admission_key), f"({now_ms}", "+inf"
             )
             return int(live) < max_inflight
-        raw_members = cache.get(admission_key)
-        members = raw_members if isinstance(raw_members, dict) else {}
-        live = sum(
-            1
-            for expiry in members.values()
-            if isinstance(expiry, int) and expiry > now_ms
-        )
-        return live < max_inflight
+        live = _live_admission_members(cache.get(admission_key), now_ms)
+        return len(live) < max_inflight
     except Exception:
         logger.warning(
             "exact_aggregation_scope_admission_probe_failed",
@@ -607,9 +621,7 @@ def _claim_exact_refresh_admission(
     admission_key = _scope_admission_key(identity)
     if admission_key is None:
         return True
-    max_inflight = _max_inflight_per_scope()
-    if limit is not None:
-        max_inflight = max(1, min(max_inflight, int(limit)))
+    max_inflight = _admission_ceiling(limit)
     now_ms = int(time.time() * 1000)
     expiry_ms = now_ms + lease_seconds * 1000
     ttl_margin_ms = 5 * 60 * 1000
@@ -631,13 +643,7 @@ def _claim_exact_refresh_admission(
             )
 
         with _CACHE_FENCE_FALLBACK_LOCK:
-            raw_members = cache.get(admission_key)
-            members = dict(raw_members) if isinstance(raw_members, dict) else {}
-            members = {
-                member: expiry
-                for member, expiry in members.items()
-                if isinstance(expiry, int) and expiry > now_ms
-            }
+            members = _live_admission_members(cache.get(admission_key), now_ms)
             if token not in members and len(members) >= max_inflight:
                 cache.set(
                     admission_key,
@@ -691,13 +697,7 @@ def _renew_exact_refresh_admission(
             )
 
         with _CACHE_FENCE_FALLBACK_LOCK:
-            raw_members = cache.get(admission_key)
-            members = dict(raw_members) if isinstance(raw_members, dict) else {}
-            members = {
-                member: expiry
-                for member, expiry in members.items()
-                if isinstance(expiry, int) and expiry > now_ms
-            }
+            members = _live_admission_members(cache.get(admission_key), now_ms)
             if token not in members:
                 return False
             members[token] = expiry_ms
