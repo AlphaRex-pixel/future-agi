@@ -33,7 +33,7 @@ export function asRequestError(err, action) {
 // dialog that closes on it) settles only once the config has been re-read:
 // otherwise Edit, clicked straight after Save, opens on the cached config from
 // before the save. The other keys are refreshed without waiting.
-function refreshGatewayConfig(queryClient, ...alsoStaleKeys) {
+export function refreshGatewayConfig(queryClient, ...alsoStaleKeys) {
   alsoStaleKeys.forEach((queryKey) =>
     queryClient.invalidateQueries({ queryKey }),
   );
