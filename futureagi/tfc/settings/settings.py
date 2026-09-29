@@ -1159,7 +1159,7 @@ BASE_URL = os.getenv(
     "BASE_URL",
     (
         "https://api.futureagi.com"
-        if CLOUD_DEPLOYMENT and not _is_local
+        if is_cloud_env(CLOUD_DEPLOYMENT) and not _is_local
         else "http://localhost:8000"
     ),
 )
