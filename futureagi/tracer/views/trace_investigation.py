@@ -134,7 +134,9 @@ class SimulationEvidenceView(InternalInvestigationView):
             )
         except SimulationInvestigationConflict as error:
             return Response(
-                {"code": "conflict", "detail": str(error)},
+                build_error_envelope(
+                    str(error), status_code=status.HTTP_409_CONFLICT, code="conflict"
+                ),
                 status=status.HTTP_409_CONFLICT,
             )
         return Response(payload, status=status.HTTP_200_OK)
