@@ -28,6 +28,8 @@ from simulate.models import (
     HostedHarnessConversationTranscript,
     HostedHarnessJob,
     HostedHarnessReceipt,
+    HostedHarnessScenario,
+    HostedHarnessStageOutput,
 )
 from simulate.services.hosted_harness import (
     HostedHarnessError,
@@ -974,6 +976,12 @@ def _project_event(
         ):
             conversation.state = HostedHarnessConversation.State.WARM_IDLE
         conversation.active_invocation_id = None
+        # Only a finished turn leaves a complete suite; checkpoints taken mid-turn are scratch.
+        if payload.get("outcome") == "success":
+            conversation_id, sequence = str(conversation.id), event["sequence"]
+            transaction.on_commit(
+                lambda: _schedule_checkpoint_promotion(conversation_id, sequence)
+            )
 
 
 def conversation_run_status(
@@ -996,57 +1004,255 @@ def conversation_run_status(
     }
 
 
-def prepare_conversation_rerun(
+# What a chat workspace reproduces faithfully. Build outputs (the bundle manifest, seeded
+# stores) are not in it, so those keep what the last build produced.
+_CHECKPOINT_STAGE_KINDS = ("contract", "scenarios", "sub_goals", "coverage")
+
+
+def _schedule_checkpoint_promotion(conversation_id: str, turn_sequence: int) -> None:
+    from simulate.tasks.hosted_harness_conversation import (
+        promote_hosted_harness_conversation_checkpoint,
+    )
+
+    try:
+        promote_hosted_harness_conversation_checkpoint.apply_async(
+            args=[conversation_id, turn_sequence]
+        )
+    except Exception:  # noqa: BLE001 - the turn is recorded; the next finished turn publishes
+        logger.exception(
+            "could not schedule checkpoint promotion conversation=%s", conversation_id
+        )
+
+
+def promote_turn_checkpoint(
+    conversation_id: str, turn_sequence: int
+) -> HostedHarnessJob | None:
+    """Publish the workspace a successful chat turn committed just before it finished."""
+    conversation = HostedHarnessConversation.no_workspace_objects.get(
+        id=conversation_id
+    )
+    committed = (
+        HostedHarnessConversationEvent.no_workspace_objects.filter(
+            conversation=conversation,
+            kind="checkpoint_committed",
+            sequence__lt=turn_sequence,
+            # A control-only checkpoint stored chat state, not the workspace.
+            payload__has_key="digest",
+        )
+        .order_by("-sequence")
+        .values_list("sequence", "payload")
+        .first()
+    )
+    if committed is None:
+        return None
+    sequence, payload = committed
+    digest = str(payload["digest"])
+    return promote_conversation_checkpoint(
+        conversation,
+        object_key=_workspace_object_key(conversation, digest),
+        digest=digest,
+        sequence=sequence,
+    )
+
+
+def promote_latest_checkpoint(
     conversation: HostedHarnessConversation,
-) -> HostedHarnessJob:
-    """Promote the latest chat checkpoint to the job's next immutable run input."""
-    terminal_states = {
-        HostedHarnessJob.State.COMPLETED,
-        HostedHarnessJob.State.FAILED,
-        HostedHarnessJob.State.CANCELED,
+) -> HostedHarnessJob | None:
+    """Publish the workspace the chat checkpointed right before asking for a run."""
+    conversation = HostedHarnessConversation.no_workspace_objects.get(
+        id=conversation.id
+    )
+    if not conversation.latest_workspace_object_key:
+        raise HostedHarnessError(
+            "conversation_workspace_not_ready",
+            "The conversation has not committed an environment checkpoint",
+            status_code=409,
+            retryable=True,
+        )
+    return promote_conversation_checkpoint(
+        conversation,
+        object_key=conversation.latest_workspace_object_key,
+        digest=conversation.latest_workspace_digest,
+        # Every event acknowledged so far was emitted before this checkpoint was taken.
+        sequence=conversation.event_acked_through,
+    )
+
+
+def promote_conversation_checkpoint(
+    conversation: HostedHarnessConversation,
+    *,
+    object_key: str,
+    digest: str,
+    sequence: int,
+) -> HostedHarnessJob | None:
+    """Make a chat checkpoint the environment's authored snapshot: the archive Runs replay,
+    the documents the environment shows, and the scenarios a Run can select.
+
+    Only a completed environment is published to; while authoring runs, its pipeline owns
+    these. A checkpoint older than the published one is ignored, so a late delivery never
+    rolls the environment back.
+    """
+    from simulate.services.harness_scenarios import index_scenarios
+    from simulate.services.hosted_harness_gateway import (
+        _scenario_token,
+        authoring_stage_outputs_from_archive,
+        store_authoring_archive,
+    )
+
+    job = HostedHarnessJob.no_workspace_objects.select_related("environment").get(
+        id=conversation.job_id
+    )
+    environment = job.environment or job
+    if environment.state != HostedHarnessJob.State.COMPLETED:
+        return None
+    checkpoint = _read_object(object_key)
+    if checkpoint is None:
+        raise HostedHarnessError(
+            "conversation_checkpoint_missing",
+            "the chat checkpoint is no longer stored",
+            status_code=409,
+        )
+    archive = _authoring_archive(checkpoint)
+    outputs = {
+        output["kind"]: output
+        for output in authoring_stage_outputs_from_archive(archive)
+        if output["kind"] in _CHECKPOINT_STAGE_KINDS
     }
+    suite = (outputs.get("scenarios") or {}).get("data")
+    tokens = [
+        _scenario_token(one.get("scenario_key") or one.get("name"))
+        for one in (suite if isinstance(suite, list) else [])
+        if isinstance(one, dict)
+    ]
+    if (
+        not 1 <= len(tokens) <= 200
+        or len(tokens) != len(suite)
+        or "" in tokens
+        or len(set(tokens)) != len(tokens)
+    ):
+        raise HostedHarnessError(
+            "conversation_checkpoint_invalid",
+            "the chat checkpoint does not hold 1 to 200 uniquely named scenarios",
+            status_code=422,
+        )
+
     with transaction.atomic():
-        conversation = (
-            HostedHarnessConversation.no_workspace_objects.select_for_update()
-            .select_related("job")
-            .get(id=conversation.id)
+        environment = HostedHarnessJob.no_workspace_objects.select_for_update().get(
+            id=environment.id
         )
-        job = HostedHarnessJob.no_workspace_objects.select_for_update().get(
-            id=conversation.job_id
-        )
-        if job.state not in terminal_states:
-            raise HostedHarnessError(
-                "job_not_terminal",
-                f"hosted harness job cannot be rerun while it is {job.state}",
-                status_code=409,
-            )
-        if not conversation.latest_workspace_object_key:
-            raise HostedHarnessError(
-                "conversation_workspace_not_ready",
-                "The conversation has not committed an environment checkpoint",
-                status_code=409,
-                retryable=True,
-            )
-        if (
-            conversation.latest_scenario_count is not None
-            and not 1 <= conversation.latest_scenario_count <= 200
+        if environment.state != HostedHarnessJob.State.COMPLETED:
+            return None
+        published = ((environment.payload or {}).get("metadata") or {}).get(
+            "conversation_checkpoint"
+        ) or {}
+        if published.get("digest") == digest or sequence < published.get(
+            "sequence", -1
         ):
-            raise HostedHarnessError(
-                "conversation_scenario_count_invalid",
-                "A hosted run requires between 1 and 200 saved scenarios",
-                status_code=422,
+            return environment
+        store_authoring_archive(environment, archive, advance_lifecycle=False)
+        environment.payload["metadata"]["conversation_checkpoint"] = {
+            "digest": digest,
+            "sequence": sequence,
+        }
+        fresh = dict(outputs)
+        stage_outputs = [
+            fresh.pop(item["kind"])
+            if isinstance(item, dict) and item.get("kind") in fresh
+            else item
+            for item in environment.stage_outputs or []
+        ]
+        environment.stage_outputs = stage_outputs + list(fresh.values())
+        environment.scenario_count = len(suite)
+        environment.save(
+            update_fields=["payload", "stage_outputs", "scenario_count", "updated_at"]
+        )
+        for output in HostedHarnessStageOutput.no_workspace_objects.filter(
+            job=environment, kind__in=list(outputs)
+        ):
+            output.data = outputs[output.kind]["data"]
+            output.summary = outputs[output.kind]["summary"]
+            output.save(update_fields=["data", "summary", "updated_at"])
+        index_scenarios(environment, suite, prune=True)
+        _bind_added_scenarios(environment)
+    return environment
+
+
+def _authoring_archive(checkpoint: bytes) -> bytes:
+    """The checkpoint as authoring packs it: without the chat's session state (the hidden
+    entries at its root, some of them credentials) or files no simulation reads."""
+    out = io.BytesIO()
+    with (
+        tarfile.open(fileobj=io.BytesIO(checkpoint), mode="r:gz") as source,
+        tarfile.open(fileobj=out, mode="w:gz") as target,
+    ):
+        for member in source.getmembers():
+            parts = [
+                part
+                for part in member.name.replace("\\", "/").split("/")
+                if part not in {"", "."}
+            ]
+            if (
+                not parts
+                or parts[0].startswith(".")
+                or parts == ["cost.json"]
+                or "__pycache__" in parts
+            ):
+                continue
+            target.addfile(
+                member, source.extractfile(member) if member.isfile() else None
             )
-        payload = copy.deepcopy(job.payload)
-        metadata = payload.setdefault("metadata", {})
-        metadata["authoring_object_key"] = conversation.latest_workspace_object_key
-        metadata["authoring_digest"] = conversation.latest_workspace_digest
-        metadata.pop("scenario_extend", None)
-        payload["metadata"] = metadata
-        job.payload = payload
-        if conversation.latest_scenario_count is not None:
-            job.scenario_count = conversation.latest_scenario_count
-        job.save(update_fields=["payload", "scenario_count", "updated_at"])
-    return job
+    return out.getvalue()
+
+
+def _bind_added_scenarios(environment: HostedHarnessJob) -> None:
+    """Give scenarios the chat added the platform identity a Run creates its calls from."""
+    from simulate.services.alk_simulate_ingestion import (
+        ALKSimulateIngestionError,
+        append_alk_sim_scenarios,
+    )
+
+    added = list(
+        HostedHarnessScenario.no_workspace_objects.filter(
+            job=environment, scenario__isnull=True
+        ).order_by("number", "created_at")
+    )
+    if not added or environment.run_test_id is None:
+        return
+    try:
+        shared, created = append_alk_sim_scenarios(
+            environment.run_test, [_provision_persona(one) for one in added]
+        )
+    except ALKSimulateIngestionError as exc:
+        raise HostedHarnessError("scenario_provision_failed", str(exc)) from exc
+    bound_at = timezone.now()
+    for registration, one in zip(added, created, strict=True):
+        # Jobs from before grouped datasets get one scenario per persona and no row.
+        registration.scenario, registration.dataset_row = (
+            (shared, one) if shared is not None else (one, None)
+        )
+        registration.updated_at = bound_at
+    HostedHarnessScenario.no_workspace_objects.bulk_update(
+        added, ["scenario", "dataset_row", "updated_at"]
+    )
+
+
+def _provision_persona(registration: HostedHarnessScenario) -> dict[str, Any]:
+    """The persona record ALK registers for a scenario (fi.alk.harness.platform.persona_of)."""
+    persona = registration.persona if isinstance(registration.persona, dict) else {}
+    return {
+        "name": str(persona.get("name") or registration.name or "caller")[:255],
+        "role": str(persona.get("role") or persona.get("occupation") or "")[:255],
+        "situation": registration.instruction,
+        "outcome": registration.tests,
+        "persona": persona,
+    }
+
+
+def _workspace_object_key(conversation: HostedHarnessConversation, digest: str) -> str:
+    return (
+        f"harness-conversations/{conversation.organization_id}/"
+        f"{conversation.id}/{digest.removeprefix('sha256:')}.tar.gz"
+    )
 
 
 def store_workspace_archive(
@@ -1071,10 +1277,7 @@ def store_workspace_archive(
         )
     _validate_workspace_archive(body)
     scenario_count = _workspace_scenario_count(body)
-    key = (
-        f"harness-conversations/{conversation.organization_id}/"
-        f"{conversation.id}/{actual[7:]}.tar.gz"
-    )
+    key = _workspace_object_key(conversation, actual)
     client = get_storage_client()
     ensure_bucket(client, UPLOAD_BUCKET_NAME)
     client.put_object(
@@ -1096,19 +1299,23 @@ def store_workspace_archive(
 def load_workspace_archive(conversation: HostedHarnessConversation) -> bytes | None:
     if not conversation.latest_workspace_object_key:
         return None
-    try:
-        response = get_storage_client().get_object(
-            UPLOAD_BUCKET_NAME, conversation.latest_workspace_object_key
-        )
-    except S3Error as exc:
-        if exc.code != "NoSuchKey":
-            raise
+    body = _read_object(conversation.latest_workspace_object_key)
+    if body is None:
         # The checkpoint object is gone; treat it like no checkpoint so chat falls back
         # to the authoring archive rather than retiring. The user's edits are lost.
         logger.warning(
             "conversation checkpoint object missing; falling back to authoring archive conversation=%s",
             conversation.id,
         )
+    return body
+
+
+def _read_object(object_key: str) -> bytes | None:
+    try:
+        response = get_storage_client().get_object(UPLOAD_BUCKET_NAME, object_key)
+    except S3Error as exc:
+        if exc.code != "NoSuchKey":
+            raise
         return None
     try:
         return response.read()
