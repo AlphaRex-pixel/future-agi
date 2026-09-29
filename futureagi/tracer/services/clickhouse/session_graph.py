@@ -26,6 +26,7 @@ from tracer.services.clickhouse.exact_graph_reads import (
     session_graph_root_estimate_sql,
 )
 from tracer.services.clickhouse.graph_dispatch import (
+    _GRAPH_SEED_ESTIMATE_QUERY_MS,
     _GRAPH_SEED_PROBE_ERRORS,
     OBSERVE_SYSTEM_GRAPH_PAYLOAD_VERSION,
     _require_rollup_result_shape,
@@ -95,9 +96,6 @@ _SESSION_IDENTITY_ONLY_METRICS = frozenset(
     {"traffic", "session_count", "avg_traces_per_session"}
 )
 _SESSION_ROLLUP_METRICS = SESSION_SYSTEM_METRICS - {"avg_traces_per_session"}
-# Server cap on the one metadata estimate that decides inline vs background
-# (the raw trace graph's seed estimate uses the same per-probe grant).
-SESSION_GRAPH_INLINE_ESTIMATE_CAP_MS = 1_500
 # The inline attempt (estimate plus read) may use at most half of what is left
 # of the request's wall, and never more than this. The browser's first graph
 # request gives up after 30 s (AGGREGATION_REQUEST_TIMEOUT_MS, counted from
@@ -707,11 +705,11 @@ def _session_graph_root_estimate(
         result = analytics.execute_ch_query(
             query,
             params,
-            timeout_ms=SESSION_GRAPH_INLINE_ESTIMATE_CAP_MS,
+            timeout_ms=_GRAPH_SEED_ESTIMATE_QUERY_MS,
             # Index analysis parallelises over parts; the estimate reads no
             # column data (the raw graph's seed estimate uses the same budget).
             settings={"max_threads": settings.DASHBOARD_TRACE_READ_MAX_THREADS},
-            server_execution_cap_ms=SESSION_GRAPH_INLINE_ESTIMATE_CAP_MS,
+            server_execution_cap_ms=_GRAPH_SEED_ESTIMATE_QUERY_MS,
         )
     except _GRAPH_SEED_PROBE_ERRORS as exc:
         logger.info(
