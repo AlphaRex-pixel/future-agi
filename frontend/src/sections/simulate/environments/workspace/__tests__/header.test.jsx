@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -240,17 +240,25 @@ describe("WorkspaceHeader", () => {
     expect(onFork).toHaveBeenCalledTimes(1);
   });
 
-  it("opens the run-config dialog and starts a run-all (no ids) on confirm", async () => {
+  it("starts a run-all (no ids) directly on Run, with no config dialog", async () => {
     const user = userEvent.setup();
     const onStartRun = vi.fn();
     render(withRouter(<WorkspaceHeader {...baseProps} canRun onStartRun={onStartRun} />));
 
-    // The header Run opens the config dialog rather than navigating directly.
     await user.click(screen.getByRole("button", { name: "Run simulation" }));
-    const dialog = screen.getByRole("dialog");
-    // Confirm inside the dialog → run every scenario (ids undefined) × default k.
-    await user.click(within(dialog).getByRole("button", { name: "Run simulation" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(onStartRun).toHaveBeenCalledWith(undefined, 1);
+  });
+
+  it("runs with the repeats picked in the header dropdown", async () => {
+    const user = userEvent.setup();
+    const onStartRun = vi.fn();
+    render(withRouter(<WorkspaceHeader {...baseProps} canRun onStartRun={onStartRun} />));
+
+    await user.click(screen.getByText(/^Repeats:/));
+    await user.click(screen.getByText("3×"));
+    await user.click(screen.getByRole("button", { name: "Run simulation" }));
+    expect(onStartRun).toHaveBeenCalledWith(undefined, 3);
   });
 
   it("hides the header Run + Repeats while a scenario selection is active", () => {
