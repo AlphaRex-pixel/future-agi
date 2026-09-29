@@ -430,7 +430,7 @@ def test_the_native_statement_returns_each_users_newest_witnessed_span(
     builder = UserListQueryBuilderV2(
         organization_id=ORGANIZATION, project_ids=[PROJECT], filters=filters
     )
-    assert builder.native_matching_activity_witness().leaf_index == 1
+    assert [w.leaf_index for w in builder.matching_activity_witnesses()] == [1]
     users = [user for label, user in USERS.items() if label != "F"] + [seeded]
     with patch(SERVICE, return_value=LiveExecutor(ch_client)):
         manager._read_native_span_dimensions(

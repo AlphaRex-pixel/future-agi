@@ -1358,7 +1358,7 @@ class UsersListManager:
           predicate, and the exact-text values of a key are the union of all
           its items;
         * a native leaf whose graph condition has an existence term
-          (``native_matching_activity_witness``); its order key is its own
+          (``_native_user_witnesses``); its order key is its own
           newest match, so two leaves on its column need no special rule.
 
         With none, the page does not walk: every other filter shape keeps

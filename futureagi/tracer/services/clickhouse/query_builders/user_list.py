@@ -57,9 +57,8 @@ class MatchingActivityWitness:
     graph's own per-span flag). ``sql``/``params`` are the predicate every
     slice, instant, existence and estimate statement puts in ``WHERE``. A raw
     witness names its attribute ``key`` and ``kind`` (``text``, ``number`` or
-    ``boolean``); a native one the filter index of its leaf (``leaf_index``),
-    the flag alias it certifies its order key on (``flag_alias``) and its
-    column (``key``, display only). ``index_pruned`` says whether a skip index
+    ``boolean``); a native one the filter index of its leaf (``leaf_index``)
+    and its column (``key``, display only). ``index_pruned`` says whether a skip index
     is known to serve the predicate, so an empty slice costs only its fixed
     overhead; it is False for a native witness (only ``idx_status`` serves one
     of them, and not by design).
@@ -79,7 +78,6 @@ class MatchingActivityWitness:
     sql: str
     params: dict[str, Any] = field(default_factory=dict)
     leaf_index: int | None = None
-    flag_alias: str | None = None
     index_pruned: bool = True
     identity: str = field(default="", compare=False)
 
@@ -644,29 +642,6 @@ class UserListQueryBuilder(BaseQueryBuilder):
         ranked.sort(key=lambda entry: entry[:4])
         return [entry[-1] for entry in ranked]
 
-    def matching_activity_witness(self) -> MatchingActivityWitness | None:
-        """The raw span-attribute witness ranked first (``matching_activity_witnesses``).
-
-        ``kind`` is ``text``, ``number`` or ``boolean``; the walk needs the
-        key to read that filter's certified order key back from the page
-        enrichment.
-        """
-        return next(
-            (w for w in self.matching_activity_witnesses() if w.family == "raw"),
-            None,
-        )
-
-    def native_matching_activity_witness(self) -> MatchingActivityWitness | None:
-        """The native leaf ranked first (``matching_activity_witnesses``).
-
-        Only the walk consults native witnesses: the seeded page never seeds
-        on a native leaf (``_scalar_user_witnesses``).
-        """
-        return next(
-            (w for w in self.matching_activity_witnesses() if w.family == "native"),
-            None,
-        )
-
     def _native_user_witnesses(self) -> Iterator[MatchingActivityWitness]:
         """Native leaves whose graph condition has an existence term, in filter order.
 
@@ -695,7 +670,7 @@ class UserListQueryBuilder(BaseQueryBuilder):
             )
             if existence is None:
                 continue
-            alias, predicate = existence
+            _alias, predicate = existence
             yield MatchingActivityWitness(
                 family="native",
                 key=column,
@@ -703,7 +678,6 @@ class UserListQueryBuilder(BaseQueryBuilder):
                 sql=f"({predicate})",
                 params=dict(params),
                 leaf_index=index,
-                flag_alias=alias,
                 index_pruned=False,
                 identity=canonical_filter_leaf(item),
             )

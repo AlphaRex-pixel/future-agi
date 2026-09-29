@@ -476,7 +476,7 @@ def test_a_family_less_is_null_walks_on_its_absence_flag(ch_client, survivor_of_
 
     witness = manager._walk_witness
     assert (witness.family, witness.key) == ("native", "model")
-    assert witness.flag_alias.endswith("_absent")
+    assert witness.sql.startswith("(NOT ifNull(")
     names = [row["user_id"] for row in rows]
     assert names == _ordered(survivor_of_e, {"G": 30})
     assert set(names) == _graph_members(ch_client, survivor_of_e, item)

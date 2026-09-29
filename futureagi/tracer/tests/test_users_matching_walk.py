@@ -3496,7 +3496,9 @@ def test_slice_statement_is_bounded_by_the_slice_and_carries_no_sorting_key_in_s
         search="",
         empty_scope=False,
     )
-    builder.walk_witness = builder.matching_activity_witness()
+    builder.walk_witness = next(
+        w for w in builder.matching_activity_witnesses() if w.family == "raw"
+    )
     sql, params = builder.build_matching_activity_slice_query(
         slice_start=minutes_before_end(60),
         slice_end=WINDOW_END,

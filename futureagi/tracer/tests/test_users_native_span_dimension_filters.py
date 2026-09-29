@@ -63,6 +63,14 @@ def manager_for(*filters):
     )
 
 
+def first_witness(builder, family):
+    """The best-ranked eligible witness of ``family``, or ``None``."""
+    return next(
+        (w for w in builder.matching_activity_witnesses() if w.family == family),
+        None,
+    )
+
+
 def test_native_dimensions_are_the_span_compilers_own_columns():
     for column_id, column in USER_NATIVE_SPAN_DIMENSIONS.items():
         assert column_id not in UserListQueryBuilderV2.OUTPUT_FILTER_MAP
@@ -279,10 +287,10 @@ def test_native_leaf_never_narrows_acquisition_on_the_attribute_maps(
     builder = UserListQueryBuilderV2(
         organization_id=ORG, project_ids=[PROJECT], filters=[item]
     )
-    assert builder.matching_activity_witness() is None
+    assert first_witness(builder, "raw") is None
     manager = manager_for(item)
     assert manager.matching_activity_walk_applies(builder) is True
-    assert manager._walk_witness == builder.native_matching_activity_witness()
+    assert manager._walk_witness == first_witness(builder, "native")
     assert manager._walk_witness.family == "native"
     assert "attrs_" not in manager._walk_witness.sql
     query, _params = builder.build_dimension_candidate_query(limit=26, **WINDOW)
@@ -295,7 +303,7 @@ def test_a_raw_attribute_of_a_native_name_still_narrows_acquisition():
     builder = UserListQueryBuilderV2(
         organization_id=ORG, project_ids=[PROJECT], filters=[item]
     )
-    witness = builder.matching_activity_witness()
+    witness = first_witness(builder, "raw")
     assert witness is not None and witness.key == "status"
     assert witness.family == "raw" and witness.index_pruned is True
     query, _params = builder.build_dimension_candidate_query(limit=26, **WINDOW)
@@ -436,7 +444,7 @@ def test_a_native_witness_is_the_leafs_existence_flag(
         },
     }
     builder = _builder(date, item)
-    witness = builder.native_matching_activity_witness()
+    witness = first_witness(builder, "native")
     flags, condition, params, _terms = compile_user_membership_leaf(
         item, project_id=PROJECT, namespace="native_leaf_1"
     )
@@ -450,7 +458,6 @@ def test_a_native_witness_is_the_leafs_existence_flag(
             sql=f"(NOT ifNull({present}, 0))",
             params=params,
             leaf_index=1,
-            flag_alias="native_leaf_1_match_0_absent",
             index_pruned=False,
         )
         return
@@ -461,7 +468,6 @@ def test_a_native_witness_is_the_leafs_existence_flag(
         sql=flags[0].removesuffix(" AS native_leaf_1_match_0"),
         params=params,
         leaf_index=1,
-        flag_alias="native_leaf_1_match_0",
         index_pruned=False,
     )
     if col_type is None and operation in _NEGATIONS:
@@ -471,7 +477,7 @@ def test_a_native_witness_is_the_leafs_existence_flag(
     else:
         assert condition == "countIf(native_leaf_1_match_0) > 0"
     # The raw attribute-map witness never takes a native leaf.
-    assert builder.matching_activity_witness() is None
+    assert first_witness(builder, "raw") is None
 
 
 def test_the_native_witness_is_one_leaf_whatever_the_filter_order():
@@ -488,22 +494,20 @@ def test_the_native_witness_is_one_leaf_whatever_the_filter_order():
     model = leaf("model", "equals", "gpt-4o")
     # The leaf decides (ERROR ranks above a model), not its position; its
     # position only names its parameters.
-    witness = _builder(date, is_null, model, status).native_matching_activity_witness()
+    witness = first_witness(_builder(date, is_null, model, status), "native")
     assert (witness.leaf_index, witness.key) == (3, "status")
-    witness = _builder(model, status).native_matching_activity_witness()
+    witness = first_witness(_builder(model, status), "native")
     assert (witness.leaf_index, witness.key) == (1, "status")
-    witness = _builder(status, model).native_matching_activity_witness()
+    witness = first_witness(_builder(status, model), "native")
     assert (witness.leaf_index, witness.key) == (0, "status")
     # Alone, an is_null without a family witnesses on its absence flag.
-    witness = _builder(date, is_null).native_matching_activity_witness()
-    assert (witness.leaf_index, witness.flag_alias) == (
-        1,
-        "native_leaf_1_match_0_absent",
-    )
+    witness = first_witness(_builder(date, is_null), "native")
+    assert witness.leaf_index == 1
+    assert witness.sql.startswith("(NOT ifNull(")
     # A raw attribute of a native name is a raw leaf, never a native witness.
     raw = leaf("status", "equals", "OK", col_type="SPAN_ATTRIBUTE")
-    assert _builder(raw).native_matching_activity_witness() is None
-    assert _builder(raw).matching_activity_witness().family == "raw"
+    assert first_witness(_builder(raw), "native") is None
+    assert first_witness(_builder(raw), "raw") is not None
 
 
 def test_the_walk_statements_carry_the_chosen_witness_and_never_recompute_it():
@@ -515,7 +519,7 @@ def test_the_walk_statements_carry_the_chosen_witness_and_never_recompute_it():
             slice_end=datetime(2026, 9, 2, tzinfo=UTC),
             limit=10,
         )
-    builder.walk_witness = builder.native_matching_activity_witness()
+    builder.walk_witness = first_witness(builder, "native")
     flags, _condition, params, _terms = compile_user_membership_leaf(
         item, project_id=PROJECT, namespace="native_leaf_0"
     )
