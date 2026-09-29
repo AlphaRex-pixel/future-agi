@@ -2089,7 +2089,9 @@ def _standalone_build(text: str) -> str:
     """The installer's `docker build` of futureagi/standalone, through its
     context (deploy/standalone)."""
     found = re.search(
-        r"futureagi/standalone:local.*?deploy/standalone'?$", text, re.S | re.M
+        r"futureagi/standalone:(?:local|\$tag).*?deploy/standalone'?$",
+        text,
+        re.S | re.M,
     )
     assert found, "no futureagi/standalone build"
     return found.group(0)

@@ -220,7 +220,8 @@ With `E2E_STACK=standalone`, every `bin/e2e` subcommand targets the Standalone s
 and the UI, next to Postgres and ClickHouse) plus `e2e/stack/docker-compose.standalone-e2e.yml`,
 with `e2e/stack/standalone-e2e.env`, as Compose project `futureagi-e2e-standalone`. The harness
 ports are the same, so run only one of the two stacks at a time. Its images are built from this
-checkout, tagged with that env file's `FUTURE_AGI_VERSION` (`e2esa`):
+checkout by `bin/lib/build-local.sh`, the recipe of `./bin/install --from-source`, tagged with
+that env file's `FUTURE_AGI_VERSION` (`e2esa`) instead of `local`:
 
 ```bash
 bin/e2e build standalone             # slim backend, frontend, fi-collector, agentcc-gateway, then futureagi/standalone

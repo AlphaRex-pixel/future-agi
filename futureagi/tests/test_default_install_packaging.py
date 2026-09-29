@@ -525,7 +525,9 @@ def test_installer_build_args_are_declared_in_the_standalone_dockerfile(
     text = (ROOT / "bin" / "lib" / recipe).read_text(encoding="utf-8")
     build_arg = r"--build-arg['\", ]+([A-Za-z_][A-Za-z0-9_]*)="
     standalone = re.search(
-        r"futureagi/standalone:local.*?deploy/standalone'?$", text, re.S | re.M
+        r"futureagi/standalone:(?:local|\$tag).*?deploy/standalone'?$",
+        text,
+        re.S | re.M,
     ).group(0)
     passed = set(re.findall(build_arg, standalone))
     assert {"BACKEND_IMAGE", "FI_COLLECTOR_IMAGE", "AGENTCC_GATEWAY_IMAGE"} <= passed
