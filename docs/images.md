@@ -34,7 +34,7 @@ check it in `standalone-ci.yml`.
 | Image | What it runs | Setups | Ports | User | Health check | Architectures | Size budget |
 |---|---|---|---|---|---|---|---|
 | `futureagi/standalone` | The Standalone app container: API with an embedded Temporal worker, Temporal dev server, fi-collector, agentcc-gateway, code-evals sandbox, UI, Redis and object storage under supervisord. Built on the `-slim` backend | Standalone | 3000 UI, 8000 API, 4317/4318 OTLP, 8080 gateway, 9005 object storage | root | the five URLs of the compose `app` healthcheck | amd64, arm64 | 549 |
-| `futureagi/future-agi` | Backend, the default [variant](#backend-variants) (feature-complete): API (`SERVICE_TYPE=backend`), Temporal and Celery workers, bootstrap jobs. Base of the simulation runner and of the EE and cloud images | Distributed, Helm | 80 HTTP, 50051 gRPC, 5555 Flower | root (runs as `1000:1000` on request) | `GET /health/` on :80 for the API; roles with no listener are healthy while they run | amd64, arm64 | 890 |
+| `futureagi/future-agi` | Backend, the default [variant](#backend-variants) (feature-complete): API (`SERVICE_TYPE=backend`), Temporal and Celery workers, bootstrap jobs. Base of the simulation runner and of the EE and cloud images | Distributed, Helm | 80 HTTP, 50051 gRPC, 5555 Flower | root (runs as `1000:1000` on request) | `GET /health/` on :80 for the API; roles with no listener are healthy while they run | amd64, arm64 | 1015 |
 | `futureagi/future-agi:*-slim` | The same backend, lean: the base of `futureagi/standalone` | Standalone (inside `futureagi/standalone`) | as above | as above | as above | amd64, arm64 | 376 |
 | `futureagi/frontend` | The web UI: the React app served by nginx | Distributed, Helm (Standalone serves the same files from `futureagi/standalone`) | 80 | root master, `nginx` (101) workers | `GET /` on :80 | amd64, arm64 | 42 |
 | `futureagi/fi-collector` | OTLP receiver that writes spans to ClickHouse; also `fi-property-catalog-consumer` and `fi-observed-catalog-backfill` | Distributed, Helm (`fi-collector` and `fi-observed-catalog-backfill` bundled in `standalone`) | 4317 gRPC, 4318 HTTP, 9464 admin | `nonroot` (65532) | `GET /healthz` on :9464, for the `fi-collector` command only | amd64, arm64 | 25 |
@@ -42,7 +42,7 @@ check it in `standalone-ci.yml`.
 | `futureagi/serving` | Embedding and audio/image model server | Standalone (`COMPOSE_PROFILES=ml`), Distributed, Helm | 8080 | root (Helm runs it as `appuser`, 1000) | `GET /health` on :8080 | amd64, arm64 | 520 amd64, 480 arm64 |
 | `futureagi/serving:*-gpu` | The same with CUDA 12.4 torch | any, on an NVIDIA host | 8080 | root (Helm: 1000) | `GET /health` on :8080 | amd64 | 3800 |
 | `futureagi/code-executor` | nsjail sandbox for untrusted code evals | Standalone (`COMPOSE_PROFILES=sandbox`), Distributed, Helm; needs `privileged` | 8060 | root | `GET /health` on :8060 | amd64, arm64 | 225 |
-| `futureagi/future-agi-simulation-runner` | Temporal worker for the `simulation_runner` queue: the default backend variant plus the Agent Learning Kit SDK | Distributed, Helm | none | root (from the backend) | inherited from the backend: healthy while it runs | amd64 | 1350, reported only |
+| `futureagi/future-agi-simulation-runner` | Temporal worker for the `simulation_runner` queue: the default backend variant plus the Agent Learning Kit SDK | Distributed, Helm | none | root (from the backend) | inherited from the backend: healthy while it runs | amd64 | 1525, reported only |
 | `futureagi/code-executor-base` | Build input of `code-executor` (nsjail, Node.js, sandbox libraries); never run on its own | none | | | | amd64, arm64 | counted in `code-executor` |
 
 A fresh Standalone install downloads `standalone`, `postgres:16` and
@@ -57,7 +57,7 @@ build argument, `IMAGE_VARIANT`:
 |---|---|---|
 | Published as | `futureagi/future-agi:vX.Y.Z` (and `vX.Y`, `latest`) | `futureagi/future-agi:vX.Y.Z-slim` (and `vX.Y-slim`, `latest-slim`) |
 | Used by | Distributed, Helm, the simulation runner, and the EE and cloud images; `./bin/install --distributed --from-source` and `./bin/e2e` build it | the base of `futureagi/standalone`, so Standalone; `./bin/install --from-source` and `./bin/dev` build it for Standalone |
-| Contents | what earlier releases shipped: the `sandbox` (Daytona, E2B), `billing`, `ops` (Flower), `gcp` (Vertex AI SDK), `langchain` and `rabbitmq` dependency groups, `uv`, git, Debian's ffmpeg, every NLTK package and untrimmed site-packages. Only development tools (type stubs, the debug toolbar) moved to the `dev` group | base dependencies only, no `uv` or git, a minimal LGPL ffmpeg build, the English NLTK data the app loads, and trimmed site-packages |
+| Contents | what earlier releases shipped: the `sandbox` (Daytona, E2B), `billing`, `ops` (Flower), `gcp` (Vertex AI SDK), `langchain`, `rabbitmq` and `localizer` (Claude Agent SDK) dependency groups, `uv`, git, Debian's ffmpeg, every NLTK package and untrimmed site-packages. Only development tools (type stubs, the debug toolbar) moved to the `dev` group | base dependencies only, no `uv` or git, a minimal LGPL ffmpeg build, the English NLTK data the app loads, and trimmed site-packages |
 | Size | about the size of earlier releases | budget 376 MB compressed (measured 341) |
 
 Both run the same code and dependency versions (from `uv.lock`). What the
@@ -65,9 +65,11 @@ slim variant leaves out shows up in a Standalone install as: hosted agent
 runs on Daytona or E2B answer `501 sandbox_sdk_missing`, and from a GitHub
 source `501 git_unavailable`; the Vertex AI partner models (Model Garden,
 Gemma, Claude, Llama and Mistral on Vertex) are hidden from the model picker;
-`SERVICE_TYPE=flower` and the RabbitMQ channel layer are unavailable; an audio
-upload in an exotic codec (AV1, WavPack, ProRes) fails with "Decoder not
-found".
+`SERVICE_TYPE=flower` and the RabbitMQ channel layer are unavailable; error
+localization runs its original backend (`ERROR_LOCALIZER_BACKEND=legacy`,
+which cannot localize simulation call audio) instead of the Claude Agent SDK
+one; an audio upload in an exotic codec (AV1, WavPack, ProRes) fails with
+"Decoder not found".
 
 `IMAGE_VARIANT` only sets the defaults of the per-feature build arguments
 ([Build arguments](#build-arguments)); one passed explicitly wins. A
@@ -316,7 +318,7 @@ Per image:
 | Image | Argument | Default | Effect |
 |---|---|---|---|
 | `future-agi` | `IMAGE_VARIANT` | `standard` | `standard` or `slim` ([Backend variants](#backend-variants)); sets the default of each argument below that is left empty |
-| | `EXTRAS` | `standard`: `sandbox,billing,ops,gcp,langchain,rabbitmq`; `slim`: none | optional dependency groups, comma-separated: `audio`, `ml`, `voice`, `pii`, `prompt-opt`, `vectordb`, `rabbitmq`, `gcp`, `sandbox`, `billing`, `ops`, `langchain` (pinned by `uv.lock`). A value replaces the variant's list (include its groups to keep them); `none` installs no group |
+| | `EXTRAS` | `standard`: `sandbox,billing,ops,gcp,langchain,rabbitmq,localizer`; `slim`: none | optional dependency groups, comma-separated: `audio`, `ml`, `voice`, `pii`, `prompt-opt`, `vectordb`, `rabbitmq`, `gcp`, `sandbox`, `billing`, `ops`, `langchain`, `localizer` (pinned by `uv.lock`). A value replaces the variant's list (include its groups to keep them); `none` installs no group |
 | | `FFMPEG_FLAVOR` | `standard`: `debian`; `slim`: `minimal` | `minimal` (LGPL build, ~9 MB), `debian` (Debian's ffmpeg, about +145 MB), `none` (audio upload and video thumbnails fail) |
 | | `WITH_GIT` | `standard`: `true`; `slim`: `false` | git (+29 MB) for hosted-harness GitHub sources, which otherwise answer 501 |
 | | `WITH_UV` | `standard`: `true`; `slim`: `false` | ships `uv` and `uvx` for images that install packages on top |
@@ -332,7 +334,7 @@ Per image:
 | | `TEMPORAL_IMAGE`, `MINIO_IMAGE` | pinned | |
 | simulation runner | `FI_VERSION` | required | Agent Learning Kit SDK version (PyPI) |
 | | `BACKEND_IMAGE` | `futureagi/future-agi:latest` | the backend it extends; the build fails on one without the sandbox SDKs and git, such as a `-slim` tag |
-| | `LIVEKIT_AGENTS_VERSION` | `1.5.17` | |
+| | `LIVEKIT_AGENTS_VERSION` | `1.8.3` | |
 | `code-executor` | `CODE_EXECUTOR_BASE` | `futureagi/code-executor-base:v1.1.0` | its base; bump it whenever `Dockerfile.base` changes (`backend-ci.yml` enforces this) |
 
 ## EE and cloud builds

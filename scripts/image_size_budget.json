@@ -13,9 +13,9 @@
   "images": [
     {
       "image": "futureagi/future-agi",
-      "budget_mb": 890,
-      "projected_mb": 771,
-      "note": "The default, feature-complete variant (IMAGE_VARIANT=standard): the dependency set, uv, git, Debian ffmpeg, full NLTK data and untrimmed site-packages of the releases before the variants, so projected at v1.41's 770.5 (amd64) until a release measures it. Distributed, Helm, the simulation runner and the EE and cloud builds use it."
+      "budget_mb": 1015,
+      "projected_mb": 882,
+      "note": "The default, feature-complete variant (IMAGE_VARIANT=standard): the dependency set, uv, git, Debian ffmpeg, full NLTK data and untrimmed site-packages of the releases before the variants, so projected at v1.42.0's 881.8 (amd64, from the registry: v1.41.3's 782.0 plus claude-agent-sdk, ~100 MB, now the `localizer` extra) until a release measures it. Distributed, Helm, the simulation runner and the EE and cloud builds use it."
     },
     {
       "image": "futureagi/future-agi",
@@ -80,10 +80,10 @@
       "arches": [
         "amd64"
       ],
-      "budget_mb": 1350,
-      "projected_mb": 1172,
+      "budget_mb": 1525,
+      "projected_mb": 1325,
       "enforce": false,
-      "note": "FROM the default futureagi/future-agi variant plus a ~401 MB SDK venv (v1.41.1: 1171.4 = 770.5 + 400.9). Checked by build-image-multiarch.yml before its tags move, but reported only until a release measures it."
+      "note": "FROM the default futureagi/future-agi variant plus a ~443 MB SDK venv (v1.42.0: 1324.5 = 881.8 + 442.7). Checked by build-image-multiarch.yml before its tags move, but reported only until a release measures it."
     }
   ],
   "standalone_install": {

@@ -128,6 +128,8 @@ dependencies = [
     "google-api-python-client",
     "google-auth",  # imported directly to verify the Marketplace sign-up JWT
     "anthropic[vertex]",
+    # claude-agent-sdk is the `localizer` extra below.
+    "aiohttp>=3.13.3",  # Per-run AgentCC multimodal transport for the SDK
     "rouge-score",
     "python-levenshtein",
     "scipy",
@@ -150,7 +152,7 @@ dependencies = [
     "pyotp>=2.9.0",  # TOTP generation and verification
     "qrcode[pil]>=7.4",  # QR code generation for TOTP provisioning URIs
     "webauthn>=2.2.0",  # WebAuthn server-side (py_webauthn by Duo Labs)
-    "mcp>=1.26.0",  # Model Context Protocol SDK (Anthropic)
+    "mcp>=1.26.0,<2",  # Claude Agent SDK uses the MCP v1 server API
     "restrictedpython>=8.0",
     # Explicit pins — previously transitive via packages now in extras:
     "scikit-learn",  # TF-IDF in tracer/queries/feed.py (was via hdbscan)
@@ -158,6 +160,7 @@ dependencies = [
     # Deepgram STT (a base feature) segments audio with pydub — pure Python,
     # pairs with the ffmpeg binary kept in the runtime image stage.
     "pydub",
+    "audioop-lts>=0.2.2; python_version >= '3.13'",  # pydub on newer Python
 ]
 
 [project.optional-dependencies]
@@ -178,6 +181,10 @@ dependencies = [
 #              tfc/telemetry/instrumentation.py skips traceai_vertexai when absent.
 #   langchain: not imported by OSS code; kept installable so the EE/cloud export
 #              (ee/requirements.txt) keeps langchain + langchain-community.
+#   localizer: claude-agent-sdk, ~100 MB a wheel for its bundled Claude Code
+#              CLI. ee/evals/localizer/claude_harness.py, the default
+#              ERROR_LOCALIZER_BACKEND=claude_agent_sdk; Standalone's compose
+#              file selects `legacy`, which does not need it.
 # ee/requirements.txt exports every extra except `dev` (see backend-ci.yml).
 sandbox = [
     "daytona==0.207.0",
@@ -199,6 +206,10 @@ gcp = [
 langchain = [
     "langchain",
     "langchain_community",
+]
+localizer = [
+    # Match the ALK harness runtime; includes the Claude Code executable.
+    "claude-agent-sdk==0.2.139",
 ]
 audio = [
     "av>=14.0.0,!=14.4.0,<15.0.0",

@@ -330,7 +330,7 @@ VARIANT_ARGS = (
 )
 # The groups that were base dependencies before the image-size split, so the
 # default variant ships what earlier releases did.
-STANDARD_EXTRAS = "sandbox,billing,ops,gcp,langchain,rabbitmq"
+STANDARD_EXTRAS = "sandbox,billing,ops,gcp,langchain,rabbitmq,localizer"
 
 
 def resolve_variant(**env: str) -> subprocess.CompletedProcess:
@@ -425,6 +425,21 @@ class BackendVariants(unittest.TestCase):
             with self.subTest(group=group):
                 self.assertIn(group, groups)
                 self.assertTrue(smoke.EXTRA_MODULES[group])
+
+    def test_published_image_checks_import_every_standard_extra(self):
+        # The release leg and verify-image-contents.sh re-check the pushed
+        # image; each imports a module of every group the smoke test covers.
+        smoke = _load_module(ROOT / "futureagi" / "docker" / "runtime_smoke.py")
+        for path in (
+            WORKFLOWS / "release-images.yml",
+            ROOT / "scripts" / "verify-image-contents.sh",
+        ):
+            text = path.read_text(encoding="utf-8")
+            (probe,) = re.findall(r'"import (daytona, [a-z0-9_, ]+)"', text)
+            imported = {name.strip() for name in probe.split(",")}
+            for group in STANDARD_EXTRAS.split(","):
+                with self.subTest(path=path.name, group=group):
+                    self.assertTrue(imported & set(smoke.EXTRA_MODULES[group]))
 
     def test_ffmpeg_stages_match_the_variant_defaults(self):
         # FROM picks the ffmpeg stage before any RUN could source the script.
