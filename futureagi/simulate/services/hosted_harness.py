@@ -464,11 +464,7 @@ def create_selected_harness_run(
 def _scenario_edits(
     environment: HostedHarnessJob, registrations: list[HostedHarnessScenario]
 ) -> dict[str, dict[str, Any]]:
-    """Each selected scenario's editable fields as the environment holds them now.
-
-    A run replays the sealed bundle, which keeps every scenario as authored; the call overlays
-    these, so an edit made in the scenarios tab is what the next call plays.
-    """
+    """Each selected scenario's editable fields as the environment holds them now."""
     from simulate.models import HostedHarnessStageOutput
     from simulate.services.harness_provider import HostedHarnessProvider
     from simulate.services.hosted_harness_gateway import _scenario_token

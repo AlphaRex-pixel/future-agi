@@ -4750,11 +4750,7 @@ def _archive_parts(name: str) -> tuple[str, ...]:
 
 
 def _rewritten_authoring_archive(body: bytes, suite: list[dict]) -> bytes | None:
-    """The archive with the suite's edits applied, or None when the result would break a run.
-
-    Only the authoring copy (``scenarios/`` and ``scenarios.json``) changes. The sealed bundles
-    pass through untouched: a removed scenario there is simply never selected again.
-    """
+    """The archive with the suite's edits applied, or None when the result would break a run."""
     with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as source:
         members = [
             (member, source.extractfile(member).read() if member.isfile() else None)

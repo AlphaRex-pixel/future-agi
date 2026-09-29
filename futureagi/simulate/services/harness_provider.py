@@ -2038,8 +2038,7 @@ class HostedHarnessProvider:
                         "why": f"unknown change {op!r}",
                     }
                 )
-            # Edited scenarios pass the same gates as a written one; untouched ones, possibly
-            # written under older rules, are not re-judged, so a neighbour never blocks an amend.
+            # Only the scenarios this amend changed pass the gates again.
             if changed:
                 try:
                     from fi.alk.harness.scenario import Scenario, scenario_edit_problems
