@@ -979,6 +979,15 @@ def scenarios_meant(
     keys = {
         str(one.get("scenario_key") or ""): str(one.get("name") or "") for one in suite
     }
+    from simulate.services.hosted_harness_gateway import _scenario_token
+
+    # Older suites carry no scenario_key, so a row's hyphenated key must still find its name.
+    loose = {
+        _scenario_token(label): str(one.get("name") or "")
+        for one in suite
+        for label in (one.get("name"), one.get("scenario_key"))
+        if label
+    }
     found: list[str] = []
 
     def take(name: str) -> None:
@@ -995,6 +1004,9 @@ def scenarios_meant(
                 continue
             if part in keys:
                 take(keys[part])
+                continue
+            if _scenario_token(part) in loose:
+                take(loose[_scenario_token(part)])
                 continue
             span = re.fullmatch(r"(\d+)\s*(?:-|–|to|through)\s*(\d+)", part)
             if span:
@@ -1892,6 +1904,7 @@ class HostedHarnessProvider:
             by_name = {str(one.get("name") or ""): one for one in suite}
             receipts = []
             touched = False
+            changed: set[str] = set()
             # One change may name many scenarios; each gets its own receipt.
             spread = []
             for change in changes:
@@ -1969,6 +1982,7 @@ class HostedHarnessProvider:
                         continue
                     target[field] = change.get("value")
                     touched = True
+                    changed.add(name)
                     receipts.append(
                         {
                             "scenario": name,
@@ -2008,6 +2022,7 @@ class HostedHarnessProvider:
                     )
                     target["persona"] = persona
                     touched = True
+                    changed.add(name)
                     receipts.append(
                         {
                             "scenario": name,
@@ -2023,8 +2038,9 @@ class HostedHarnessProvider:
                         "why": f"unknown change {op!r}",
                     }
                 )
-            # Edits pass the same gates as a written scenario.
-            if touched:
+            # Edited scenarios pass the same gates as a written one; untouched ones, possibly
+            # written under older rules, are not re-judged, so a neighbour never blocks an amend.
+            if changed:
                 try:
                     from fi.alk.harness.scenario import Scenario, scenario_edit_problems
                 except (
@@ -2033,7 +2049,11 @@ class HostedHarnessProvider:
                     scenario_edit_problems = None
 
                 rejected = []
-                for one in suite if scenario_edit_problems else ():
+                for one in (
+                    [one for one in suite if str(one.get("name") or "") in changed]
+                    if scenario_edit_problems
+                    else ()
+                ):
                     try:
                         problems = scenario_edit_problems(Scenario.model_validate(one))
                     except Exception:  # noqa: BLE001 - a document we cannot read is the edit's fault
