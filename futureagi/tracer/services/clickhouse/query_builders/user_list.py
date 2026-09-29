@@ -114,15 +114,8 @@ class MatchingActivityWitness:
 #    or with any value at all.
 #
 # The rank is a guess: a common raw value (``env = production``) outranks a
-# rare ``status = ERROR``. So it is no longer the choice, only its order: a
-# first page with two or more eligible witnesses costs up to
-# ``USER_LIST_WALK_WITNESS_CANDIDATES`` of them (the best native one always
-# among them, the rest in this order), with one ``EXPLAIN ESTIMATE`` each over
-# the whole window, and walks the cheapest that answered
-# (``users_matching_walk._witness_candidates``, ``_choose_witness``). Ties go
-# to this order, and so does the page when no estimate answered. The choice is
-# bound into the cursor, so every later page walks the same leaf without
-# measuring.
+# rare ``status = ERROR``. So it only orders the walk's measured choice, which
+# falls back to it (``users_matching_walk._choose_witness`` states the rule).
 _WITNESS_RANK_NATIVE_EQUALITY = {
     "name": 2,
     "trace_name": 2,

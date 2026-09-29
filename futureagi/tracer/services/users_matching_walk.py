@@ -1214,9 +1214,9 @@ def _choose_witness(
     at its cap, failed on a read budget, unreadable, or never sent because
     no wall or count was left - is never chosen while another answered: a
     raw leaf whose estimate did not answer is not cheaper than any answered
-    native leaf (the static rank's raw-first walk is the failure the choice
-    exists for: 10-12 GB a page for 0 users). Only when no estimate answered
-    does the static choice, the first candidate, stand. Every eligible
+    native leaf (the failure the module docstring's Witness choice names).
+    Only when no estimate answered does the static choice, the first
+    candidate, stand. Every eligible
     witness keeps the walk exact; the choice decides nothing but which one
     this cursor walks (``_bound_witness`` continues it). Returns the
     estimates sent.
