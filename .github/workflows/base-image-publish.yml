@@ -18,7 +18,7 @@
 #
 # Base images take exactly one tag, the version input (never vX.Y or latest):
 # the images built on them pin that tag. Every build gets the VERSION,
-# REVISION and CREATED build args of the image labels (docs/images.md); a
+# REVISION and CREATED build args of the image labels (TESTING.md › Image conventions); a
 # Dockerfile.base without those ARGs just ignores them.
 name: Publish base image
 

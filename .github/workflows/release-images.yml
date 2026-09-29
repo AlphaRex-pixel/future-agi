@@ -12,8 +12,8 @@
 # an upgrade downloads only the layers that changed. The code-executor base
 # builds through base-image-publish.yml.
 #
-# The backend has two variants (futureagi/Dockerfile.oss IMAGE_VARIANT,
-# docs/images.md): the default, feature-complete futureagi/future-agi:<tag>,
+# The backend has two variants (futureagi/Dockerfile.oss IMAGE_VARIANT;
+# docs.futureagi.com/docs/self-hosting/images#backend-variants): the default, feature-complete futureagi/future-agi:<tag>,
 # which Distributed and Helm run and the simulation runner and the EE and
 # cloud images build on (future-agi/ee Dockerfile.ee: FROM it, then
 # `uv pip install`), and the lean <tag>-slim.
@@ -24,7 +24,7 @@
 # backend's digest. code-executor builds FROM the base image its Dockerfile
 # pins; that base is published first when the tag does not exist.
 #
-# Tags (docs/images.md): vX.Y.Z, vX.Y and latest for every image; the slim
+# Tags (docs.futureagi.com/docs/self-hosting/images#tags): vX.Y.Z, vX.Y and latest for every image; the slim
 # backend adds -slim and the CUDA serving variant -gpu to each. Labels: the
 # reusable build workflows pass VERSION, REVISION and CREATED to every
 # Dockerfile.

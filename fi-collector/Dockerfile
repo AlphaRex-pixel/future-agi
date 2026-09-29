@@ -2,7 +2,7 @@
 # The build stage uses the official golang image so
 # we get the toolchain + git for module fetch; the runtime stage strips
 # everything except the three static commands and collector config.
-# Conventions shared by every futureagi/* image: docs/images.md.
+# Conventions shared by every futureagi/* image: TESTING.md › Image conventions.
 
 # The toolchain tag floats on the 1.24 minor on purpose: Go patch releases
 # carry standard-library security fixes that are compiled into the binaries.
@@ -48,7 +48,7 @@ ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src/healthcheck
 RUN printf '%s\n' \
-        '// healthcheck: HEALTHCHECK probe for images with no shell (docs/images.md).' \
+        '// healthcheck: HEALTHCHECK probe for images with no shell (docs.futureagi.com/docs/self-hosting/images#health-checks).' \
         '// usage: healthcheck [-pid1 NAME] http://HOST:PORT/PATH' \
         '// Exits 0 when the URL answers HTTP 2xx, else 1. HEALTHCHECK_URL replaces' \
         '// the URL. -pid1 NAME: exit 0 without probing unless PID 1 runs NAME, so a' \
@@ -148,7 +148,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 ENTRYPOINT ["/usr/local/bin/fi-collector"]
 CMD ["-config", "/etc/fi-collector/config.yaml"]
 
-# Image metadata (docs/images.md). Declared last: a new version, commit or
+# Image metadata (TESTING.md › Image conventions). Declared last: a new version, commit or
 # build time changes the image config only, never a cached layer.
 ARG VERSION=dev
 ARG REVISION=unknown
@@ -157,7 +157,7 @@ LABEL org.opencontainers.image.title="Future AGI fi-collector" \
       org.opencontainers.image.description="OTLP (gRPC :4317, HTTP :4318) trace receiver that writes spans to ClickHouse; also ships the property-catalog consumer and observed-catalog backfill commands." \
       org.opencontainers.image.source="https://github.com/future-agi/future-agi" \
       org.opencontainers.image.url="https://futureagi.com" \
-      org.opencontainers.image.documentation="https://github.com/future-agi/future-agi/blob/main/docs/images.md" \
+      org.opencontainers.image.documentation="https://docs.futureagi.com/docs/self-hosting/images" \
       org.opencontainers.image.vendor="Future AGI" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}" \

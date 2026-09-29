@@ -43,7 +43,8 @@
 
 .PARAMETER NoTelemetry
   Turn deployment telemetry off: writes FUTURE_AGI_TELEMETRY_DISABLED=true to
-  .env before anything starts (docs/telemetry.md).
+  .env before anything starts
+  (https://docs.futureagi.com/docs/self-hosting/configuration/telemetry).
 
 .EXAMPLE
   .\bin\install.ps1
@@ -211,7 +212,8 @@ function Test-TelemetryOff {
 }
 
 # What deployment telemetry sends, before any account (and so any admin
-# email) exists. Worded as docs/telemetry.md.
+# email) exists. Worded as the telemetry page,
+# https://docs.futureagi.com/docs/self-hosting/configuration/telemetry.
 function Show-TelemetryNotice {
   $url = Get-EnvValue 'FUTURE_AGI_TELEMETRY_URL'
   if (-not $url) { $url = 'https://api.futureagi.com' }
@@ -229,7 +231,7 @@ function Show-TelemetryNotice {
     Say "  Opt out: -NoTelemetry, or FUTURE_AGI_TELEMETRY_DISABLED=true in .env. One minimal"
     Say "  registration remains: instance id, version, deployment type, timestamp."
   }
-  Say "  Details: docs/telemetry.md"
+  Say "  Details: https://docs.futureagi.com/docs/self-hosting/configuration/telemetry"
 }
 
 # ---- this project's existing state ----

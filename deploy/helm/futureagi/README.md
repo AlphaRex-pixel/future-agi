@@ -162,7 +162,7 @@ cosign verify-blob futureagi-$VERSION.tgz --bundle futureagi-$VERSION.tgz.sigsto
 
 The chart pins every Future AGI image to its digest, so a verified chart
 also fixes the exact images it runs. The images themselves are not signed
-yet: see [docs/images.md](../../../docs/images.md#verifying-an-image).
+yet: see [Verifying an image](https://docs.futureagi.com/docs/self-hosting/images#verifying-an-image).
 Flux can check the signature before every install and upgrade: see
 [GitOps](#gitops-argo-cd-and-flux).
 
@@ -1069,7 +1069,7 @@ chart's changelog.
 
 Every key, generated from `values.yaml` by `hack/values_docs.py`.
 Bracketed names are the environment variables a key sets;
-[docs/configuration.md](../../../docs/configuration.md) explains each one.
+the [configuration reference](https://docs.futureagi.com/docs/self-hosting/configuration/reference) explains each one.
 
 <!-- values-table:start -->
 | Key | Default | Description |
@@ -1112,7 +1112,7 @@ Bracketed names are the environment variables a key sets;
 | `config.email.serverEmail` | `""` | [SERVER_EMAIL] sender of error emails. |
 | `config.email.existingSecret` | `""` | Existing Secret with the Mailgun API key [MAILGUN_API_KEY] (wins over `secrets.mailgunApiKey`). |
 | `config.email.existingSecretKey` | `"MAILGUN_API_KEY"` | Key of the Mailgun API key in `existingSecret`. |
-| `config.extraEnv` | `{}` | Extra environment variables for the backend, workers and bootstrap job, as `NAME: value`. Every supported key is in docs/configuration.md. |
+| `config.extraEnv` | `{}` | Extra environment variables for the backend, workers and bootstrap job, as `NAME: value`. Every supported key: https://docs.futureagi.com/docs/self-hosting/configuration/reference (rows marked H). |
 | `config.extraEnvFrom` | `[]` | Extra `envFrom` sources for the backend, workers and bootstrap job, e.g. `[{secretRef: {name: my-env}}]`. |
 | `secrets.existingSecret` | `""` | Existing Secret with the application keys: SECRET_KEY, INTEGRATION_ENCRYPTION_KEY, AGENTCC_INTERNAL_API_KEY, AGENTCC_ADMIN_TOKEN, PROPERTY_CATALOG_API_PASSWORD, PROPERTY_CATALOG_CONSUMER_PASSWORD and AGENTCC_WEBHOOK_SECRET (unless `agentccWebhookSecret` is set). Empty: generated. Required with Argo CD, which cannot `lookup` the generated Secret. |
 | `secrets.llm.existingSecret` | `""` | Existing Secret with any of OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (missing keys are fine). Overrides the values below. |

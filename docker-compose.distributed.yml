@@ -126,7 +126,7 @@ x-backend-env: &backend-env
   # Provider base URLs on private networks (a local Ollama or vLLM); the
   # gateway reads it too. Off: the Docker network stays out of reach of
   # provider URLs. Which backends and gateways read it:
-  # docs/configuration.md.
+  # https://docs.futureagi.com/docs/self-hosting/configuration/reference#application-behaviour
   AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS: ${AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS:-false}
   # Platform-owned virtual key for hosted ALK authoring (not a customer secret).
   AGENTCC_HARNESS_API_KEY: ${AGENTCC_HARNESS_API_KEY:-}
@@ -558,7 +558,8 @@ services:
       AGENTCC_SYNC_ON_STARTUP: "true"
       # Re-read keys and org settings every minute too, so a gateway that
       # started before the app (or missed an update) catches up. Which
-      # gateways read it: docs/configuration.md.
+      # gateways read it:
+      # https://docs.futureagi.com/docs/self-hosting/configuration/reference#application-behaviour
       AGENTCC_SYNC_INTERVAL: ${AGENTCC_SYNC_INTERVAL:-60s}
       AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS: ${AGENTCC_ALLOW_PRIVATE_PROVIDER_URLS:-false}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

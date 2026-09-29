@@ -81,7 +81,7 @@ function Show-Summary {
   Say "     Start        $DcText up -d"
   Say "     Upgrade      $upgradeCmd"
   Say "     Uninstall    $DcText down -v  (deletes all data)"
-  Say "     Settings     .env  (every variable: docs/configuration.md)"
+  Say "     Settings     .env  (every variable: https://docs.futureagi.com/docs/self-hosting/configuration/reference)"
   Say "     Install log  $LogFile"
   if ($IsDistributed) {
     Say ""

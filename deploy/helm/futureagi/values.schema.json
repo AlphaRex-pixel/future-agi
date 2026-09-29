@@ -276,7 +276,7 @@
               "boolean"
             ]
           },
-          "description": "Extra environment variables for the backend, workers and bootstrap job, as `NAME: value`. Every supported key is in docs/configuration.md."
+          "description": "Extra environment variables for the backend, workers and bootstrap job, as `NAME: value`. Every supported key: https://docs.futureagi.com/docs/self-hosting/configuration/reference (rows marked H)."
         },
         "extraEnvFrom": {
           "type": "array",

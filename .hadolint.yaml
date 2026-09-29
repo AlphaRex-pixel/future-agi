@@ -1,4 +1,4 @@
-# hadolint settings for every Dockerfile in this repository (docs/images.md).
+# hadolint settings for every Dockerfile in this repository (TESTING.md › Image conventions).
 #   hadolint <Dockerfile>   (hadolint >= 2.12; or docker run --rm -i hadolint/hadolint < <Dockerfile>)
 # Findings a Dockerfile accepts on purpose are ignored inline, next to the
 # instruction, with the reason.

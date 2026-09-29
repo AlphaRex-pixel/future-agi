@@ -28,7 +28,8 @@
 #                                      # from env if you want a user created.
 #   ./bin/install --no-telemetry       # turn deployment telemetry off
 #                                      # (FUTURE_AGI_TELEMETRY_DISABLED=true
-#                                      # in .env; docs/telemetry.md)
+#                                      # in .env;
+#                                      # https://docs.futureagi.com/docs/self-hosting/configuration/telemetry)
 #
 # Idempotent: a fresh install gets generated secrets in .env; re-running
 # never changes an existing value and merges any new vars from .env.example.
@@ -218,7 +219,8 @@ telemetry_is_off() {
 }
 
 # What deployment telemetry sends, before any account (and so any admin
-# email) exists. Worded as docs/telemetry.md.
+# email) exists. Worded as the telemetry page,
+# https://docs.futureagi.com/docs/self-hosting/configuration/telemetry.
 telemetry_notice() {
   local url host hours
   url=$(env_value FUTURE_AGI_TELEMETRY_URL https://api.futureagi.com)
@@ -236,7 +238,7 @@ telemetry_notice() {
     say "  Opt out: --no-telemetry, or FUTURE_AGI_TELEMETRY_DISABLED=true in .env. One minimal"
     say "  registration remains: instance id, version, deployment type, timestamp."
   fi
-  say "  ${DIM}Details: docs/telemetry.md${RESET}"
+  say "  ${DIM}Details: https://docs.futureagi.com/docs/self-hosting/configuration/telemetry${RESET}"
 }
 
 # Find the next free project name in the futureagi-N family by checking

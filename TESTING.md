@@ -86,7 +86,7 @@ The installers' bring-up block is also executed on its own, against a Compose do
 
 ### Image sizes
 
-Every image has a compressed-size budget in [`scripts/image_size_budget.json`](scripts/image_size_budget.json), per architecture, and so does what a fresh Standalone install downloads (the app image plus Postgres and ClickHouse, each layer counted once). Per-image budgets and measured sizes are summarized in [`docs/images.md`](docs/images.md#images-at-a-glance). `scripts/image_size_budget.py` reads the sizes from registry manifests, so it needs no Docker daemon:
+Every image has a compressed-size budget in [`scripts/image_size_budget.json`](scripts/image_size_budget.json), per architecture, and so does what a fresh Standalone install downloads (the app image plus Postgres and ClickHouse, each layer counted once). Per-image budgets and measured sizes are rendered, from this file and [`deploy/images.toml`](deploy/images.toml), in [Images at a glance](https://docs.futureagi.com/docs/self-hosting/images#images-at-a-glance) (`python3 scripts/docs_site.py render images-at-a-glance`). `scripts/image_size_budget.py` reads the sizes from registry manifests, so it needs no Docker daemon:
 
 ```bash
 # Every image of a release, both architectures:
@@ -98,7 +98,79 @@ python3 scripts/image_size_budget.py check --image futureagi/standalone --arch a
   --ref localhost:5000/futureagi/standalone:ci --baseline futureagi/standalone:latest --standalone-install
 ```
 
-CI runs `check` on pull requests (`standalone-ci.yml`, for the images it builds) and on every release build before any tag moves (`build-image-multiarch.yml`). It also prints the upgrade delta: the bytes an existing install downloads to move from `:latest` to the new image, which stays small only while the release build cache hits. A change that needs a bigger image raises its budget in the same pull request, with the reason. `deploy/tests/test_image_size_budget.py` tests the script against a fake registry and checks that every image the compose files and `release-images.yml` use has a budget.
+CI runs `check` on pull requests (`standalone-ci.yml`, for the images it builds) and on every release build before any tag moves (`build-image-multiarch.yml`). It also prints the upgrade delta: the bytes an existing install downloads to move from `:latest` to the new image, which stays small only while the release build cache hits. A change that needs a bigger image raises its budget in the same pull request, with the reason. `deploy/tests/test_image_size_budget.py` tests the script against a fake registry, checks that every image the compose files and `release-images.yml` use has a budget, and that `deploy/images.toml` describes every budget entry and the rendered "Images at a glance" table states each budget.
+
+### Image conventions
+
+Every published `futureagi/*` image follows the same conventions, and
+`deploy/tests/test_image_standards.py` checks them on every Dockerfile
+(`futureagi/Dockerfile.oss`, `deploy/standalone/Dockerfile`,
+`frontend/Dockerfile`, `fi-collector/Dockerfile`, `agentcc-gateway/Dockerfile`,
+`futureagi/model_serving/Dockerfile.oss`, `futureagi/code-executor/Dockerfile`
+and `Dockerfile.base`, `Dockerfile.simulation-runner`). What users see of them
+(tags, labels, health checks, users, base images, build arguments, verifying an
+image) is on [Container images](https://docs.futureagi.com/docs/self-hosting/images), whose tables are rendered from
+`deploy/images.toml`.
+
+- **One tag scheme.** `vX.Y.Z`, `vX.Y` and `latest` (`-slim` for the backend's
+  slim variant, `-gpu` for CUDA serving). A release builds every architecture,
+  checks it, and only then points all three tags at one multi-architecture
+  manifest (`build-image-multiarch.yml`). See [Tags](https://docs.futureagi.com/docs/self-hosting/images#tags).
+- **The same OCI labels.** Every image sets the `org.opencontainers.image.*`
+  labels that `deploy/images.toml` lists; `documentation` is
+  `https://docs.futureagi.com/docs/self-hosting/images`. `version`, `revision` and `created` come from the `VERSION`,
+  `REVISION` and `CREATED` build arguments, which the release workflows pass
+  and each Dockerfile declares as its last instructions, so a new value changes
+  only the image configuration and never invalidates a cached layer. A local
+  build without them says `dev` and `unknown`.
+- **Digest-pinned bases.** Every base is an `ARG` near the top of its
+  Dockerfile, pinned by digest, so a rebuild of the same commit reuses the same
+  layers. The deliberate exceptions are explained in each Dockerfile and listed
+  as `floating` in the test's `IMAGES` table: the Go build stages float on the
+  minor version (patch releases carry standard-library security fixes),
+  `standalone`'s component images and the simulation runner's backend default
+  to `:latest` for a local build (a release passes digests), and
+  `code-executor` pins `futureagi/code-executor-base` by an immutable version
+  tag.
+- **A `HEALTHCHECK` on the service's real health endpoint**, and a
+  `STOPSIGNAL`. `fi-collector` and `agentcc-gateway` have no shell and ship the
+  same static probe, whose Go source is in both Dockerfiles.
+- **A documented user.** Non-root where the image allows it; each image that
+  runs as root says why in its Dockerfile, and [Users](https://docs.futureagi.com/docs/self-hosting/images#users) lists them.
+
+`base-digest-check.yml` runs weekly and fails, listing the new digests, when a
+pinned tag has moved (a Debian security update, for example). To pick one up,
+replace the digest in every file it lists in one pull request.
+
+**Images built on the default backend.** The Enterprise and cloud backend
+images are built outside this repository, `FROM futureagi/future-agi:<version>`
+as published, followed by `uv pip install --system -r ee/requirements.txt`
+(every dependency group except `dev`). That install needs the default
+variant's `uv`, and those images rely at run time on its git, Debian ffmpeg,
+NLTK packages and Google API discovery documents. A `-slim` base has none of
+them: the install fails with `uv: not found`. The default variant's build
+checks all of these (`futureagi/docker/runtime_smoke.py`), the release checks
+`uv`, git and the dependency groups again before it moves any tag
+(`release-images.yml`), and `scripts/verify-image-contents.sh` checks them on
+a published image. An image built `FROM` another keeps the parent's labels
+until it sets its own: such an overlay should declare `VERSION`, `REVISION`
+and `CREATED` and set every `org.opencontainers.image.*` label, with its own
+title and licenses. It also inherits the backend's user (root), `HEALTHCHECK`,
+`STOPSIGNAL`, `ENTRYPOINT` (`bash /app/backend/entrypoint.sh`) and
+`SERVICE_VERSION` (the release it was built from, which deployment telemetry
+reports when `FUTURE_AGI_VERSION` names none).
+
+Lint the Dockerfiles with [hadolint](https://github.com/hadolint/hadolint)
+(settings in `.hadolint.yaml`; findings a Dockerfile accepts on purpose are
+ignored inline, with the reason) and the workflows with
+[actionlint](https://github.com/rhysd/actionlint):
+
+```bash
+hadolint futureagi/Dockerfile.oss deploy/standalone/Dockerfile frontend/Dockerfile \
+  fi-collector/Dockerfile agentcc-gateway/Dockerfile futureagi/model_serving/Dockerfile.oss \
+  futureagi/code-executor/Dockerfile futureagi/code-executor/Dockerfile.base Dockerfile.simulation-runner
+actionlint .github/workflows/*.yml
+```
 
 ### Images, docs and the Helm chart
 
@@ -106,23 +178,48 @@ These suites read files and need no Docker daemon and no services:
 
 ```bash
 # Every deployment suite: Compose contracts, installer bring-up, production setup,
-# image conventions (docs/images.md), Standalone's first-run page and boot summary.
+# image conventions (Image conventions above; deploy/images.toml), Standalone's
+# first-run page and boot summary.
 python3 -m unittest discover -s deploy/tests -v
 
-# Docs that must match the code, from futureagi/ in its virtualenv (uv sync --frozen):
-#   docs/configuration.md documents every ${VAR} of the compose files and every .env.example key;
-#   docs/telemetry.md lists every field telemetry sends and every FUTURE_AGI_TELEMETRY_* setting;
+# Reference data that must match the code, from futureagi/ in its virtualenv (uv sync --frozen):
+#   deploy/env-reference.toml has a row for every ${VAR} of the compose files and every
+#   .env.example key, and renders as a sound docs page;
+#   wire_reference.toml names every field telemetry sends, with valid example payloads;
+#   every FUTURE_AGI_TELEMETRY_* setting has a row tagged telemetry;
 #   every setup-check link points at a heading of INSTALLATION.md.
 cd futureagi && .venv/bin/python -m pytest -q tests/test_env_reference.py \
-  tfc/deployment_telemetry/tests/test_docs_contract.py \
+  tfc/deployment_telemetry/tests/test_wire_reference.py \
   "tfc/tests/test_setup_checks.py::TestCheckInventory"
 ```
 
 So renaming a heading of `INSTALLATION.md` under **Troubleshooting**, adding
-a compose variable without a row in `docs/configuration.md`, or sending a new
-telemetry field without documenting it fails a test.
-`python3 scripts/env_reference.py` lists the compose variables
-`docs/configuration.md` does not document yet.
+a compose variable without a row in `deploy/env-reference.toml`, or sending a
+new telemetry field without describing it in `wire_reference.toml` fails a
+test. `python3 scripts/env_reference.py` lists the compose variables
+`deploy/env-reference.toml` does not document yet, and `--check` also
+validates the data.
+
+The self-hosting pages of docs.futureagi.com live in the
+[future-agi/docs](https://github.com/future-agi/docs) repository, not under
+`docs/` here. Three parts of them are generated from this repository, so the
+tests above keep them true: the [configuration reference](https://docs.futureagi.com/docs/self-hosting/configuration/reference)
+from `deploy/env-reference.toml`, the payloads and settings on
+[Telemetry](https://docs.futureagi.com/docs/self-hosting/configuration/telemetry) from
+`futureagi/tfc/deployment_telemetry/wire_reference.toml` and the rows tagged
+`telemetry`, and the image tables on [Container images](https://docs.futureagi.com/docs/self-hosting/images)
+from `deploy/images.toml` and `scripts/image_size_budget.json`.
+`scripts/docs_site.py` renders them (standard library only):
+
+```bash
+python3 scripts/docs_site.py render reference        # or telemetry-registration, images-at-a-glance, ...
+python3 scripts/docs_site.py sync ../docs            # write them into a future-agi/docs checkout
+python3 scripts/docs_site.py sync ../docs --check    # exit 1 when that checkout is out of date
+```
+
+`sync` rewrites the reference page and the blocks between the
+`generated:begin`/`generated:end` markers of the other two; `--ref vX.Y.Z` on
+a release points the page's repository links at that tag.
 
 `deploy/tests/test_image_standards.py` checks every Dockerfile's conventions
 and the release workflows (both backend variants, the size budgets); CI runs it
@@ -270,7 +367,7 @@ CI covers frontend, sharded backend pytest, Go collector tests/builds, deploymen
 | `frontend-auto-approve-hotfix.yml` | hotfix PRs                                                                       | Auto-approval routing for verified hotfix branches                                                 |
 | `backend-ci.yml`                  | Backend/deployment PR changes, pushes to `dev`/`main`, merge queue               | Sharded pytest using the standard test dependency stack                                          |
 | `fi-collector-ci.yml`             | Collector/deployment PR changes, pushes to `dev`/`main`, merge queue, manual | Go race tests/builds, real observation integration, Compose/bootstrap contracts and installer syntax |
-| `images-ci.yml`                   | PR changes and pushes on `dev`/`main` to Dockerfiles, image scripts, the build and release workflows or `docs/images.md`; merge queue, manual | Image conventions (`test_image_standards.py`) and size budgets (`test_image_size_budget.py`), no image built |
+| `images-ci.yml`                   | PR changes and pushes on `dev`/`main` to Dockerfiles, image scripts, the build and release workflows, `deploy/images.toml` or `scripts/docs_site.py`; merge queue, manual | Image conventions (`test_image_standards.py`) and size budgets (`test_image_size_budget.py`), no image built |
 | `e2e-ci.yml`                       | PRs into and pushes on `dev`/`main`, merge queue                                 | Builds the changed images from PR code, boots the `futureagi-e2e` stack, runs the Playwright flows |
 | `standalone-ci.yml`                | PRs into and pushes on `dev`/`main` that touch the Standalone setup or the backend | Builds the five Standalone images, the backend as its slim variant (amd64; arm64 when dependencies or Dockerfiles change), checks their size budgets, runs `./bin/install` and smoke-tests the Standalone stack |
 | `helm-ci.yml`                      | PRs into and pushes on `dev`/`main` that touch `deploy/helm/**`, the bootstrap or `create_user` command or the release-please files | `hack/check.sh` (lint, template, kubeconform on Kubernetes 1.27 and 1.37, rendered invariants, values docs and schema) with Helm 3.22 and Helm 4.3, on the chart and on its package (`hack/package.sh`); fails on a subchart or a Bitnami image, and when the chart's `version` or `appVersion` drifts from the release manifest; then installs the chart on kind with bundled datastores and runs `hack/kind-smoke.sh`, including an in-place upgrade and a rollback |

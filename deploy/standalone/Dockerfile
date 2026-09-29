@@ -25,7 +25,8 @@
 #     --build-arg AGENTCC_GATEWAY_IMAGE=futureagi/agentcc-gateway:local \
 #     -t futureagi/standalone:local deploy/standalone
 #
-# Runs as root (docs/images.md): supervisord starts Redis, MinIO, nginx and
+# Runs as root (https://docs.futureagi.com/docs/self-hosting/images#users):
+# supervisord starts Redis, MinIO, nginx and
 # the API as root, runs code evals as the unprivileged `sandbox` user, and
 # keeps secrets in a root-only directory.
 # The component image defaults float on :latest, the newest release, which
@@ -136,7 +137,7 @@ HEALTHCHECK --interval=15s --timeout=10s --start-period=3600s --retries=5 \
     CMD ["python", "-I", "-S", "-c", "import urllib.request as u; o = u.build_opener(u.ProxyHandler({})); [o.open(url, timeout=5).close() for url in ('http://127.0.0.1:8000/health/', 'http://127.0.0.1:9464/healthz', 'http://127.0.0.1:8080/healthz', 'http://127.0.0.1:3000/', 'http://127.0.0.1:9005/minio/health/live')]"]
 ENTRYPOINT ["/opt/futureagi/bin/start"]
 
-# Image metadata (docs/images.md). Declared last: a new version, commit or
+# Image metadata (TESTING.md › Image conventions). Declared last: a new version, commit or
 # build time changes the image config only, never a cached layer.
 ARG VERSION=dev
 ARG REVISION=unknown
@@ -153,7 +154,7 @@ LABEL org.opencontainers.image.title="Future AGI standalone" \
       org.opencontainers.image.description="The Standalone install's application container: API with an embedded Temporal worker, Temporal dev server, fi-collector, agentcc-gateway, code-evals sandbox, UI, Redis and object storage under supervisord." \
       org.opencontainers.image.source="https://github.com/future-agi/future-agi" \
       org.opencontainers.image.url="https://futureagi.com" \
-      org.opencontainers.image.documentation="https://github.com/future-agi/future-agi/blob/main/docs/images.md" \
+      org.opencontainers.image.documentation="https://docs.futureagi.com/docs/self-hosting/images" \
       org.opencontainers.image.vendor="Future AGI" \
       org.opencontainers.image.licenses="Apache-2.0 AND LicenseRef-FutureAGI-Enterprise-1.0" \
       org.opencontainers.image.version="${VERSION}" \

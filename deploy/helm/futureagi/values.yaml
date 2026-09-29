@@ -19,7 +19,8 @@
 #   examples/gitops/               Argo CD Application and Flux HelmRelease (not values)
 #
 # Environment variable names in [brackets] are what each key sets in the
-# application; docs/configuration.md explains every one of them.
+# application; https://docs.futureagi.com/docs/self-hosting/configuration/reference
+# explains every one of them.
 # =============================================================================
 
 # -- Override the chart name used in resource names.
@@ -120,7 +121,7 @@ config:
     existingSecret: ""
     # -- Key of the Mailgun API key in `existingSecret`.
     existingSecretKey: MAILGUN_API_KEY
-  # -- Extra environment variables for the backend, workers and bootstrap job, as `NAME: value`. Every supported key is in docs/configuration.md.
+  # -- Extra environment variables for the backend, workers and bootstrap job, as `NAME: value`. Every supported key: https://docs.futureagi.com/docs/self-hosting/configuration/reference (rows marked H).
   extraEnv: {}
   # -- Extra `envFrom` sources for the backend, workers and bootstrap job, e.g. `[{secretRef: {name: my-env}}]`.
   extraEnvFrom: []

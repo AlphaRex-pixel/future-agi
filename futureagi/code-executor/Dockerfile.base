@@ -66,7 +66,7 @@ RUN if ldd /usr/local/bin/nsjail | grep -q 'not found'; then \
     && mkdir -p /sandbox/tmp /sandbox/python-libs /sandbox/config \
     && chmod 755 /sandbox/tmp
 
-# Image metadata (docs/images.md); futureagi/code-executor replaces every
+# Image metadata (TESTING.md › Image conventions); futureagi/code-executor replaces every
 # label. Declared last: a new value never invalidates a cached layer.
 ARG VERSION=dev
 ARG REVISION=unknown
@@ -75,7 +75,7 @@ LABEL org.opencontainers.image.title="Future AGI code-executor base" \
       org.opencontainers.image.description="Dependency base of futureagi/code-executor: nsjail, Node.js and the sandbox Python libraries, no application code." \
       org.opencontainers.image.source="https://github.com/future-agi/future-agi" \
       org.opencontainers.image.url="https://futureagi.com" \
-      org.opencontainers.image.documentation="https://github.com/future-agi/future-agi/blob/main/docs/images.md" \
+      org.opencontainers.image.documentation="https://docs.futureagi.com/docs/self-hosting/images" \
       org.opencontainers.image.vendor="Future AGI" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}" \
