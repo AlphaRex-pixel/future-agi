@@ -181,10 +181,10 @@ EVAL_EXECUTION_SETTING_SPECS = {
                 86_400,
             ),
             # 0 is the off switch. A Temporal pause is the immediate lever,
-            # but ``register_temporal_schedules`` runs on every backend
-            # container start and re-registers the schedule with
-            # ``ScheduleState`` rebuilt from config, so a manual pause does not
-            # survive the next deploy, restart or scale-up. A setting does.
+            # but ``register_temporal_schedules`` runs on every deploy (the
+            # one-shot ``SERVICE_TYPE=temporal-schedules`` job) and re-registers
+            # the schedule with ``ScheduleState`` rebuilt from config, so a
+            # manual pause does not survive the next deploy. A setting does.
             ("SWEEP_MAX_TASKS", 25, 0, 500),
         ),
         prefix="EVAL_TASK_",

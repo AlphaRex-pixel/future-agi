@@ -39,8 +39,8 @@ scope for the same reason and is opt-in through
 
 ``EVAL_TASK_SWEEP_MAX_TASKS=0`` disables the sweep. That is the rollback that
 survives a restart: pausing the schedule in Temporal takes effect at once but
-is undone by the next backend container start, which re-registers every
-schedule with its state rebuilt from config.
+is undone by the next schedule registration (every deploy's one-shot
+``SERVICE_TYPE=temporal-schedules`` job), which rebuilds its state from config.
 """
 
 from __future__ import annotations
