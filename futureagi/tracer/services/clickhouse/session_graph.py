@@ -828,7 +828,6 @@ def _inline_session_latency_graph(
             interval=interval,
             metric_id=metric_id,
             wall_ms=deadline.remaining_ms(floor_ms=floor_ms),
-            interactive=True,
         )
     except ExactGraphReadError as exc:
         error_type = type(exc).__name__

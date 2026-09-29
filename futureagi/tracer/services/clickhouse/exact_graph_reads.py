@@ -4924,15 +4924,15 @@ def read_exact_session_system_graph(
     interval: str,
     metric_id: str,
     wall_ms: int | None = None,
-    interactive: bool = False,
 ) -> dict[str, Any]:
     """The one statement behind every Sessions system chart.
 
-    The exact-aggregation worker runs it on ``GRAPH_BACKGROUND_WALL_MS`` with
-    the session thread budget. ``interactive`` runs the SAME statement (same
-    SQL, same parameters, same numbers) inline on the caller's ``wall_ms``
-    with the shared exact settings - one thread, as other interactive reads -
-    for a scope whose root estimate is affordable (``session_graph``).
+    The exact-aggregation worker runs it (no ``wall_ms``) on
+    ``GRAPH_BACKGROUND_WALL_MS`` with the session thread budget. A caller's
+    ``wall_ms`` runs the SAME statement (same SQL, same parameters, same
+    numbers) inline on that wall with the shared exact settings - one thread,
+    as other interactive reads - for a scope whose root estimate is
+    affordable (``session_graph``).
     """
 
     started = monotonic()
@@ -5012,7 +5012,7 @@ def read_exact_session_system_graph(
     # stable on one thread and not on several. Such a chart keeps dev's
     # single-thread settings for the main, witness and fallback statements
     # (the witness copies ``graph_settings``), so it selects dev's sessions.
-    if interactive or _session_filters_need_message_aggregates(filters):
+    if wall_ms is not None or _session_filters_need_message_aggregates(filters):
         graph_settings = dict(EXACT_GRAPH_READ_SETTINGS)
     else:
         graph_settings = _session_graph_read_settings()
