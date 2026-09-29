@@ -9495,6 +9495,8 @@ export const ApiSetupChecksListResponse = zod.object({
         status: zod.enum(["passed", "warning", "failed", "skipped"]),
         required: zod.boolean(),
         detail: zod.string(),
+        fix: zod.string(),
+        docs_url: zod.string(),
       }),
     ),
   }),
@@ -12481,6 +12483,7 @@ Includes queues where:
 Query params:
   - source_type, source_id  (single source)
   - OR sources (JSON array of {source_type, source_id} objects for multi-source lookup)
+  - project_id (optional): the project a trace / span drawer shows
  */
 export const ModelHubAnnotationQueuesForSourceQueryParams = zod.object({
   page: zod
@@ -12503,6 +12506,13 @@ export const ModelHubAnnotationQueuesForSourceQueryParams = zod.object({
     .optional(),
   source_id: zod.string().optional(),
   sources: zod.string().optional(),
+  project_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "Tracer project the trace / span was opened from. The same id can exist in several projects; when supplied, only that project's queue items are listed.",
+    ),
 });
 
 export const modelHubAnnotationQueuesForSourceResponseStatusDefault = true;
@@ -22856,6 +22866,14 @@ Query params: page (0-based), page_size, period
 The response is rendered through
 ``EvalUsageStatsResponseResultSerializer(instance=...).data`` at the
 boundary so shape drift surfaces here instead of shipping silently.
+
+Counts and lists only successful runs from the usage ledger
+(``APICallLog`` rows with status ``success``), from every source: tasks,
+playground, composites, datasets and experiments. Errored and skipped runs
+are not usage but stay in the eval logs (task logs, template eval logs);
+an in-flight run counts once it succeeds. ``error_count`` is therefore 0
+and ``pass_rate`` 100 whenever there are runs; both remain for
+compatibility.
  * @summary GET /model-hub/eval-templates/<id>/usage/
  */
 export const ModelHubEvalTemplatesUsageListParams = zod.object({
@@ -22912,9 +22930,21 @@ export const ModelHubEvalTemplatesUsageListResponse = zod.object({
     stats: zod.object({
       total_runs: zod.number(),
       runs_period: zod.number(),
-      success_count: zod.number(),
-      error_count: zod.number(),
-      pass_rate: zod.number(),
+      success_count: zod
+        .number()
+        .describe(
+          "Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period.",
+        ),
+      error_count: zod
+        .number()
+        .describe(
+          "Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the eval logs.",
+        ),
+      pass_rate: zod
+        .number()
+        .describe(
+          "Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0.",
+        ),
     }),
     chart: zod.array(
       zod.object({
@@ -29788,6 +29818,13 @@ export const ModelHubScoresBulkCreateBody = zod.object({
   span_notes: zod.string().optional(),
   span_notes_source_id: zod.string().optional(),
   queue_item_id: zod.string().uuid().optional(),
+  project_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "Tracer project the trace / span was opened from. The same id can exist in several projects; when supplied, the score is written to that project's copy.",
+    ),
 });
 
 export const modelHubScoresBulkCreateResponseStatusDefault = true;
@@ -29858,6 +29895,13 @@ export const ModelHubScoresForSourceQueryParams = zod.object({
     "trace_session",
   ]),
   source_id: zod.string().min(1),
+  project_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "Tracer project the trace / span was opened from. The same id can exist in several projects; when supplied, only that project's scores are listed.",
+    ),
 });
 
 export const modelHubScoresForSourceResponseStatusDefault = true;
@@ -31519,7 +31563,7 @@ export const simulateAgentDefinitionsCreateCreateBodyObservabilityEnabledDefault
   false;
 export const simulateAgentDefinitionsCreateCreateBodyLivekitUrlMax = 500;
 
-export const simulateAgentDefinitionsCreateCreateBodyLivekitMaxConcurrencyMax = 5;
+export const simulateAgentDefinitionsCreateCreateBodyLivekitMaxConcurrencyMax = 25;
 
 export const SimulateAgentDefinitionsCreateCreateBody = zod.object({
   agent_name: zod
@@ -31738,7 +31782,7 @@ export const simulateAgentDefinitionsEditUpdateBodyAgentNameMax = 255;
 
 export const simulateAgentDefinitionsEditUpdateBodyLivekitUrlMax = 500;
 
-export const simulateAgentDefinitionsEditUpdateBodyLivekitMaxConcurrencyMax = 5;
+export const simulateAgentDefinitionsEditUpdateBodyLivekitMaxConcurrencyMax = 25;
 
 export const SimulateAgentDefinitionsEditUpdateBody = zod.object({
   agent_name: zod
@@ -31994,7 +32038,7 @@ export const simulateAgentDefinitionsVersionsCreateCreateBodyLivekitApiSecretMax
 
 export const simulateAgentDefinitionsVersionsCreateCreateBodyLivekitAgentNameMax = 255;
 
-export const simulateAgentDefinitionsVersionsCreateCreateBodyLivekitMaxConcurrencyMax = 5;
+export const simulateAgentDefinitionsVersionsCreateCreateBodyLivekitMaxConcurrencyMax = 25;
 
 export const simulateAgentDefinitionsVersionsCreateCreateBodyCommitMessageDefault = ``;
 export const simulateAgentDefinitionsVersionsCreateCreateBodyObservabilityEnabledDefault =
@@ -52416,14 +52460,23 @@ export const TracerEvalTaskGetUsageResponse = zod.object({
           .min(tracerEvalTaskGetUsageResponseResultStatsRunsPeriodMin),
         success_count: zod
           .number()
-          .min(tracerEvalTaskGetUsageResponseResultStatsSuccessCountMin),
+          .min(tracerEvalTaskGetUsageResponseResultStatsSuccessCountMin)
+          .describe(
+            "Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period.",
+          ),
         error_count: zod
           .number()
-          .min(tracerEvalTaskGetUsageResponseResultStatsErrorCountMin),
+          .min(tracerEvalTaskGetUsageResponseResultStatsErrorCountMin)
+          .describe(
+            "Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the task logs.",
+          ),
         pass_rate: zod
           .number()
           .min(tracerEvalTaskGetUsageResponseResultStatsPassRateMin)
-          .max(tracerEvalTaskGetUsageResponseResultStatsPassRateMax),
+          .max(tracerEvalTaskGetUsageResponseResultStatsPassRateMax)
+          .describe(
+            "Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0.",
+          ),
         total_runs_is_lower_bound: zod.boolean().optional(),
         runs_period_is_lower_bound: zod.boolean().optional(),
       })
@@ -55011,8 +55064,10 @@ export const TracerInternalErrorFeedV2ClaimsCreateResponse = zod.object({
   claims: zod.array(
     zod.object({
       organization_id: zod.string().uuid(),
+      organization_name: zod.string().min(1).optional(),
       workspace_id: zod.string().uuid(),
       project_id: zod.string().uuid(),
+      project_name: zod.string().min(1).optional(),
       job_id: zod.string().uuid(),
       workload_type: zod
         .enum(["trace", "simulation_test_execution"])
@@ -63701,6 +63756,8 @@ export const TracerTraceGetGraphMethodsQueryParams = zod.object({
 export const tracerTraceGetGraphMethodsBodyFiltersDefault = [];
 export const tracerTraceGetGraphMethodsBodyIntervalDefault = `day`;
 export const tracerTraceGetGraphMethodsBodyPropertyDefault = `average`;
+export const tracerTraceGetGraphMethodsBodyObserveTypeDefault = `trace`;
+export const tracerTraceGetGraphMethodsBodyRemoveSimulationCallsDefault = false;
 
 export const TracerTraceGetGraphMethodsBody = zod.object({
   project_id: zod.string().uuid(),
@@ -63785,6 +63842,18 @@ export const TracerTraceGetGraphMethodsBody = zod.object({
       .describe("Stable Property Registry identity."),
     source: zod.enum(["traces", "sessions"]).optional(),
   }),
+  observe_type: zod
+    .enum(["trace", "voice"])
+    .default(tracerTraceGetGraphMethodsBodyObserveTypeDefault)
+    .describe(
+      "Population the graph counts: every trace, or only voice calls (traces whose root span is a conversation), exactly as list_voice_calls selects them.",
+    ),
+  remove_simulation_calls: zod
+    .boolean()
+    .default(tracerTraceGetGraphMethodsBodyRemoveSimulationCallsDefault)
+    .describe(
+      "Voice graphs only: exclude calls placed by a simulator phone, exactly as list_voice_calls' remove_simulation_calls does.",
+    ),
 });
 
 export const tracerTraceGetGraphMethodsResponseStatusDefault = true;
@@ -64729,6 +64798,13 @@ export const TracerTraceVoiceCallDetailQueryParams = zod.object({
     .describe(
       "Legacy alias for trace_id; when both are supplied they must match.",
     ),
+  project_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "Project the detail was opened from. The same id can exist in several projects; when supplied, only that project's copy is read.",
+    ),
 });
 
 export const TracerTraceVoiceCallDetailResponse = zod.object({
@@ -64809,10 +64885,22 @@ export const TracerTraceVoiceCallDetailResponse = zod.object({
 });
 
 /**
- * Retrieve a trace by its ID.
+ * Query params:
+- project_id (optional) — the project the trace was opened from.
+ * @summary Retrieve a trace by its ID.
  */
 export const TracerTraceReadParams = zod.object({
   id: zod.string(),
+});
+
+export const TracerTraceReadQueryParams = zod.object({
+  project_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "Project the detail was opened from. The same id can exist in several projects; when supplied, only that project's copy is read.",
+    ),
 });
 
 export const tracerTraceReadResponseStatusDefault = true;
