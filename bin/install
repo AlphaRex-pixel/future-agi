@@ -35,7 +35,9 @@
 # --distributed is recorded in .env (COMPOSE_FILE), so later runs and a plain
 # `docker compose` stay on the distributed stack. An existing install keeps its
 # stack: moving one between standalone and distributed is refused, because its data
-# does not carry over. A timestamped log is written to install-*.log.
+# does not carry over. So is a COMPOSE_FILE set in your shell that does not start
+# the install's stack: Compose reads it over .env. A timestamped log is written
+# to install-*.log.
 # ============================================================================
 
 set -eEuo pipefail
@@ -377,6 +379,21 @@ swap_to_distributed_compose() {
   if (( found == 1 )); then printf '%s' "$out"; fi
 }
 
+# The stack a COMPOSE_FILE setting starts: standalone when it lists
+# docker-compose.yml, distributed when it lists docker-compose.distributed.yml.
+# Prints nothing when it lists both (Compose merges them) or neither.
+compose_setting_stack() {
+  local entry standalone=0 distributed=0 IFS=':'
+  for entry in $1; do
+    case "${entry##*/}" in
+      docker-compose.yml) standalone=1 ;;
+      docker-compose.distributed.yml) distributed=1 ;;
+    esac
+  done
+  if (( standalone == 1 && distributed == 0 )); then printf standalone; fi
+  if (( distributed == 1 && standalone == 0 )); then printf distributed; fi
+}
+
 # Services of this project's containers, running or not.
 PROJECT_SERVICES=$(docker ps -a --filter "label=com.docker.compose.project=${project_name}" \
   --format '{{.Label "com.docker.compose.service"}}' 2>/dev/null | sort -u || true)
@@ -460,6 +477,32 @@ if (( DISTRIBUTED == 1 && WIPE_VOLS == 0 )); then
   fi
 fi
 
+# Compose takes COMPOSE_FILE from the shell over .env, so a value set there
+# picks the stack of every compose command below, whatever .env records. It
+# has to start the stack chosen above, or the install stops before it records
+# the stack, wipes volumes or generates secrets. The refusals above come
+# first: whatever the shell sets, they stand.
+if [[ -n "${COMPOSE_FILE+set}" ]]; then
+  install_stack=standalone stack_file=docker-compose.yml other_file=docker-compose.distributed.yml
+  if (( DISTRIBUTED == 1 )); then
+    install_stack=distributed stack_file=docker-compose.distributed.yml other_file=docker-compose.yml
+  fi
+  shell_stack=$(compose_setting_stack "$COMPOSE_FILE")
+  if [[ "$shell_stack" != "$install_stack" ]]; then
+    # A plain re-run chooses from .env and the volumes, which may not record
+    # --distributed yet.
+    rerun=./bin/install
+    if (( DISTRIBUTED_REQUESTED == 1 )); then rerun+=" --distributed"; fi
+    shell_hint=""
+    if [[ "$shell_stack" == standalone ]]; then
+      shell_hint=" To keep your other compose files, set COMPOSE_FILE=$(swap_to_distributed_compose "$COMPOSE_FILE") instead."
+    elif [[ "$shell_stack" == distributed ]] && (( standalone_app_container == 0 && standalone_app_volume == 0 )); then
+      shell_hint=" For the distributed stack, run ./bin/install --distributed."
+    fi
+    die "COMPOSE_FILE=${COMPOSE_FILE} is set in your shell, and Docker Compose uses it instead of .env. The installer chose the ${install_stack} stack for project ${project_name}, which takes ${stack_file} without ${other_file}. Run \`unset COMPOSE_FILE\` (and remove it wherever your shell sets it), then re-run ${rerun}.${shell_hint}"
+  fi
+fi
+
 if (( DISTRIBUTED == 1 )); then
   COMPOSE_PATH=docker-compose.distributed.yml
   APP_SVC=backend
@@ -486,6 +529,9 @@ else
   else
     ok "Mode: Standalone (docker-compose.yml) — pass --distributed for one container per service"
   fi
+fi
+if [[ -n "${COMPOSE_FILE:-}" ]]; then
+  ok "Compose uses COMPOSE_FILE=${COMPOSE_FILE} from your shell, which selects the same stack"
 fi
 [[ -f "$COMPOSE_PATH" ]] || die "$COMPOSE_PATH missing — are you running this from a complete checkout?"
 

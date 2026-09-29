@@ -571,7 +571,9 @@ class InstallerStartupContractTests(unittest.TestCase):
         # A full-stack upgrade names the retired RabbitMQ container and how to
         # remove it, but removes nothing itself (asserted by assert_attempt:
         # still exactly one compose call). The standalone stack never had one.
-        notice = [line for line in result.stdout.splitlines() if line.startswith("WARN:")]
+        notice = [
+            line for line in result.stdout.splitlines() if line.startswith("WARN:")
+        ]
         if mode == "full":
             self.assertTrue(any("RabbitMQ" in line for line in notice), result.stdout)
             self.assertTrue(
@@ -677,9 +679,7 @@ function Die { Write-Output ('FAIL:' + ($args -join ' ')); exit 1 }
         for mode in INSTALL_MODES:
             for status in (0, 1, 124):
                 with self.subTest(mode=mode, status=status):
-                    self.assert_attempt(
-                        self.run_powershell(mode, status), status, mode
-                    )
+                    self.assert_attempt(self.run_powershell(mode, status), status, mode)
 
     @unittest.skipUnless(
         shutil.which("pwsh"), "pwsh unavailable; static contract still runs"

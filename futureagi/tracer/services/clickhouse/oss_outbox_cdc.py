@@ -47,7 +47,7 @@ without the drain, so
 ``ensure_installed()`` manages the triggers and the Temporal schedules
 together, and removes both when ``FI_CDC_MODE`` is not ``outbox``. To stop
 capture by hand run ``uninstall --apply``; do not just disable the triggers
-(the drain re-arms them and re-snapshots the table).
+(the drain or the next start re-arms them and re-snapshots the table).
 
 Like ``oss_cdc_install``, the CLI needs no Django settings;
 ``ensure_installed()`` reaches Temporal (which does) only through a lazy
@@ -366,11 +366,18 @@ def broken_capture(states: dict[str, dict[str, str]]) -> dict[str, list[str]]:
     }
 
 
-def _ddl(pg, statements: list[str], *, attempts: int = DDL_ATTEMPTS) -> None:
+def _ddl(
+    pg,
+    statements: list[str],
+    *,
+    attempts: int = DDL_ATTEMPTS,
+    then: Callable[[], None] | None = None,
+) -> None:
     """One short transaction that gives up on lock waits instead of queueing.
 
     A DDL statement waiting behind a long app transaction would otherwise
-    block every later writer on that table until it gets its lock.
+    block every later writer on that table until it gets its lock. ``then``
+    runs last, in the same transaction.
     """
     for attempt in range(1, attempts + 1):
         try:
@@ -378,6 +385,8 @@ def _ddl(pg, statements: list[str], *, attempts: int = DDL_ATTEMPTS) -> None:
                 pg.execute(f"SET LOCAL lock_timeout = '{DDL_LOCK_TIMEOUT_MS}ms'")
                 for statement in statements:
                     pg.execute(statement)
+                if then is not None:
+                    then()
             return
         except psycopg.errors.LockNotAvailable:
             if attempt == attempts:
@@ -391,7 +400,13 @@ def _ddl(pg, statements: list[str], *, attempts: int = DDL_ATTEMPTS) -> None:
 def arm_triggers(
     pg, table: str, triggers: dict[str, str], *, attempts: int = DDL_ATTEMPTS
 ) -> None:
-    """Create missing, replace wrong and enable disabled triggers; skip ok ones."""
+    """Create missing, replace wrong and enable disabled triggers; skip ok ones.
+
+    Writes made while capture was off never reached the outbox, so the same
+    transaction restarts the table's snapshot (and the reconcile that follows
+    it). A failure after the arm cannot lose the restart, and a failed arm
+    does not start a copy that capture would not keep current.
+    """
     statements = []
     for name, state in triggers.items():
         if state == "disabled":
@@ -403,7 +418,12 @@ def arm_triggers(
                 statements.append(f"DROP TRIGGER {name} ON public.{_ident(table)}")
             statements.append(create_trigger_sql(table, name))
     if statements:
-        _ddl(pg, statements, attempts=attempts)
+        _ddl(
+            pg,
+            statements,
+            attempts=attempts,
+            then=lambda: _reset_snapshots(pg, (table,)),
+        )
 
 
 def install_capture(pg, tables: Iterable[str], *, attempts: int = DDL_ATTEMPTS) -> dict:
@@ -933,16 +953,18 @@ def _reset_snapshots(pg, tables: Iterable[str]) -> None:
 
 
 def request_reconcile(pg, tables: Iterable[str]) -> None:
+    # Restamped on every request, even one already pending: a sweep clears
+    # only the request it saw when it started.
     pg.execute(
-        f"UPDATE {STATE} SET reconcile_requested_at = "
-        "coalesce(reconcile_requested_at, clock_timestamp()) WHERE table_name = ANY(%s)",
+        f"UPDATE {STATE} SET reconcile_requested_at = clock_timestamp() "
+        "WHERE table_name = ANY(%s)",
         (list(tables),),
     )
 
 
 def _rearm(pg, tables) -> tuple[list[str], dict[str, str]]:
     """Re-arm lost capture. Writes made while it was off were not captured, so
-    the table is re-snapshotted (and reconciled when that completes)."""
+    ``arm_triggers`` re-snapshots the table (reconciled when that completes)."""
     rearmed, failed = [], {}
     for table, triggers in capture_state(pg, tables).items():
         if all(state == "ok" for state in triggers.values()):
@@ -955,24 +977,34 @@ def _rearm(pg, tables) -> tuple[list[str], dict[str, str]]:
         except psycopg.ProgrammingError as error:
             failed[table] = f"{table}: cannot arm capture ({type(error).__name__})"
             continue
-        _reset_snapshots(pg, (table,))
         rearmed.append(table)
     return rearmed, failed
 
 
 def add_source_columns(
-    ch, table: str, source: SourceTable, present: Iterable[str]
+    pg, ch, table: str, source: SourceTable, present: Iterable[str]
 ) -> list[str]:
-    """ADD the PG columns a landing table lacks, as PeerDB does at runtime."""
+    """ADD the PG columns a landing table lacks, as PeerDB does at runtime.
+
+    ``ADD COLUMN ... DEFAULT`` gives every existing PG row a value without
+    firing a capture trigger, while the CH column starts at its own default.
+    So the table is re-snapshotted, requested before the first ALTER: a
+    failure after it cannot leave the column added and the re-copy forgotten.
+    """
     present = set(present)
-    added = []
-    for column, data_type in source.columns:
-        if column not in present:
-            ch.command(
-                f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS `{column}` {data_type}"
-            )
-            added.append(f"{table}.{column}")
-    return added
+    missing = [(c, data_type) for c, data_type in source.columns if c not in present]
+    if missing:
+        _reset_snapshots(pg, (table,))
+    for column, data_type in missing:
+        ch.command(
+            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS `{column}` {data_type}"
+        )
+    return [f"{table}.{column}" for column, _ in missing]
+
+
+def _tables_of(columns: Iterable[str]) -> list[str]:
+    """The tables of ``table.column`` names, as ``added_columns`` lists them."""
+    return sorted({column.split(".", 1)[0] for column in columns})
 
 
 def _add_drift(pg, ch, specs, target) -> tuple[list[str], dict[str, str]]:
@@ -987,7 +1019,7 @@ def _add_drift(pg, ch, specs, target) -> tuple[list[str], dict[str, str]]:
     added = []
     for table in drifted:
         added += add_source_columns(
-            ch, table, source.tables[table], specs[table].ch_columns
+            pg, ch, table, source.tables[table], specs[table].ch_columns
         )
     return added, {}
 
@@ -1021,13 +1053,13 @@ def drain(
             specs, errors = load_specs(pg, ch, tables)
             added, drift_errors = _add_drift(pg, ch, specs, source)
             if added:
-                refreshed, more = load_specs(
-                    pg, ch, tuple({a.split(".")[0] for a in added})
-                )
+                refreshed, more = load_specs(pg, ch, _tables_of(added))
                 specs.update(refreshed)
                 errors.update(more)
                 for table in more:
                     specs.pop(table, None)
+                # add_source_columns restarted their snapshots: start this tick.
+                pending = _pending_snapshots(pg, tables)
             has_deadletter = bool(
                 pg.execute(f"SELECT EXISTS (SELECT 1 FROM {DEADLETTER})").fetchone()[0]
             )
@@ -1334,14 +1366,20 @@ def reconcile(
     for table in _due_reconciles(pg, tables, full=full, max_age_s=max_age_s):
         if table not in specs:
             continue
-        (started,) = pg.execute("SELECT clock_timestamp()").fetchone()
+        started, requested = pg.execute(
+            f"SELECT clock_timestamp(), reconcile_requested_at FROM {STATE} "
+            "WHERE table_name = %s",
+            (table,),
+        ).fetchone()
         reconcile_table(pg, ch, specs[table], stats)
-        # A request made during the sweep (a TRUNCATE, say) stays pending.
+        # A request made during the sweep (a TRUNCATE, say) restamped it and
+        # stays pending. Compared by value, not against ``started``, so a
+        # server clock that stepped back cannot make it look older.
         pg.execute(
             f"UPDATE {STATE} SET reconciled_at = %s, reconcile_requested_at = "
-            "CASE WHEN reconcile_requested_at <= %s THEN NULL "
+            "CASE WHEN reconcile_requested_at IS NOT DISTINCT FROM %s THEN NULL "
             "ELSE reconcile_requested_at END WHERE table_name = %s",
-            (started, started, table),
+            (started, requested, table),
         )
         swept.append(table)
     return {
@@ -1392,9 +1430,13 @@ _CH_TABLE_COLUMNS_SQL = (
 
 
 def ensure_landing_tables(
-    ch, source: SourceInventory, *, include_usage_schema: bool
+    ch, source: SourceInventory, *, include_usage_schema: bool, pg
 ) -> tuple[list[str], list[str]]:
-    """Create absent landing tables and ADD PG columns PeerDB would have added."""
+    """Create absent landing tables and ADD PG columns PeerDB would have added.
+
+    ``pg`` holds the capture state: a table that gains a column is
+    re-snapshotted (``add_source_columns``).
+    """
     definitions = landing_definitions(source, include_usage_schema=include_usage_schema)
     existing = {
         row[0]
@@ -1414,7 +1456,7 @@ def ensure_landing_tables(
                 _CH_TABLE_COLUMNS_SQL, parameters={"table": name}
             ).result_rows
         ]
-        added += add_source_columns(ch, name, source.tables[name], present)
+        added += add_source_columns(pg, ch, name, source.tables[name], present)
     return created, added
 
 
@@ -1545,7 +1587,7 @@ def install(
         capture = install_capture(pg, tables)
         # 2. Landing tables in the exact PeerDB-created shape.
         created, added = ensure_landing_tables(
-            ch, source, include_usage_schema=config.include_usage_schema
+            ch, source, include_usage_schema=config.include_usage_schema, pg=pg
         )
         # 3. Derived usage columns, dictionaries, views and full qualification,
         #    through the PeerDB-path installer unchanged.
@@ -1565,16 +1607,22 @@ def install(
             clock.last = max(clock.last, _ch_max_version(ch, tables))
             # 5. Re-snapshot whatever CH lost or never had while PG kept its
             #    state: a PeerDB takeover (changes after PeerDB stopped were
-            #    missed), a re-created landing table, or an emptied one (volume
-            #    reset, restore from a PG-only backup, ch25_remove_pg drops).
-            #    Tables new to the state table are already pending.
+            #    missed), capture that was off until step 1 re-armed it, a new
+            #    column PG filled in without firing capture, a re-created
+            #    landing table, or an emptied one (volume reset, restore from a
+            #    PG-only backup, ch25_remove_pg drops). Steps 1 and 2 already
+            #    restarted the re-armed and widened ones. Tables new to the
+            #    state table are already pending.
             new = set(capture["new_state"])
+            widened = _tables_of(added)
             resync = sorted(
                 t
                 for t in tables
                 if t not in new
                 and (
                     leftovers
+                    or t in capture["armed"]
+                    or t in widened
                     or t in created
                     or (not _ch_has_live_rows(ch, t) and _pg_has_rows(pg, t))
                 )

@@ -99,9 +99,11 @@ def _probe_interval() -> float:
 
 
 def _retry_delay(consecutive_failures: int) -> float:
-    # The count restarts at 0 once the Workers have run, so a crash after a
-    # healthy period is retried after 1 s.
-    return min(2.0 ** (consecutive_failures - 1), 30.0)
+    # 1, 2, 4, 8, 16, then 30 s. The count restarts at 0 once the Workers have
+    # run, so a crash after a healthy period is retried after 1 s. The exponent
+    # is capped before it is evaluated: an outage keeps counting failures, and
+    # 2.0 ** 1024 overflows.
+    return min(2.0 ** min(consecutive_failures - 1, 5), 30.0)
 
 
 def _schedule_registration_enabled() -> bool:

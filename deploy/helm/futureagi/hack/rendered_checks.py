@@ -90,6 +90,21 @@ COMPOSE_BACKEND_DEFAULTS = (
 )
 COMPOSE_DEFAULT = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:?-([^${}]*)\}")
 
+# Argo CD's sync order, as gitops-engine computes it (pkg/sync: hook/hook.go,
+# hook/helm/type.go, syncwaves/waves.go, sync_phase.go, sync_tasks.go). Its own
+# hook annotation replaces the Helm one; without it, every Helm install and
+# upgrade hook applies on every sync, since Argo CD does not tell them apart.
+ARGO_HOOK = "argocd.argoproj.io/hook"
+ARGO_PHASES = {"PreSync": -1, "Sync": 0, "PostSync": 1}
+ARGO_HOOK_TYPES = (*ARGO_PHASES, "SyncFail", "Skip")
+HELM_HOOK_PHASES = {
+    "pre-install": "PreSync",
+    "pre-upgrade": "PreSync",
+    "post-install": "PostSync",
+    "post-upgrade": "PostSync",
+}
+DATASTORES = ("postgres", "clickhouse", "redis", "temporal", "minio")
+
 
 def pod_spec(doc: dict) -> dict:
     return doc["spec"] if doc["kind"] == "Pod" else doc["spec"]["template"]["spec"]
@@ -106,6 +121,102 @@ def env_values(container: dict) -> dict:
 
 def component(doc: dict) -> str:
     return doc["metadata"]["labels"].get("app.kubernetes.io/component", "")
+
+
+def annotation_csv(doc: dict, key: str) -> list[str]:
+    value = (doc["metadata"].get("annotations") or {}).get(key, "")
+    items = (item.strip() for item in value.split(","))
+    return list(dict.fromkeys(item for item in items if item))
+
+
+def argo_steps(doc: dict) -> set[tuple[str, int]]:
+    """The (phase, wave) steps of an Argo CD sync that apply this manifest,
+    leaving out SyncFail, which runs only when a sync fails."""
+    annotations = doc["metadata"].get("annotations") or {}
+    types = [t for t in annotation_csv(doc, ARGO_HOOK) if t in ARGO_HOOK_TYPES]
+    if types == ["Skip"]:
+        return set()
+    if not types:
+        helm = annotation_csv(doc, "helm.sh/hook")
+        types = [HELM_HOOK_PHASES[t] for t in helm if t in HELM_HOOK_PHASES]
+    helm_hook = annotations.get("helm.sh/hook", "crd-install") != "crd-install"
+    hook = ARGO_HOOK in annotations or helm_hook
+    phases = {t for t in types if t in ARGO_PHASES} if hook else {"Sync"}
+    wave = 0
+    for key in ("argocd.argoproj.io/sync-wave", "helm.sh/hook-weight"):
+        try:
+            wave = int(annotations[key])
+            break
+        except (KeyError, ValueError):
+            continue
+    return {(phase, wave) for phase in phases}
+
+
+def argo_order(step: tuple[str, int]) -> tuple[int, int]:
+    return ARGO_PHASES[step[0]], step[1]
+
+
+def references(spec: dict) -> set[tuple[str, str]]:
+    """The Secrets, ConfigMaps and ServiceAccount a pod spec reads."""
+    found = set()
+    if spec.get("serviceAccountName"):
+        found.add(("ServiceAccount", spec["serviceAccountName"]))
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, kind in (
+                ("secretKeyRef", "Secret"),
+                ("secretRef", "Secret"),
+                ("configMapKeyRef", "ConfigMap"),
+                ("configMapRef", "ConfigMap"),
+                ("configMap", "ConfigMap"),
+            ):
+                if isinstance(node.get(key), dict) and node[key].get("name"):
+                    found.add((kind, node[key]["name"]))
+            secret = node.get("secret")
+            if isinstance(secret, dict) and secret.get("secretName"):
+                found.add(("Secret", secret["secretName"]))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(spec)
+    return found
+
+
+def check_bootstrap_order(name: str, docs: list[dict]) -> list[str]:
+    """Helm runs the bootstrap job before an upgrade's pods; Argo CD runs it once
+    per sync, after what it reads and the bundled datastores it waits for, and
+    before the other pods, which need its schema."""
+    failed = []
+    for job in (d for d in docs if d["kind"] == "Job" and component(d) == "bootstrap"):
+        where = f"{name}: Job {job['metadata']['name']}"
+        if "pre-upgrade" not in annotation_csv(job, "helm.sh/hook"):
+            failed.append(f"{where} is not a pre-upgrade hook")
+        steps = argo_steps(job)
+        if len(steps) != 1:
+            failed.append(f"{where}: Argo CD runs it {len(steps)} times per sync")
+        reads = references(pod_spec(job))
+        for step in sorted(steps, key=argo_order):
+            early, late = [], []
+            for doc in docs:
+                ref = (doc["kind"], doc["metadata"]["name"])
+                needed = ref in reads or component(doc) in DATASTORES
+                waiting = doc["kind"] in WORKLOADS and doc is not job and not needed
+                for other in argo_steps(doc):
+                    at = f"{' '.join(ref)} ({other[0]} wave {other[1]})"
+                    if needed and argo_order(other) >= argo_order(step):
+                        early.append(at)
+                    if waiting and argo_order(other) <= argo_order(step):
+                        late.append(at)
+            when = f"{where}: Argo CD runs it in {step[0]} wave {step[1]}"
+            if early:
+                failed.append(f"{when}, not after {', '.join(sorted(early))}")
+            if late:
+                failed.append(f"{when}, not before {', '.join(sorted(late))}")
+    return failed
 
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
@@ -570,7 +681,10 @@ def check_render(name: str, docs: list[dict]) -> list[str]:
     # The collector writes observed attributes (property suggestions) into the
     # index the bootstrap job provisions: its database, as its writer.
     by_component = {component(d): pod_spec(d)["containers"][0] for d in workloads}
-    collector, bootstrap = by_component.get("fi-collector"), by_component.get("bootstrap")
+    collector, bootstrap = (
+        by_component.get("fi-collector"),
+        by_component.get("bootstrap"),
+    )
     if collector and bootstrap:
         writes, provisions = env_values(collector), env_values(bootstrap)
 
@@ -586,7 +700,8 @@ def check_render(name: str, docs: list[dict]) -> list[str]:
             or writes.get("FI_OBSERVED_CATALOG_CH_URL") != writes.get("FI_CH_URL")
             or writes.get("FI_OBSERVED_CATALOG_CH_DATABASE")
             != provisions.get("PROPERTY_CATALOG_DATABASE")
-            or writes.get("FI_OBSERVED_CATALOG_CH_USERNAME") != "observed_catalog_writer"
+            or writes.get("FI_OBSERVED_CATALOG_CH_USERNAME")
+            != "observed_catalog_writer"
             or not writer
             or writer != secret_key(bootstrap, "PROPERTY_CATALOG_CONSUMER_PASSWORD")
         ):
@@ -1202,6 +1317,7 @@ def main() -> int:
     failed = []
     for name, docs in renders.items():
         failed += check_render(name, docs) + check_health_check_policies(name, docs)
+        failed += check_bootstrap_order(name, docs)
         failed += check_alb_health_checks(name, docs)
         # ci/all-components.yaml turns serviceAccount.automountServiceAccountToken on.
         failed += check_token_mounts(name, docs, mounted=name == "all-components")

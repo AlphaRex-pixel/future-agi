@@ -111,7 +111,7 @@ def installed(pg, ch, backend_env):
     source = cdc.inspect_source(cdc._pg_query(pg), source=config.source, tables=tables)
     capture = cdc.install_capture(pg, tables)
     created, _ = cdc.ensure_landing_tables(
-        ch, source, include_usage_schema=config.include_usage_schema
+        ch, source, include_usage_schema=config.include_usage_schema, pg=pg
     )
     assert sorted(created) == sorted(tables) == sorted(capture["new_state"])
     return tables
@@ -181,6 +181,26 @@ def test_drain_activity_lands_captured_writes_in_clickhouse(pg, ch, installed):
     # _connections() closed its Postgres session (and the tick left no lock).
     assert _activity_sessions(pg) == 0
     assert tasks.drain_outbox_cdc._original_func()["outbox_depth"] == 0
+
+
+def test_drain_activity_backfills_a_new_column_into_existing_rows(pg, ch, installed):
+    old = _trace(pg)
+    tasks.drain_outbox_cdc._original_func()  # also completes the snapshots
+    # Django's AddField: existing rows get the default, and no trigger fires.
+    pg.execute(
+        "ALTER TABLE tracer_trace ADD COLUMN sample_rate double precision "
+        "NOT NULL DEFAULT 0.25"
+    )
+    pg.execute("ALTER TABLE tracer_trace ALTER COLUMN sample_rate DROP DEFAULT")
+    new = _trace(pg, sample_rate=0.5)
+
+    result = tasks.drain_outbox_cdc._original_func()
+
+    assert result["errors"] == {} and result["pending_snapshots"] == []
+    assert result["added_columns"] == ["tracer_trace.sample_rate"]
+    # Without the re-copy the old row reads ClickHouse's Float64 default, 0.
+    rows = ch.query("SELECT id, sample_rate FROM tracer_trace FINAL").result_rows
+    assert dict(rows) == {old: 0.25, new: 0.5}
 
 
 def test_reconcile_activity_repairs_writes_capture_never_saw(

@@ -117,7 +117,7 @@ and `CH_PASSWORD` once in use: their rows say what breaks.
 
 | Key | Default | Setups | What it does |
 | --- | --- | --- | --- |
-| `COMPOSE_FILE` | unset: Standalone (`docker-compose.yml`) | S D | Read by Docker Compose. `./bin/install --distributed` writes `docker-compose.distributed.yml` so plain `docker compose` commands keep using Distributed. An install keeps its setup: moving data between Standalone and Distributed is not supported, and the installer refuses. |
+| `COMPOSE_FILE` | unset: Standalone (`docker-compose.yml`) | S D | Read by Docker Compose. `./bin/install --distributed` writes `docker-compose.distributed.yml` so plain `docker compose` commands keep using Distributed. An install keeps its setup: moving data between Standalone and Distributed is not supported, and the installer refuses. A `COMPOSE_FILE` exported in your shell wins over `.env`; the installer stops unless it lists the chosen setup's file and not the other one. |
 | `COMPOSE_PROJECT_NAME` | `futureagi` | S D | Read by Docker Compose; prefixes container, volume and network names. `./bin/install --new-instance` writes `futureagi-2`, `futureagi-3`, ... to run an isolated second copy. Changing it on an existing install points it at new, empty volumes. |
 
 The installer also writes `FUTURE_AGI_VERSION=local` (and, for Distributed,

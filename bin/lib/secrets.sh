@@ -92,8 +92,10 @@ write_secrets() { # fresh (0|1), distributed (0|1), project
     # ClickHouse takes CH_PASSWORD at every start, while Distributed's PeerDB
     # peer keeps the password it was set up with, and the bootstrap re-creates
     # the dictionaries with a new password but not without one. Neither value
-    # is printed.
-    if running_password=$(clickhouse_running_password "$project") \
+    # is printed. "|| exit 1" keeps the ERR trap, which the substitution
+    # inherits through set -E, from reporting "no ClickHouse container" as a
+    # failed install.
+    if running_password=$(clickhouse_running_password "$project" || exit 1) \
       && [[ "$running_password" != "$(compose_env_value CH_PASSWORD)" ]]; then
       preflight_fail "CH_PASSWORD differs from the password this install's ClickHouse runs with. Starting now would change that password, while what was set up with the old one keeps it: on Distributed the Postgres → ClickHouse sync, and, when CH_PASSWORD is now empty, the dictionaries every span insert reads. Set CH_PASSWORD back to the password ClickHouse runs with (empty on installs made before the installer generated one), or see INSTALLATION.md › Secrets that must be changed"
     fi

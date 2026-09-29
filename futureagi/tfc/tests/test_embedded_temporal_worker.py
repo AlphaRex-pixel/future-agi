@@ -18,6 +18,10 @@ from tfc.temporal.embedded import EmbeddedTemporalWorker
 
 pytestmark = pytest.mark.unit
 
+# The autouse fixture below shortens the backoff; tests of the schedule itself
+# need the real one.
+_real_retry_delay = embedded._retry_delay
+
 
 @pytest.fixture(autouse=True)
 def _no_embedded_env(monkeypatch):
@@ -325,6 +329,55 @@ def test_supervise_retries_until_temporal_is_reachable(monkeypatch):
 
     assert len(attempts) == 3
     state = worker.health()
+    assert state["fatal"] is False
+    assert state["consecutive_failures"] == 0
+
+
+@pytest.mark.parametrize(
+    ("failures", "delay"),
+    [
+        (1, 1.0),
+        (2, 2.0),
+        (5, 16.0),
+        (6, 30.0),
+        (1024, 30.0),
+        (1025, 30.0),
+        (10**9, 30.0),
+    ],
+)
+def test_retry_delay_doubles_up_to_thirty_seconds(failures, delay):
+    assert _real_retry_delay(failures) == delay
+
+
+def test_supervise_keeps_retrying_through_a_long_outage(monkeypatch):
+    # With an uncapped exponent, failure 1025 would evaluate 2.0 ** 1024, past the
+    # float range; raised inside the retry handler, that ended the worker thread.
+    delays = []
+
+    def retry_delay(failures):
+        delays.append(_real_retry_delay(failures))
+        return 0.01
+
+    attempts = []
+
+    async def fake_run_workers(self):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise RuntimeError("Failed client connect: connection refused")
+        self._set_state(connected=True, workers_running=True)
+        self._shutdown.set()
+
+    monkeypatch.setattr(embedded, "_retry_delay", retry_delay)
+    monkeypatch.setattr(EmbeddedTemporalWorker, "_run_workers", fake_run_workers)
+    worker = EmbeddedTemporalWorker()
+    worker._consecutive_failures = 1023  # the outage so far
+
+    asyncio.run(worker._supervise())
+
+    assert delays == [30.0, 30.0]  # failures 1024 and 1025
+    assert len(attempts) == 3
+    state = worker.health()
+    assert state["healthy"] is True
     assert state["fatal"] is False
     assert state["consecutive_failures"] == 0
 

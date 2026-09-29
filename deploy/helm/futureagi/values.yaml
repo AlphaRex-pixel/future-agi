@@ -1043,7 +1043,7 @@ codeExecutor:
 # ClickHouse schema, observed-attribute index, CDC, Temporal schedules).
 # -----------------------------------------------------------------------------
 bootstrap:
-  # -- When the job runs on install. `auto`: pre-install when every datastore is external (the app starts on a ready schema), post-install when any is bundled (they must exist first). It always runs pre-upgrade.
+  # -- When the job runs on install. `auto`: pre-install when every datastore is external (the app starts on a ready schema), post-install when any is bundled (they must exist first). It always runs pre-upgrade. Argo CD runs a pre-install job in PreSync, a post-install one after the bundled datastores and before the rest of the release.
   installHook: auto
   # -- Create the observed-attribute index database and its two ClickHouse users (needs CREATE USER and GRANT). `false`: create them yourself.
   propertyCatalog: true

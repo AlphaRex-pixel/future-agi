@@ -12,7 +12,8 @@
   Postgres and ClickHouse. -Distributed records COMPOSE_FILE=docker-compose.distributed.yml
   in .env, so later runs and a plain `docker compose` stay on the distributed stack.
   An existing install keeps its stack: moving one between standalone and distributed
-  is refused, because its data does not carry over.
+  is refused, because its data does not carry over. So is a COMPOSE_FILE set in
+  your shell that does not start the install's stack: Compose reads it over .env.
 
 .PARAMETER Distributed
   Run the Distributed setup, one container per service
@@ -324,6 +325,38 @@ function Save-Mode {
     $script:newComposeSetting = ''
   }
 }
+
+# A COMPOSE_FILE setting with its docker-compose.yml entry swapped for
+# docker-compose.distributed.yml, other entries (overrides) kept. Returns ''
+# when the setting lists no docker-compose.yml. Compose on Windows separates
+# COMPOSE_FILE entries with ';'.
+function Get-DistributedComposeSetting {
+  param([string]$Setting)
+  $found = $false
+  $entries = @()
+  foreach ($entry in ($Setting -split ';')) {
+    if ($entry -match '(^|[\\/])docker-compose\.yml$') {
+      $entry = $entry -replace 'docker-compose\.yml$', 'docker-compose.distributed.yml'
+      $found = $true
+    }
+    $entries += $entry
+  }
+  if ($found) { $entries -join ';' } else { '' }
+}
+
+# The stack a COMPOSE_FILE setting starts: 'standalone' when it lists
+# docker-compose.yml, 'distributed' when it lists docker-compose.distributed.yml,
+# '' when it lists both (Compose merges them) or neither.
+function Get-ComposeSettingStack {
+  param([string]$Setting)
+  $names = @($Setting -split ';' | ForEach-Object { ($_ -split '[\\/]')[-1] })
+  $standalone = $names -contains 'docker-compose.yml'
+  $distributed = $names -contains 'docker-compose.distributed.yml'
+  if ($standalone -and -not $distributed) { 'standalone' }
+  elseif ($distributed -and -not $standalone) { 'distributed' }
+  else { '' }
+}
+
 $distributedSetting = ''
 if ($IsDistributed) {
   $distributedSetting = $composeFileSetting
@@ -331,24 +364,13 @@ if ($IsDistributed) {
     $distributedSetting = 'docker-compose.distributed.yml'
     # An explicit COMPOSE_FILE switches off Compose's automatic loading of
     # docker-compose.override.yml, so carry an existing override along.
-    # Compose on Windows separates COMPOSE_FILE entries with ';'.
     if (Test-Path 'docker-compose.override.yml') { $distributedSetting += ';docker-compose.override.yml' }
     $newComposeSetting = $distributedSetting
   } elseif ($composeFileSetting -notlike '*docker-compose.distributed.yml*') {
-    # Swap the docker-compose.yml entry for the Distributed file; keep the others.
-    $found = $false
-    $entries = @()
-    foreach ($entry in ($composeFileSetting -split ';')) {
-      if ($entry -match '(^|[\\/])docker-compose\.yml$') {
-        $entry = $entry -replace 'docker-compose\.yml$', 'docker-compose.distributed.yml'
-        $found = $true
-      }
-      $entries += $entry
-    }
-    if (-not $found) {
+    $distributedSetting = Get-DistributedComposeSetting $composeFileSetting
+    if (-not $distributedSetting) {
       Die "COMPOSE_FILE=$composeFileSetting in .env lists no docker-compose.yml, so the installer cannot point it at the distributed stack. Add docker-compose.distributed.yml to it yourself, then re-run .\bin\install.ps1."
     }
-    $distributedSetting = $entries -join ';'
     $newComposeSetting = $distributedSetting
   }
 }
@@ -364,6 +386,33 @@ if ($IsDistributed -and -not $wipe) {
     $hint = ''
     if (-not $Distributed) { $hint = ' If you did not ask for the distributed stack, delete the COMPOSE_FILE line from .env and re-run .\bin\install.ps1.' }
     Die "Project $projectName already holds a standalone install. Moving an existing install to the distributed stack is not supported: its data would not carry over. Back up first (INSTALLATION.md > Backups), then re-run with -Distributed -WipeVolumes, which deletes this install's data. To run the distributed stack next to this install, use a second checkout with another COMPOSE_PROJECT_NAME.$hint"
+  }
+}
+
+# Compose takes COMPOSE_FILE from the shell over .env, so a value set there
+# picks the stack of every compose command below, whatever .env records. It
+# has to start the stack chosen above, or the install stops before it records
+# the stack, wipes volumes or generates secrets. The refusals above come
+# first: whatever the shell sets, they stand.
+$shellComposeFile = [Environment]::GetEnvironmentVariable('COMPOSE_FILE')
+if ($null -ne $shellComposeFile) {
+  $installStack, $stackFile, $otherFile = 'standalone', 'docker-compose.yml', 'docker-compose.distributed.yml'
+  if ($IsDistributed) {
+    $installStack, $stackFile, $otherFile = 'distributed', 'docker-compose.distributed.yml', 'docker-compose.yml'
+  }
+  $shellStack = Get-ComposeSettingStack $shellComposeFile
+  if ($shellStack -ne $installStack) {
+    # A plain re-run chooses from .env and the volumes, which may not record
+    # -Distributed yet.
+    $rerun = '.\bin\install.ps1'
+    if ($Distributed) { $rerun += ' -Distributed' }
+    $shellHint = ''
+    if ($shellStack -eq 'standalone') {
+      $shellHint = " To keep your other compose files, set COMPOSE_FILE=$(Get-DistributedComposeSetting $shellComposeFile) instead."
+    } elseif ($shellStack -eq 'distributed' -and -not $standaloneAppContainer -and -not $standaloneAppVolume) {
+      $shellHint = ' For the distributed stack, run .\bin\install.ps1 -Distributed.'
+    }
+    Die "COMPOSE_FILE=$shellComposeFile is set in your shell, and Docker Compose uses it instead of .env. The installer chose the $installStack stack for project $projectName, which takes $stackFile without $otherFile. Run 'Remove-Item Env:COMPOSE_FILE' (and remove it wherever your profile or system settings set it), then re-run $rerun.$shellHint"
   }
 }
 
@@ -390,6 +439,9 @@ if ($IsDistributed) {
   } else {
     Ok "Mode: Standalone (docker-compose.yml) -- pass -Distributed for one container per service"
   }
+}
+if ($shellComposeFile) {
+  Ok "Compose uses COMPOSE_FILE=$shellComposeFile from your shell, which selects the same stack"
 }
 if (-not (Test-Path $ComposePath)) {
   Die "$ComposePath missing -- are you running this from a complete checkout?"
