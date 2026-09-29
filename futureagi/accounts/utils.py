@@ -192,7 +192,10 @@ def is_disposable_email_domain(domain):
     domain_parts = domain.split(".")
     for i in range(len(domain_parts) - 1):
         suffix = ".".join(domain_parts[i:])
-        if suffix in DISPOSABLE_EMAIL_DOMAINS or suffix in EXTRA_DISPOSABLE_EMAIL_DOMAINS:
+        if (
+            suffix in DISPOSABLE_EMAIL_DOMAINS
+            or suffix in EXTRA_DISPOSABLE_EMAIL_DOMAINS
+        ):
             return True
     return False
 
