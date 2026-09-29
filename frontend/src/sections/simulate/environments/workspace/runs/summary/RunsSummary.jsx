@@ -1,7 +1,7 @@
 import PropTypes from "prop-types";
 import { useState } from "react";
 import {
-  Box, Stack, Typography, Button, TextField, MenuItem, Checkbox, ListItemText,
+  Box, Stack, Typography, Button, TextField, MenuItem, Checkbox, ListItemText, CircularProgress,
 } from "@mui/material";
 import Iconify from "src/components/iconify";
 import CustomTooltip from "src/components/tooltip";
@@ -19,7 +19,7 @@ import SummaryTable from "./SummaryTable";
 const MIN_SUMMARY_PX = 760;
 
 export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
-  const { rows, rowsChrono, evals, series } = useRunsSummary(env, envState);
+  const { rows, rowsChrono, evals, series, isLoading } = useRunsSummary(env, envState);
   const scenarioCount = envState.scenarios?.length ?? 0;
 
   // Which eval lines to draw. Defaults to all; the last one cannot be unticked
@@ -37,6 +37,16 @@ export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
     if (!ids.length) return; // keep at least one line
     setHiddenIds(evals.filter((e) => !ids.includes(e.id)).map((e) => e.id));
   };
+
+  // A deep link to ?tab=runs keeps the tab while the runs load; show that
+  // they are loading rather than an empty summary.
+  if (isLoading && rows.length === 0) {
+    return (
+      <Stack alignItems="center" sx={{ py: 6 }}>
+        <CircularProgress size={20} />
+      </Stack>
+    );
+  }
 
   return (
     // The tab's height: the header, legend and graph keep their size and the

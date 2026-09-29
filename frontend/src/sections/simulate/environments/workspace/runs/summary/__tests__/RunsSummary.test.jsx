@@ -42,8 +42,8 @@ const RUNS = [
 const env = { id: "env-1", name: "Refund Support", version: "v3" };
 const envState = { scenarios: Array.from({ length: 20 }, (_, i) => ({ id: `s${i}` })) };
 
-function renderSummary(props = {}, runs = RUNS) {
-  useEnvironmentRuns.mockReturnValue({ runs, isLoading: false });
+function renderSummary(props = {}, runs = RUNS, isLoading = false) {
+  useEnvironmentRuns.mockReturnValue({ runs, isLoading });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
@@ -54,6 +54,12 @@ function renderSummary(props = {}, runs = RUNS) {
 
 describe("RunsSummary", () => {
   beforeEach(() => useEnvironmentRuns.mockReset());
+
+  it("shows a spinner, not an empty summary, while the runs load", () => {
+    renderSummary({}, [], true);
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    expect(screen.queryByText("Simulations summary")).toBeNull();
+  });
 
   it("heads the summary with the run and scenario counts", () => {
     renderSummary();
