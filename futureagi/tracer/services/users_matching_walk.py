@@ -1152,7 +1152,7 @@ def _tail_has_no_user(
 
 
 def _witness_candidates(
-    manager: Any,
+    manager: UsersListManager,
 ) -> list[tuple[MatchingActivityWitness, WalkedTypedFilter | None]]:
     """The eligible witnesses a first page costs: none when fewer than two.
 
@@ -1846,7 +1846,9 @@ def witness_fingerprint(witness: MatchingActivityWitness) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
 
 
-def _bound_witness(manager: Any, fingerprint: Any) -> MatchingActivityWitness:
+def _bound_witness(
+    manager: UsersListManager, fingerprint: Any
+) -> MatchingActivityWitness:
     """The eligible witness a cursor's ``fingerprint`` names, now in use.
 
     Selected, never re-chosen: a cursor's keys and coverage speak for the
