@@ -19,7 +19,7 @@ def test_a_background_reads_as_what_the_caller_is_heard_over():
         ]
     )
 
-    assert labels["transit"] == "Airport / station"
+    assert labels["transit"] == "Station / transit"
     assert labels["quiet line"] == "Off"
     assert labels["none"] == "No attack"
 
@@ -137,3 +137,15 @@ def test_a_sub_goal_reads_as_words():
 
     assert labels["exact_opening_greeting"] == "Exact opening greeting"
     assert labels["spoken_pin_guidance"] == "Spoken pin guidance"
+
+
+def test_every_place_the_catalogue_can_play_can_be_chosen_in_the_editor():
+    import json
+    from pathlib import Path
+
+    from simulate.services.harness_scenarios import NOISE_LABELS
+
+    catalogue = Path(__file__).resolve().parents[1] / "data" / "background_sounds.json"
+    places = {clip["environment"] for clip in json.loads(catalogue.read_text(encoding="utf-8"))}
+
+    assert places <= set(NOISE_LABELS)
