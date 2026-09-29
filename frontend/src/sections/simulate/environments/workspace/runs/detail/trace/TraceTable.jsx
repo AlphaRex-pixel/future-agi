@@ -26,7 +26,9 @@ import {
   numCellSx,
   bodyCellSx,
   runOutcome,
+  CALL_STATUS_CHIPS,
 } from "./traceTable.constants";
+import StatusChip from "../../StatusChip";
 import { MetricValue, Score, Field } from "./traceCells";
 import TraceGroupHeaderRow from "./TraceGroupHeaderRow";
 
@@ -209,6 +211,23 @@ export default function TraceTable({
           </TableCell>
         )}
 
+        {show("status") && (
+          <TableCell sx={bodyCellSx} onClick={() => onOpen(t)}>
+            {CALL_STATUS_CHIPS[t.executionStatus] ? (
+              <Box sx={{ display: "inline-flex" }}>
+                <StatusChip
+                  status={CALL_STATUS_CHIPS[t.executionStatus].chip}
+                  label={CALL_STATUS_CHIPS[t.executionStatus].label}
+                />
+              </Box>
+            ) : (
+              <Typography sx={{ typography: "s3", color: "text.disabled" }}>
+                -
+              </Typography>
+            )}
+          </TableCell>
+        )}
+
         {show("persona") && (
           <TableCell sx={bodyCellSx} onClick={() => onOpen(t)}>
             {t.personaDetails?.name ? (
@@ -365,6 +384,11 @@ export default function TraceTable({
               {show("callDetails") && (
                 <TableCell sx={{ ...headCellSx, width: 200 }}>
                   Run details
+                </TableCell>
+              )}
+              {show("status") && (
+                <TableCell sx={{ ...headCellSx, width: 120 }}>
+                  Status
                 </TableCell>
               )}
               {show("persona") && (

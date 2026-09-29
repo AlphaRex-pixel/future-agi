@@ -121,3 +121,55 @@ describe("TraceTable — sticky header and group rows", () => {
     );
   });
 });
+
+describe("TraceTable — call status column", () => {
+  const withStatus = (id, executionStatus) => ({ ...row(id), executionStatus });
+  const statusGroups = [
+    {
+      label: "A",
+      count: 3,
+      rows: [
+        withStatus("s1", "pending"),
+        withStatus("s2", "ongoing"),
+        withStatus("s3", "completed"),
+      ],
+      agg: {},
+    },
+  ];
+
+  it("sits between Run details and Persona", () => {
+    render(table());
+    const heads = [...document.querySelectorAll("thead th")].map((th) =>
+      th.textContent.trim(),
+    );
+    expect(heads.slice(0, 3)).toEqual(["Run details", "Status", "Persona"]);
+  });
+
+  it("shows each call's lifecycle status", () => {
+    render(table({ groups: statusGroups, activeCallId: "s1" }));
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.getByText("Completed")).toBeInTheDocument();
+  });
+
+  it("summarises how many calls in the group have completed", () => {
+    render(table({ groups: statusGroups }));
+    expect(screen.getByText("1/3 completed")).toBeInTheDocument();
+  });
+
+  it("shows no completed count while only some of the group's calls are loaded", () => {
+    render(table({ groups: [{ ...statusGroups[0], count: 25 }] }));
+    expect(screen.queryByText(/completed$/)).toBeNull();
+  });
+});
+
+describe("TraceTable — group row grid", () => {
+  it("keeps the column dividers on the group row", () => {
+    render(table());
+    const cells = screen.getByText("A").closest("tr").querySelectorAll("td");
+    expect(cells.length).toBeGreaterThan(1);
+    [...cells].slice(1).forEach((td) => {
+      expect(window.getComputedStyle(td).borderLeftStyle).toBe("solid");
+    });
+  });
+});
