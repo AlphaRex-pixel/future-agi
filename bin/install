@@ -209,7 +209,8 @@ if [[ "$(env_value OSS_RETURN_PASSWORD_RESET_LINK "" | tr '[:upper:]' '[:lower:]
 fi
 
 telemetry_is_off() {
-  local value="${FUTURE_AGI_TELEMETRY_DISABLED:-$(env_value FUTURE_AGI_TELEMETRY_DISABLED "")}"
+  local value
+  value=$(compose_env_value FUTURE_AGI_TELEMETRY_DISABLED)
   [[ "$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')" =~ ^(1|true|yes|on)$ ]]
 }
 
@@ -252,13 +253,8 @@ next_free_project_name() {
 # this run's compose commands: a value exported in the shell would win over
 # .env.
 set_project_name_in_env() {
-  local name="$1"
-  if grep -Eq '^COMPOSE_PROJECT_NAME=' .env; then
-    sed_inplace -E "s|^COMPOSE_PROJECT_NAME=.*|COMPOSE_PROJECT_NAME=${name}|" .env
-  else
-    printf "\nCOMPOSE_PROJECT_NAME=%s\n" "$name" >> .env
-  fi
-  export COMPOSE_PROJECT_NAME="$name"
+  set_env_var COMPOSE_PROJECT_NAME "$1"
+  export COMPOSE_PROJECT_NAME="$1"
 }
 
 # ---------------- this project's existing state ----------------
@@ -1055,7 +1051,7 @@ if [[ -n "$USER_EMAIL" ]]; then
   # (up to three requests). Unless a timeout is configured, cap each request
   # at 2 s, so blocked egress costs seconds instead of half a minute; the
   # scheduled telemetry job retries a registration that failed here.
-  telemetry_timeout="${FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS:-$(env_value FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS 2)}"
+  telemetry_timeout=$(compose_env_value FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS 2)
   # The password goes on stdin, never on a command line: in Standalone this
   # runs in the app container, where eval code can read /proc/*/cmdline.
   if cu_out=$(printf '%s\n' "$USER_PASS" | $DC exec -T -e "FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS=${telemetry_timeout}" \

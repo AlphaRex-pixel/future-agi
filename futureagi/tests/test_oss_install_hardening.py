@@ -758,7 +758,7 @@ def test_power_shell_installer_pipes_the_admin_password_to_create_user(
             f"$UserPass = '{ADMIN_PASSWORD}'",
             "$AccountCreated = 'created'; $AccountExists = 'exists'",
             "$AccountFailed = 'failed'; $AccountState = 'skipped'",
-            "function Get-EnvValue { param($n) '' }",
+            "function Get-ComposeEnvValue { param($n, $default) $default }",
             "function Step { param($m) }",
             "function Ok { param($m) Write-Output $m }",
             "function Warn { param($m) Write-Output $m }",
@@ -1512,6 +1512,53 @@ def test_a_project_name_exported_in_the_shell_wins_over_env(tmp_path: Path) -> N
     # An existing install: its secrets are never generated.
     assert "PG_PASSWORD" not in _env_values(repo)
     assert "still use the defaults published in this repository" in stderr
+
+
+def test_power_shell_installer_takes_the_project_name_exported_in_the_shell(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("pwsh is unavailable")
+    stub = tmp_path / "docker"
+    stub.write_text(
+        '#!/bin/bash\n[ "$1 $2" = "volume inspect" ] || exit 1\n'
+        'case " $FAGI_STUB_VOLUMES " in *" $3 "*) exit 0 ;; esac\nexit 1\n',
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    (tmp_path / ".env").write_text("COMPOSE_PROJECT_NAME=futureagi\n", encoding="utf-8")
+    script = "\n".join(
+        [
+            f". '{INSTALL_LIB / 'env.ps1'}'; . '{INSTALL_LIB / 'secrets.ps1'}'",
+            "function Invoke-Probe { param($Command) & $Command }",
+            "function Die { param($m) throw $m }",
+            "$WipeVolumes = $false",
+            _power_shell_section(_read(INSTALL_PS1), "this project's existing state"),
+            "Write-Output $projectName; $existingVolumes",
+        ]
+    )
+
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", script],
+        cwd=tmp_path,
+        env={
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "HOME": str(tmp_path),
+            "COMPOSE_PROJECT_NAME": "custom",
+            "FAGI_STUB_VOLUMES": "custom_app-data custom_postgres-data",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == [
+        "custom",
+        "custom_app-data",
+        "custom_postgres-data",
+    ]
 
 
 def test_a_new_instance_next_to_existing_volumes_gets_fresh_secrets(

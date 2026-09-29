@@ -9,9 +9,7 @@ function Show-Summary {
   if (-not $collectorHttpPort) { $collectorHttpPort = 4318 }
   # The URL SDKs send traces to, as the compose files give it to the app.
   $localCollectorUrl = "http://localhost:$collectorHttpPort"
-  $collectorUrl = $env:FI_COLLECTOR_PUBLIC_URL
-  if (-not $collectorUrl) { $collectorUrl = Get-EnvValue 'FI_COLLECTOR_PUBLIC_URL' }
-  if (-not $collectorUrl) { $collectorUrl = $localCollectorUrl }
+  $collectorUrl = Get-ComposeEnvValue 'FI_COLLECTOR_PUBLIC_URL' $localCollectorUrl
   $gatewayPort = Get-EnvValue 'AGENTCC_GATEWAY_PORT'
   if (-not $gatewayPort) { $gatewayPort = 8090 }
   $uiUrl = "http://localhost:$FrontendPort"

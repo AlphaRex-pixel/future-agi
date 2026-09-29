@@ -22,6 +22,16 @@ function Get-EnvValue {
   if ($line) { ($line -split '=', 2)[1] } else { '' }
 }
 
+# Var as Compose resolves it: exported in the shell, else from .env, else
+# Default.
+function Get-ComposeEnvValue {
+  param([string]$Var, [string]$Default = '')
+  $value = [Environment]::GetEnvironmentVariable($Var)
+  if (-not $value) { $value = Get-EnvValue $Var }
+  if (-not $value) { $value = $Default }
+  $value
+}
+
 function Set-EnvValue {
   param([string]$Var, [string]$Val)
   $lines = Read-EnvLines

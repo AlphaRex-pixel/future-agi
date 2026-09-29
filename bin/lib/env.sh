@@ -11,12 +11,17 @@ env_value() { # VAR [DEFAULT]
   printf '%s' "${value:-${2:-}}"
 }
 
-# The Compose project, resolved as Compose does: the environment, then .env,
-# then the compose files' `name:`. bin/install --new-instance writes
-# futureagi-2, -3, ... to .env.
+# VAR as Compose resolves it: exported in the shell, else from .env, else
+# DEFAULT.
+compose_env_value() { # VAR [DEFAULT]
+  local value="${!1:-}"
+  printf '%s' "${value:-$(env_value "$1" "${2:-}")}"
+}
+
+# The Compose project: the environment, then .env, then the compose files'
+# `name:`. bin/install --new-instance writes futureagi-2, -3, ... to .env.
 compose_project_name() {
-  local name="${COMPOSE_PROJECT_NAME:-$(env_value COMPOSE_PROJECT_NAME)}"
-  printf '%s' "${name:-futureagi}"
+  compose_env_value COMPOSE_PROJECT_NAME futureagi
 }
 
 # Portable in-place sed (BSD on mac, GNU on linux).

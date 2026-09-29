@@ -76,10 +76,12 @@ dc() { docker compose -p "$PROJECT" "${FILES[@]}" "$@"; }
 installed() { docker volume inspect "${PROJECT}_postgres-data" >/dev/null 2>&1; }
 
 print_urls() {
-  local ui="${FRONTEND_PORT:-$(env_value FRONTEND_PORT)}" api="${BACKEND_PORT:-$(env_value BACKEND_PORT)}"
+  local ui api
+  ui=$(compose_env_value FRONTEND_PORT 3000)
+  api=$(compose_env_value BACKEND_PORT 8000)
   say ""
-  say "  ${BOLD}UI${RESET}    http://localhost:${ui:-3000}   ${DIM}(Vite, hot module replacement)${RESET}"
-  say "  ${BOLD}API${RESET}   http://localhost:${api:-8000}   ${DIM}(reloads on save under futureagi/)${RESET}"
+  say "  ${BOLD}UI${RESET}    http://localhost:${ui}   ${DIM}(Vite, hot module replacement)${RESET}"
+  say "  ${BOLD}API${RESET}   http://localhost:${api}   ${DIM}(reloads on save under futureagi/)${RESET}"
   say "  ${DIM}Logs: ./bin/dev logs   Shell: ./bin/dev shell   Stop: ./bin/dev down${RESET}"
 }
 

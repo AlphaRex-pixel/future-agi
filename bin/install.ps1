@@ -205,8 +205,7 @@ if ((Get-EnvValue 'OSS_RETURN_PASSWORD_RESET_LINK') -eq 'true') {
 }
 
 function Test-TelemetryOff {
-  $value = $env:FUTURE_AGI_TELEMETRY_DISABLED
-  if (-not $value) { $value = Get-EnvValue 'FUTURE_AGI_TELEMETRY_DISABLED' }
+  $value = Get-ComposeEnvValue 'FUTURE_AGI_TELEMETRY_DISABLED'
   return ("$value" -match '^(1|true|yes|on)$')
 }
 
@@ -238,10 +237,8 @@ function Show-TelemetryNotice {
 # install, and of which stack. Deletion happens only behind the explicit
 # -WipeVolumes switch and targets exact Compose volume names; no wildcard or
 # broad Docker cleanup command is used.
-# Resolved as Compose does: the environment, then .env, then `name:`.
-$projectName = $env:COMPOSE_PROJECT_NAME
-if (-not $projectName) { $projectName = Get-EnvValue 'COMPOSE_PROJECT_NAME' }
-if (-not $projectName) { $projectName = 'futureagi' }
+# The environment, then .env, then the compose files' `name:`.
+$projectName = Get-ComposeEnvValue 'COMPOSE_PROJECT_NAME' 'futureagi'
 $persistentVolumeSuffixes = @(
   'app-data',
   'postgres-data',
@@ -982,9 +979,7 @@ if ($UserEmail) {
   # (up to three requests). Unless a timeout is configured, cap each request
   # at 2 s, so blocked egress costs seconds instead of half a minute; the
   # scheduled telemetry job retries a registration that failed here.
-  $telemetryTimeout = $env:FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS
-  if (-not $telemetryTimeout) { $telemetryTimeout = Get-EnvValue 'FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS' }
-  if (-not $telemetryTimeout) { $telemetryTimeout = 2 }
+  $telemetryTimeout = Get-ComposeEnvValue 'FUTURE_AGI_TELEMETRY_TIMEOUT_SECONDS' '2'
   # The password goes on stdin, never on a command line: in Standalone this
   # runs in the app container, where eval code can read /proc/*/cmdline.
   # Piped as UTF-8 (Windows PowerShell 5.1 pipes ASCII); stderr is output

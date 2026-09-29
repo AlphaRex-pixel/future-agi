@@ -32,7 +32,7 @@ print_summary() { # frontend port, backend port
 
   collector_http_port=$(env_value FI_COLLECTOR_OTLP_HTTP_PORT 4318)
   # The URL SDKs send traces to, as the compose files give it to the app.
-  collector_url="${FI_COLLECTOR_PUBLIC_URL:-$(env_value FI_COLLECTOR_PUBLIC_URL "http://localhost:${collector_http_port}")}"
+  collector_url=$(compose_env_value FI_COLLECTOR_PUBLIC_URL "http://localhost:${collector_http_port}")
   gateway_port=$(env_value AGENTCC_GATEWAY_PORT 8090)
   ui_url="http://localhost:${frontend_port}"
   upgrade_cmd="git pull && ./bin/install"
