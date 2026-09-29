@@ -25,7 +25,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from threading import Lock
 from time import monotonic
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 import structlog
@@ -62,7 +62,10 @@ from tracer.services.clickhouse.query_builders.session_filters import (
     SESSION_ID_FILTER_COLS,
     build_session_id_filter_clause,
 )
-from tracer.services.clickhouse.query_builders.user_list import UserListQueryBuilder
+from tracer.services.clickhouse.query_builders.user_list import (
+    MembershipTerm,
+    UserListQueryBuilder,
+)
 from tracer.services.clickhouse.read_budget import (
     ReadDeadlineExceeded,
     is_clickhouse_query_size_error,
@@ -3861,7 +3864,7 @@ def _user_membership_parts(
     *,
     project_id: str,
     namespace: str = "user_member",
-) -> tuple[tuple[str, ...], str, dict[str, Any], tuple[tuple[str, str, str], ...]]:
+) -> tuple[tuple[str, ...], str, dict[str, Any], tuple[MembershipTerm, ...]]:
     """Match independent leaves across a user's complete latest-live spans.
 
     Attribute negatives follow UsersListManager's collection semantics: a
@@ -3874,14 +3877,12 @@ def _user_membership_parts(
 
     Returns the per-span flags (``(predicate) AS alias``), the per-user
     condition (the terms joined by AND), the parameters, and the terms
-    themselves as ``(alias, predicate, comparison)``: each term is
-    ``countIf(alias) <comparison>`` over ``predicate``, so a caller can tell an
-    existence term (``> 0``) from an absence term (``= 0``) without parsing
-    the SQL.
+    themselves (``MembershipTerm``), so a caller can tell an existence term
+    from an absence term without parsing the SQL.
     """
     clauses: list[str] = []
     row_predicates: list[str] = []
-    terms: list[tuple[str, str, str]] = []
+    terms: list[MembershipTerm] = []
     params: dict[str, Any] = {}
     negative_ops = {
         "not_equals": "equals",
@@ -3903,10 +3904,10 @@ def _user_membership_parts(
             params[new_name] = value
         return predicate
 
-    def group_match(predicate: str, comparison: str) -> str:
+    def group_match(predicate: str, comparison: Literal["> 0", "= 0"]) -> str:
         alias = f"{namespace}_match_{len(row_predicates)}"
         row_predicates.append(f"({predicate}) AS {alias}")
-        terms.append((alias, predicate, comparison))
+        terms.append(MembershipTerm(alias, predicate, comparison))
         return f"countIf({alias}) {comparison}"
 
     for index, item in enumerate(filters):
@@ -3957,7 +3958,7 @@ def _user_membership_parts(
 
 def compile_user_membership_leaf(
     item: dict[str, Any], *, project_id: str, namespace: str
-) -> tuple[tuple[str, ...], str, dict[str, Any], tuple[tuple[str, str, str], ...]]:
+) -> tuple[tuple[str, ...], str, dict[str, Any], tuple[MembershipTerm, ...]]:
     """The users graph's own membership SQL for one filter leaf.
 
     ``_user_membership_parts`` for ``[item]`` under ``namespace``: the per-span

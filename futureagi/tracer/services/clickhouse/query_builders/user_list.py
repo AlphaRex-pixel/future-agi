@@ -3,7 +3,7 @@
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from tracer.services.clickhouse.eval_logger_table import eval_logger_source
 from tracer.services.clickhouse.list_cursor import canonical_filter_leaf
@@ -42,6 +42,18 @@ USER_NATIVE_SPAN_DIMENSIONS: dict[str, str] = {
         "trace_name",
     )
 }
+
+
+class MembershipTerm(NamedTuple):
+    """One ``countIf(alias) <comparison>`` term of a user membership condition.
+
+    ``> 0`` is an existence term, ``= 0`` an absence term
+    (``exact_graph_reads.compile_user_membership_leaf``).
+    """
+
+    alias: str
+    predicate: str
+    comparison: Literal["> 0", "= 0"]
 
 
 class UnsupportedBoundedUserListQuery(ValueError):
@@ -2001,7 +2013,7 @@ class UserListQueryBuilder(BaseQueryBuilder):
 
     @staticmethod
     def _native_witness_flag(
-        terms: tuple[tuple[str, str, str], ...],
+        terms: tuple[MembershipTerm, ...],
     ) -> tuple[str, str] | None:
         """``(alias, predicate)`` of a native leaf's witness flag.
 
@@ -2021,10 +2033,10 @@ class UserListQueryBuilder(BaseQueryBuilder):
         ``None`` for any other condition with no existence term.
         """
 
-        for alias, predicate, comparison in terms:
-            if comparison.strip() == "> 0":
-                return alias, predicate
-        if len(terms) == 1 and terms[0][2].strip() == "= 0":
+        for term in terms:
+            if term.comparison == "> 0":
+                return term.alias, term.predicate
+        if len(terms) == 1 and terms[0].comparison == "= 0":
             alias, predicate, _comparison = terms[0]
             return f"{alias}_absent", f"NOT ifNull(({predicate}), 0)"
         return None
