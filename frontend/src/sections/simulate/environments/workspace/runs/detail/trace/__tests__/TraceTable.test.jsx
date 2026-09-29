@@ -1,0 +1,175 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+
+import TraceTable from "../TraceTable";
+
+const row = (id) => ({
+  id,
+  scenario: `Scenario ${id}`,
+  goal: `Goal ${id}`,
+  status: "passed",
+  critical: false,
+  csat: 5,
+  turns: 3,
+  latencyMs: 100,
+  tokens: null,
+  durationMs: 1000,
+  personaDetails: { name: "P", voice: null, age: null, traits: [] },
+  evalResults: [],
+});
+const group = (label, ids) => ({
+  label,
+  count: ids.length,
+  rows: ids.map(row),
+  agg: {},
+});
+const PAGE1 = [group("A", ["a1", "a2"]), group("B", ["b1", "b2"])];
+// Group-by-goal repeats labels across pages.
+const PAGE2 = [group("A", ["a3", "a4"]), group("B", ["b3", "b4"])];
+
+const table = (props) => (
+  <TraceTable groups={PAGE1} evals={[]} onOpen={vi.fn()} {...props} />
+);
+const activeRow = () => document.querySelector('tr[aria-selected="true"]');
+
+// The open call's row must end up on screen — groups start collapsed, and the
+// row only mounts once its group expands, so the scroll has to wait for it.
+describe("TraceTable — the open call's row scrolls into view", () => {
+  let scrollIntoView;
+  beforeEach(() => {
+    scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+  });
+
+  it("when a call is first opened in a group that starts collapsed", () => {
+    render(table({ activeCallId: "a2" }));
+    expect(activeRow()).not.toBeNull();
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it("when a step lands in another, collapsed group", () => {
+    const { rerender } = render(table({ activeCallId: "a2" }));
+    scrollIntoView.mockClear();
+
+    rerender(table({ activeCallId: "b1" }));
+
+    expect(activeRow()).toHaveTextContent("Scenario b1");
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it("when a step crosses a page into a group that is still collapsed", () => {
+    const { rerender } = render(table({ activeCallId: "a2" }));
+    scrollIntoView.mockClear();
+
+    rerender(table({ groups: PAGE2, activeCallId: "b3" }));
+
+    expect(activeRow()).toHaveTextContent("Scenario b3");
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it("but not again on a live refresh of the same call", () => {
+    const { rerender } = render(table({ activeCallId: "a2" }));
+    scrollIntoView.mockClear();
+
+    for (let i = 0; i < 3; i += 1) {
+      rerender(
+        table({ groups: PAGE1.map((g) => ({ ...g })), activeCallId: "a2" }),
+      );
+    }
+
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("and a group the user collapses stays collapsed across refreshes", () => {
+    const { rerender } = render(table({ activeCallId: "a2" }));
+
+    fireEvent.click(screen.getAllByText("A")[0]);
+    rerender(
+      table({ groups: PAGE1.map((g) => ({ ...g })), activeCallId: "a2" }),
+    );
+
+    expect(activeRow()).toBeNull();
+  });
+});
+
+// Scrolling a long run must keep the column names and the current group's
+// scores on screen, or the eval columns become unlabeled numbers.
+describe("TraceTable — sticky header and group rows", () => {
+  const position = (el) => window.getComputedStyle(el).position;
+
+  it("pins every column header cell", () => {
+    render(table());
+    const heads = document.querySelectorAll("thead th");
+    expect(heads.length).toBeGreaterThan(0);
+    heads.forEach((th) => expect(position(th)).toBe("sticky"));
+  });
+
+  it("pins every group row just under the header", () => {
+    render(table({ activeCallId: "a1" }));
+    ["A", "B"].forEach((label) => {
+      const td = screen.getByText(label).closest("td");
+      expect(position(td)).toBe("sticky");
+      expect(window.getComputedStyle(td).top).toBe("44px");
+    });
+  });
+
+  it("scrolls inside the table box, not the page", () => {
+    render(table());
+    const scroller = document.querySelector("table").parentElement;
+    expect(window.getComputedStyle(scroller).getPropertyValue("overflow")).toBe(
+      "auto",
+    );
+  });
+});
+
+describe("TraceTable — call status column", () => {
+  const withStatus = (id, executionStatus) => ({ ...row(id), executionStatus });
+  const statusGroups = [
+    {
+      label: "A",
+      count: 3,
+      rows: [
+        withStatus("s1", "pending"),
+        withStatus("s2", "ongoing"),
+        withStatus("s3", "completed"),
+      ],
+      agg: {},
+    },
+  ];
+
+  it("sits between Run details and Persona", () => {
+    render(table());
+    const heads = [...document.querySelectorAll("thead th")].map((th) =>
+      th.textContent.trim(),
+    );
+    expect(heads.slice(0, 3)).toEqual(["Run details", "Status", "Persona"]);
+  });
+
+  it("shows each call's lifecycle status", () => {
+    render(table({ groups: statusGroups, activeCallId: "s1" }));
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.getByText("Completed")).toBeInTheDocument();
+  });
+
+  it("summarises how many calls in the group have completed", () => {
+    render(table({ groups: statusGroups }));
+    expect(screen.getByText("1/3 completed")).toBeInTheDocument();
+  });
+
+  it("shows no completed count while only some of the group's calls are loaded", () => {
+    render(table({ groups: [{ ...statusGroups[0], count: 25 }] }));
+    expect(screen.queryByText(/completed$/)).toBeNull();
+  });
+});
+
+describe("TraceTable — group row grid", () => {
+  it("keeps the column dividers on the group row", () => {
+    render(table());
+    const cells = screen.getByText("A").closest("tr").querySelectorAll("td");
+    expect(cells.length).toBeGreaterThan(1);
+    [...cells].slice(1).forEach((td) => {
+      expect(window.getComputedStyle(td).borderLeftStyle).toBe("solid");
+    });
+  });
+});
