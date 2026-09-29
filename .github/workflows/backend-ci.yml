@@ -39,6 +39,7 @@ jobs:
           filters: |
             backend:
               - 'futureagi/**'
+              - 'api_contracts/gateway/provider-url-policy.json'
               - 'docker-compose*.yml'
               - 'fi-collector/Dockerfile'
               - 'bin/install*'
