@@ -1340,6 +1340,9 @@ LOGIN_ERROR_CODES = {
     "LOGIN_UNEXPECTED_ERROR": [
         "An unexpected error occurred during login. Please try again."
     ],
+    "LOGIN_SERVICE_UNAVAILABLE": [
+        "Sign-in is temporarily unavailable. Please try again in a moment."
+    ],
     "LOGIN_PASSWORD_RESET_RATE_LIMITED": [
         "Too many password reset requests. Please try again later."
     ],
