@@ -11,7 +11,10 @@ from tracer.services.clickhouse.query_builders.base import (
     BaseQueryBuilder,
     _unix_microseconds,
 )
-from tracer.services.clickhouse.query_builders.filters import EvalFilterMetadata
+from tracer.services.clickhouse.query_builders.filters import (
+    ClickHouseFilterBuilder,
+    EvalFilterMetadata,
+)
 from tracer.services.clickhouse.v2.id_remap_sql import (
     bounded_survivor_map_subquery,
     literal_survivor_map_subquery,
@@ -26,15 +29,18 @@ from tracer.services.clickhouse.v2.id_remap_sql import (
 # users graph aggregates — instead of being looked up in the span attribute
 # maps, where a native column has no key and every user reads NULL.
 USER_NATIVE_SPAN_DIMENSIONS: dict[str, str] = {
-    "status": "status",
-    "model": "model",
-    "provider": "provider",
-    "observation_type": "observation_type",
-    "span_kind": "observation_type",
-    "node_type": "observation_type",
-    "name": "name",
-    "span_name": "name",
-    "trace_name": "trace_name",
+    column_id: ClickHouseFilterBuilder.SYSTEM_METRIC_MAP[column_id]
+    for column_id in (
+        "status",
+        "model",
+        "provider",
+        "observation_type",
+        "span_kind",
+        "node_type",
+        "name",
+        "span_name",
+        "trace_name",
+    )
 }
 
 

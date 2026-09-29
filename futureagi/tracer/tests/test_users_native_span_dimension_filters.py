@@ -65,7 +65,6 @@ def manager_for(*filters):
 
 def test_native_dimensions_are_the_span_compilers_own_columns():
     for column_id, column in USER_NATIVE_SPAN_DIMENSIONS.items():
-        assert ClickHouseFilterBuilder.SYSTEM_METRIC_MAP[column_id] == column
         assert column_id not in UserListQueryBuilderV2.OUTPUT_FILTER_MAP
         assert column in ClickHouseFilterBuilder._CASE_INSENSITIVE_COLUMNS
 
