@@ -407,7 +407,7 @@ def _run_environment(user, workspace, key):
 
 
 @pytest.mark.django_db
-def test_dropping_a_scenario_that_has_run_hides_it_and_keeps_the_history(
+def test_dropping_a_scenario_that_has_run_keeps_its_row_for_the_history(
     user, workspace
 ):
     from simulate.models import HostedHarnessExecution, HostedHarnessScenario
@@ -420,8 +420,11 @@ def test_dropping_a_scenario_that_has_run_hides_it_and_keeps_the_history(
 
     index_scenarios(environment, [{"name": NAMES[0]}], prune=True)
 
+    # A selected run's calls read their scenario through this row, so it stays.
     visible = HostedHarnessScenario.no_workspace_objects.filter(job=environment)
-    assert [row.scenario_key for row in visible] == [_key(NAMES[0])]
+    assert sorted(row.scenario_key for row in visible) == sorted(
+        _key(name) for name in NAMES[:2]
+    )
     assert HostedHarnessExecution.no_workspace_objects.filter(
         source_scenario__scenario_key=_key(NAMES[1])
     ).exists()
