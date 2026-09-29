@@ -1612,7 +1612,7 @@ def test_three_raw_leaves_never_crowd_the_native_leaf_out_of_the_costed_ones():
     )
     assert manager.matching_activity_walk_applies(builder)
     candidates = [witness.key for witness, _typed in walk._witness_candidates(manager)]
-    eligible = [witness.key for witness, _typed in walk._eligible_witnesses(manager)]
+    eligible = [witness.key for witness, _typed in manager._walk_eligible]
     # The static rank: the three raw leaves (by identity), then status.
     assert eligible == ["region", "tag", "tier", "status"]
     # K = 3: the first two by rank and the best native leaf, in static order;

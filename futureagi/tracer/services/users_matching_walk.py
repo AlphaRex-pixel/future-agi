@@ -1155,7 +1155,8 @@ def _witness_candidates(
     static rank's first is walked.
     """
 
-    eligible = _eligible_witnesses(manager)
+    # In static rank order (``UsersListManager.matching_activity_walk_applies``).
+    eligible = manager._walk_eligible
     limit = USER_LIST_WALK_WITNESS_CANDIDATES
     chosen = list(range(min(limit, len(eligible))))
     native = next(
@@ -1854,21 +1855,6 @@ def witness_fingerprint(witness: MatchingActivityWitness) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
 
 
-def _eligible_witnesses(
-    manager: Any,
-) -> list[tuple[MatchingActivityWitness, WalkedTypedFilter | None]]:
-    """The witnesses the walk may discover on, in static rank order.
-
-    ``UsersListManager.matching_activity_walk_applies`` computes them from the
-    filters the cursor binds; a manager that set only one witness walks it.
-    """
-
-    eligible = list(getattr(manager, "_walk_eligible", None) or ())
-    if not eligible and manager._walk_witness is not None:
-        eligible = [(manager._walk_witness, manager._walked_typed_filter)]
-    return eligible
-
-
 def _bound_witness(manager: Any, fingerprint: Any) -> MatchingActivityWitness:
     """The eligible witness a cursor's ``fingerprint`` names, now in use.
 
@@ -1879,7 +1865,7 @@ def _bound_witness(manager: Any, fingerprint: Any) -> MatchingActivityWitness:
     certification reads it (``_enrichment_statement_count``, ``_certify``).
     """
 
-    for witness, typed in _eligible_witnesses(manager):
+    for witness, typed in manager._walk_eligible:
         if witness_fingerprint(witness) == fingerprint:
             manager.use_walk_witness(witness, typed)
             return witness
