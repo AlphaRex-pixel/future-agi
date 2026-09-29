@@ -308,7 +308,7 @@ Six prompt-optimization algorithms (GEPA, PromptWizard, ProTeGi, Bayesian, Meta-
 |  Kubernetes / Helm | ✅ | Distributed on Kubernetes: `helm install futureagi oci://ghcr.io/future-agi/charts/futureagi --version X.Y.Z`, one signed chart for the open-source and Enterprise editions ([chart README](deploy/helm/futureagi/README.md)) |
 |  AWS / GCP / Azure | ✅ | Docker Compose on a VM, or the Helm chart on a Kubernetes 1.27+ cluster |
 |  AWS Marketplace | ⏳ | Coming soon |
-|  Air-gapped / on-prem | ✅ | Mirror the images, set `FUTURE_AGI_TELEMETRY_DISABLED=true` and block outbound traffic ([Telemetry](#telemetry)); [contact sales](mailto:sales@futureagi.com) for support |
+|  Air-gapped / on-prem | ✅ | Mirror the images, set `FUTURE_AGI_TELEMETRY_DISABLED=true` and block outbound traffic ([Telemetry](#telemetry)); on Helm, set `global.airgap=true` and mirror the images the release lists ([chart README](deploy/helm/futureagi/README.md#enterprise)); [contact sales](mailto:sales@futureagi.com) for support |
 
 Every image, tag and size: [docs/images.md](docs/images.md). Every setting:
 [docs/configuration.md](docs/configuration.md).

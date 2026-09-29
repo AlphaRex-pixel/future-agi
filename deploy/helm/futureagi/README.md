@@ -91,8 +91,8 @@ helm install futureagi oci://ghcr.io/future-agi/charts/futureagi --version "$VER
 > (see [Developing from a git checkout](#developing-from-a-git-checkout)),
 > and point `image.tag` (and `image.registry`) at images built from the same
 > branch and pushed where your cluster can pull them. The bootstrap job runs
-> `python manage.py bootstrap_install`, which no published image up to
-> v1.41.1 contains; with such an image it fails with
+> `python manage.py bootstrap_install`, which no published v1.41.x
+> image contains; with such an image it fails with
 > `Unknown command: 'bootstrap_install'`.
 
 Helm waits for the bootstrap job (migrations and schema, a few minutes on
@@ -130,12 +130,16 @@ Both name the workflow and the tag that built it:
 
 ```sh
 VERSION=X.Y.Z
-cosign verify ghcr.io/future-agi/charts/futureagi:$VERSION \
+cosign verify --new-bundle-format=false ghcr.io/future-agi/charts/futureagi:$VERSION \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity https://github.com/future-agi/future-agi/.github/workflows/helm-release.yml@refs/tags/v$VERSION
 gh attestation verify oci://ghcr.io/future-agi/charts/futureagi:$VERSION --repo future-agi/future-agi \
   --signer-workflow future-agi/future-agi/.github/workflows/helm-release.yml
 ```
+
+`--new-bundle-format=false` makes cosign check the chart's signature, as the
+release workflow does. Without it, cosign checks the provenance attestation
+instead, and passes even if the signature is missing.
 
 The GitHub Release `vX.Y.Z` carries the same package and what you need to
 mirror it:
@@ -994,7 +998,7 @@ and upgrade by changing it, following [Upgrading](#upgrading).
 | `helm install` times out | `kubectl logs job/<release>-bootstrap`; let a running job finish before retrying; raise `--timeout` together with `bootstrap.activeDeadlineSeconds` (the first bootstrap migrates an empty database) |
 | bootstrap: `... is not reachable after 600s` | the host and port in the values, NetworkPolicies, DNS, `global.proxy.noProxy` |
 | bootstrap: `native tiered storage policy required` | the ClickHouse [storage policy](#clickhouse) |
-| bootstrap: `Unknown command: 'bootstrap_install'` | the backend image predates this chart (every published image up to v1.41.1 does): set `image.tag` to images built from the chart's checkout |
+| bootstrap: `Unknown command: 'bootstrap_install'` | the backend image predates this chart (every published v1.41.x image does): set `image.tag` to images built from the chart's checkout |
 | bootstrap or fi-collector: certificate verify failed | `global.caBundle`, or `PGSSLROOTCERT` and the CA mount (see [PostgreSQL](#postgresql)) |
 | `helm upgrade`: `... cannot change` (StatefulSet ...) | [Install-time settings](#install-time-settings) |
 | Workers log `waiting for the database migrations` | the bootstrap job: `kubectl logs job/<release>-bootstrap` |

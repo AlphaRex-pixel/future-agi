@@ -558,7 +558,7 @@ jobs:
             echo
             echo '```sh'
             echo "helm install futureagi oci://$CHART_REF --version $CHART_VERSION -n futureagi --create-namespace -f my-values.yaml --timeout 20m"
-            echo "cosign verify $CHART_REF:$CHART_VERSION --certificate-oidc-issuer $OIDC_ISSUER --certificate-identity $CERT_IDENTITY"
+            echo "cosign verify --new-bundle-format=false $CHART_REF:$CHART_VERSION --certificate-oidc-issuer $OIDC_ISSUER --certificate-identity $CERT_IDENTITY"
             echo "gh attestation verify oci://$CHART_REF:$CHART_VERSION --repo $GITHUB_REPOSITORY --signer-workflow $SIGNER_WORKFLOW"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

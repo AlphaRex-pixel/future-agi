@@ -466,7 +466,7 @@ helm install futureagi deploy/helm/futureagi \
   --namespace futureagi --create-namespace --timeout 20m
 ```
 
-No published image up to v1.41.1 contains the chart's bootstrap command, so
+No published v1.41.x image contains the chart's bootstrap command, so
 with those the bootstrap job fails with `Unknown command: 'bootstrap_install'`.
 
 For production, start from `examples/external.yaml` (your own Postgres,
