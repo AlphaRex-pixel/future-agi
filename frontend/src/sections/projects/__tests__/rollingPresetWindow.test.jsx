@@ -135,7 +135,7 @@ describe("observePresetDateFilter", () => {
     expect(observePresetDateFilter("nonsense")).toBeNull();
   });
 
-  it("leaves presetToRange unrounded for callers that do not ask", () => {
+  it("keeps presetToRange unrounded; only the Observe helper floors the start", () => {
     // Task scheduling and the saved-view picker keep their exact instants.
     expect(presetToRange("7D", NOW)[0]).toEqual(sub(NOW, { days: 7 }));
     expect(presetToRange("30 mins", NOW)).toEqual([
