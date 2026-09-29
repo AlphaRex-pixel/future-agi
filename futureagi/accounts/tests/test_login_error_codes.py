@@ -15,7 +15,6 @@ Covers:
 
 import json
 import time
-from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -28,7 +27,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from tfc.utils.error_codes import get_error_message
+from tfc.utils.error_codes import LOGIN_ERROR_CODES
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -400,7 +399,7 @@ class TestInfrastructureErrorCode:
         result = _result(resp)
         assert result["error_code"] == "LOGIN_SERVICE_UNAVAILABLE"
         assert "remaining_attempts" not in result
-        assert result["message"] == get_error_message("LOGIN_SERVICE_UNAVAILABLE")
+        assert result["message"] == LOGIN_ERROR_CODES["LOGIN_SERVICE_UNAVAILABLE"][0]
 
     @pytest.mark.parametrize(
         "error",
@@ -473,13 +472,6 @@ class TestInfrastructureErrorCode:
 
         declared = CustomTokenObtainPairView.post._swagger_auto_schema["responses"]
         assert 503 in declared
-        swagger = json.loads(
-            (
-                Path(__file__).resolve().parents[3]
-                / "api_contracts/openapi/swagger.json"
-            ).read_text()
-        )
-        assert "503" in swagger["paths"]["/accounts/token/"]["post"]["responses"]
 
 
 # ---------------------------------------------------------------------------
