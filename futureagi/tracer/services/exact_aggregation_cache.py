@@ -794,7 +794,7 @@ def _refresh_dispatch_seconds() -> int:
     )
 
 
-def _refresh_failure_seconds() -> int:
+def refresh_failure_seconds() -> int:
     return max(
         30,
         int(
@@ -1437,7 +1437,7 @@ def finish_exact_refresh(
                     cache.set(
                         state_key,
                         failed_state,
-                        timeout=_refresh_failure_seconds(),
+                        timeout=refresh_failure_seconds(),
                     )
                 cache.delete(lock_key)
             return
@@ -1451,7 +1451,7 @@ def finish_exact_refresh(
             redis_client.encode(token),
             1 if succeeded else 0,
             redis_client.encode(failed_state),
-            _refresh_failure_seconds() * 1000,
+            refresh_failure_seconds() * 1000,
         )
     except Exception:
         logger.warning(
@@ -1642,7 +1642,7 @@ def _remember_revalidation_token(namespace: str, identity: Any, token: str) -> N
             token,
             timeout=_refresh_dispatch_seconds()
             + _refresh_lock_seconds()
-            + _refresh_failure_seconds(),
+            + refresh_failure_seconds(),
         )
     except Exception:
         logger.warning(
@@ -2017,6 +2017,8 @@ __all__ = [
     "record_exact_refresh_dispatch",
     "refresh_claim_is_current",
     "read_or_schedule_exact_snapshot",
+    "raw_observe_identity_key",
     "read_exact_snapshot",
+    "refresh_failure_seconds",
     "snapshot_cache_key",
 ]

@@ -107,11 +107,12 @@ def reduce_spans_estimate(
     reports are what separate the last one - not the row count:
 
     * the estimate table with part rows is their summed ``rows``;
-    * the estimate table with NO rows is zero. For this statement that reading
-      is unambiguous: the key condition is ``project_id`` and a half-open
-      ``start_time`` range over a table partitioned by ``toDate(start_time)``,
-      there is no subquery and no step that could vanish, so "no part
-      selected" means "nothing to read" and the scan is affordable;
+    * the estimate table with NO rows is zero. For the statements this reads
+      (the raw graph's scan and the Sessions root read) that is unambiguous:
+      their key condition is ``project_id`` and a half-open ``start_time``
+      range over a table partitioned by ``toDate(start_time)``, with no
+      subquery and no step that could vanish, so "no part selected" means
+      "nothing to read" and the scan is affordable;
     * anything else - a transport that answered something other than this
       statement, or a server whose estimate table changed shape - is ``None``,
       meaning unknown.
@@ -391,6 +392,7 @@ __all__ = [
     "estimate_user_graph_scan_rows",
     "raw_graph_scan_fits_wall",
     "raw_graph_scan_window",
+    "reduce_spans_estimate",
     "user_graph_scan_fits_wall",
     "user_graph_scan_window",
 ]
