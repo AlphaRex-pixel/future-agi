@@ -1149,6 +1149,14 @@ class UsersListManager:
             str(row.get("end_user_id", "")), {}
         ).get(filter_index, False)
 
+    def _native_filters_match(self, row: dict[str, Any]) -> bool:
+        """Every native leaf's certified decision for ``row``'s user."""
+
+        return all(
+            self._native_dimension_matches(row=row, filter_index=index)
+            for index, _item in self.native_dimension_leaves
+        )
+
     def _read_evals(
         self,
         rows: list[dict],

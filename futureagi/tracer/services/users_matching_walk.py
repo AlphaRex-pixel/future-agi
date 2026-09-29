@@ -1416,7 +1416,7 @@ def _certify(state: _WalkState, batch: list[_Candidate]) -> int:
         member = (
             order_key is not None
             and manager._attribute_filters_match({"end_user_id": uid})
-            and _native_filters_match(manager, uid)
+            and manager._native_filters_match({"end_user_id": uid})
         )
         state.certified[uid] = _Certified(
             end_user_id=uid,
@@ -1520,16 +1520,6 @@ def _read_native_certification(
         statements=state.budget.statements,
     )
     state.manager._read_native_span_dimensions(rows, builder, None, newest=newest)
-
-
-def _native_filters_match(manager: Any, end_user_id: str) -> bool:
-    """Every native leaf's certified decision for ``end_user_id``."""
-
-    row = {"end_user_id": end_user_id}
-    return all(
-        manager._native_dimension_matches(row=row, filter_index=index)
-        for index, _item in manager.native_dimension_leaves
-    )
 
 
 def _certified_prefix(
