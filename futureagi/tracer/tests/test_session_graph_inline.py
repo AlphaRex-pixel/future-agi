@@ -386,6 +386,18 @@ def _raises(exc):
             data=[{"rows": "many"}], columns=list(ESTIMATE_COLUMNS)
         ),
         lambda _call: SimpleNamespace(data=[("db", 5)], columns=list(ESTIMATE_COLUMNS)),
+        lambda _call: SimpleNamespace(
+            data=[{"table": "spans", "rows": "10"}], columns=list(ESTIMATE_COLUMNS)
+        ),
+        lambda _call: SimpleNamespace(
+            data=[{"table": "spans", "rows": True}], columns=list(ESTIMATE_COLUMNS)
+        ),
+        lambda _call: SimpleNamespace(
+            data=[{"table": "traces", "rows": 10}], columns=list(ESTIMATE_COLUMNS)
+        ),
+        lambda _call: SimpleNamespace(
+            data=[{"table": "spans", "rows": 10}], columns=["rows"]
+        ),
     ],
     ids=[
         "stopped",
@@ -395,6 +407,10 @@ def _raises(exc):
         "no-columns",
         "bad-rows",
         "not-a-dict",
+        "text-rows",
+        "bool-rows",
+        "another-table",
+        "rows-column-only",
     ],
 )
 def test_an_unknown_estimate_never_guesses_inline(scheduled, estimate):

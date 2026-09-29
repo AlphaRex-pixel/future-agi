@@ -672,7 +672,7 @@ def test_a_poll_behind_a_failed_refresh_does_not_re_enqueue_the_scan(scheduled):
     ],
 )
 def test_estimate_reducer_tells_zero_from_unknown(rows, columns, expected):
-    assert graph_read_cost._reduce_estimate(rows, columns) == expected
+    assert graph_read_cost.reduce_spans_estimate(rows, columns) == expected
 
 
 @pytest.mark.unit

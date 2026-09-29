@@ -97,7 +97,7 @@ def raw_graph_scan_window(
     return start_date - _SCAN_WINDOW_MARGIN, end_date + _SCAN_WINDOW_MARGIN
 
 
-def _reduce_estimate(
+def reduce_spans_estimate(
     rows: Iterable[Mapping[str, Any]] | None,
     columns: Iterable[str] | None,
 ) -> int | None:
@@ -214,7 +214,7 @@ def estimate_raw_graph_scan_rows(
         # that cannot answer can never license the interactive full-window scan.
         logger.info("graph_raw_scan_estimate_unavailable", exc_info=True)
         return None
-    return _reduce_estimate(
+    return reduce_spans_estimate(
         getattr(result, "data", None), getattr(result, "columns", None)
     )
 
@@ -358,7 +358,7 @@ def estimate_user_graph_scan_rows(
         # an uncosted read affordable.
         logger.info("user_graph_scan_estimate_unavailable", exc_info=True)
         return None
-    return _reduce_estimate(
+    return reduce_spans_estimate(
         getattr(result, "data", None), getattr(result, "columns", None)
     )
 

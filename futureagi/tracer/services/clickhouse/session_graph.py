@@ -40,6 +40,7 @@ from tracer.services.clickhouse.graph_metric_statistic import (
     snapshot_names_its_statistic,
     stamps_metric_statistic,
 )
+from tracer.services.clickhouse.graph_read_cost import reduce_spans_estimate
 from tracer.services.clickhouse.query_builders.base import BaseQueryBuilder
 from tracer.services.clickhouse.query_builders.session_time_series import (
     SessionRollupTimeSeriesQueryBuilder,
@@ -691,10 +692,11 @@ def _session_graph_root_estimate(
 ) -> int | None:
     """Estimated live-root candidates of the window, or ``None`` if unknown.
 
-    One ``EXPLAIN ESTIMATE`` (part metadata only) with a small server cap. A
-    statement that fails, is stopped, or answers in an unexpected shape is
-    ``None``: never guess inline. An empty answer with the estimate's columns
-    is zero rows; an empty window sends nothing and is zero.
+    One ``EXPLAIN ESTIMATE`` (part metadata only) with a small server cap,
+    read by the shared ``spans`` estimate reducer. A statement that fails, is
+    stopped, or answers in an unexpected shape is ``None``: never guess inline.
+    An empty answer with the estimate's columns is zero rows; an empty window
+    sends nothing and is zero.
     """
 
     built = session_graph_root_estimate_sql(project_id=project_id, filters=filters)
@@ -717,21 +719,9 @@ def _session_graph_root_estimate(
             error_type=type(exc).__name__,
         )
         return None
-    columns = getattr(result, "columns", None)
-    data = getattr(result, "data", None)
-    if not isinstance(columns, list | tuple) or "rows" not in columns:
-        return None
-    if not isinstance(data, list | tuple):
-        return None
-    total = 0
-    for row in data:
-        if not isinstance(row, dict):
-            return None
-        try:
-            total += max(0, int(row["rows"]))
-        except (KeyError, TypeError, ValueError):
-            return None
-    return total
+    return reduce_spans_estimate(
+        getattr(result, "data", None), getattr(result, "columns", None)
+    )
 
 
 def session_latency_may_inline(
