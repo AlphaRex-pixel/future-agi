@@ -1511,7 +1511,7 @@ class HostedHarnessProvider:
         if job.state in terminal_states:
             conversation = (
                 HostedHarnessConversation.no_workspace_objects.filter(job=job)
-                .only("latest_workspace_object_key")
+                .only("latest_workspace_object_key", "state")
                 .first()
             )
             metadata = (job.payload or {}).get("metadata") or {}
@@ -1519,11 +1519,22 @@ class HostedHarnessProvider:
                 metadata.get("authoring_object_key")
                 or getattr(conversation, "latest_workspace_object_key", None)
             )
-            if job.state == HostedHarnessJob.State.COMPLETED and not has_archive:
+            files_gone = (
+                getattr(conversation, "state", None)
+                == HostedHarnessConversation.State.RETIRED
+            )
+            if files_gone or (
+                job.state == HostedHarnessJob.State.COMPLETED and not has_archive
+            ):
                 return Response(
                     {
                         "error": "conversation_workspace_not_ready",
-                        "message": "This completed run has no saved authoring workspace to restore.",
+                        "message": (
+                            "This environment's saved files are no longer available; "
+                            "rebuild it to chat."
+                            if files_gone
+                            else "This completed run has no saved authoring workspace to restore."
+                        ),
                         "retryable": False,
                     },
                     status=status.HTTP_409_CONFLICT,

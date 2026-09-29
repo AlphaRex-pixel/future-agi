@@ -810,3 +810,132 @@ def test_command_poll_activates_starting_lease_and_throttles_heartbeat(organizat
         )
     assert second.json()["commands"] == first.json()["commands"]
     assert not any(query["sql"].startswith("UPDATE") for query in queries)
+
+
+def _storage_error(code):
+    from minio.error import S3Error
+
+    return S3Error(None, code, "storage said no", "key", "request", "host")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("storage_code", "permanent"), [("NoSuchKey", True), ("SlowDown", False)]
+)
+def test_chat_on_run_whose_saved_files_are_gone_fails_at_once(
+    organization, monkeypatch, storage_code, permanent
+):
+    from simulate.services import hosted_harness_gateway as gateway_module
+
+    job, _ = create_hosted_job(organization, _payload(), idempotency_key="gone")
+    job.state = HostedHarnessJob.State.COMPLETED
+    job.payload["metadata"]["authoring_object_key"] = (
+        "harness-authoring/org/gone.tar.gz"
+    )
+    job.save()
+    conversation, message, _ = enqueue_message(
+        job, content="whats up?", client_request_id="gone"
+    )
+
+    def get_object(*_args):
+        raise _storage_error(storage_code)
+
+    monkeypatch.setattr(
+        gateway_module,
+        "get_storage_client",
+        lambda: SimpleNamespace(get_object=get_object),
+    )
+    gateway = object.__new__(gateway_module.HostedHarnessGateway)
+    gateway.client = SimpleNamespace(runtime_name="", runtime_digest="")
+    with pytest.raises(gateway_module.HostedHarnessError):
+        gateway.ensure_conversation_runtime(
+            job, conversation=conversation, endpoint_base_url="https://platform.example"
+        )
+
+    message.refresh_from_db()
+    conversation.refresh_from_db()
+    reply = conversation.messages.order_by("-sequence").first()
+    runtime = serialize_conversation(conversation)["runtime"]
+    if permanent:
+        assert message.state == "failed"
+        assert reply.role == "assistant" and "no longer available" in reply.content
+        assert runtime["available"] is False
+        assert conversation.state == "retired"
+    else:
+        # A transient storage error keeps the message for the recovery sweep to retry.
+        assert message.state == "queued"
+        assert runtime["available"] is True
+
+
+@pytest.mark.django_db
+def test_missing_checkpoint_object_falls_back_instead_of_retiring(
+    organization, monkeypatch
+):
+    from minio.error import S3Error
+
+    from simulate.services import hosted_harness_conversation as conv_module
+
+    job, _ = create_hosted_job(organization, _payload(), idempotency_key="ckpt-gone")
+    conversation, _, _ = enqueue_message(
+        job, content="hi", client_request_id="ckpt-gone"
+    )
+    type(conversation).no_workspace_objects.filter(id=conversation.id).update(
+        latest_workspace_object_key="harness-checkpoints/org/gone.tar.gz"
+    )
+    conversation.refresh_from_db()
+
+    def raise_code(code):
+        def get_object(*_args):
+            raise _storage_error(code)
+
+        monkeypatch.setattr(
+            conv_module,
+            "get_storage_client",
+            lambda: SimpleNamespace(get_object=get_object),
+        )
+
+    # A gone checkpoint is treated as no checkpoint, so chat falls back to the
+    # authoring archive rather than retiring.
+    raise_code("NoSuchKey")
+    assert conv_module.load_workspace_archive(conversation) is None
+    # A transient storage error still propagates for the recovery sweep to retry.
+    raise_code("SlowDown")
+    with pytest.raises(S3Error):
+        conv_module.load_workspace_archive(conversation)
+
+
+@pytest.mark.django_db
+def test_send_message_rejected_after_conversation_retired(organization):
+    from simulate.services.harness_provider import HostedHarnessProvider
+
+    job, _ = create_hosted_job(organization, _payload(), idempotency_key="retired-409")
+    job.state = HostedHarnessJob.State.COMPLETED
+    job.payload["metadata"]["authoring_object_key"] = (
+        "harness-authoring/org/gone.tar.gz"
+    )
+    job.save()
+    conversation, _, _ = enqueue_message(
+        job, content="hi", client_request_id="retired-409"
+    )
+    type(conversation).no_workspace_objects.filter(id=conversation.id).update(
+        state="retired"
+    )
+
+    provider = HostedHarnessProvider()
+    provider._job = lambda _request, _pk: job
+    request = SimpleNamespace(
+        validated_data={
+            "content": "let me back in",
+            "client_request_id": "again",
+            "kind": "user_message",
+            "payload": {},
+        },
+        build_absolute_uri=lambda _path: "https://platform.example/",
+    )
+    response = provider.send_message(request, job.id)
+    assert response.status_code == 409
+    assert response.data["error"] == "conversation_workspace_not_ready"
+    assert "rebuild" in response.data["message"]
+    assert not HostedHarnessConversationMessage.no_workspace_objects.filter(
+        conversation=conversation, client_request_id="again"
+    ).exists()

@@ -27,6 +27,7 @@ import structlog
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from minio.error import S3Error
 
 from simulate.models import (
     HostedHarnessAttempt,
@@ -48,6 +49,7 @@ from simulate.services.hosted_harness_conversation import (
     issue_conversation_capability,
     load_workspace_archive,
     record_runtime_started,
+    retire_without_saved_workspace,
     runtime_is_live,
     runtime_start_pending,
     settle_interrupted_turn,
@@ -2457,6 +2459,9 @@ class HostedHarnessGateway:
                 conversation=conversation,
                 state=HostedHarnessConversationLease.State.STARTING,
             ).update(state=HostedHarnessConversationLease.State.EXPIRED)
+            if getattr(exc, "code", None) == "authoring_artifacts_not_found":
+                retire_without_saved_workspace(conversation.id)
+                raise
             HostedHarnessConversation.no_workspace_objects.filter(
                 id=conversation.id
             ).update(
@@ -3891,7 +3896,9 @@ def _authoring_archive_for(job: HostedHarnessJob) -> bytes | None:
         try:
             response = get_storage_client().get_object(UPLOAD_BUCKET_NAME, object_key)
             return response.read()
-        except Exception as exc:
+        except S3Error as exc:
+            if exc.code != "NoSuchKey":
+                raise
             raise HostedHarnessError(
                 "authoring_artifacts_not_found",
                 "the frozen ALK authoring artifacts could not be loaded",
