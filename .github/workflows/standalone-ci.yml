@@ -154,7 +154,7 @@ jobs:
           python -m unittest discover -s deploy/tests -p 'test_standalone_*.py' -v
           python -m unittest discover -s deploy/tests -p 'test_production_setup.py' -v
 
-  default-install:
+  standalone-install:
     name: standalone install (${{ matrix.arch }})
     needs: changes
     if: needs.changes.outputs.install == 'true'
@@ -401,7 +401,7 @@ jobs:
           check futureagi/frontend "" || failed=1
           check futureagi/fi-collector "" || failed=1
           check futureagi/agentcc-gateway "" || failed=1
-          check futureagi/standalone "" --default-install \
+          check futureagi/standalone "" --standalone-install \
             --max-growth-percent "$STANDALONE_GROWTH_PERCENT" || failed=1
           exit "$failed"
 
@@ -559,7 +559,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure() && matrix.arch == 'amd64'
         with:
-          name: default-install-diagnostics
+          name: standalone-install-diagnostics
           path: ${{ runner.temp }}/diagnostics
           if-no-files-found: ignore
           retention-days: 7

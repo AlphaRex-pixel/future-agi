@@ -10,7 +10,7 @@ Sizes are the compressed layer bytes in the registry manifest, which is what
   scripts/image_size_budget.py check --image futureagi/standalone --arch amd64 \\
       --ref docker.io/futureagi/standalone@sha256:<digest> \\
       --baseline docker.io/futureagi/standalone:latest \\
-      --max-growth-percent 10 --default-install
+      --max-growth-percent 10 --standalone-install
 
   # Every budgeted image of a published release, both architectures:
   scripts/image_size_budget.py report --tag v1.42.0
@@ -19,9 +19,9 @@ Sizes are the compressed layer bytes in the registry manifest, which is what
 (an image without an entry fails too, so a new image cannot skip the gate);
 when it grew more than --max-growth-percent over --baseline (a pull request
 that carries the $WAIVER_LABEL label is let through with a warning); or, with
---default-install, when the layers a fresh standalone install downloads (this
+--standalone-install, when the layers a fresh standalone install downloads (this
 image plus the other images of docker-compose.yml, each layer counted once)
-are over the default-install budget. A deliberate increase changes the budget
+are over the standalone-install budget. A deliberate increase changes the budget
 file in the same pull request, where review sees it. It also prints the upgrade delta: the
 bytes of layers --baseline does not have, which is what an existing install
 downloads to upgrade. A registry build cache keeps that delta small; a delta
@@ -218,7 +218,7 @@ def budget_for(entry: dict, arch: str) -> float:
     return float(budget)
 
 
-def default_install_mb(
+def standalone_install_mb(
     cfg: dict,
     arch: str,
     registry,
@@ -227,14 +227,14 @@ def default_install_mb(
 ) -> float:
     """Distinct compressed layers a fresh standalone install pulls on linux/<arch>.
 
-    app_ref is the app image being measured (default_install.app); the other
+    app_ref is the app image being measured (standalone_install.app); the other
     images of docker-compose.yml's default services come from the budget file.
     A layer shared by two images is downloaded, and counted, once.
     """
     combined = dict(
         app_layers if app_layers is not None else layers(app_ref, arch, registry)
     )
-    for ref in cfg["default_install"]["with"]:
+    for ref in cfg["standalone_install"]["with"]:
         combined.update(layers(ref, arch, registry))
     return mb(combined)
 
@@ -343,17 +343,17 @@ def check(args: argparse.Namespace, cfg: dict, registry) -> int:
                 else:
                     failures.append(message)
 
-    if args.default_install:
-        install = cfg["default_install"]
+    if args.standalone_install:
+        install = cfg["standalone_install"]
         if args.image != install["app"]:
             annotate(
                 "error",
-                f"--default-install measures {install['app']}, not {args.image}",
+                f"--standalone-install measures {install['app']}, not {args.image}",
             )
             return 1
         install_budget = float(install["budget_mb"])
         try:
-            total = default_install_mb(cfg, args.arch, registry, args.ref, new)
+            total = standalone_install_mb(cfg, args.arch, registry, args.ref, new)
         except LookupError as exc:
             failures.append(
                 f"cannot measure the standalone install on linux/{args.arch}: {exc}"
@@ -390,7 +390,7 @@ def check(args: argparse.Namespace, cfg: dict, registry) -> int:
 def report(args: argparse.Namespace, cfg: dict, registry) -> int:
     rows: list[str] = []
     failures = 0
-    app = cfg["default_install"]["app"]
+    app = cfg["standalone_install"]["app"]
     for entry in cfg["images"]:
         ref = f"{entry['image']}:{args.tag}{entry.get('tag_suffix', '')}"
         for arch in arches_of(cfg, entry):
@@ -409,10 +409,10 @@ def report(args: argparse.Namespace, cfg: dict, registry) -> int:
             print(
                 f"{ref:<52} linux/{arch}  {size:8.1f} MB  budget {budget:6.0f}  {'OVER' if over else 'ok'}"
             )
-    budget = float(cfg["default_install"]["budget_mb"])
+    budget = float(cfg["standalone_install"]["budget_mb"])
     for arch in cfg["arches"]:
         try:
-            total = default_install_mb(cfg, arch, registry, f"{app}:{args.tag}")
+            total = standalone_install_mb(cfg, arch, registry, f"{app}:{args.tag}")
         except LookupError as exc:
             print(f"standalone install linux/{arch}: {exc}")
             continue
@@ -457,7 +457,7 @@ def main(argv: list[str] | None = None, registry=None) -> int:
     )
     one.add_argument("--waiver-label", default=os.environ.get("WAIVER_LABEL", ""))
     one.add_argument(
-        "--default-install",
+        "--standalone-install",
         action="store_true",
         help="also check the standalone install's total download",
     )

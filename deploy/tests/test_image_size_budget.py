@@ -81,7 +81,7 @@ CONFIG = {
         },
         {"image": "futureagi/runner", "budget_mb": 10, "enforce": False},
     ],
-    "default_install": {
+    "standalone_install": {
         "app": "futureagi/standalone",
         "with": ["postgres:16"],
         "budget_mb": 150,
@@ -246,16 +246,16 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("no baseline", out)
 
-    def test_default_install_counts_a_shared_layer_once(self):
+    def test_standalone_install_counts_a_shared_layer_once(self):
         # standalone 90 + postgres 70, sharing the 30 MB base layer: 130 MB.
-        code, out = self.check("futureagi/standalone", "amd64", "--default-install")
+        code, out = self.check("futureagi/standalone", "amd64", "--standalone-install")
         self.assertEqual(code, 0, out)
         self.assertIn("standalone install linux/amd64: 130.0 MB", out)
         config = dict(
-            CONFIG, default_install=dict(CONFIG["default_install"], budget_mb=120)
+            CONFIG, standalone_install=dict(CONFIG["standalone_install"], budget_mb=120)
         )
         self.budgets.write_text(json.dumps(config))
-        code, out = self.check("futureagi/standalone", "amd64", "--default-install")
+        code, out = self.check("futureagi/standalone", "amd64", "--standalone-install")
         self.assertEqual(code, 1)
         self.assertIn("standalone install downloads 130.0 MB", out)
 
@@ -349,9 +349,9 @@ class BudgetFileTests(unittest.TestCase):
                 self.assertTrue(any(s == suffix for _, s in self.entries()))
 
     @unittest.skipUnless(shutil.which("docker"), "docker CLI unavailable")
-    def test_default_install_matches_docker_compose_yml(self):
+    def test_standalone_install_matches_docker_compose_yml(self):
         images = rendered_images("docker-compose.yml", "")
-        install = self.config["default_install"]
+        install = self.config["standalone_install"]
         self.assertEqual(
             {untagged(image) for image in images if image.startswith("futureagi/")},
             {install["app"]},
@@ -402,7 +402,7 @@ class BudgetFileTests(unittest.TestCase):
         for pattern, entry in (
             (
                 r"([\d.]+) MB at most \(measured ([\d.]+)\)",
-                self.config["default_install"],
+                self.config["standalone_install"],
             ),
             (r"budget ([\d.]+) MB compressed \(measured ([\d.]+)\)", slim),
         ):

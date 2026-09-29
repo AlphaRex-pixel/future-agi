@@ -95,7 +95,7 @@ python3 scripts/image_size_budget.py report --tag v1.42.0
 # local `docker build` does not have until it is pushed; CI pushes to a
 # throwaway localhost:5000 registry):
 python3 scripts/image_size_budget.py check --image futureagi/standalone --arch amd64 \
-  --ref localhost:5000/futureagi/standalone:ci --baseline futureagi/standalone:latest --default-install
+  --ref localhost:5000/futureagi/standalone:ci --baseline futureagi/standalone:latest --standalone-install
 ```
 
 CI runs `check` on pull requests (`standalone-ci.yml`, for the images it builds) and on every release build before any tag moves (`build-image-multiarch.yml`). It also prints the upgrade delta: the bytes an existing install downloads to move from `:latest` to the new image, which stays small only while the release build cache hits. A change that needs a bigger image raises its budget in the same pull request, with the reason. `deploy/tests/test_image_size_budget.py` tests the script against a fake registry and checks that every image the compose files and `release-images.yml` use has a budget.

@@ -340,7 +340,7 @@ jobs:
       use-cache: false
       timeout-minutes: 45
       size-budget-percent: ${{ fromJSON(vars.STANDALONE_SIZE_BUDGET_PERCENT || '10') }}
-      default-install-total: true
+      standalone-install-total: true
       build-args: ${{ needs.standalone-inputs.outputs.build-args }}
       # Every bundled binary must be this architecture's and must start
       # (deploy/standalone/bin/verify-binaries, which standalone-ci.yml runs too).

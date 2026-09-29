@@ -1574,7 +1574,9 @@ class Workflows(unittest.TestCase):
     @unittest.skipUnless(HAVE_YAML, "PyYAML unavailable")
     def test_standalone_ci_builds_the_slim_backend(self):
         ci = (WORKFLOWS / "standalone-ci.yml").read_text(encoding="utf-8")
-        steps = yaml_jobs(WORKFLOWS / "standalone-ci.yml")["default-install"]["steps"]
+        steps = yaml_jobs(WORKFLOWS / "standalone-ci.yml")["standalone-install"][
+            "steps"
+        ]
         backend = next(
             s
             for s in steps

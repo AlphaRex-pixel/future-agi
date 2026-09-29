@@ -57,7 +57,7 @@ on:
       # (ad-hoc builds). off: skip.
       size-budget: { required: false, type: string, default: enforce }
       size-budget-percent: { required: false, type: number, default: 0 }   # max growth over :latest; 0 = off
-      default-install-total: { required: false, type: boolean, default: false }   # futureagi/standalone only
+      standalone-install-total: { required: false, type: boolean, default: false }   # futureagi/standalone only
       verify-command: { required: false, type: string, default: '' }   # sh script run inside each arch's image
     outputs:
       digest:
@@ -275,7 +275,7 @@ jobs:
           BASELINE_REF: docker.io/${{ inputs.image }}:latest${{ inputs.tag-suffix }}
           ARCH: ${{ matrix.arch }}
           GROWTH_PERCENT: ${{ inputs.size-budget-percent }}
-          DEFAULT_INSTALL: ${{ inputs.default-install-total }}
+          STANDALONE_INSTALL: ${{ inputs.standalone-install-total }}
           MODE: ${{ inputs.size-budget }}
         run: |
           set -euo pipefail
@@ -285,7 +285,7 @@ jobs:
           fi
           args=(check --image "$IMAGE" "--tag-suffix=${TAG_SUFFIX}" --arch "$ARCH"
                 --ref "$NEW_REF" --baseline "$BASELINE_REF" --max-growth-percent "$GROWTH_PERCENT")
-          if [ "$DEFAULT_INSTALL" = true ]; then args+=(--default-install); fi
+          if [ "$STANDALONE_INSTALL" = true ]; then args+=(--standalone-install); fi
           if [ "$MODE" = report ]; then args+=(--report-only); fi
           python3 scripts/image_size_budget.py "${args[@]}"
       - name: Export digest
