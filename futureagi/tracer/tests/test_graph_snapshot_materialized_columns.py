@@ -231,7 +231,7 @@ def test_the_partitioned_trace_membership_snapshot_names_trace_name():
     _names_trace_name(query)
 
 
-def test_a_snapshot_of_another_table_names_nothing_unless_asked():
+def test_a_snapshot_of_another_table_names_nothing():
     sql = latest_physical_span_rows_sql(
         table="spans_copy",
         project_predicate="1",
@@ -240,12 +240,3 @@ def test_a_snapshot_of_another_table_names_nothing_unless_asked():
         mutable_columns=("start_time",),
     )
     assert "SELECT * FROM spans_copy FINAL" in sql
-    sql = latest_physical_span_rows_sql(
-        table="spans_copy",
-        project_predicate="1",
-        start_hour="a",
-        end_hour="b",
-        mutable_columns=("start_time",),
-        materialized_columns=("trace_name",),
-    )
-    assert "SELECT *, trace_name FROM spans_copy FINAL" in sql

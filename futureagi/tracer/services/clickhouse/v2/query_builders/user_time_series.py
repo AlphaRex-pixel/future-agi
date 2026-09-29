@@ -41,19 +41,14 @@ SPANS_FILTERABLE_MATERIALIZED_COLUMNS: tuple[str, ...] = ("trace_name",)
 def latest_physical_span_rows_sql(
     *, table: str = "spans", project_predicate: str,
     start_hour: str, end_hour: str, mutable_columns: tuple[str, ...],
-    materialized_columns: tuple[str, ...] | None = None,
 ) -> str:
     """Fence trusted mutable output columns after full physical FINAL winners.
 
-    ``materialized_columns`` are named after ``*`` in the FINAL read, which
-    omits MATERIALIZED columns; by default a ``spans`` snapshot names the ones
-    a filter can reference (``SPANS_FILTERABLE_MATERIALIZED_COLUMNS``).
+    A ``spans`` snapshot names the MATERIALIZED columns a filter can reference
+    (``SPANS_FILTERABLE_MATERIALIZED_COLUMNS``) after ``*``, which omits them.
     """
-    if materialized_columns is None:
-        materialized_columns = (
-            SPANS_FILTERABLE_MATERIALIZED_COLUMNS if table == "spans" else ()
-        )
-    named = "".join(f", {column}" for column in materialized_columns)
+    materialized = SPANS_FILTERABLE_MATERIALIZED_COLUMNS if table == "spans" else ()
+    named = "".join(f", {column}" for column in materialized)
     columns = ", ".join(mutable_columns)
     values = ", ".join(f"physical.{column}" for column in mutable_columns)
     projection = ",\n            ".join(
