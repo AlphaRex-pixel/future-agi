@@ -54,7 +54,6 @@ const metricUnits = {
 };
 
 const metricYLabels = {
-  latency: "Latency in (ms)",
   tokens: "Tokens",
   traffic: "Traffic in (spans)",
   cost: "Cost in ($)",
