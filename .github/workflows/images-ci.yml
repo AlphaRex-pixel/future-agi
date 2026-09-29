@@ -8,7 +8,8 @@
 #       workflows
 #   deploy/tests/test_image_size_budget.py  scripts/image_size_budget.py
 #       against a fake registry, and the budget file against the compose
-#       files, release-images.yml and docs/images.md
+#       files, release-images.yml and deploy/images.toml (the images page
+#       of the docs site is rendered from it by scripts/docs_site.py)
 name: Images CI
 
 on:
@@ -29,7 +30,8 @@ on:
       - "scripts/verify-image-contents.sh"
       - "scripts/image_size_budget.*"
       - "scripts/code-executor-base-pin.sh"
-      - "docs/images.md"
+      - "deploy/images.toml"
+      - "scripts/docs_site.py"
       - ".hadolint.yaml"
       - ".github/workflows/build-image*.yml"
       - ".github/workflows/base-image-publish.yml"
@@ -54,7 +56,8 @@ on:
       - "scripts/verify-image-contents.sh"
       - "scripts/image_size_budget.*"
       - "scripts/code-executor-base-pin.sh"
-      - "docs/images.md"
+      - "deploy/images.toml"
+      - "scripts/docs_site.py"
       - ".hadolint.yaml"
       - ".github/workflows/build-image*.yml"
       - ".github/workflows/base-image-publish.yml"

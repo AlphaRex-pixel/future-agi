@@ -1,6 +1,6 @@
 # Future AGI agentcc-gateway (futureagi/agentcc-gateway): the LLM gateway, one
 # static binary on an empty (scratch) base.
-# Conventions shared by every futureagi/* image: docs/images.md.
+# Conventions shared by every futureagi/* image: TESTING.md › Image conventions.
 #
 # The toolchain tag floats on the 1.26 minor on purpose: Go patch releases
 # carry standard-library security fixes, and those are compiled into the
@@ -32,7 +32,7 @@ ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /src/healthcheck
 RUN printf '%s\n' \
-        '// healthcheck: HEALTHCHECK probe for images with no shell (docs/images.md).' \
+        '// healthcheck: HEALTHCHECK probe for images with no shell (docs.futureagi.com/docs/self-hosting/images#health-checks).' \
         '// usage: healthcheck [-pid1 NAME] http://HOST:PORT/PATH' \
         '// Exits 0 when the URL answers HTTP 2xx, else 1. HEALTHCHECK_URL replaces' \
         '// the URL. -pid1 NAME: exit 0 without probing unless PID 1 runs NAME, so a' \
@@ -128,7 +128,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 ENTRYPOINT ["/app/agentcc-gateway"]
 CMD ["--config", "/app/config.yaml"]
 
-# Image metadata (docs/images.md). Declared last: a new version, commit or
+# Image metadata (TESTING.md › Image conventions). Declared last: a new version, commit or
 # build time changes the image config only, never a cached layer.
 ARG VERSION=dev
 ARG REVISION=unknown
@@ -137,7 +137,7 @@ LABEL org.opencontainers.image.title="Future AGI agentcc-gateway" \
       org.opencontainers.image.description="Future AGI LLM gateway (Agent Command Center): one OpenAI-compatible endpoint in front of every model provider, on :8080." \
       org.opencontainers.image.source="https://github.com/future-agi/future-agi" \
       org.opencontainers.image.url="https://futureagi.com" \
-      org.opencontainers.image.documentation="https://github.com/future-agi/future-agi/blob/main/docs/images.md" \
+      org.opencontainers.image.documentation="https://docs.futureagi.com/docs/self-hosting/images" \
       org.opencontainers.image.vendor="Future AGI" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}" \

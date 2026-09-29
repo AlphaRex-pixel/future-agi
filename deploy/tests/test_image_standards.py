@@ -1,6 +1,7 @@
-"""Image conventions (docs/images.md): OCI labels, base-image pinning, user,
-HEALTHCHECK and STOPSIGNAL of every published image, the health probes, and
-the build workflows that feed the labels."""
+"""Image conventions (TESTING.md, "Image conventions"; deploy/images.toml):
+OCI labels, base-image pinning, user, HEALTHCHECK and STOPSIGNAL of every
+published image, the health probes, and the build workflows that feed the
+labels."""
 
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import tomllib
 import types
 import unittest
 from pathlib import Path
@@ -33,7 +35,7 @@ WITH_EE = "Apache-2.0 AND LicenseRef-FutureAGI-Enterprise-1.0"
 INHERITED = object()  # set by the image this one is built FROM
 HAVE_YAML = importlib.util.find_spec("yaml") is not None  # CI installs PyYAML
 
-# Dockerfile -> what docs/images.md promises for its image.
+# Dockerfile -> what deploy/images.toml and the images page promise for its image.
 IMAGES = {
     "futureagi/Dockerfile.oss": {
         "licenses": WITH_EE,
@@ -77,7 +79,8 @@ IMAGES = {
         "healthcheck": True,
         "floating": {"GO_IMAGE"},
     },
-    # Root is a documented exception (docs/images.md); Helm runs it as 1000.
+    # Root is a documented exception
+    # (https://docs.futureagi.com/docs/self-hosting/images#users); Helm runs it as 1000.
     "futureagi/model_serving/Dockerfile.oss": {
         "licenses": APACHE,
         "user": "root",
@@ -112,7 +115,7 @@ IMAGES = {
 FIXED_LABELS = {
     "org.opencontainers.image.source": "https://github.com/future-agi/future-agi",
     "org.opencontainers.image.url": "https://futureagi.com",
-    "org.opencontainers.image.documentation": "https://github.com/future-agi/future-agi/blob/main/docs/images.md",
+    "org.opencontainers.image.documentation": "https://docs.futureagi.com/docs/self-hosting/images",
     "org.opencontainers.image.vendor": "Future AGI",
     "org.opencontainers.image.version": "${VERSION}",
     "org.opencontainers.image.revision": "${REVISION}",
@@ -1538,7 +1541,8 @@ class Workflows(unittest.TestCase):
             "deploy/standalone/bin/verify-binaries",
             "scripts/code-executor-base-pin.sh",
             "futureagi/requirements.txt",
-            "docs/images.md",
+            "deploy/images.toml",
+            "scripts/docs_site.py",
             ".github/workflows/release-images.yml",
         ):
             with self.subTest(path=path):
@@ -1602,16 +1606,38 @@ class Workflows(unittest.TestCase):
 
 
 class Docs(unittest.TestCase):
+    """deploy/images.toml, from which the images page of the docs site is
+    rendered, covers every released image and every label."""
+
+    def setUp(self):
+        with (ROOT / "deploy" / "images.toml").open("rb") as handle:
+            self.data = tomllib.load(handle)
+
     def test_every_released_image_is_documented(self):
         release = (WORKFLOWS / "release-images.yml").read_text(encoding="utf-8")
         images = set(re.findall(r"\bimage:\s*(futureagi/[a-z0-9-]+)", release))
         self.assertIn("futureagi/future-agi-simulation-runner", images)
-        docs = (ROOT / "docs" / "images.md").read_text(encoding="utf-8")
+        described = {image["name"] for image in self.data["image"]}
         for image in images | {"futureagi/code-executor-base"}:
             with self.subTest(image=image):
-                self.assertIn(f"`{image}`", docs)
-        for label in FIXED_LABELS:
-            self.assertIn(label, docs)
+                self.assertIn(image, described)
+
+    def test_every_label_is_documented(self):
+        documented = [label["name"] for label in self.data["label"]]
+        self.assertEqual(len(documented), len(set(documented)))
+        prefix = "org.opencontainers.image."
+        expected = set(FIXED_LABELS) | {
+            prefix + name for name in ("title", "description", "licenses")
+        }
+        self.assertEqual(set(documented), expected)
+        values = {label["name"]: label["value"] for label in self.data["label"]}
+        # A fixed literal label is stated as the Dockerfiles set it.
+        for name, value in FIXED_LABELS.items():
+            if "${" not in value and name != prefix + "documentation":
+                with self.subTest(label=name):
+                    self.assertIn(f"`{value}`", values[name])
+        for license_ in (APACHE, WITH_EE):
+            self.assertIn(f"`{license_}`", values[prefix + "licenses"])
 
 
 if __name__ == "__main__":

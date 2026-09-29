@@ -1,5 +1,6 @@
 """Image size budget: scripts/image_size_budget.py against a fake registry,
-and the budget file against the compose files and the release workflow."""
+and the budget file against the compose files, the release workflow and
+deploy/images.toml (the images page of the docs site states the budgets)."""
 
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import os
 import re
 import shutil
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -19,9 +21,16 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "image_size_budget.py"
 BUDGETS = ROOT / "scripts" / "image_size_budget.json"
 
+IMAGES = ROOT / "deploy" / "images.toml"
+
 _spec = importlib.util.spec_from_file_location("image_size_budget", SCRIPT)
 budget = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(budget)
+_spec = importlib.util.spec_from_file_location(
+    "docs_site", ROOT / "scripts" / "docs_site.py"
+)
+docs_site = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(docs_site)
 
 MB = 1_000_000
 
@@ -373,13 +382,33 @@ class BudgetFileTests(unittest.TestCase):
                 with self.subTest(compose_file=compose_file, image=image):
                     self.assertIn((image, ""), self.entries())
 
-    def test_docs_images_md_states_these_budgets(self):
-        docs = (ROOT / "docs" / "images.md").read_text()
+    def images(self) -> dict:
+        with IMAGES.open("rb") as handle:
+            return tomllib.load(handle)
+
+    def test_images_data_covers_every_budget_entry(self):
+        described = [
+            (image["name"], image.get("tag_suffix", ""))
+            for image in self.images()["image"]
+        ]
+        self.assertEqual(len(described), len(set(described)), described)
+        # The one image without a budget of its own states its size in words.
+        self.assertEqual(
+            set(described), self.entries() | {("futureagi/code-executor-base", "")}
+        )
+        for image in self.images()["image"]:
+            key = (image["name"], image.get("tag_suffix", ""))
+            with self.subTest(image=key):
+                self.assertEqual("size" in image, key not in self.entries())
+
+    def test_rendered_images_at_a_glance_states_the_budgets(self):
+        rendered = docs_site.render_images_at_a_glance(self.images(), self.config)
         # "Images at a glance": image -> its last cell, the size budget.
-        documented = {
+        stated = {
             (image, suffix): row.rstrip().rstrip("|").rsplit("|", 1)[1].strip()
             for row, image, suffix in re.findall(
-                r"(?m)^(\| `(futureagi/[a-z0-9-]+)(?::\*(-[a-z0-9]+))?` \|.*)$", docs
+                r"(?m)^(\| `(futureagi/[a-z0-9-]+)(?::\*(-[a-z0-9]+))?` \|.*)$",
+                rendered,
             )
         }
         expected = {}
@@ -391,26 +420,27 @@ class BudgetFileTests(unittest.TestCase):
                 text = f"{mb:g}"
             if not entry.get("enforce", True):
                 text += ", reported only"
+            if "measured_mb" in entry:
+                text += f" (measured {entry['measured_mb']:g})"
             expected[(entry["image"], entry.get("tag_suffix", ""))] = text
-        self.assertEqual({key: documented.get(key) for key in expected}, expected)
-        # The one row without a budget of its own.
+        self.assertEqual({key: stated.get(key) for key in expected}, expected)
         self.assertEqual(
-            documented.keys() - expected.keys(), {("futureagi/code-executor-base", "")}
+            stated.keys() - expected.keys(), {("futureagi/code-executor-base", "")}
         )
-        # The fresh-install total, and the slim variant's row in its own table.
-        (slim,) = [e for e in self.config["images"] if e.get("tag_suffix") == "-slim"]
-        for pattern, entry in (
-            (
-                r"([\d.]+) MB at most \(measured ([\d.]+)\)",
-                self.config["standalone_install"],
-            ),
-            (r"budget ([\d.]+) MB compressed \(measured ([\d.]+)\)", slim),
-        ):
-            with self.subTest(pattern=pattern):
-                self.assertEqual(
-                    re.search(pattern, docs).groups(),
-                    (f"{entry['budget_mb']:g}", f"{entry['measured_mb']:g}"),
-                )
+        # The fresh-install total.
+        install = self.config["standalone_install"]
+        self.assertEqual(
+            re.search(r"([\d.]+) MB at most \(measured ([\d.]+)\)", rendered).groups(),
+            (f"{install['budget_mb']:g}", f"{install['measured_mb']:g}"),
+        )
+        for image in (install["app"].removeprefix("futureagi/"), *install["with"]):
+            self.assertIn(
+                f"`{image}`", rendered.split("MB at most")[0].rsplit("\n", 1)[-1]
+            )
+
+    def test_images_data_is_mdx_safe_and_its_links_resolve(self):
+        problems = docs_site.data_problems(docs_site.image_texts(self.images()))
+        self.assertEqual(problems, [])
 
 
 if __name__ == "__main__":

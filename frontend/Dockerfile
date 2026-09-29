@@ -1,5 +1,5 @@
 # Future AGI frontend (futureagi/frontend): the React SPA served by nginx.
-# Conventions shared by every futureagi/* image: docs/images.md.
+# Conventions shared by every futureagi/* image: TESTING.md › Image conventions.
 
 # Base images, pinned by digest (multi-arch indexes) so a rebuild of the same
 # source gives the same layers. Bump both the tag and the digest together.
@@ -86,7 +86,8 @@ EXPOSE 443
 # The nginx master runs as root to bind :80 (docker-compose.distributed.yml
 # publishes 3000:80) and to write config.js at start; its workers, which
 # serve every request, run as the unprivileged `nginx` user (nginx.conf
-# `user nginx;`). docs/images.md lists this exception.
+# `user nginx;`). https://docs.futureagi.com/docs/self-hosting/images#users
+# lists this exception.
 # hadolint ignore=DL3002
 USER root
 # nginx: SIGQUIT finishes the requests in flight, SIGTERM drops them.
@@ -97,7 +98,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
 
-# Image metadata (docs/images.md). Declared last: a new version, commit or
+# Image metadata (TESTING.md › Image conventions). Declared last: a new version, commit or
 # build time changes the image config only, never a cached layer.
 ARG VERSION=dev
 ARG REVISION=unknown
@@ -106,7 +107,7 @@ LABEL org.opencontainers.image.title="Future AGI frontend" \
       org.opencontainers.image.description="Future AGI web UI: the React single-page app served by nginx on :80." \
       org.opencontainers.image.source="https://github.com/future-agi/future-agi" \
       org.opencontainers.image.url="https://futureagi.com" \
-      org.opencontainers.image.documentation="https://github.com/future-agi/future-agi/blob/main/docs/images.md" \
+      org.opencontainers.image.documentation="https://docs.futureagi.com/docs/self-hosting/images" \
       org.opencontainers.image.vendor="Future AGI" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}" \

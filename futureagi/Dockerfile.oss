@@ -52,7 +52,7 @@
 #   * Every stage starts from ONE digest-pinned base, shared with serving and
 #     code-executor, so a fresh distributed install downloads it once.
 #
-# Image conventions shared by every futureagi/* image (docs/images.md):
+# Image conventions shared by every futureagi/* image (TESTING.md › Image conventions):
 #   * OCI labels from VERSION, REVISION and CREATED, declared last so a new
 #     value never invalidates a cached layer.
 #   * HEALTHCHECK: docker/healthcheck.py, which probes only the roles that
@@ -297,7 +297,7 @@ RUN chmod +x entrypoint.sh \
 
 EXPOSE 80 5555 50051
 
-# Root by default; see the header and docs/images.md.
+# Root by default; see the header and https://docs.futureagi.com/docs/self-hosting/images#users.
 # hadolint ignore=DL3002
 USER root
 STOPSIGNAL SIGTERM
@@ -307,7 +307,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=600s --retries=3 \
     CMD ["python", "-I", "-S", "/usr/local/lib/futureagi/healthcheck.py"]
 ENTRYPOINT ["bash", "/app/backend/entrypoint.sh"]
 
-# Image metadata (docs/images.md). Declared last: a new version, commit or
+# Image metadata (TESTING.md › Image conventions). Declared last: a new version, commit or
 # build time changes the image config only, never a cached layer.
 ARG VERSION=dev
 ARG REVISION=unknown
@@ -321,7 +321,7 @@ LABEL org.opencontainers.image.title="Future AGI backend" \
       org.opencontainers.image.description="Future AGI API, Temporal and Celery workers and bootstrap jobs; SERVICE_TYPE selects the role." \
       org.opencontainers.image.source="https://github.com/future-agi/future-agi" \
       org.opencontainers.image.url="https://futureagi.com" \
-      org.opencontainers.image.documentation="https://github.com/future-agi/future-agi/blob/main/docs/images.md" \
+      org.opencontainers.image.documentation="https://docs.futureagi.com/docs/self-hosting/images" \
       org.opencontainers.image.vendor="Future AGI" \
       org.opencontainers.image.licenses="Apache-2.0 AND LicenseRef-FutureAGI-Enterprise-1.0" \
       org.opencontainers.image.version="${VERSION}" \

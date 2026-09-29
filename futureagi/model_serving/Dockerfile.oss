@@ -18,14 +18,15 @@
 #   * no uv binary and no uv cache in the image.
 #   * same digest-pinned Python base as the backend and code-executor images.
 #
-# Runs as root by default, a documented exception (docs/images.md): the cloud
+# Runs as root by default, a documented exception
+# (https://docs.futureagi.com/docs/self-hosting/images#users): the cloud
 # embedding pod mounts a root-owned model-cache volume (HF_HOME) with no
 # fsGroup, which uid 1000 could not write. The image is ready for uid 1000
 # (appuser, the backend image's uid): Helm runs it that way with fsGroup
 # 1000, and compose can with `user: "1000:1000"`. It serves on :8080 and
 # writes only model caches (under $HOME/.cache unless HF_HOME and friends
 # point elsewhere). Conventions shared by every futureagi/* image:
-# docs/images.md.
+# TESTING.md › Image conventions.
 # ============================================================================
 
 ARG PYTHON_IMAGE=python:3.11-slim-bookworm@sha256:a36c24f9cbdf4fd0f52d67f0823eeac19c2028c637cecc392d97f980d4fec56b
@@ -96,7 +97,7 @@ RUN chmod +x entrypoint.sh
 
 EXPOSE 8000 8080
 
-# Root by default; see the header and docs/images.md.
+# Root by default; see the header and https://docs.futureagi.com/docs/self-hosting/images#users.
 # hadolint ignore=DL3002
 USER root
 STOPSIGNAL SIGTERM
@@ -105,7 +106,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
     CMD ["python", "-I", "-S", "-c", "import urllib.request as u; u.build_opener(u.ProxyHandler({})).open('http://127.0.0.1:8080/health', timeout=5).close()"]
 ENTRYPOINT ["/app/embedding/entrypoint.sh"]
 
-# Image metadata (docs/images.md). Declared last: a new version, commit or
+# Image metadata (TESTING.md › Image conventions). Declared last: a new version, commit or
 # build time changes the image config only, never a cached layer.
 ARG VERSION=dev
 ARG REVISION=unknown
@@ -114,7 +115,7 @@ LABEL org.opencontainers.image.title="Future AGI model serving" \
       org.opencontainers.image.description="Embedding and audio/image model server for embedding-based evals and knowledge bases (FastAPI on :8080). CPU torch; the -gpu tags carry CUDA torch." \
       org.opencontainers.image.source="https://github.com/future-agi/future-agi" \
       org.opencontainers.image.url="https://futureagi.com" \
-      org.opencontainers.image.documentation="https://github.com/future-agi/future-agi/blob/main/docs/images.md" \
+      org.opencontainers.image.documentation="https://docs.futureagi.com/docs/self-hosting/images" \
       org.opencontainers.image.vendor="Future AGI" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}" \

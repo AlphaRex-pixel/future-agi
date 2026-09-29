@@ -29,7 +29,8 @@ WORKDIR /sandbox
 
 EXPOSE 8060
 
-# Runs as root (docs/images.md): nsjail needs it, with `privileged: true`, to
+# Runs as root (https://docs.futureagi.com/docs/self-hosting/images#users):
+# nsjail needs it, with `privileged: true`, to
 # create the namespaces and cgroups of each jail. server.py runs nsjail with
 # command-line flags, not config/python.cfg, so evaluated code runs inside
 # the jail as uid 0 with every capability dropped, without a seccomp filter,
@@ -42,7 +43,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
 # Run the HTTP API server
 CMD ["gunicorn", "--bind", "0.0.0.0:8060", "--workers", "4", "--timeout", "60", "server:app"]
 
-# Image metadata (docs/images.md). Declared last: a new version, commit or
+# Image metadata (TESTING.md › Image conventions). Declared last: a new version, commit or
 # build time changes the image config only, never a cached layer.
 ARG VERSION=dev
 ARG REVISION=unknown
@@ -51,7 +52,7 @@ LABEL org.opencontainers.image.title="Future AGI code executor" \
       org.opencontainers.image.description="nsjail sandbox that runs untrusted Python and JavaScript code evals behind an HTTP API on :8060." \
       org.opencontainers.image.source="https://github.com/future-agi/future-agi" \
       org.opencontainers.image.url="https://futureagi.com" \
-      org.opencontainers.image.documentation="https://github.com/future-agi/future-agi/blob/main/docs/images.md" \
+      org.opencontainers.image.documentation="https://docs.futureagi.com/docs/self-hosting/images" \
       org.opencontainers.image.vendor="Future AGI" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}" \
