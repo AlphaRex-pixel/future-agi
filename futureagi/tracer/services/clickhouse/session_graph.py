@@ -29,6 +29,7 @@ from tracer.services.clickhouse.graph_dispatch import (
     _GRAPH_SEED_ESTIMATE_QUERY_MS,
     _GRAPH_SEED_PROBE_ERRORS,
     OBSERVE_SYSTEM_GRAPH_PAYLOAD_VERSION,
+    _pending_graph_payload,
     _require_rollup_result_shape,
     degraded_graph_response,
     fetch_annotation_graph_ch,
@@ -966,14 +967,7 @@ def fetch_session_graph_ch(
             identity["organization_id"] = str(organization_id)
         if workspace_id is not None:
             identity["workspace_id"] = str(workspace_id)
-        pending_payload = {
-            "metric_name": metric_id,
-            "data": [],
-            "query_complete": False,
-            "query_status": "pending",
-            "query_sampled": False,
-            "query_refreshing": True,
-        }
+        pending_payload = _pending_graph_payload(metric_id)
 
         def accept_snapshot(payload: Any) -> bool:
             # A latency snapshot not marked as the mean is a miss.
