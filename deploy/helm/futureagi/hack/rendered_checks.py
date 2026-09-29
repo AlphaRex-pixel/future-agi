@@ -55,9 +55,7 @@ EXPECTED_URLS = {
     "digests-unpinned": PORT_FORWARD_URLS,
 }
 CHART = Path(__file__).resolve().parent.parent
-APP_VERSION = str(
-    yaml.safe_load((CHART / "Chart.yaml").read_text())["appVersion"]
-)
+APP_VERSION = str(yaml.safe_load((CHART / "Chart.yaml").read_text())["appVersion"])
 # ci/digests.yaml: the digest stamped for each published repository.
 STAMPED = {
     "futureagi/future-agi": "sha256:" + "1" * 64,
@@ -230,7 +228,9 @@ def is_public(url: str) -> bool:
 def check_python_env(where: str, values: dict) -> list[str]:
     """Wiring every Python container needs (backend, workers, bootstrap)."""
     failed = []
-    collector = f"{values.get('FI_COLLECTOR_HOST')}:{values.get('FI_COLLECTOR_OTLP_PORT')}"
+    collector = (
+        f"{values.get('FI_COLLECTOR_HOST')}:{values.get('FI_COLLECTOR_OTLP_PORT')}"
+    )
     # Simulation and voice spans go to this release's collector, over gRPC.
     if values.get("SIM_COLLECTOR_OTLP_ENDPOINT") != collector:
         failed.append(
@@ -253,7 +253,10 @@ def check_python_env(where: str, values: dict) -> list[str]:
     if is_public(app) and not values.get("CORS_ALLOWED_ORIGINS"):
         failed.append(f"{where}: the UI is public ({app}) but CORS allows every origin")
     cors = (values.get("CORS_ALLOWED_ORIGINS") or "").split(",")
-    if is_public(app) and f"{urlparse(app).scheme}://{urlparse(app).netloc}" not in cors:
+    if (
+        is_public(app)
+        and f"{urlparse(app).scheme}://{urlparse(app).netloc}" not in cors
+    ):
         failed.append(f"{where}: CORS_ALLOWED_ORIGINS {cors} misses the UI origin")
     hosts = (values.get("ALLOWED_HOSTS") or "").split(",")
     if is_public(api) and (
@@ -295,7 +298,9 @@ def check_gateway_redis(name: str, docs: list[dict]) -> list[str]:
         if multi and not values.get("AGENTCC_REDIS_ADDRESS"):
             failed.append(f"{name}: the gateway runs several replicas without Redis")
         if app_tls_redis and values.get("AGENTCC_REDIS_ADDRESS") == app_tls_redis:
-            failed.append(f"{name}: the gateway, which has no Redis TLS, uses the app's Redis over TLS")
+            failed.append(
+                f"{name}: the gateway, which has no Redis TLS, uses the app's Redis over TLS"
+            )
         if values.get("AGENTCC_REDIS_DB") in {"0", "1", "2", "3"}:
             failed.append(
                 f"{name}: the gateway shares Redis database {values['AGENTCC_REDIS_DB']} with the app"
@@ -340,13 +345,17 @@ def check_scheduling(name: str, docs: list[dict]) -> list[str]:
         values = env_values(container)
         graceful = int(values["TEMPORAL_GRACEFUL_SHUTDOWN_TIMEOUT"])
         if grace != prestop_seconds(container) + graceful + 30:
-            failed.append(f"{where}: grace {grace} is not preStop + graceful shutdown + 30")
+            failed.append(
+                f"{where}: grace {grace} is not preStop + graceful shutdown + 30"
+            )
         if own == "worker-exact-aggregation" and (
             doc["metadata"]["name"] in scaled
             or doc["spec"].get("replicas") != 1
             or values.get("TEMPORAL_MAX_CONCURRENT_ACTIVITIES") != "1"
         ):
-            failed.append(f"{where}: the exact-aggregation worker must be one single-slot replica")
+            failed.append(
+                f"{where}: the exact-aggregation worker must be one single-slot replica"
+            )
     return failed
 
 
@@ -357,14 +366,19 @@ def check_worker_queues(docs: list[dict]) -> list[str]:
     hpas = {component(d): d for d in docs if d["kind"] == "HorizontalPodAutoscaler"}
     pdbs = {component(d): d for d in docs if d["kind"] == "PodDisruptionBudget"}
     generic = env_values(pod_spec(deployments["worker"])["containers"][0])
-    if generic.get("TEMPORAL_EXCLUDED_QUEUES") != "simulation_runner,tasks_xl,agent_compass":
+    if (
+        generic.get("TEMPORAL_EXCLUDED_QUEUES")
+        != "simulation_runner,tasks_xl,agent_compass"
+    ):
         failed.append(
             "worker-queues: the all-queues worker still polls the dedicated queues "
             f"({generic.get('TEMPORAL_EXCLUDED_QUEUES')!r})"
         )
     xl = pod_spec(deployments["worker-tasks-xl"])
     if xl.get("terminationGracePeriodSeconds") != 30 + 900 + 30:
-        failed.append("worker-queues: tasks_xl grace is not preStop 30 + graceful 900 + 30")
+        failed.append(
+            "worker-queues: tasks_xl grace is not preStop 30 + graceful 900 + 30"
+        )
     if xl.get("nodeSelector") != {"workload": "batch"} or not xl.get("tolerations"):
         failed.append("worker-queues: tasks_xl is not on its own pool")
     if xl.get("priorityClassName") != "futureagi-batch":
@@ -374,25 +388,39 @@ def check_worker_queues(docs: list[dict]) -> list[str]:
         for name in ("worker", "worker-tasks-xl")
     }
     if policies != {"worker": "IfNotPresent", "worker-tasks-xl": "Always"}:
-        failed.append(f"worker-queues: pull policies {policies}: tasks_xl sets its own, Always")
+        failed.append(
+            f"worker-queues: pull policies {policies}: tasks_xl sets its own, Always"
+        )
     hpa = hpas.get("worker-tasks-xl")
-    metrics = {m["resource"]["name"]: m for m in (hpa or {}).get("spec", {}).get("metrics", [])}
+    metrics = {
+        m["resource"]["name"]: m for m in (hpa or {}).get("spec", {}).get("metrics", [])
+    }
     if not hpa or set(metrics) != {"memory"} or hpa["spec"]["maxReplicas"] != 3:
-        failed.append("worker-queues: tasks_xl HPA is not memory-only with maxReplicas 3")
+        failed.append(
+            "worker-queues: tasks_xl HPA is not memory-only with maxReplicas 3"
+        )
     if (hpa or {}).get("spec", {}).get("behavior", {}).get("scaleDown", {}).get(
         "stabilizationWindowSeconds"
     ) != 600:
-        failed.append("worker-queues: tasks_xl HPA does not inherit allQueues.autoscaling.behavior")
+        failed.append(
+            "worker-queues: tasks_xl HPA does not inherit allQueues.autoscaling.behavior"
+        )
     if pdbs.get("worker-tasks-xl", {}).get("spec", {}).get("maxUnavailable") != 2:
         failed.append("worker-queues: tasks_xl PDB ignores its own maxUnavailable")
     if "worker-agent-compass" in pdbs:
-        failed.append("worker-queues: agent_compass has a PDB although it turned it off")
-    backend_spread = pod_spec(deployments["backend"]).get("topologySpreadConstraints", [])
+        failed.append(
+            "worker-queues: agent_compass has a PDB although it turned it off"
+        )
+    backend_spread = pod_spec(deployments["backend"]).get(
+        "topologySpreadConstraints", []
+    )
     if not any(
         c["whenUnsatisfiable"] == "DoNotSchedule" and c.get("minDomains") == 2
         for c in backend_spread
     ):
-        failed.append("worker-queues: preset hard does not spread the two backend replicas")
+        failed.append(
+            "worker-queues: preset hard does not spread the two backend replicas"
+        )
     if pod_spec(deployments["frontend"]).get("topologySpreadConstraints"):
         failed.append("worker-queues: a single-replica frontend got a spread preset")
     return failed
@@ -402,7 +430,9 @@ def check_pooler(docs: list[dict]) -> list[str]:
     """ci/pooler.yaml over examples/external.yaml: Django pooled, CDC direct."""
     failed = []
     for doc in docs:
-        if doc["kind"] != "Deployment" or not component(doc).startswith(("backend", "worker")):
+        if doc["kind"] != "Deployment" or not component(doc).startswith(
+            ("backend", "worker")
+        ):
             continue
         values = env_values(pod_spec(doc)["containers"][0])
         expected = {
@@ -424,18 +454,29 @@ def check_pooler(docs: list[dict]) -> list[str]:
 def check_gateway_api(docs: list[dict]) -> list[str]:
     """examples/gateway-api.yaml and ci/gateway-api.yaml over bundled.yaml."""
     failed = []
-    routes = {d["metadata"]["name"]: d for d in docs if d["kind"] in ("HTTPRoute", "GRPCRoute")}
+    routes = {
+        d["metadata"]["name"]: d
+        for d in docs
+        if d["kind"] in ("HTTPRoute", "GRPCRoute")
+    }
     api = next((r for n, r in routes.items() if n.endswith("-api")), None)
     if not api:
         return ["gateway-api: no API HTTPRoute"]
     otlp = [
-        rule for rule in api["spec"]["rules"]
-        if {m["path"]["value"] for m in rule["matches"]} == {"/v1/traces", "/tracer/v1/traces"}
+        rule
+        for rule in api["spec"]["rules"]
+        if {m["path"]["value"] for m in rule["matches"]}
+        == {"/v1/traces", "/tracer/v1/traces"}
     ]
-    if not otlp or any(m["path"]["type"] != "Exact" for m in otlp[0]["matches"]) or not otlp[
-        0
-    ]["backendRefs"][0]["name"].endswith("-fi-collector") or otlp[0]["backendRefs"][0]["port"] != 4318:
-        failed.append("gateway-api: OTLP/HTTP is not routed on exact paths to the collector's 4318")
+    if (
+        not otlp
+        or any(m["path"]["type"] != "Exact" for m in otlp[0]["matches"])
+        or not otlp[0]["backendRefs"][0]["name"].endswith("-fi-collector")
+        or otlp[0]["backendRefs"][0]["port"] != 4318
+    ):
+        failed.append(
+            "gateway-api: OTLP/HTTP is not routed on exact paths to the collector's 4318"
+        )
     ws = [r for r in api["spec"]["rules"] if r["matches"][0]["path"]["value"] == "/ws/"]
     if not ws or ws[0].get("timeouts", {}).get("request") != "24h":
         failed.append("gateway-api: the WebSocket rule has no long timeout")
@@ -446,10 +487,17 @@ def check_gateway_api(docs: list[dict]) -> list[str]:
     if not llm or llm["spec"]["hostnames"] != ["llm.futureagi.example.com"]:
         failed.append("gateway-api: no LLM gateway route")
     public = next(
-        d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"].endswith("-public")
+        d
+        for d in docs
+        if d["kind"] == "NetworkPolicy" and d["metadata"]["name"].endswith("-public")
     )
-    if "agentcc-gateway" not in public["spec"]["podSelector"]["matchExpressions"][0]["values"]:
-        failed.append("gateway-api: the routed LLM gateway is not in the public NetworkPolicy")
+    if (
+        "agentcc-gateway"
+        not in public["spec"]["podSelector"]["matchExpressions"][0]["values"]
+    ):
+        failed.append(
+            "gateway-api: the routed LLM gateway is not in the public NetworkPolicy"
+        )
     return failed
 
 
@@ -460,7 +508,9 @@ def check_health_check_policies(name: str, docs: list[dict]) -> list[str]:
     probes and would send GET / with the pod's IP as the Host."""
     failed = []
     policies = {
-        d["spec"]["targetRef"]["name"]: d for d in docs if d["kind"] == "HealthCheckPolicy"
+        d["spec"]["targetRef"]["name"]: d
+        for d in docs
+        if d["kind"] == "HealthCheckPolicy"
     }
     if not policies:
         return failed
@@ -478,7 +528,9 @@ def check_health_check_policies(name: str, docs: list[dict]) -> list[str]:
     for target, policy in policies.items():
         where = f"{name}: HealthCheckPolicy {policy['metadata']['name']}"
         service = services.get(target)
-        deployment = service and deployments.get(service["spec"]["selector"]["app.kubernetes.io/component"])
+        deployment = service and deployments.get(
+            service["spec"]["selector"]["app.kubernetes.io/component"]
+        )
         if not deployment:
             failed.append(f"{where}: no Service and Deployment {target}")
             continue
@@ -486,11 +538,15 @@ def check_health_check_policies(name: str, docs: list[dict]) -> list[str]:
         ports = {p["name"]: p["containerPort"] for p in container["ports"]}
         probe = container["readinessProbe"]["httpGet"]
         probe_host = next(
-            (h["value"] for h in probe.get("httpHeaders", []) if h["name"] == "Host"), None
+            (h["value"] for h in probe.get("httpHeaders", []) if h["name"] == "Host"),
+            None,
         )
         config = policy["spec"]["default"]["config"]
         check = config.get("httpHealthCheck", {})
-        if config.get("type") != "HTTP" or (check.get("requestPath"), check.get("host")) != (
+        if config.get("type") != "HTTP" or (
+            check.get("requestPath"),
+            check.get("host"),
+        ) != (
             probe["path"],
             probe_host,
         ):
@@ -504,7 +560,10 @@ def check_health_check_policies(name: str, docs: list[dict]) -> list[str]:
             probed = {check.get("port")}
         else:
             targets = {p["port"]: p["targetPort"] for p in service["spec"]["ports"]}
-            probed = {ports.get(targets.get(port), targets.get(port)) for port in routed.get(target, ())}
+            probed = {
+                ports.get(targets.get(port), targets.get(port))
+                for port in routed.get(target, ())
+            }
         if probed != {ports.get(probe["port"], probe["port"])}:
             failed.append(
                 f"{where}: probes port {sorted(probed, key=str)}, the readiness probe {probe['port']!r}"
@@ -534,18 +593,27 @@ def check_alb_health_checks(name: str, docs: list[dict]) -> list[str]:
                     **ingress["metadata"].get("annotations", {}),
                     **service["metadata"].get("annotations", {}),
                 }
-                deployment = deployments[service["spec"]["selector"]["app.kubernetes.io/component"]]
+                deployment = deployments[
+                    service["spec"]["selector"]["app.kubernetes.io/component"]
+                ]
                 container = pod_spec(deployment)["containers"][0]
                 ports = {p["name"]: p["containerPort"] for p in container["ports"]}
                 probe = container["readinessProbe"]["httpGet"]
                 target = next(
-                    p["targetPort"] for p in service["spec"]["ports"]
-                    if p["port"] == ref["port"].get("number") or p["name"] == ref["port"].get("name")
+                    p["targetPort"]
+                    for p in service["spec"]["ports"]
+                    if p["port"] == ref["port"].get("number")
+                    or p["name"] == ref["port"].get("name")
                 )
                 port = annotations.get(prefix + "healthcheck-port", "traffic-port")
-                probed = ports.get(target, target) if port == "traffic-port" else int(port)
+                probed = (
+                    ports.get(target, target) if port == "traffic-port" else int(port)
+                )
                 checked = annotations.get(prefix + "healthcheck-path", "/")
-                if (checked, probed) != (probe["path"], ports.get(probe["port"], probe["port"])):
+                if (checked, probed) != (
+                    probe["path"],
+                    ports.get(probe["port"], probe["port"]),
+                ):
                     failed.append(
                         f"{where}: checks {checked} on {probed}, the readiness probe "
                         f"{probe['path']} on {probe['port']}"
@@ -616,11 +684,15 @@ def check_render(name: str, docs: list[dict]) -> list[str]:
             if "*" not in hosts:
                 for pod_host in ("$(POD_IP)", "[$(POD_IP)]"):
                     if pod_host not in hosts:
-                        failed.append(f"{where}: ALLOWED_HOSTS {hosts} misses {pod_host}")
+                        failed.append(
+                            f"{where}: ALLOWED_HOSTS {hosts} misses {pod_host}"
+                        )
                 pod_ip = next((e for e in env if e["name"] == "POD_IP"), {})
                 if pod_ip.get("valueFrom", {}).get("fieldRef", {}).get(
                     "fieldPath"
-                ) != "status.podIP" or names.index("POD_IP") > names.index("ALLOWED_HOSTS"):
+                ) != "status.podIP" or names.index("POD_IP") > names.index(
+                    "ALLOWED_HOSTS"
+                ):
                     failed.append(
                         f"{where}: POD_IP is not the pod's IP (status.podIP) defined before ALLOWED_HOSTS"
                     )
@@ -795,7 +867,14 @@ def by_name(docs: list[dict], kind: str) -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 PYTHON_COMPONENTS = ("backend", "bootstrap")
 CA_PATH = "/etc/futureagi/ca/ca.crt"
-PROXY_VARS = ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy")
+PROXY_VARS = (
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "NO_PROXY",
+    "no_proxy",
+)
 # Variables only an opted-in feature may set: a default render has none.
 OPT_IN_VARS = PROXY_VARS + (
     "SSL_CERT_FILE",
@@ -841,7 +920,11 @@ def app_workloads(docs: list[dict]) -> list[dict]:
 
 def chart_secret(docs: list[dict]) -> dict:
     return next(
-        (d for d in docs if d["kind"] == "Secret" and d["metadata"]["name"].endswith("-secrets")),
+        (
+            d
+            for d in docs
+            if d["kind"] == "Secret" and d["metadata"]["name"].endswith("-secrets")
+        ),
         {"data": {}},
     )
 
@@ -883,42 +966,73 @@ def check_enterprise(docs: list[dict]) -> list[str]:
             expected = {
                 "EE_LICENSE_KEY": ("futureagi-license", "EE_LICENSE_KEY"),
                 "AUTH0_CLIENT_ID": ("futureagi-google-oauth", "AUTH0_CLIENT_ID"),
-                "AUTH0_CLIENT_SECRET": ("futureagi-google-oauth", "AUTH0_CLIENT_SECRET"),
-                "GITHUB_CLIENT_SECRET": (secret["metadata"]["name"], "GITHUB_CLIENT_SECRET"),
+                "AUTH0_CLIENT_SECRET": (
+                    "futureagi-google-oauth",
+                    "AUTH0_CLIENT_SECRET",
+                ),
+                "GITHUB_CLIENT_SECRET": (
+                    secret["metadata"]["name"],
+                    "GITHUB_CLIENT_SECRET",
+                ),
                 "MAILGUN_API_KEY": ("futureagi-mailgun", "MAILGUN_API_KEY"),
             }
             for var, ref in expected.items():
                 if refs.get(var) != ref:
-                    failed.append(f"{where}/{container['name']}: {var} from {refs.get(var)}, expected {ref}")
+                    failed.append(
+                        f"{where}/{container['name']}: {var} from {refs.get(var)}, expected {ref}"
+                    )
             if values.get("GITHUB_CLIENT_ID") != "github-client-id":
-                failed.append(f"{where}/{container['name']}: GITHUB_CLIENT_ID is {values.get('GITHUB_CLIENT_ID')!r}")
+                failed.append(
+                    f"{where}/{container['name']}: GITHUB_CLIENT_ID is {values.get('GITHUB_CLIENT_ID')!r}"
+                )
             if "MICROSOFT_CLIENT_ID" in values or "MICROSOFT_CLIENT_ID" in refs:
-                failed.append(f"{where}/{container['name']}: Microsoft sign-in is not configured")
+                failed.append(
+                    f"{where}/{container['name']}: Microsoft sign-in is not configured"
+                )
             if values.get("EE_LICENSE_CLOCK_SKEW_SECONDS") != "300":
-                failed.append(f"{where}/{container['name']}: EE_LICENSE_CLOCK_SKEW_SECONDS")
+                failed.append(
+                    f"{where}/{container['name']}: EE_LICENSE_CLOCK_SKEW_SECONDS"
+                )
             for var in PROXY_VARS:
                 if var not in values:
                     failed.append(f"{where}/{container['name']}: {var} missing")
     data = secret.get("data") or {}
     if "EE_LICENSE_KEY" in data:
-        failed.append("enterprise: license.existingSecret set, yet the chart stores EE_LICENSE_KEY")
+        failed.append(
+            "enterprise: license.existingSecret set, yet the chart stores EE_LICENSE_KEY"
+        )
     if "GITHUB_CLIENT_SECRET" not in data or "AUTH0_CLIENT_SECRET" in data:
-        failed.append("enterprise: the chart Secret should hold the inline GitHub secret only")
-    bootstrap = next(d for d in docs if d["kind"] == "Job" and component(d) == "bootstrap")
+        failed.append(
+            "enterprise: the chart Secret should hold the inline GitHub secret only"
+        )
+    bootstrap = next(
+        d for d in docs if d["kind"] == "Job" and component(d) == "bootstrap"
+    )
     container = pod_spec(bootstrap)["containers"][0]
     refs = secret_refs(container)
-    for var, key in (("FAGI_ADMIN_EMAIL", "email"), ("FAGI_ADMIN_NAME", "name"), ("FAGI_ADMIN_PASSWORD", "password")):
+    for var, key in (
+        ("FAGI_ADMIN_EMAIL", "email"),
+        ("FAGI_ADMIN_NAME", "name"),
+        ("FAGI_ADMIN_PASSWORD", "password"),
+    ):
         if refs.get(var) != ("futureagi-admin", key):
             failed.append(f"enterprise: bootstrap {var} from {refs.get(var)}")
     # The first admin is a step of bootstrap_install (FAGI_ADMIN_*): the
     # startup guard refuses `manage.py shell` in the bootstrap process.
     if container["command"] != ["python", "manage.py", "bootstrap_install"]:
-        failed.append(f"enterprise: the bootstrap job runs {container['command']}, not bootstrap_install alone")
+        failed.append(
+            f"enterprise: the bootstrap job runs {container['command']}, not bootstrap_install alone"
+        )
     if container.get("args", [])[:1] != ["--wait-timeout"]:
         failed.append("enterprise: bootstrap_install lost its arguments")
     for doc in (d for d in docs if d["kind"] == "Deployment"):
-        if doc["metadata"].get("annotations", {}).get("reloader.stakater.com/auto") != "true":
-            failed.append(f"enterprise: Deployment {doc['metadata']['name']} has no Reloader annotation")
+        if (
+            doc["metadata"].get("annotations", {}).get("reloader.stakater.com/auto")
+            != "true"
+        ):
+            failed.append(
+                f"enterprise: Deployment {doc['metadata']['name']} has no Reloader annotation"
+            )
     return failed
 
 
@@ -930,8 +1044,13 @@ def check_license_legacy(docs: list[dict]) -> list[str]:
         failed.append("license-legacy: secrets.eeLicenseKey is not stored")
     for doc in (d for d in docs if d["kind"] in ("Deployment", "Job") and is_python(d)):
         for container in containers(doc):
-            if secret_refs(container).get("EE_LICENSE_KEY") != (secret["metadata"]["name"], "EE_LICENSE_KEY"):
-                failed.append(f"license-legacy: {doc['metadata']['name']}/{container['name']} has no EE_LICENSE_KEY")
+            if secret_refs(container).get("EE_LICENSE_KEY") != (
+                secret["metadata"]["name"],
+                "EE_LICENSE_KEY",
+            ):
+                failed.append(
+                    f"license-legacy: {doc['metadata']['name']}/{container['name']} has no EE_LICENSE_KEY"
+                )
     return failed
 
 
@@ -946,36 +1065,75 @@ def check_proxy_ca(docs: list[dict]) -> list[str]:
         spec = pod_spec(doc)
         for container in containers(doc):
             values = env_values(container)
-            if values.get("HTTPS_PROXY") != "http://proxy.corp.example:3128" or values.get("https_proxy") != values.get("HTTPS_PROXY"):
+            if values.get(
+                "HTTPS_PROXY"
+            ) != "http://proxy.corp.example:3128" or values.get(
+                "https_proxy"
+            ) != values.get("HTTPS_PROXY"):
                 failed.append(f"{where}/{container['name']}: HTTPS_PROXY")
             no_proxy = set((values.get("NO_PROXY") or "").split(","))
             wanted = {
-                "localhost", "127.0.0.1", ".svc", ".cluster.local", ".futureagi.svc",
-                ".corp.example", "10.0.0.0/8", "postgres.example.internal",
-                "clickhouse.example.internal", "redis.example.internal",
+                "localhost",
+                "127.0.0.1",
+                ".svc",
+                ".cluster.local",
+                ".futureagi.svc",
+                ".corp.example",
+                "10.0.0.0/8",
+                "postgres.example.internal",
+                "clickhouse.example.internal",
+                "redis.example.internal",
             } | services
-            if not wanted <= no_proxy or values.get("no_proxy") != values.get("NO_PROXY"):
-                failed.append(f"{where}/{container['name']}: NO_PROXY misses {sorted(wanted - no_proxy)}")
+            if not wanted <= no_proxy or values.get("no_proxy") != values.get(
+                "NO_PROXY"
+            ):
+                failed.append(
+                    f"{where}/{container['name']}: NO_PROXY misses {sorted(wanted - no_proxy)}"
+                )
             # A public S3 endpoint may only be reachable through the proxy.
             if any(h.startswith("s3.") or "amazonaws" in h for h in no_proxy):
-                failed.append(f"{where}/{container['name']}: NO_PROXY bypasses the proxy for object storage")
+                failed.append(
+                    f"{where}/{container['name']}: NO_PROXY bypasses the proxy for object storage"
+                )
             if comp == "frontend":
                 continue
             if values.get("SSL_CERT_FILE") != CA_PATH:
                 failed.append(f"{where}/{container['name']}: SSL_CERT_FILE")
-            if not any(m.get("mountPath") == "/etc/futureagi/ca" and m.get("readOnly") for m in container.get("volumeMounts", [])):
-                failed.append(f"{where}/{container['name']}: CA bundle not mounted read-only")
+            if not any(
+                m.get("mountPath") == "/etc/futureagi/ca" and m.get("readOnly")
+                for m in container.get("volumeMounts", [])
+            ):
+                failed.append(
+                    f"{where}/{container['name']}: CA bundle not mounted read-only"
+                )
             if is_python(doc) or comp == "serving":
-                for var in ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "NODE_EXTRA_CA_CERTS"):
+                for var in (
+                    "REQUESTS_CA_BUNDLE",
+                    "CURL_CA_BUNDLE",
+                    "NODE_EXTRA_CA_CERTS",
+                ):
                     if values.get(var) != CA_PATH:
                         failed.append(f"{where}/{container['name']}: {var}")
-            if (is_python(doc) or comp == "fi-collector") and values.get("PGSSLROOTCERT") != CA_PATH:
-                failed.append(f"{where}/{container['name']}: PGSSLROOTCERT with verify-full")
+            if (is_python(doc) or comp == "fi-collector") and values.get(
+                "PGSSLROOTCERT"
+            ) != CA_PATH:
+                failed.append(
+                    f"{where}/{container['name']}: PGSSLROOTCERT with verify-full"
+                )
         if comp != "frontend":
-            volume = next((v for v in spec.get("volumes", []) if v["name"] == "ca-bundle"), None)
-            if not volume or volume.get("secret", {}).get("secretName") != "corp-ca" or volume["secret"].get("items") != [{"key": "bundle.pem", "path": "ca.crt"}]:
+            volume = next(
+                (v for v in spec.get("volumes", []) if v["name"] == "ca-bundle"), None
+            )
+            if (
+                not volume
+                or volume.get("secret", {}).get("secretName") != "corp-ca"
+                or volume["secret"].get("items")
+                != [{"key": "bundle.pem", "path": "ca.crt"}]
+            ):
                 failed.append(f"{where}: ca-bundle volume is {volume}")
-    for doc in (d for d in docs if component(d) == "code-executor" and d["kind"] == "Deployment"):
+    for doc in (
+        d for d in docs if component(d) == "code-executor" and d["kind"] == "Deployment"
+    ):
         for container in containers(doc):
             if set(env_values(container)) & set(OPT_IN_VARS):
                 failed.append("proxy-ca: the code sandbox gets proxy or CA variables")
@@ -1004,8 +1162,12 @@ def check_airgap(docs: list[dict]) -> list[str]:
         failed.append("airgap: examples/airgap.yaml should run serving")
     for doc in (d for d in docs if d["kind"] in WORKLOADS):
         for container in containers(doc):
-            if not container["image"].startswith("registry.example.com/futureagi-mirror/"):
-                failed.append(f"airgap: {doc['metadata']['name']} pulls {container['image']}")
+            if not container["image"].startswith(
+                "registry.example.com/futureagi-mirror/"
+            ):
+                failed.append(
+                    f"airgap: {doc['metadata']['name']} pulls {container['image']}"
+                )
     return failed
 
 
@@ -1013,23 +1175,46 @@ def check_external_secrets(docs: list[dict]) -> list[str]:
     """ExternalSecrets create exactly the Secrets the chart reads, before the
     bootstrap job, and the chart generates none of them."""
     failed = []
-    external = {d["spec"]["target"]["name"]: d for d in docs if d["kind"] == "ExternalSecret"}
+    external = {
+        d["spec"]["target"]["name"]: d for d in docs if d["kind"] == "ExternalSecret"
+    }
     # examples/external-secrets.yaml, then ci/external-secrets.yaml: one per group.
     wanted = {
-        "futureagi-app", "futureagi-llm", "futureagi-license", "futureagi-postgres", "futureagi-s3",
-        "futureagi-email", "futureagi-google", "futureagi-github", "futureagi-microsoft",
-        "futureagi-admin", "futureagi-clickhouse", "futureagi-redis",
+        "futureagi-app",
+        "futureagi-llm",
+        "futureagi-license",
+        "futureagi-postgres",
+        "futureagi-s3",
+        "futureagi-email",
+        "futureagi-google",
+        "futureagi-github",
+        "futureagi-microsoft",
+        "futureagi-admin",
+        "futureagi-clickhouse",
+        "futureagi-redis",
     }
     if set(external) != wanted:
-        failed.append(f"external-secrets: targets {sorted(external)}, expected {sorted(wanted)}")
+        failed.append(
+            f"external-secrets: targets {sorted(external)}, expected {sorted(wanted)}"
+        )
     for target, doc in external.items():
         annotations = doc["metadata"].get("annotations", {})
-        if "pre-install" not in annotations.get("helm.sh/hook", "") or int(annotations.get("helm.sh/hook-weight", "0")) >= -20:
-            failed.append(f"external-secrets: {target} is not created before the chart Secret and the bootstrap job")
+        if (
+            "pre-install" not in annotations.get("helm.sh/hook", "")
+            or int(annotations.get("helm.sh/hook-weight", "0")) >= -20
+        ):
+            failed.append(
+                f"external-secrets: {target} is not created before the chart Secret and the bootstrap job"
+            )
         if doc["spec"]["target"].get("creationPolicy") != "Orphan":
             failed.append(f"external-secrets: {target} would be deleted with its hook")
-        if doc["spec"]["secretStoreRef"] != {"name": "vault", "kind": "ClusterSecretStore"}:
-            failed.append(f"external-secrets: {target} store {doc['spec']['secretStoreRef']}")
+        if doc["spec"]["secretStoreRef"] != {
+            "name": "vault",
+            "kind": "ClusterSecretStore",
+        }:
+            failed.append(
+                f"external-secrets: {target} store {doc['spec']['secretStoreRef']}"
+            )
     read = set()
     for doc in (d for d in docs if d["kind"] in WORKLOADS):
         for container in containers(doc):
@@ -1038,8 +1223,16 @@ def check_external_secrets(docs: list[dict]) -> list[str]:
         failed.append(f"external-secrets: no pod reads {sorted(wanted - read)}")
     data = chart_secret(docs).get("data") or {}
     for key in (
-        "SECRET_KEY", "EE_LICENSE_KEY", "PG_PASSWORD", "S3_ACCESS_KEY", "MAILGUN_API_KEY", "AUTH0_CLIENT_SECRET",
-        "GITHUB_CLIENT_SECRET", "MICROSOFT_CLIENT_SECRET", "CH_PASSWORD", "REDIS_PASSWORD",
+        "SECRET_KEY",
+        "EE_LICENSE_KEY",
+        "PG_PASSWORD",
+        "S3_ACCESS_KEY",
+        "MAILGUN_API_KEY",
+        "AUTH0_CLIENT_SECRET",
+        "GITHUB_CLIENT_SECRET",
+        "MICROSOFT_CLIENT_SECRET",
+        "CH_PASSWORD",
+        "REDIS_PASSWORD",
     ):
         if key in data:
             failed.append(f"external-secrets: the chart still generates {key}")
@@ -1057,14 +1250,26 @@ def check_openshift(name: str, docs: list[dict]) -> list[str]:
         for where, context in contexts:
             fixed = sorted(set(context) & set(IDS))
             if fixed:
-                failed.append(f"{name}: {doc['metadata']['name']}/{where} keeps {fixed}")
+                failed.append(
+                    f"{name}: {doc['metadata']['name']}/{where} keeps {fixed}"
+                )
     if name == "openshift":
         statefulsets = by_name(docs, "StatefulSet")
         postgres = next(d for n, d in statefulsets.items() if n.endswith("-postgres"))
         redis = next(d for n, d in statefulsets.items() if n.endswith("-redis"))
-        if pod_spec(postgres)["containers"][0]["securityContext"].get("readOnlyRootFilesystem") is not False:
-            failed.append("openshift: postgres.bundled.containerSecurityContext is ignored")
-        if pod_spec(redis)["securityContext"].get("fsGroupChangePolicy") != "OnRootMismatch":
+        if (
+            pod_spec(postgres)["containers"][0]["securityContext"].get(
+                "readOnlyRootFilesystem"
+            )
+            is not False
+        ):
+            failed.append(
+                "openshift: postgres.bundled.containerSecurityContext is ignored"
+            )
+        if (
+            pod_spec(redis)["securityContext"].get("fsGroupChangePolicy")
+            != "OnRootMismatch"
+        ):
             failed.append("openshift: redis.bundled.podSecurityContext is ignored")
     return failed
 
@@ -1101,15 +1306,21 @@ def check_overrides(bundled: list[dict], overrides: list[dict]) -> list[str]:
 
     # bootstrap.ttlSecondsAfterFinished: 0 deletes the job at once; it is not unset.
     for render, docs, ttl in (("bundled", bundled, 86400), ("overrides", overrides, 0)):
-        job = next(d for d in docs if d["kind"] == "Job" and component(d) == "bootstrap")
+        job = next(
+            d for d in docs if d["kind"] == "Job" and component(d) == "bootstrap"
+        )
         if job["spec"].get("ttlSecondsAfterFinished") != ttl:
             failed.append(
                 f"{render}: the bootstrap job's ttlSecondsAfterFinished is "
                 f"{job['spec'].get('ttlSecondsAfterFinished')!r}, expected {ttl}"
             )
     # objectStorage.bundled.service.downloadPort: the Service port MINIO_URL names.
-    minio = next(d for d in overrides if d["kind"] == "Service" and component(d) == "minio")
-    if 9100 not in {p["port"] for p in minio["spec"]["ports"] if p["name"] == "downloads"}:
+    minio = next(
+        d for d in overrides if d["kind"] == "Service" and component(d) == "minio"
+    )
+    if 9100 not in {
+        p["port"] for p in minio["spec"]["ports"] if p["name"] == "downloads"
+    }:
         failed.append("overrides: the MinIO Service does not publish downloadPort 9100")
 
     mounts = {
@@ -1156,12 +1367,7 @@ def check_gitops(docs: list[dict]) -> list[str]:
 
 
 def all_images(docs: list[dict]) -> list[str]:
-    return [
-        c["image"]
-        for d in docs
-        if d["kind"] in WORKLOADS
-        for c in containers(d)
-    ]
+    return [c["image"] for d in docs if d["kind"] in WORKLOADS for c in containers(d)]
 
 
 def check_digests(name: str, docs: list[dict], pinned: bool) -> list[str]:
@@ -1177,18 +1383,20 @@ def check_digests(name: str, docs: list[dict], pinned: bool) -> list[str]:
         if repository not in STAMPED and not repository.startswith("acme/"):
             continue
         seen.add(repository)
-        expected = (
-            STAMPED.get(repository, "")
-            if pinned and tag == APP_VERSION
-            else ""
-        )
+        expected = STAMPED.get(repository, "") if pinned and tag == APP_VERSION else ""
         if digest != expected:
             failed.append(f"{name}: {image} should carry digest {expected!r}")
-    for repository in ("futureagi/future-agi", "futureagi/serving", "acme/code-executor"):
+    for repository in (
+        "futureagi/future-agi",
+        "futureagi/serving",
+        "acme/code-executor",
+    ):
         if repository not in seen:
             failed.append(f"{name}: no {repository} image rendered")
     # The registry is not compared: a mirror keeps the digest.
-    if not any(i.startswith("mirror.example.com/futureagi/frontend:") for i in all_images(docs)):
+    if not any(
+        i.startswith("mirror.example.com/futureagi/frontend:") for i in all_images(docs)
+    ):
         failed.append(f"{name}: the frontend does not run from its own registry")
     if not any(i.endswith(":v0.0.0-queue") for i in all_images(docs)):
         failed.append(f"{name}: the tasks_s queue does not run its own tag")
@@ -1246,7 +1454,9 @@ def check_token_mounts(name: str, docs: list[dict], mounted: bool) -> list[str]:
     }
     for account in accounts.values():
         if account.get("automountServiceAccountToken") is not mounted:
-            failed.append(f"{name}: ServiceAccount {account['metadata']['name']} automount is not {mounted}")
+            failed.append(
+                f"{name}: ServiceAccount {account['metadata']['name']} automount is not {mounted}"
+            )
     for doc in (d for d in docs if d["kind"] in WORKLOADS):
         spec = pod_spec(doc)
         want = (
@@ -1280,7 +1490,9 @@ def check_all_components(docs: list[dict]) -> list[str]:
             )
     job = next(d for d in docs if d["kind"] == "Job" and component(d) == "bootstrap")
     if "ttlSecondsAfterFinished" in job["spec"]:
-        failed.append("all-components: an empty bootstrap.ttlSecondsAfterFinished still sets one")
+        failed.append(
+            "all-components: an empty bootstrap.ttlSecondsAfterFinished still sets one"
+        )
     return failed
 
 
