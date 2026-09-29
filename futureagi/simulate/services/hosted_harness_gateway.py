@@ -4599,6 +4599,53 @@ def authoring_stage_outputs_from_archive(
     )
 
 
+# A run replays these byte for byte against their sealed manifests, so an edit never touches them.
+_SEALED_ARCHIVE_ROOTS = frozenset({"environment-bundle", "generic-harness"})
+
+
+def _scenario_token(value: object) -> str:
+    """One spelling for a scenario's folder, name and key, which older outputs wrote differently."""
+    return Path(str(value or "").strip()).name.lower().replace("-", "_")
+
+
+def _suite_tokens(suite: list[dict]) -> set[str]:
+    return {
+        token
+        for one in suite
+        for field in ("name", "scenario_key", "folder")
+        if (token := _scenario_token(one.get(field)))
+    }
+
+
+def _document_tokens(folder: str, document: object) -> set[str]:
+    tokens = {_scenario_token(folder)}
+    if isinstance(document, dict):
+        tokens |= {
+            _scenario_token(document.get(field)) for field in ("name", "scenario_key")
+        }
+    return tokens - {""}
+
+
+def _scenario_folder_kept(folder: str, document: object, tokens: set[str]) -> bool:
+    """A folder goes only when its own scenario.json names a scenario the suite no longer has."""
+    if not isinstance(document, dict):
+        return True
+    return bool(_document_tokens(folder, document) & tokens)
+
+
+def _edit_for(folder: str, document: object, suite: list[dict]) -> dict | None:
+    own = _document_tokens(folder, document)
+    return next(
+        (
+            one
+            for one in suite
+            if {_scenario_token(one.get(field)) for field in ("name", "scenario_key")}
+            & own
+        ),
+        None,
+    )
+
+
 def push_scenarios_into_live_sandbox(job: HostedHarnessJob, suite: list[dict]) -> bool:
     """Land an edited suite on the running guest, which would otherwise re-pack its own copy."""
     attempt = (
@@ -4622,22 +4669,39 @@ def push_scenarios_into_live_sandbox(job: HostedHarnessJob, suite: list[dict]) -
         )
     except Exception:  # noqa: BLE001 - no live guest is the ordinary case, not a failure
         return False
-    keep = {str(one.get("scenario_key") or one.get("name") or "") for one in suite}
+    tokens = _suite_tokens(suite)
     try:
         listed = sandbox.process.exec(
             "ls -1 /work/authoring/scenarios 2>/dev/null", timeout=60
         )
-        present = {name for name in (listed.result or "").split() if name}
-        for folder in sorted(present - keep):
-            sandbox.process.exec(
-                f"rm -rf /work/authoring/scenarios/{folder}", timeout=60
+        present = sorted(name for name in (listed.result or "").split() if name)
+        for folder in present:
+            read = sandbox.process.exec(
+                f"cat /work/authoring/scenarios/{shlex.quote(folder)}/scenario.json",
+                timeout=60,
             )
-        for one in suite:
-            folder = str(one.get("scenario_key") or one.get("name") or "")
-            if not folder or folder not in present:
+            try:
+                document = json.loads(read.result or "") if not read.exit_code else None
+            except ValueError:
+                document = None
+            if not _scenario_folder_kept(folder, document, tokens):
+                sandbox.process.exec(
+                    f"rm -rf /work/authoring/scenarios/{shlex.quote(folder)}",
+                    timeout=60,
+                )
                 continue
+            edit = _edit_for(folder, document, suite)
+            if edit is None or not isinstance(document, dict):
+                continue
+            document.update(
+                {
+                    key: value
+                    for key, value in edit.items()
+                    if key not in {"scenario_key", "scenario_id"}
+                }
+            )
             sandbox.fs.upload_file(
-                json.dumps(one, indent=2).encode("utf-8"),
+                json.dumps(document, indent=2).encode("utf-8"),
                 f"/work/authoring/scenarios/{folder}/scenario.json",
             )
         sandbox.fs.upload_file(
@@ -4652,6 +4716,10 @@ def push_scenarios_into_live_sandbox(job: HostedHarnessJob, suite: list[dict]) -
     return True
 
 
+class AuthoringArchiveKept(Exception):
+    """The edited suite could not be written into the archive without breaking a run."""
+
+
 def rewrite_authoring_scenarios(job: HostedHarnessJob, suite: list[dict]) -> str | None:
     """Write an edited suite back into the sealed archive a rerun replays."""
     metadata = (job.payload or {}).get("metadata") or {}
@@ -4663,62 +4731,117 @@ def rewrite_authoring_scenarios(job: HostedHarnessJob, suite: list[dict]) -> str
     try:
         response = client.get_object(UPLOAD_BUCKET_NAME, object_key)
         body = response.read()
-    except Exception:  # noqa: BLE001 - an unreadable archive leaves the stage output as the record
+    except Exception as exc:  # noqa: BLE001 - an archive we cannot read cannot take the edit
         logger.exception("could not read authoring archive for amend job=%s", job.id)
-        return None
+        raise AuthoringArchiveKept("the saved scenarios could not be read") from exc
     finally:
         if response is not None:
             response.close()
             response.release_conn()
 
-    edited = {str(one.get("name") or ""): one for one in suite}
-    keys = {str(one.get("scenario_key") or one.get("name") or "") for one in suite}
-    out = io.BytesIO()
-    with (
-        tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as source,
-        tarfile.open(fileobj=out, mode="w:gz") as target,
-    ):
-        for member in source.getmembers():
-            path = Path(member.name)
-            in_scenarios = "scenarios" in path.parts
-            folder = (
-                path.parts[path.parts.index("scenarios") + 1]
-                if in_scenarios and len(path.parts) > path.parts.index("scenarios") + 1
-                else ""
-            )
-            if folder and folder not in keys:
-                continue
-            handle = source.extractfile(member) if member.isfile() else None
-            if handle is None:
-                target.addfile(member)
-                continue
-            payload = handle.read()
-            if path.name == "scenario.json" and folder:
-                document = json.loads(payload.decode("utf-8"))
-                replacement = edited.get(str(document.get("name") or "")) or edited.get(
-                    folder
-                )
-                if replacement is not None:
-                    document.update(
-                        {
-                            key: value
-                            for key, value in replacement.items()
-                            if key not in {"scenario_key", "scenario_id"}
-                        }
-                    )
-                    payload = json.dumps(document, indent=2).encode("utf-8")
-            elif path.name == "scenarios.json":
-                payload = json.dumps(suite, indent=2).encode("utf-8")
-            member.size = len(payload)
-            target.addfile(member, io.BytesIO(payload))
+    rewritten = _rewritten_authoring_archive(body, suite)
+    if rewritten is None:
+        logger.error(
+            "harness_amend_archive_kept job=%s: the rewrite would lose files a run needs",
+            job.id,
+        )
+        raise AuthoringArchiveKept("the change would lose files a run needs")
     client.put_object(
         bucket_name=UPLOAD_BUCKET_NAME,
         object_name=object_key,
-        data=io.BytesIO(out.getvalue()),
-        length=len(out.getvalue()),
+        data=io.BytesIO(rewritten),
+        length=len(rewritten),
         content_type="application/gzip",
     )
     return object_key
+
+
+def _archive_parts(name: str) -> tuple[str, ...]:
+    return tuple(part for part in Path(name).parts if part not in {"", "."})
+
+
+def _rewritten_authoring_archive(body: bytes, suite: list[dict]) -> bytes | None:
+    """The archive with the suite's edits applied, or None when the result would break a run."""
+    with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as source:
+        members = [
+            (member, source.extractfile(member).read() if member.isfile() else None)
+            for member in source.getmembers()
+        ]
+    documents: dict[str, object] = {}
+    folders: set[str] = set()
+    for member, data in members:
+        parts = _archive_parts(member.name)
+        if len(parts) < 2 or parts[0] != "scenarios":
+            continue
+        folders.add(parts[1])
+        if parts[2:] == ("scenario.json",) and data is not None:
+            try:
+                documents[parts[1]] = json.loads(data.decode("utf-8"))
+            except (UnicodeDecodeError, ValueError):
+                documents[parts[1]] = None
+    tokens = _suite_tokens(suite)
+    kept = {
+        folder
+        for folder in folders
+        if _scenario_folder_kept(folder, documents.get(folder), tokens)
+    }
+    held = set().union(
+        *(_document_tokens(folder, documents.get(folder)) for folder in kept)
+    )
+    if folders and any(
+        not {_scenario_token(one.get(field)) for field in ("name", "scenario_key")}
+        & held
+        for one in suite
+    ):
+        return None
+
+    out = io.BytesIO()
+    written: set[tuple[str, ...]] = set()
+    with tarfile.open(fileobj=out, mode="w:gz") as target:
+        for member, data in members:
+            parts = _archive_parts(member.name)
+            if len(parts) >= 2 and parts[0] == "scenarios" and parts[1] not in kept:
+                continue
+            if data is None:
+                target.addfile(member)
+                written.add(parts)
+                continue
+            if parts[:1] == ("scenarios",) and parts[2:] == ("scenario.json",):
+                document = documents.get(parts[1])
+                edit = _edit_for(parts[1], document, suite)
+                if isinstance(document, dict) and edit is not None:
+                    document = {
+                        **document,
+                        **{
+                            key: value
+                            for key, value in edit.items()
+                            if key not in {"scenario_key", "scenario_id"}
+                        },
+                    }
+                    data = json.dumps(document, indent=2).encode("utf-8")
+            elif parts == ("scenarios.json",):
+                data = json.dumps(suite, indent=2).encode("utf-8")
+            member.size = len(data)
+            target.addfile(member, io.BytesIO(data))
+            written.add(parts)
+
+    for member, data in members:
+        parts = _archive_parts(member.name)
+        if parts[-1:] != ("manifest.json",) or parts[:1] not in {
+            (root,) for root in _SEALED_ARCHIVE_ROOTS
+        }:
+            continue
+        try:
+            listed = json.loads((data or b"{}").decode("utf-8")).get("files") or []
+        except (UnicodeDecodeError, ValueError, AttributeError):
+            continue
+        if any(
+            parts[:-1] + _archive_parts(str(record.get("path") or "")) not in written
+            for record in listed
+            if isinstance(record, dict) and record.get("path")
+        ):
+            return None
+    return out.getvalue()
 
 
 def store_authoring_archive(
