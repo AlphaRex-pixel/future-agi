@@ -72,11 +72,25 @@ function renderPanels(props = {}) {
 }
 
 describe("WorkspacePanels", () => {
-  it("renders all workspace tabs with Overview first and Settings last", () => {
-    renderPanels();
+  it("renders all workspace tabs with Overview first and Settings last once a run exists", () => {
+    renderPanels({ envState: baseEnvState({ runs: [{ id: "r1" }] }) });
     ["Overview", "Contract", "Scenarios", "Evaluations", "Runs", "Settings"].forEach((label) => {
       expect(screen.getByRole("tab", { name: new RegExp(label) })).toBeInTheDocument();
     });
+  });
+
+  it("hides the Runs tab until the environment has a run", () => {
+    renderPanels();
+    expect(screen.queryByRole("tab", { name: /Runs/ })).toBeNull();
+    ["Overview", "Contract", "Scenarios", "Evaluations", "Settings"].forEach((label) => {
+      expect(screen.getByRole("tab", { name: new RegExp(label) })).toBeInTheDocument();
+    });
+  });
+
+  it("falls back to the Overview for ?tab=runs while there are no runs", () => {
+    renderPanels({ tab: "runs" });
+    expect(screen.getByText(/^overview-body:/)).toBeInTheDocument();
+    expect(screen.queryByText(/^runs-body:/)).toBeNull();
   });
 
   it("badges scenarios/evals from counts and runs from the live executions", () => {
@@ -132,10 +146,10 @@ describe("WorkspacePanels", () => {
     expect(onTabChange).toHaveBeenCalledWith("contract");
   });
 
-  it("hands the Runs panel the badge state, so the pre-flight count matches the tab", () => {
+  it("hands the Runs panel the badge state, so its eval list matches the tab", () => {
     renderPanels({
       tab: "runs",
-      envState: baseEnvState({ evals: [{ id: "stale-store-eval" }] }),
+      envState: baseEnvState({ evals: [{ id: "stale-store-eval" }], runs: [{ id: "r1" }] }),
       serverEnvState: baseEnvState({
         evals: [{ id: "cfg-1", name: "no_misselling" }],
       }),
@@ -144,7 +158,10 @@ describe("WorkspacePanels", () => {
   });
 
   it("falls back to envState when no badge state is passed (the build page)", () => {
-    renderPanels({ tab: "runs", envState: baseEnvState({ evals: [{ id: "e1" }] }) });
+    renderPanels({
+      tab: "runs",
+      envState: baseEnvState({ evals: [{ id: "e1" }], runs: [{ id: "r1" }] }),
+    });
     expect(screen.getByText("runs-body:e1")).toBeInTheDocument();
   });
 

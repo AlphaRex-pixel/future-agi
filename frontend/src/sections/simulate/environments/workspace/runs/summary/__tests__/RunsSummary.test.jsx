@@ -83,6 +83,12 @@ describe("RunsSummary", () => {
     expect(screen.queryByText("Dummy")).toBeNull();
   });
 
+  it("shows no run-compare checkboxes or compare hint in the runs table", () => {
+    renderSummary();
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+    expect(screen.queryByText(/compare them/)).toBeNull();
+  });
+
   it("defers Choose winner behind a disabled 'coming soon' control", () => {
     renderSummary();
     expect(screen.getByRole("button", { name: /Choose winner/ })).toBeDisabled();

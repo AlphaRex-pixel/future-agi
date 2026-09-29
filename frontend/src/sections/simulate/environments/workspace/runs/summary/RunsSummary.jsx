@@ -11,9 +11,8 @@ import SummaryGraph from "./SummaryGraph";
 import SummaryLegend from "./SummaryLegend";
 import SummaryTable from "./SummaryTable";
 
-// The populated Runs tab: every run of the environment as one summary — the
-// eval-score trend graph over a comparison table. Replaces the pre-flight card
-// once at least one run exists. Comparing/winner/trials are later phases,
+// The Runs tab: every run of the environment as one summary — the eval-score
+// trend graph over the runs table. Choosing a winner is a later phase,
 // surfaced as "coming soon" so the shell matches the design without faking the
 // behaviour.
 // Title, legend, graph and the runs bar (~440px) plus ~320px of table rows.
@@ -124,9 +123,6 @@ export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
         <Box sx={{ px: 2.5, py: 1.25, borderTop: "1px solid", borderColor: "divider", flexShrink: 0 }}>
           <Typography sx={{ typography: "s1", fontWeight: "fontWeightSemiBold" }}>
             Runs ({rows.length})
-          </Typography>
-          <Typography sx={{ typography: "s3", color: "text.subtitle" }}>
-            Select two or more to compare them scenario by scenario
           </Typography>
         </Box>
 
