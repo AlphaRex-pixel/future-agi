@@ -83,8 +83,9 @@ refuses to start while a required value is empty. See
 On a fresh install (no volumes of this Compose project yet) `./bin/install`
 fills every key below that is empty or still a `CHANGEME-` placeholder with a
 random value and writes it to `.env`. It never changes a value afterwards. On
-an existing install it fills only `INTEGRATION_ENCRYPTION_KEY` and
-`REDIS_PASSWORD`, which is safe while they are unset, and warns about the rest.
+an existing install it fills only `INTEGRATION_ENCRYPTION_KEY`,
+`AGENTCC_WEBHOOK_SECRET` and, on Standalone, `REDIS_PASSWORD`, which is safe
+while they are unset, and warns about the rest.
 `--wipe-volumes` and `./bin/uninstall --wipe-data` make the next install fresh
 again, and a value already in `.env` is kept even then.
 
