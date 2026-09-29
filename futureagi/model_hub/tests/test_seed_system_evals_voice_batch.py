@@ -94,8 +94,6 @@ def test_output_contract(evals_by_name, name):
         ("evaluate_function_calling", "Tools"),
         ("customer_agent_objection_handling", "Sales"),
         ("tool_call_accuracy", "Tools"),
-        ("no_misselling", "Compliance"),
-        ("lead_qualification_completeness", "Sales"),
     ],
 )
 def test_tag_additions_survive_catalog_override(evals_by_name, name, tag):

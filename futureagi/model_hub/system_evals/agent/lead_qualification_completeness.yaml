@@ -22,7 +22,6 @@ eval_tags:
 - Conversation
 - Voice
 - Insurance
-- Sales
 visible_ui: true
 permissions:
   allow_edit: false
