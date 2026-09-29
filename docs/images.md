@@ -314,7 +314,7 @@ Per image:
 | | `TEMPORAL_IMAGE`, `MINIO_IMAGE` | pinned | |
 | simulation runner | `FI_VERSION` | required | Agent Learning Kit SDK version (PyPI) |
 | | `BACKEND_IMAGE` | `futureagi/future-agi:latest` | the backend it extends; the build fails on one without the sandbox SDKs and git, such as a `-slim` tag |
-| | `LIVEKIT_AGENTS_VERSION` | `1.5.17` | |
+| | `LIVEKIT_AGENTS_VERSION` | `1.8.3` | |
 | `code-executor` | `CODE_EXECUTOR_BASE` | `futureagi/code-executor-base:v1.1.0` | its base; bump it whenever `Dockerfile.base` changes (`backend-ci.yml` enforces this) |
 
 ## EE and cloud builds

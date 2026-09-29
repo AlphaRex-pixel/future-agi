@@ -269,6 +269,7 @@ the default backend ([docs/images.md](images.md#backend-variants)).
 | `ALK_HOSTED_AGENTCC_MODEL` | `vertex_ai/gemini-3.7-flash` | S D H | Model requested through that gateway. |
 | `AGENTCC_HARNESS_API_KEY` | empty (falls back to `AGENTCC_INTERNAL_API_KEY`) | S D H | Platform-owned gateway key for sandbox authoring. |
 | `SIMULATOR_LLM_PROVIDER`, `SIMULATOR_LLM_MODEL` | `vertex`, `gemini-3.8-flash` | S D H | LLM that plays the simulated user. |
+| `SIMULATOR_LLM_THINKING` | empty: the least deliberation the model accepts by default | S D H | That LLM's thinking level or token budget. Set it to go lower where the model allows, e.g. `minimal` on `gemini-3.5-flash-lite` (`gemini-3.7-flash` refuses it). |
 | `ALK_HOSTED_BASE_EGRESS_DOMAINS` | empty | S D H | Extra domains a sandbox may reach, comma-separated. |
 | `ALK_HOSTED_WEBRTC_EGRESS_CIDRS` | empty | S D H | CIDRs a sandbox may reach for WebRTC media, comma-separated. |
 | `ALK_HOSTED_EGRESS_UNRESTRICTED` | `false` | S D H | `true` lifts the sandbox egress allow-list. |
@@ -278,6 +279,10 @@ the default backend ([docs/images.md](images.md#backend-variants)).
 | `ALK_HOSTED_PROVIDER_UNREACHABLE_GRACE_SECONDS` | `180` | S D H | Seconds a running sandbox may stay unreachable through its provider's API before the job fails it (`sandbox_unreachable`) and replaces it from its infrastructure retries. Raise it for long runs that must ride out a brief provider outage. |
 | `ALK_HOSTED_CHAT_TTL_SECONDS` | `1800` | S D H | Lifetime of an interactive chat sandbox. |
 | `ALK_HOSTED_BUNDLE_DIR` | empty | S D H | Directory of pre-authored environment bundles (`<dir>/<owner>__<repo>/manifest.json`). |
+| `HARNESS_PARALLELISM_ENABLED` | `false` | S D H | `true` lets one sandbox run several of a simulation's scenarios at once. Parallelism stays off, and a run that asks for it runs one scenario at a time, unless this is `true` and the sandbox's image is in `HARNESS_PARALLEL_SNAPSHOT_DIGESTS`. A Daytona sandbox built from `ALK_DAYTONA_DOCKERFILE` (development) needs only this flag. |
+| `HARNESS_PARALLEL_SNAPSHOT_DIGESTS` | empty: no image qualifies | S D H | Sandbox images cleared for parallel scenarios, comma-separated: Daytona snapshot digests (`ALK_DAYTONA_SNAPSHOT_DIGEST`, or a profile's `snapshot_digest`) and E2B template build IDs (`ALK_E2B_TEMPLATE_BUILD_ID`). |
+| `HARNESS_MAX_WORLD_SLOTS` | `8` | S D H | Most scenarios one sandbox runs at once, 1 to 8: any other value fails every hosted run. The sandbox's CPU and memory can lower it further. |
+| `HARNESS_RESOURCE_PROFILES` | `[]`: every run uses the provider's fixed sandbox size | S D H | Measured sandbox sizes, a JSON array of objects with `name`, `cpu_units`, `memory_mb`, `disk_gb`, `max_parallelism`, `connectors` (the agent connectors it serves) and, except for sandboxes built from `ALK_DAYTONA_DOCKERFILE`, `snapshot_name` and `snapshot_digest`. A run gets the profile that runs the most of its scenarios at once, and the smallest of those. A value that is not JSON, an empty one included, stops the app from starting; an invalid profile fails every hosted run. |
 | `ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER`, `ALK_UBER_GUEST_POC_PIN` | empty: off | S D H | Temporary proof-of-concept scenario policy of Future AGI's hosted service (an E.164 target and its PIN), passed to sandboxes on the platform's simulator-secret channel. Leave empty when self-hosting. |
 
 ### Voice simulations (Distributed)
