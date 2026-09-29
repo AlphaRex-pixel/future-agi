@@ -67,10 +67,13 @@ export default function TraceGroupHeaderRow({
 
   const descSummary = (key) => {
     if (key === "status") {
+      // The group's calls load a page at a time, so only count once all of
+      // them are here — a partial count would read as the whole group.
+      if (group.rows.length < group.count) return "-";
       const done = group.rows.filter(
         (t) => t.executionStatus === "completed",
       ).length;
-      return `${done}/${group.rows.length} completed`;
+      return `${done}/${group.count} completed`;
     }
     if (key === "persona")
       return personaCount

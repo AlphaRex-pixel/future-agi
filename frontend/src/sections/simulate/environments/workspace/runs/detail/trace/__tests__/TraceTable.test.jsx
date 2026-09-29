@@ -156,6 +156,11 @@ describe("TraceTable — call status column", () => {
     render(table({ groups: statusGroups }));
     expect(screen.getByText("1/3 completed")).toBeInTheDocument();
   });
+
+  it("shows no completed count while only some of the group's calls are loaded", () => {
+    render(table({ groups: [{ ...statusGroups[0], count: 25 }] }));
+    expect(screen.queryByText(/completed$/)).toBeNull();
+  });
 });
 
 describe("TraceTable — group row grid", () => {
