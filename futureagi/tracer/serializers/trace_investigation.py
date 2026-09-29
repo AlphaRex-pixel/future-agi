@@ -165,7 +165,7 @@ class InvestigationFindingSerializer(StrictInputSerializer):
     kind = serializers.CharField(max_length=64)
     statement = serializers.CharField(max_length=8000)
     requirement_id = serializers.CharField(
-        max_length=128, required=False, allow_null=True
+        max_length=256, required=False, allow_null=True
     )
     evidence_ids = serializers.ListField(
         child=serializers.CharField(max_length=128), max_length=100
@@ -179,7 +179,7 @@ class InvestigationFindingSerializer(StrictInputSerializer):
 
 
 class InvestigationRequirementCheckSerializer(StrictInputSerializer):
-    requirement_id = serializers.CharField(max_length=128)
+    requirement_id = serializers.CharField(max_length=256)
     requirement = serializers.CharField(max_length=8000)
     status = serializers.CharField(max_length=64)
     evidence_ids = serializers.ListField(

@@ -25998,7 +25998,7 @@ export interface InvestigationFindingApi {
   statement: string;
   /**
    * @minLength 1
-   * @maxLength 128
+   * @maxLength 256
    */
   requirement_id?: string;
   /** @maxItems 100 */
@@ -26034,7 +26034,7 @@ export interface InvestigationFindingApi {
 export interface InvestigationRequirementCheckApi {
   /**
    * @minLength 1
-   * @maxLength 128
+   * @maxLength 256
    */
   requirement_id: string;
   /**
