@@ -443,8 +443,8 @@ kubectl -n futureagi exec -it deploy/futureagi-backend -c backend -- python mana
 Then open <http://localhost:3000>. SDKs on this machine send traces with
 `FI_BASE_URL=http://localhost:4318`, as in the README's Quickstart.
 
-Until a published release contains the chart's bootstrap command (no v1.41.x
-release does), add `--set image.registry=<registry> --set image.tag=<tag>` for
+Until a published release contains the chart's bootstrap command (none does
+yet), add `--set image.registry=<registry> --set image.tag=<tag>` for
 images built from this checkout and pushed where the cluster can pull them;
 otherwise the bootstrap job fails with `Unknown command: 'bootstrap_install'`.
 See the [chart README](deploy/helm/futureagi/README.md).

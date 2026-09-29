@@ -18,8 +18,8 @@ Every Future AGI image takes one tag, `image.tag`, which defaults to the
 chart's `appVersion`.
 
 > **Set `image.tag` until a release ships `bootstrap_install`.** The bootstrap
-> job runs `python manage.py bootstrap_install`, which no published v1.41.x
-> image contains, the chart's first default `appVersion` included. Until
+> job runs `python manage.py bootstrap_install`, which no image published
+> before this chart contains, the chart's first default `appVersion` included. Until
 > a published release contains the command, point `image.tag` (and
 > `image.registry`) at images built from the same checkout as this chart and
 > pushed where your cluster can pull them. Otherwise the bootstrap job fails
@@ -444,7 +444,7 @@ later one. Helm and Flux ignore these annotations.
 | `helm install` fails at once with "fix these values" | the listed keys |
 | `helm install` times out | `kubectl logs job/<release>-bootstrap`; let a running job finish before retrying; raise `--timeout` together with `bootstrap.activeDeadlineSeconds` (the first bootstrap migrates an empty database) |
 | bootstrap: `... is not reachable after 600s` | the host and port in the values, NetworkPolicies, DNS |
-| bootstrap: `Unknown command: 'bootstrap_install'` | the backend image predates this chart (every published v1.41.x image does): set `image.tag` to images built from the chart's checkout |
+| bootstrap: `Unknown command: 'bootstrap_install'` | the backend image predates this chart (every image published before this chart does): set `image.tag` to images built from the chart's checkout |
 | bootstrap or fi-collector: certificate verify failed | `PGSSLROOTCERT` and the CA mount (see [External and bundled datastores](#external-and-bundled-datastores)) |
 | `helm upgrade`: `... cannot change` (StatefulSet ...) | [Install-time settings](#install-time-settings) |
 | Workers log `waiting for the database migrations` | the bootstrap job: `kubectl logs job/<release>-bootstrap` |
