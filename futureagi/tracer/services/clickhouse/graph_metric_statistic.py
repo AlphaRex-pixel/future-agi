@@ -197,17 +197,12 @@ def stamps_metric_statistic(
 
 
 __all__ = [
-    "CHART_BUNDLE_METRICS",
-    "LATENCY_METRIC",
-    "LATENCY_STATISTIC",
     "METRIC_STATISTIC_CHOICES",
     "SESSION_METRIC_STATISTICS",
-    "SNAPSHOT_NAMESPACE_SURFACES",
     "TRACE_METRIC_STATISTICS",
     "USER_METRIC_STATISTICS",
     "chart_bundle_statistics",
     "publishes_latency",
-    "resolved_system_metric",
     "snapshot_names_its_statistic",
     "stamp_snapshot_statistic",
     "stamps_metric_statistic",
