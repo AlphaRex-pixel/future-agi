@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, Literal, ParamSpec, TypeVar, cast
+
+Surface = Literal["trace", "session", "users"]
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 # The one statistic every Observe latency series publishes.
 LATENCY_STATISTIC = "mean"
@@ -59,7 +63,7 @@ USER_METRIC_STATISTICS: Mapping[str, str] = {
 }
 
 # surface -> (statistics, series published for an unknown metric id)
-_SURFACES: dict[str, tuple[Mapping[str, str], str | None]] = {
+_SURFACES: dict[Surface, tuple[Mapping[str, str], str | None]] = {
     # ``graph_dispatch._resolved_system_metric``: unknown ids publish latency.
     "trace": (TRACE_METRIC_STATISTICS, "latency"),
     # ``fetch_session_graph_ch`` rejects unknown ids.
@@ -72,7 +76,7 @@ _SURFACES: dict[str, tuple[Mapping[str, str], str | None]] = {
 CHART_BUNDLE_METRICS = ("latency", "tokens", "cost", "traffic")
 
 
-def resolved_system_metric(surface: str, metric_id: Any) -> str | None:
+def resolved_system_metric(surface: Surface, metric_id: str | None) -> str | None:
     """The series a system-metric request on ``surface`` publishes.
 
     ``None`` when the surface rejects the id (the session graph).
@@ -89,13 +93,13 @@ def resolved_system_metric(surface: str, metric_id: Any) -> str | None:
     return fallback
 
 
-def publishes_latency(surface: str, metric_id: Any) -> bool:
+def publishes_latency(surface: Surface, metric_id: str | None) -> bool:
     """Whether a system-metric request on ``surface`` publishes latency."""
 
     return resolved_system_metric(surface, metric_id) == LATENCY_METRIC
 
 
-def system_metric_statistic(surface: str, metric_id: Any) -> str | None:
+def system_metric_statistic(surface: Surface, metric_id: str | None) -> str | None:
     """The statistic of the series a system-metric request publishes."""
 
     statistics, _fallback = _SURFACES[surface]
@@ -109,7 +113,7 @@ def chart_bundle_statistics() -> dict[str, str]:
     return {key: TRACE_METRIC_STATISTICS[key] for key in CHART_BUNDLE_METRICS}
 
 
-def with_metric_statistic(payload: Any, surface: str, metric_id: Any) -> Any:
+def with_metric_statistic(payload: _R, surface: Surface, metric_id: str | None) -> _R:
     """Return ``payload`` stamped with its series' ``metric_statistic``."""
 
     if not isinstance(payload, dict):
@@ -117,11 +121,11 @@ def with_metric_statistic(payload: Any, surface: str, metric_id: Any) -> Any:
     statistic = system_metric_statistic(surface, metric_id)
     if statistic is None:
         return payload
-    return {**payload, "metric_statistic": statistic}
+    return cast(_R, {**payload, "metric_statistic": statistic})
 
 
 # Exact snapshot namespace of each system-metric surface.
-SNAPSHOT_NAMESPACE_SURFACES: Mapping[str, str] = {
+SNAPSHOT_NAMESPACE_SURFACES: Mapping[str, Surface] = {
     "observe-system-graph": "trace",
     "observe-session-system-graph": "session",
     "observe-user-system-graph": "users",
@@ -166,20 +170,21 @@ def snapshot_names_its_statistic(namespace: str, metric_id: Any, payload: Any) -
 
 
 def stamps_metric_statistic(
-    surface: str,
-    metric_of: Callable[[dict[str, Any]], Any],
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    surface: Surface,
+    metric_of: Callable[[dict[str, Any]], str | None],
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Stamp every envelope a keyword-only graph entry point returns.
 
     Stamping at the public boundary covers the complete, cached, pending,
     degraded and refused envelopes alike, so the label never flickers while a
     series loads. ``metric_of`` maps the call's keyword arguments to the
     requested metric id, or to ``None`` when the call is not a system metric.
+    The decorated function keeps its signature for the type checker.
     """
 
-    def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
+    def decorate(function: Callable[_P, _R]) -> Callable[_P, _R]:
         @functools.wraps(function)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             payload = function(*args, **kwargs)
             metric_id = metric_of(kwargs)
             if metric_id is None:
