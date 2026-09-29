@@ -1174,7 +1174,7 @@ def _witness_candidates(
         (
             index
             for index, (witness, _typed) in enumerate(eligible)
-            if witness.family != "raw"
+            if witness.family == "native"
         ),
         None,
     )

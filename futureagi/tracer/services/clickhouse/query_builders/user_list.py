@@ -3,7 +3,7 @@
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any
+from typing import Any, Literal
 
 from tracer.services.clickhouse.eval_logger_table import eval_logger_source
 from tracer.services.clickhouse.list_cursor import canonical_filter_leaf
@@ -72,9 +72,9 @@ class MatchingActivityWitness:
     of equality: the predicate is what a witness is.
     """
 
-    family: str
+    family: Literal["raw", "native"]
     key: str
-    kind: str
+    kind: Literal["text", "number", "boolean", "native"]
     sql: str
     params: dict[str, Any] = field(default_factory=dict)
     leaf_index: int | None = None
@@ -636,14 +636,18 @@ class UserListQueryBuilder(BaseQueryBuilder):
             )
             rank = witness_selectivity_rank(item, found)
             ranked.append((rank, 0, not seedable, found.identity, found))
-        for found in self._native_user_witnesses():
-            rank = witness_selectivity_rank(self.filters[found.leaf_index], found)
+        for item, found in self._native_user_witnesses():
+            rank = witness_selectivity_rank(item, found)
             ranked.append((rank, 1, False, found.identity, found))
         ranked.sort(key=lambda entry: entry[:4])
         return [entry[-1] for entry in ranked]
 
-    def _native_user_witnesses(self) -> Iterator[MatchingActivityWitness]:
+    def _native_user_witnesses(
+        self,
+    ) -> Iterator[tuple[dict[str, Any], MatchingActivityWitness]]:
         """Native leaves whose graph condition has an existence term, in filter order.
+
+        Each leaf comes with its witness.
 
         A native leaf decides membership with the users graph's own condition
         (``compile_user_membership_leaf``). When that condition holds a term
@@ -671,15 +675,18 @@ class UserListQueryBuilder(BaseQueryBuilder):
             if existence is None:
                 continue
             _alias, predicate = existence
-            yield MatchingActivityWitness(
-                family="native",
-                key=column,
-                kind="native",
-                sql=f"({predicate})",
-                params=dict(params),
-                leaf_index=index,
-                index_pruned=False,
-                identity=canonical_filter_leaf(item),
+            yield (
+                item,
+                MatchingActivityWitness(
+                    family="native",
+                    key=column,
+                    kind="native",
+                    sql=f"({predicate})",
+                    params=dict(params),
+                    leaf_index=index,
+                    index_pruned=False,
+                    identity=canonical_filter_leaf(item),
+                ),
             )
 
     def _scalar_user_witnesses(self):
