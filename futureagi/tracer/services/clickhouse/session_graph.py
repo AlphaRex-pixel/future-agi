@@ -807,7 +807,7 @@ def _inline_session_latency_graph(
     inline_wall_ms = min(int(wall_deadline_ms) // 2, SESSION_GRAPH_INLINE_WALL_MS)
     if inline_wall_ms < floor_ms:
         return None
-    deadline = ReadDeadline.start(inline_wall_ms, enforce_on_server=True)
+    deadline = ReadDeadline.start(inline_wall_ms)
     capped = WallCappedAnalytics(analytics, deadline, floor_ms=floor_ms)
     max_estimated_rows = int(settings.SESSION_GRAPH_INLINE_MAX_ESTIMATED_ROWS)
     estimated_rows = _session_graph_root_estimate(

@@ -237,12 +237,13 @@ def test_trace_and_user_background_statements_are_capped(worker, namespace, iden
 
 @pytest.mark.unit
 def test_a_statement_is_not_sent_once_the_wall_is_spent(worker, monkeypatch):
-    from tracer.services.clickhouse.read_budget import ReadDeadlineExceeded
+    from tracer.services.clickhouse.read_budget import (
+        ReadDeadline,
+        ReadDeadlineExceeded,
+    )
 
     with worker._exact_observe_analytics() as analytics:
-        monkeypatch.setattr(
-            type(analytics.deadline), "elapsed_ms", lambda _self: WALL_S * 1000
-        )
+        monkeypatch.setattr(ReadDeadline, "elapsed_ms", lambda _self: WALL_S * 1000)
         with pytest.raises(ReadDeadlineExceeded):
             analytics.execute_ch_query("SELECT 1", {}, timeout_ms=1_000)
 

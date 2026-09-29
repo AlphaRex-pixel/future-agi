@@ -123,7 +123,7 @@ def _exact_observe_analytics() -> Iterator[Any]:
                 ch_client=client,
                 read_timeout_ceiling_ms=read_timeout_ceiling_ms,
             ),
-            ReadDeadline.start(read_timeout_ceiling_ms, enforce_on_server=True),
+            ReadDeadline.start(read_timeout_ceiling_ms),
             floor_ms=int(settings.EXACT_GRAPH_MIN_REMAINING_MS),
         )
     finally:

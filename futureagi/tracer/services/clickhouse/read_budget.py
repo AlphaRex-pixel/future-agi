@@ -128,7 +128,9 @@ class WallCappedAnalytics:
     (``ReadDeadlineExceeded``) instead of reading to the end and holding its
     slot for a result nobody can use. ``timeout_ms`` and ``settings`` pass
     through unchanged; a caller's own tighter cap is kept. Below
-    ``floor_ms`` left, the statement is not sent at all.
+    ``floor_ms`` left, the statement is not sent at all. The cap is sent
+    whatever the deadline's ``enforce_on_server`` says: wrapping is the
+    opt-in.
 
     A server profile locked at ``readonly=1`` accepts no query setting, so on
     that lane the cap cannot reach the server (the service drops every
@@ -139,10 +141,6 @@ class WallCappedAnalytics:
         self._delegate = delegate
         self._deadline = deadline
         self._floor_ms = int(floor_ms)
-
-    @property
-    def deadline(self) -> ReadDeadline:
-        return self._deadline
 
     def execute_ch_query(
         self,
