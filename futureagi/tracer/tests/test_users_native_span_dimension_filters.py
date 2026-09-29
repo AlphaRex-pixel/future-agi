@@ -10,7 +10,7 @@ The list decides each native leaf with the users graph's own membership SQL:
 a user matches when ANY of their latest live spans in the window satisfies the
 span compiler's predicate (``''`` is null on these non-nullable columns,
 negations mean "some span differs", comparisons are case-insensitive). The
-live proof is ``test_users_native_span_dimension_parity_ch25.py``.
+live proof is ``test_users_native_span_dimension_parity_real_schema_ch25.py``.
 """
 
 from datetime import UTC, datetime

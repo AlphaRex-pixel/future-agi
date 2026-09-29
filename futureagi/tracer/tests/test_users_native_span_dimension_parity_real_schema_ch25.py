@@ -1,10 +1,9 @@
 """Live ClickHouse 25 on the DEPLOYED schema: native Users leaves, list = graph.
 
-The hand-built parity module (``test_users_native_span_dimension_parity_ch25``)
-declares ``trace_name`` as a plain column. On the deployed schema it is
-MATERIALIZED from ``trace_dict`` at INSERT, and ``SELECT *`` omits it, so the
-users graph's latest-row snapshot lost it and every ``trace_name`` leaf failed
-with code 47 there. This module runs on the lane database provisioned with the
+On the deployed schema ``trace_name`` is MATERIALIZED from ``trace_dict`` at
+INSERT, and ``SELECT *`` omits it, so the users graph's latest-row snapshot
+lost it and every ``trace_name`` leaf failed with code 47 there; a hand-built
+schema that declares it as a plain column cannot show that. This module runs on the lane database provisioned with the
 repo's own DDL (``provision-lane-ch-db.sh``, named by ``CH25_DATABASE``) and
 seeds ``trace_name`` the way production does: traces first, the dictionary
 reloaded, then spans, whose stored ``trace_name`` is asserted before any
@@ -305,8 +304,8 @@ def _labels(survivor: str) -> dict[str, str]:
     return labels
 
 
-def _list_members(ch_client, survivor, item) -> set[str]:
-    filters = [_date_filter(), item]
+def _list_members(ch_client, survivor, *items) -> set[str]:
+    filters = [_date_filter(), *items]
     manager = UsersListManager(
         organization_id=ORGANIZATION,
         allowed_project_ids=[PROJECT],
@@ -385,6 +384,15 @@ def test_model_and_trace_name_leaves_are_the_any_span_answer(
     assert _graph_members(ch_client, seeded, item) == expected
     assert _list_members(ch_client, seeded, item) == expected
     assert _graph_active_users(ch_client, item) == len(expected)
+
+
+def test_two_leaves_on_one_column_are_decided_independently(ch_client, seeded):
+    # "model contains gpt AND model is_null": only C has both a gpt span and
+    # an empty one. Each leaf reads its own any-span decision from the same
+    # statement, as each is its own countIf in the graph.
+    items = (_leaf("model", "contains", "gpt"), _leaf("model", "is_null", None))
+    assert _list_members(ch_client, seeded, *items) == {"C"}
+    assert _graph_members(ch_client, seeded, *items) == {"C"}
 
 
 @pytest.mark.parametrize("col_type", ["SYSTEM_METRIC", None], ids=["system", "none"])
