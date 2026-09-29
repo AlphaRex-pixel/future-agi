@@ -31,6 +31,8 @@ from types import SimpleNamespace
 from typing import ClassVar
 from unittest import mock
 
+from test_standalone_first_run import fake_structlog
+
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "futureagi"
 SCRIPT = ROOT / "deploy" / "standalone" / "bin" / "bootstrap.py"
@@ -368,9 +370,7 @@ class FakeStack:
             "clickhouse_connect": package(
                 "clickhouse_connect", get_client=self.get_client
             ),
-            "structlog": package(
-                "structlog", get_logger=lambda *args, **kwargs: mock.Mock()
-            ),
+            "structlog": fake_structlog(),
             # Its real subpackages, bootstrap_install among them, import
             # from the source tree; the ones listed here are fakes.
             "tfc": package("tfc", __path__=[str(BACKEND / "tfc")]),
@@ -623,14 +623,12 @@ class MainTest(StackTest):
     def test_a_hosted_environment_without_operator_mode_refuses_to_migrate(self):
         self.stack.authorized = False
 
-        # The refusal is final at createcachetable, whose other failures are not.
-        with self.assertRaisesRegex(
-            CommandError, "^createcachetable is not authorized here"
-        ):
+        # The refusal itself is bootstrap_install's (test_bootstrap_install.py).
+        with self.assertRaises(CommandError):
             bootstrap.main()
 
+        self.assertEqual(self.stack.log[-1], "phase migrating")
         self.assertEqual(self.stack.commands, [])
-        self.assertNotIn("createcachetable failed", self.out.getvalue())
         self.assertFalse(bootstrap.READY.exists())
 
     def test_a_backend_image_without_bootstrap_install_says_what_to_build(self):

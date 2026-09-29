@@ -747,8 +747,8 @@ def test_every_setup_resolves_with_an_empty_env(files) -> None:
 
 def test_cdc_defaults_cover_schedules_and_an_adopted_peerdb() -> None:
     """The bootstrap passes no options: the outbox module's defaults must sync
-    the schedules and take over from a stopped PeerDB (an adopted full-install
-    database always has its slots, publications and raw tables)."""
+    the schedules and take over from a stopped PeerDB (an adopted Distributed
+    install's database always has its slots, publications and raw tables)."""
     import inspect
 
     from tracer.services.clickhouse import oss_outbox_cdc

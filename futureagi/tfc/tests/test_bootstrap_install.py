@@ -87,9 +87,7 @@ def recorded_steps(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return steps
 
 
-def test_runs_every_step_in_the_standalone_bootstrap_order(
-    local_operator, recorded_steps
-) -> None:
+def test_runs_every_step_in_order(local_operator, recorded_steps) -> None:
     call_command("bootstrap_install", "--clickhouse-timeout", "321")
 
     assert recorded_steps == [
@@ -970,12 +968,15 @@ def test_the_job_retries_search_attributes_until_temporal_serves(
     assert "[bootstrap] eval-task search attributes already registered" in lines
     assert recorded_steps[-2:] == ["cdc", "register_temporal_schedules"]
 
-    # Out of attempts: the Job fails before change data capture.
+    # Out of attempts: the Job fails before change data capture, without
+    # sleeping after its last attempt.
     connects.clear()
     recorded_steps.clear()
+    sleeps.clear()
     with pytest.raises(RuntimeError, match="Temporal not serving yet"):
         call_command("bootstrap_install", "--temporal-attempts", "1", stdout=out)
     assert "cdc" not in recorded_steps
+    assert sleeps == []
 
 
 def test_an_unknown_cdc_mode_fails_before_the_installer_runs(
