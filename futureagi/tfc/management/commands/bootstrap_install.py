@@ -7,7 +7,8 @@ deploy/standalone/bin/bootstrap.py imports these steps and runs them in the
 same order, so every install path prepares the datastores the same way:
 
   1. wait until Postgres, ClickHouse, Redis and Temporal accept connections
-  2. createcachetable (a failure is logged, not fatal, as in entrypoint.sh)
+  2. createcachetable (a failure other than an authorization refusal is
+     logged, not fatal, as in entrypoint.sh)
   3. migrate, then seed_system_evals
   4. ClickHouse native schema (``oss_cdc_install --phase native --apply``)
   5. observed-attribute index: its ClickHouse database, users and grants
