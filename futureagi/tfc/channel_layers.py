@@ -143,7 +143,7 @@ def channel_layer_settings(
     files still carry ``amqp://...@rabbitmq``, a host that no longer ships, and
     every ``group_add()`` would wait on it forever.
     """
-    workers = env_int("GRANIAN_WORKERS", 1, env=env)
+    workers = env_int("GRANIAN_WORKERS", 1, env=env, minimum=1)
     amqp_url = env.get("CHANNEL_LAYER_AMQP_URL", "")
     backend = (env.get("CHANNEL_LAYER_BACKEND") or "").strip().lower() or "auto"
     if backend == "inmemory":
@@ -156,8 +156,8 @@ def channel_layer_settings(
         else:
             backend = "memory"
 
-    capacity = env_int("CHANNEL_LAYER_CAPACITY", 1500, env=env)
-    expiry = env_int("CHANNEL_LAYER_EXPIRY_SECONDS", 300, env=env)
+    capacity = env_int("CHANNEL_LAYER_CAPACITY", 1500, env=env, minimum=1)
+    expiry = env_int("CHANNEL_LAYER_EXPIRY_SECONDS", 300, env=env, minimum=1)
 
     if backend == "memory":
         # Only the web process holds WebSockets. Workers and bootstrap read the

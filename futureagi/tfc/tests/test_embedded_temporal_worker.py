@@ -147,6 +147,31 @@ def test_a_malformed_slot_count_names_its_variable(fake_registry, monkeypatch):
         embedded._worker_plans()
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "FI_APP_TEMPORAL_MAX_CONCURRENT_ACTIVITIES",
+        "TEMPORAL_MAX_CONCURRENT_WORKFLOW_TASKS",
+    ],
+)
+def test_a_slot_count_below_one_names_its_variable(fake_registry, monkeypatch, name):
+    # temporalio reads 0 slots as its default of 100, far more Postgres
+    # connections than the standalone install's database allows.
+    monkeypatch.setenv(name, "0")
+
+    with pytest.raises(ImproperlyConfigured, match=f"^{name} must be between 1 and"):
+        embedded._worker_plans()
+
+
+def test_zero_activity_threads_names_its_variable(monkeypatch):
+    monkeypatch.setenv("FI_EMBEDDED_ACTIVITY_THREADS", "0")
+
+    with pytest.raises(
+        ImproperlyConfigured, match="^FI_EMBEDDED_ACTIVITY_THREADS must be between 1"
+    ):
+        embedded.EmbeddedTemporalWorker()._thread_main()
+
+
 def test_worker_kwargs_size_each_worker_to_its_own_slots():
     client = object()
     interceptor = object()

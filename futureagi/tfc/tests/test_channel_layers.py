@@ -142,6 +142,18 @@ def test_a_malformed_number_names_its_variable(name):
         _select({name: "lots"})
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["CHANNEL_LAYER_CAPACITY", "CHANNEL_LAYER_EXPIRY_SECONDS", "GRANIAN_WORKERS"],
+)
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_a_count_below_one_names_its_variable(name, value):
+    # A capacity of 0 fills on the first message, an expiry of 0 drops every
+    # message, and Granian cannot run 0 workers.
+    with pytest.raises(ImproperlyConfigured, match=f"^{name} must be between 1 and"):
+        _select({name: value})
+
+
 def test_redis_layer_prefers_channel_redis_url():
     _, layers = _select(
         {

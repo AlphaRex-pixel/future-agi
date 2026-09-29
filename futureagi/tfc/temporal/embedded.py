@@ -90,8 +90,8 @@ DEFAULT_QUEUE_SLOTS = 8
 def _queue_slots(name: str) -> int:
     own = f"FI_APP_{name}"
     if os.getenv(own, "").strip():
-        return env_int(own, DEFAULT_QUEUE_SLOTS)
-    return env_int(name, DEFAULT_QUEUE_SLOTS)
+        return env_int(own, DEFAULT_QUEUE_SLOTS, minimum=1)
+    return env_int(name, DEFAULT_QUEUE_SLOTS, minimum=1)
 
 
 def _probe_interval() -> float:
@@ -444,12 +444,12 @@ class EmbeddedTemporalWorker:
     # -- worker thread -------------------------------------------------------
 
     def _thread_main(self) -> None:
+        threads = env_int("FI_EMBEDDED_ACTIVITY_THREADS", 4, minimum=1)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.set_default_executor(
             _QueueRoutingExecutor(
-                max_workers=env_int("FI_EMBEDDED_ACTIVITY_THREADS", 4),
-                thread_name_prefix="temporal-activity",
+                max_workers=threads, thread_name_prefix="temporal-activity"
             )
         )
         self._loop = loop

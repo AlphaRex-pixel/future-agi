@@ -66,6 +66,15 @@ def test_a_malformed_tuning_variable_names_itself(monkeypatch):
         _fresh_module(monkeypatch, {"FI_CDC_SNAPSHOT_PAGE": "10k"})
 
 
+@pytest.mark.parametrize("name", ["FI_CDC_DRAIN_BATCH", "FI_CDC_SNAPSHOT_PAGE"])
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_a_page_size_below_one_names_itself(monkeypatch, name, value):
+    # A 0-row page is never short, so the drain never finishes a table and a
+    # snapshot never completes.
+    with pytest.raises(ImproperlyConfigured, match=f"^{name} must be between 1 and"):
+        _fresh_module(monkeypatch, {name: value})
+
+
 def test_version_clock_is_strictly_increasing_across_backwards_steps_and_floor():
     ticks = iter([100, 50, 50, 200, 10])
     clock = cdc.VersionClock(floor=120, now=lambda: next(ticks))

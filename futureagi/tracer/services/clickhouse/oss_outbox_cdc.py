@@ -110,8 +110,8 @@ TRIGGERS = {
 }
 
 
-DRAIN_BATCH = env_int("FI_CDC_DRAIN_BATCH", 5000)
-SNAPSHOT_PAGE = env_int("FI_CDC_SNAPSHOT_PAGE", 10000)
+DRAIN_BATCH = env_int("FI_CDC_DRAIN_BATCH", 5000, minimum=1)
+SNAPSHOT_PAGE = env_int("FI_CDC_SNAPSHOT_PAGE", 10000, minimum=1)
 APPLY_CHUNK = 5000
 # Keys per reconcile page. Pass B sends them to ClickHouse as an IN list, so
 # this also bounds the query text (40 bytes per UUID; max_query_size 256 KiB).
