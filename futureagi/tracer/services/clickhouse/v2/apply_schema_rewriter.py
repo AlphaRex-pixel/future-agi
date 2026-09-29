@@ -317,6 +317,17 @@ def credentials_fingerprint(user: str, password: str) -> str:
     return _FINGERPRINT_PREFIX + digest.hex()[:16]
 
 
+def _statement_start(tokens: list[re.Match], position: int) -> int:
+    """Start of the statement running through ``position``: after its ``;``."""
+    start = 0
+    for token in tokens:
+        if token.start() >= position:
+            break
+        if token[0] == ";":
+            start = token.end()
+    return start
+
+
 def _statement_end(tokens: list[re.Match], position: int) -> int:
     """End of the last code token of the statement running through ``position``."""
     end = position
@@ -329,12 +340,9 @@ def _statement_end(tokens: list[re.Match], position: int) -> int:
     return end
 
 
-def _fingerprint_comments(sql: str) -> list[tuple[int, int, str]]:
-    """(start, end, value) of each top-level ``COMMENT '<fingerprint>'``.
-
-    ``start`` includes the whitespace before ``COMMENT``.
-    """
-    tokens = _code_tokens(sql)
+def _top_level_comments(tokens: list[re.Match]) -> list[int]:
+    """Indexes of each ``COMMENT`` keyword followed by a string, outside
+    parentheses (a column's COMMENT is inside them)."""
     found, depth = [], 0
     for i, token in enumerate(tokens):
         if token[0] == "(":
@@ -346,10 +354,23 @@ def _fingerprint_comments(sql: str) -> list[tuple[int, int, str]]:
             and token[0].upper() == "COMMENT"
             and i + 1 < len(tokens)
             and tokens[i + 1][0].startswith("'")
-            and _literal(tokens[i + 1][0]).startswith(_FINGERPRINT_PREFIX)
         ):
-            start = len(sql[: token.start()].rstrip())
-            found.append((start, tokens[i + 1].end(), _literal(tokens[i + 1][0])))
+            found.append(i)
+    return found
+
+
+def _fingerprint_comments(sql: str) -> list[tuple[int, int, str]]:
+    """(start, end, value) of each top-level ``COMMENT '<fingerprint>'``.
+
+    ``start`` includes the whitespace before ``COMMENT``.
+    """
+    tokens = _code_tokens(sql)
+    found = []
+    for i in _top_level_comments(tokens):
+        value = _literal(tokens[i + 1][0])
+        if value.startswith(_FINGERPRINT_PREFIX):
+            start = len(sql[: tokens[i].start()].rstrip())
+            found.append((start, tokens[i + 1].end(), value))
     return found
 
 
@@ -360,6 +381,9 @@ def with_dictionary_credentials(sql: str, user: str, password: str) -> str:
     Only ``SOURCE(CLICKHOUSE(...))`` clauses without a USER are changed. With an
     empty password the statement is returned unchanged, so passwordless installs
     execute exactly the packaged text. Idempotent. Never log the result.
+
+    Raises ValueError when a statement to change already has a COMMENT: the
+    fingerprint must be its only one.
     """
     if not password or "SOURCE" not in sql.upper():
         return sql
@@ -368,14 +392,24 @@ def with_dictionary_credentials(sql: str, user: str, password: str) -> str:
     )
     comment = f" COMMENT {_sql_string(credentials_fingerprint(user, password))}"
     tokens = _code_tokens(sql)
+    comments = [tokens[i].start() for i in _top_level_comments(tokens)]
     inserts = set()
     for start, end, arguments in _clickhouse_sources(sql):
         if any(pair[0] == "user" for pair in _source_pairs(arguments)):
             continue
+        statement_end = _statement_end(tokens, end)
+        if any(
+            _statement_start(tokens, start) <= position < statement_end
+            for position in comments
+        ):
+            raise ValueError(
+                "a dictionary with a SOURCE(CLICKHOUSE(...)) already has a COMMENT; "
+                "the credentials fingerprint must be its only one"
+            )
         stripped = sql[start:end].rstrip()
         separator = " " if stripped and not stripped.endswith("(") else ""
         inserts.add((start + len(stripped), separator + credentials))
-        inserts.add((_statement_end(tokens, end), comment))
+        inserts.add((statement_end, comment))
     result, last = [], 0
     for position, text in sorted(inserts):
         result.append(sql[last:position])

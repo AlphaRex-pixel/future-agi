@@ -193,6 +193,26 @@ def test_comments_strings_and_columns_named_source_are_not_clauses():
     assert result.startswith("-- SOURCE(CLICKHOUSE(TABLE 'commented'))\n")
 
 
+def test_a_dictionary_with_its_own_comment_is_refused():
+    # A second COMMENT clause is a syntax error, and the fingerprint must be
+    # the only COMMENT for dictionary_credentials_outdated to read it.
+    sql = TRACE_DICT.replace(";", " COMMENT 'existing';")
+    with pytest.raises(ValueError, match="already has a COMMENT"):
+        with_dictionary_credentials(sql, USER, PASSWORD)
+    # Without a password nothing is added, so there is nothing to refuse.
+    assert with_dictionary_credentials(sql, USER, "") is sql
+
+
+def test_a_comment_elsewhere_does_not_block_the_rewrite():
+    sql = (
+        "CREATE TABLE t (id UUID COMMENT 'key') ENGINE = MergeTree ORDER BY id "
+        "COMMENT 'a table';\n" + TRACE_DICT
+    )
+    result = with_dictionary_credentials(sql, USER, PASSWORD)
+    assert result.count(CREDENTIALS) == 1
+    assert not dictionary_credentials_outdated(result, USER, PASSWORD)
+
+
 def test_statements_without_a_clickhouse_source_are_untouched():
     for sql in (
         "CREATE TABLE t (source String) ENGINE = MergeTree ORDER BY source",
@@ -221,6 +241,8 @@ def test_the_packaged_dictionary_sites_are_all_covered():
 
 @pytest.mark.parametrize("site,sql", list(_packaged_dictionaries()))
 def test_every_packaged_dictionary_gets_the_credentials(site, sql):
+    # The credentials fingerprint is the dictionary's only COMMENT.
+    assert "COMMENT" not in (token.upper() for token in core._tokens(sql))
     assert dictionary_credentials_outdated(sql, USER, PASSWORD)
     result = with_dictionary_credentials(sql, USER, PASSWORD)
     assert result.count(CREDENTIALS) == len(SOURCE.findall(sql))
