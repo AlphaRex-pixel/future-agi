@@ -769,9 +769,17 @@ STANDALONE_OWN_BACKEND_ENV = {
 }
 
 
+# Keys of Distributed's backends that the Standalone app does without, and why.
+DISTRIBUTED_OWN_BACKEND_ENV = {
+    "FAST_STARTUP": "only futureagi/entrypoint.sh reads it; the app starts through bin/start",
+}
+
+
 def test_standalone_backend_env_matches_distributed_outside_its_own_keys() -> None:
     app = _compose(STANDALONE_COMPOSE)["services"]["app"]["environment"]
     backend = _compose(DISTRIBUTED_COMPOSE)["x-backend-env"]
+    # A key added to one setup only would escape the comparison below.
+    assert set(backend) - set(app) == set(DISTRIBUTED_OWN_BACKEND_ENV)
     differing = {
         key for key in set(app) & set(backend) if str(app[key]) != str(backend[key])
     }
