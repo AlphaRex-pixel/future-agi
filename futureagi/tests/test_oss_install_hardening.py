@@ -960,6 +960,8 @@ def test_an_existing_distributed_install_is_never_moved_to_standalone_silently(
     code, stdout, stderr = _run_installer(script, environment, "--no-up")
 
     assert code == 0, stderr
+    # No ClickHouse container runs here: that is not a failure.
+    assert "install failed" not in stdout + stderr
     assert "staying on the distributed stack" in stderr
     assert "Recorded COMPOSE_FILE=docker-compose.distributed.yml in .env" in stderr
     assert (
