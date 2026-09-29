@@ -90,6 +90,23 @@ err_dict = {
     "DATASET_CREATE_LIMIT_REACHED": [
         "Dataset creation limit has been reached for your plan."
     ],
+    "USER_FILTER_REQUIRES_CURSOR": [
+        "These user filters need cursor pagination. Retry with cursor_mode=true."
+    ],
+    "SCORE_PROJECT_MISMATCH": [
+        "This queue item belongs to another project's copy of this source. "
+        "Annotate it from that project."
+    ],
+    "SCORE_PROJECT_MISMATCH_EXISTING_SCORE": [
+        "A score on this queue item belongs to another project's copy of "
+        "this source. Annotate it from that project."
+    ],
+    "FILTER_VALUE_INVENTORY_TOO_BROAD": [
+        "Too many values to browse exactly. Enter a more specific search."
+    ],
+    "DATASET_LIMIT_CHECK_FAILED": [
+        "Could not verify your plan's dataset limit. Please try again in a moment."
+    ],
     "DATASET_NAME_MISSING": ["Dataset name is required for Hugging Face datasets."],
     "DATASET_EXIST_IN_ORG": [
         "A dataset with this name already exists in your organization."
