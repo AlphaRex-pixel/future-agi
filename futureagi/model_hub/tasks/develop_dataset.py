@@ -588,8 +588,7 @@ def _file_metadata_with_error(metadata, error):
             meta = {}
     if not isinstance(meta, dict):
         meta = {}
-    meta["error"] = error[:10000]
-    return json.dumps(meta)
+    return json.dumps({**meta, "error": error[:10000]})
 
 
 def remove_from_kb(deleted_files, kb_file_id, org_id):

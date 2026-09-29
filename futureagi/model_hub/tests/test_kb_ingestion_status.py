@@ -15,7 +15,11 @@ from rest_framework import status
 
 from model_hub.models.choices import StatusType
 from model_hub.models.develop_dataset import Files, KnowledgeBaseFile
-from model_hub.tasks.develop_dataset import ingest_files_to_s3, remove_kb_files
+from model_hub.tasks.develop_dataset import (
+    _file_metadata_with_error,
+    ingest_files_to_s3,
+    remove_kb_files,
+)
 from model_hub.utils.kb_indexer import KB_EMBEDDINGS_UNAVAILABLE_ERROR
 
 
@@ -167,3 +171,12 @@ def test_removed_file_is_marked_deleted(file_with_default_metadata):
 
     assert kb_file.status == StatusType.COMPLETED.value
     assert kb_file.deleted is True
+
+
+def test_recording_an_error_leaves_the_given_metadata_unchanged():
+    metadata = {"source": "upload"}
+
+    stored = _file_metadata_with_error(metadata, "x" * 10001)
+
+    assert metadata == {"source": "upload"}
+    assert json.loads(stored) == {"source": "upload", "error": "x" * 10000}
