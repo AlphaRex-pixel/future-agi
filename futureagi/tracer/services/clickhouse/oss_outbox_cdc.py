@@ -1612,7 +1612,9 @@ def check(
     tables: tuple[str, ...],
     peerdb: dict[str, list[str]],
 ) -> CheckResult:
-    """Read-only readiness. Fails when capture could be running without a drain."""
+    """Read-only readiness. Fails when capture could be running without a
+    drain, or when keys parked in the dead-letter table leave ClickHouse rows
+    stale."""
     problems = []
     if config.hosted:
         problems.append("outbox CDC is qualified for single-node installs only")
@@ -1635,8 +1637,8 @@ def check(
             problems.append(f"outbox holds {state['outbox_depth']} rows")
         if state["parked_keys"]:
             problems.append(
-                f"{state['parked_keys']} keys are parked in {DEADLETTER}, so "
-                "their ClickHouse rows are stale; fix the cause, then run "
+                f"keys parked in {DEADLETTER}: {state['parked_keys']}; their "
+                "ClickHouse rows are stale until you fix the cause and run "
                 "`requeue --apply`"
             )
     try:

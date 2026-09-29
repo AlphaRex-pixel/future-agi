@@ -771,7 +771,7 @@ def test_install_without_apply_is_a_check_whose_exit_code_is_readiness(
             "installed": True,
             "ready": ready,
             "applied": False,
-            "problems": [] if ready else ["1 keys are parked in fi_cdc_deadletter"],
+            "problems": [] if ready else ["keys parked in fi_cdc_deadletter: 1"],
         }
 
     monkeypatch.setattr(cdc, "install", install)

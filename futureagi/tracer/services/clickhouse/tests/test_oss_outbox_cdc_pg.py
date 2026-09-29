@@ -912,7 +912,7 @@ def test_poison_row_is_bisected_parked_and_later_retried(pg, ch, config, monkeyp
     # A parked key's ClickHouse row is stale until it applies.
     check = cdc.install(pg, ch, config=config, apply=False)
     assert not check["ready"] and check["parked_keys"] == 1
-    assert any("1 keys are parked" in p for p in check["problems"])
+    assert any("keys parked in fi_cdc_deadletter: 1;" in p for p in check["problems"])
     ch.fail_insert = None
     assert cdc.requeue_deadletter(pg) == 1
     assert cdc.requeue_deadletter(pg) == 0  # at most hourly
