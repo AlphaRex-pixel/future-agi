@@ -540,6 +540,11 @@ has data:
 - `--distributed` stops with an error for a project that holds a Standalone
   install (its `app` container or `app-data` volume), before changing `.env`.
   `--force` does not override this.
+- A `COMPOSE_FILE` set in your shell wins over `.env` in Docker Compose. It
+  has to list the chosen setup's compose file and not the other one, or the
+  installer stops before it records the setup or wipes volumes. Unset it
+  (`unset COMPOSE_FILE`), or set it to the value the installer prints, and
+  run the installer again.
 
 To switch, back up what you need (see [Backups](#backups)), then start fresh:
 
@@ -962,8 +967,10 @@ the bootstrap Job migrates before any Deployment is rolled. See the
 > topology moved to `docker-compose.distributed.yml`. `./bin/install`
 > recognises an existing Distributed install by its volumes or containers,
 > keeps it on Distributed and records
-> `COMPOSE_FILE=docker-compose.distributed.yml` in `.env`. If you upgrade with
-> plain `docker compose` instead, add that line to `.env` **before** running
+> `COMPOSE_FILE=docker-compose.distributed.yml` in `.env`. A `COMPOSE_FILE`
+> exported in your shell wins over `.env`: if it still lists
+> `docker-compose.yml`, the installer stops and says how to fix it. If you upgrade
+> with plain `docker compose` instead, add that line to `.env` **before** running
 > `docker compose up -d`. Without it Compose reads the new default file under
 > the same project name: it recreates your `postgres` and `clickhouse`
 > containers with Standalone's small-host settings (fewer Postgres
@@ -1121,6 +1128,20 @@ lost. If it also finds a Standalone `app` container, a plain
 `docker compose up -d` started the new default file against the old install:
 remove that container with the `docker compose ... rm -sf app` command the
 installer prints, then run `./bin/install` again.
+
+### `bin/install` says `COMPOSE_FILE` is set in your shell
+
+Docker Compose reads `COMPOSE_FILE` from your shell before `.env`, so the value
+there decides which setup every `docker compose` command runs. The installer
+stopped because that value does not start the setup it chose for this
+project: it has to list that setup's compose file (`docker-compose.yml` for
+Standalone, `docker-compose.distributed.yml` for Distributed) and not the
+other one, and an empty value lists none. Run `unset COMPOSE_FILE` (on
+Windows, `Remove-Item Env:COMPOSE_FILE`), remove it from your shell profile,
+and run the command the installer prints: it includes `--distributed` when
+you passed that flag, since `.env` does not record it yet. To keep extra
+compose files, set `COMPOSE_FILE` to the value the installer prints instead,
+when it prints one.
 
 ### `docker compose pull` failed: Docker Hub has no `futureagi/standalone:…`
 

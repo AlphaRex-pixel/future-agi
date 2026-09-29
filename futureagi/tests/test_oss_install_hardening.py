@@ -323,16 +323,19 @@ env_value() {
 last_arg=""
 for arg in "$@"; do last_arg="$arg"; done
 
+# As in Compose: COMPOSE_FILE from the environment, even empty, wins over .env.
+compose_file=${COMPOSE_FILE-$(env_value COMPOSE_FILE)}
+
 if [ "$1" = "compose" ]; then
   shift
   case "$1" in
     version) printf '2.31.0\n'; exit 0 ;;
     config)
-      # The resolved config for the mode recorded in .env, as `docker compose
-      # config` prints it: services at two spaces, their keys at four.
+      # The resolved config for the stack COMPOSE_FILE selects, as `docker
+      # compose config` prints it: services at two spaces, their keys at four.
       version=$(env_value FUTURE_AGI_VERSION)
       printf 'name: futureagi\nservices:\n'
-      if env_value COMPOSE_FILE | grep -q 'docker-compose.distributed.yml'; then
+      if printf '%s' "$compose_file" | grep -q 'docker-compose.distributed.yml'; then
         frontend=$(env_value FRONTEND_VERSION)
         gateway=$(env_value AGENTCC_GATEWAY_VERSION)
         set -- "agentcc-gateway futureagi/agentcc-gateway:${gateway:-latest}" \
@@ -363,8 +366,9 @@ if [ "$1" = "compose" ]; then
       printf '%s\n' "$*" >> "$state/compose_down.log"
       exit 0 ;;
     up)
-      # What the stack starts with.
+      # What the stack starts with, and from which compose files.
       cp .env "$state/env_at_up"
+      printf '%s\n' "$compose_file" > "$state/compose_file_at_up"
       exit 0 ;;
     ps)
       [ "$3" = "-q" ] || exit 0
@@ -1100,6 +1104,330 @@ def test_a_stray_standalone_app_next_to_an_older_distributed_install_is_named(
         _env_values(script.parents[1])["COMPOSE_FILE"]
         == "docker-compose.distributed.yml"
     )
+
+
+DISTRIBUTED_VOLUMES = {
+    "FAGI_STUB_VOLUMES": "futureagi_postgres-data futureagi_minio-data"
+}
+STANDALONE_VOLUMES = {"FAGI_STUB_VOLUMES": "futureagi_app-data futureagi_postgres-data"}
+
+
+@pytest.mark.parametrize(
+    ("shell_compose_file", "args", "project", "env_line", "hint"),
+    [
+        pytest.param(
+            "docker-compose.yml",
+            (),
+            DISTRIBUTED_VOLUMES,
+            "",
+            "set COMPOSE_FILE=docker-compose.distributed.yml instead",
+            id="existing-distributed-install",
+        ),
+        pytest.param(
+            "docker-compose.yml:docker-compose.override.yml",
+            ("--distributed",),
+            {},
+            "",
+            "set COMPOSE_FILE=docker-compose.distributed.yml:docker-compose.override.yml instead",
+            id="distributed-requested",
+        ),
+        pytest.param(
+            "docker-compose.yml",
+            (),
+            {},
+            "COMPOSE_FILE=docker-compose.distributed.yml\n",
+            "set COMPOSE_FILE=docker-compose.distributed.yml instead",
+            id="distributed-recorded",
+        ),
+        pytest.param(
+            "docker-compose.distributed.yml",
+            (),
+            STANDALONE_VOLUMES,
+            "",
+            None,
+            id="existing-standalone-install",
+        ),
+        pytest.param(
+            "docker-compose.distributed.yml",
+            (),
+            {},
+            "",
+            "For the distributed stack, run ./bin/install --distributed.",
+            id="fresh-project",
+        ),
+        pytest.param(
+            "docker-compose.yml",
+            ("--wipe-volumes",),
+            DISTRIBUTED_VOLUMES,
+            "",
+            "set COMPOSE_FILE=docker-compose.distributed.yml instead",
+            id="wipe-volumes",
+        ),
+        # Both stacks merged: Standalone's app next to the Distributed services.
+        pytest.param(
+            "docker-compose.yml:docker-compose.distributed.yml",
+            (),
+            DISTRIBUTED_VOLUMES,
+            "",
+            None,
+            id="both-stack-files",
+        ),
+        pytest.param(
+            "docker-compose.override.yml", (), {}, "", None, id="no-stack-file"
+        ),
+        # Set but empty, Compose reads no file at all.
+        pytest.param("", (), {}, "", None, id="empty"),
+    ],
+)
+def test_a_compose_file_in_the_shell_for_another_stack_stops_before_anything_changes(
+    tmp_path: Path,
+    shell_compose_file: str,
+    args: tuple[str, ...],
+    project: dict[str, str],
+    env_line: str,
+    hint: str | None,
+) -> None:
+    """Compose reads COMPOSE_FILE from the shell over .env, so the installer
+    would report and record one stack while its compose commands ran another."""
+    script, environment, state = _installer_sandbox(
+        tmp_path, CI="1", COMPOSE_FILE=shell_compose_file, **project
+    )
+    repo = script.parents[1]
+    env_before = SANDBOX_ENV_EXAMPLE + env_line
+    (repo / ".env").write_text(env_before, encoding="utf-8")
+
+    code, stdout, stderr = _run_installer(
+        script, environment, "--skip-user-creation", *args
+    )
+
+    assert code == 1
+    assert f"COMPOSE_FILE={shell_compose_file} is set in your shell" in stderr
+    assert "unset COMPOSE_FILE" in stderr
+    # .env does not record --distributed yet, so the re-run has to repeat it.
+    rerun = (
+        "./bin/install --distributed" if "--distributed" in args else "./bin/install"
+    )
+    assert f"then re-run {rerun}." in stderr
+    if hint:
+        assert hint in stderr
+    else:
+        assert "instead." not in stderr
+        assert "--distributed." not in stderr
+    assert "Mode:" not in stdout
+    # Nothing recorded, generated, wiped, pulled or started.
+    assert _read(repo / ".env") == env_before
+    assert not (state / "compose_down.log").exists()
+    assert not (state / "volume_rm.log").exists()
+    assert not (state / "pull.argv").exists()
+    assert not (state / "compose_file_at_up").exists()
+
+
+@pytest.mark.parametrize(
+    ("args", "env_line"),
+    [
+        pytest.param(("--distributed",), "", id="distributed-requested"),
+        pytest.param(
+            (),
+            "COMPOSE_FILE=docker-compose.distributed.yml\n",
+            id="distributed-recorded",
+        ),
+    ],
+)
+def test_a_standalone_install_is_refused_distributed_before_the_shell_is_checked(
+    tmp_path: Path, args: tuple[str, ...], env_line: str
+) -> None:
+    """Unsetting the shell's COMPOSE_FILE would not get past this refusal, and
+    the shell's docker-compose.yml is the file that matches the data."""
+    script, environment, _ = _installer_sandbox(
+        tmp_path, CI="1", COMPOSE_FILE="docker-compose.yml", **STANDALONE_VOLUMES
+    )
+    repo = script.parents[1]
+    env_before = SANDBOX_ENV_EXAMPLE + env_line
+    (repo / ".env").write_text(env_before, encoding="utf-8")
+
+    code, _, stderr = _run_installer(script, environment, "--no-up", *args)
+
+    assert code == 1
+    assert "already holds a standalone install" in stderr
+    assert ("delete the COMPOSE_FILE line from .env" in stderr) == bool(env_line)
+    assert "is set in your shell" not in stderr
+    assert _read(repo / ".env") == env_before
+
+
+@pytest.mark.parametrize(
+    ("shell_compose_file", "project", "mode", "recorded"),
+    [
+        pytest.param(
+            "docker-compose.distributed.yml:docker-compose.override.yml",
+            DISTRIBUTED_VOLUMES,
+            "Mode: Distributed",
+            "docker-compose.distributed.yml",
+            id="distributed",
+        ),
+        pytest.param(
+            "docker-compose.yml:docker-compose.override.yml",
+            {},
+            "Mode: Standalone",
+            None,
+            id="standalone",
+        ),
+    ],
+)
+def test_a_compose_file_in_the_shell_for_the_same_stack_keeps_its_other_files(
+    tmp_path: Path,
+    shell_compose_file: str,
+    project: dict[str, str],
+    mode: str,
+    recorded: str | None,
+) -> None:
+    script, environment, state = _installer_sandbox(
+        tmp_path, CI="1", COMPOSE_FILE=shell_compose_file, **project
+    )
+
+    code, stdout, stderr = _run_installer(script, environment, "--skip-user-creation")
+
+    assert code == 0, stderr
+    assert mode in stdout
+    assert f"Compose uses COMPOSE_FILE={shell_compose_file} from your shell" in stdout
+    # The stack starts from the shell's files, and .env still records the
+    # stack for a shell without them.
+    assert _lines(state / "compose_file_at_up") == [shell_compose_file]
+    assert _env_values(script.parents[1]).get("COMPOSE_FILE") == recorded
+
+
+def _power_shell_mode(
+    tmp_path: Path, shell_compose_file: str, project: dict[str, str], distributed: bool
+) -> subprocess.CompletedProcess[str]:
+    """install.ps1's project-state and mode sections under pwsh, against a
+    docker that knows only the project's volumes."""
+    stub = tmp_path / "docker"
+    stub.write_text(
+        '#!/bin/bash\n[ "$1 $2" = "volume inspect" ] || exit 0\n'
+        'case " $FAGI_STUB_VOLUMES " in *" $3 "*) exit 0 ;; esac\nexit 1\n',
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    for compose in ("docker-compose.yml", "docker-compose.distributed.yml"):
+        (tmp_path / compose).write_text("services: {}\n", encoding="utf-8")
+    (tmp_path / ".env").write_text(SANDBOX_ENV_EXAMPLE, encoding="utf-8")
+    installer = _read(INSTALL_PS1)
+    script = "\n".join(
+        [
+            "$ErrorActionPreference = 'Stop'; Set-StrictMode -Version 3.0",
+            f". '{INSTALL_LIB / 'env.ps1'}'; . '{INSTALL_LIB / 'secrets.ps1'}'",
+            "function Invoke-Probe { param($Command) & $Command }",
+            "function Die { param($m) Write-Output $m; exit 1 }",
+            "function Warn { param($m) Write-Output $m }",
+            "function Ok { param($m) Write-Output $m }",
+            f"$Distributed = ${str(distributed).lower()}; $WipeVolumes = $false",
+            _power_shell_section(installer, "this project's existing state"),
+            _power_shell_section(installer, "mode"),
+        ]
+    )
+    return subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", script],
+        cwd=tmp_path,
+        env={
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "HOME": str(tmp_path),
+            "COMPOSE_FILE": shell_compose_file,
+            **project,
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+@pytest.mark.parametrize(
+    ("shell_compose_file", "project", "distributed", "code", "output"),
+    [
+        pytest.param(
+            "docker-compose.yml",
+            DISTRIBUTED_VOLUMES,
+            False,
+            1,
+            r"then re-run .\bin\install.ps1. To keep your other compose files, "
+            "set COMPOSE_FILE=docker-compose.distributed.yml instead.",
+            id="existing-distributed-install",
+        ),
+        pytest.param(
+            "docker-compose.yml;docker-compose.override.yml",
+            {},
+            True,
+            1,
+            r"then re-run .\bin\install.ps1 -Distributed. To keep your other compose "
+            "files, set COMPOSE_FILE=docker-compose.distributed.yml;"
+            "docker-compose.override.yml instead.",
+            id="distributed-requested",
+        ),
+        pytest.param(
+            "docker-compose.distributed.yml",
+            STANDALONE_VOLUMES,
+            False,
+            1,
+            "chose the standalone stack",
+            id="existing-standalone-install",
+        ),
+        pytest.param(
+            "docker-compose.yml;docker-compose.distributed.yml",
+            DISTRIBUTED_VOLUMES,
+            False,
+            1,
+            "chose the distributed stack",
+            id="both-stack-files",
+        ),
+        pytest.param("", {}, False, 1, "chose the standalone stack", id="empty"),
+        pytest.param(
+            "docker-compose.distributed.yml;docker-compose.override.yml",
+            DISTRIBUTED_VOLUMES,
+            False,
+            0,
+            "Mode: Distributed (COMPOSE_FILE=docker-compose.distributed.yml)",
+            id="same-stack",
+        ),
+    ],
+)
+def test_power_shell_installer_checks_a_compose_file_in_the_shell(
+    tmp_path: Path,
+    shell_compose_file: str,
+    project: dict[str, str],
+    distributed: bool,
+    code: int,
+    output: str,
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("pwsh is unavailable")
+
+    result = _power_shell_mode(tmp_path, shell_compose_file, project, distributed)
+
+    assert result.returncode == code, result.stdout + result.stderr
+    assert output in result.stdout
+    if code:
+        assert (
+            f"COMPOSE_FILE={shell_compose_file} is set in your shell" in result.stdout
+        )
+        assert _read(tmp_path / ".env") == SANDBOX_ENV_EXAMPLE
+    else:
+        assert "from your shell, which selects the same stack" in result.stdout
+        assert _env_values(tmp_path)["COMPOSE_FILE"] == "docker-compose.distributed.yml"
+
+
+def test_power_shell_installer_refuses_a_standalone_install_distributed_before_the_shell_check(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("pwsh is unavailable")
+
+    result = _power_shell_mode(
+        tmp_path, "docker-compose.yml", STANDALONE_VOLUMES, distributed=True
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "already holds a standalone install" in result.stdout
+    assert "is set in your shell" not in result.stdout
+    assert _read(tmp_path / ".env") == SANDBOX_ENV_EXAMPLE
 
 
 SECRET_KEYS = (
