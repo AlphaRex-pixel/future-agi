@@ -1,5 +1,5 @@
 import PropTypes from "prop-types";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Box,
   Stack,
@@ -67,6 +67,25 @@ export default function RunTraceTable({
   );
   const [filterAnchor, setFilterAnchor] = useState(null);
   const [filters, setFilters] = useState(initialFilters);
+
+  // Which groups are open lives here, not in the table: a filter's loading
+  // and empty states unmount the table, and its own state would go with it,
+  // folding every group back up. Tagged with the axis it was set under, so a
+  // new group-by starts from the default (group labels differ per axis).
+  const [groupState, setGroupState] = useState({ groupBy, collapsed: null });
+  const collapsed = groupState.groupBy === groupBy ? groupState.collapsed : null;
+  const setCollapsed = useCallback(
+    (update) =>
+      setGroupState((prev) => {
+        const current = prev.groupBy === groupBy ? prev.collapsed : null;
+        return {
+          groupBy,
+          collapsed: typeof update === "function" ? update(current) : update,
+        };
+      }),
+    [groupBy],
+  );
+  const expandedForRef = useRef(null);
 
   const serverFilters = useMemo(() => {
     const next = {};
@@ -352,6 +371,9 @@ export default function RunTraceTable({
               onOpen={onOpenCall}
               activeCallId={activeCallId}
               scrollRef={tableScrollRef}
+              collapsed={collapsed}
+              onCollapsedChange={setCollapsed}
+              expandedForRef={expandedForRef}
             />
           )}
         </Box>

@@ -302,6 +302,57 @@ describe("RunTraceTable", () => {
     );
   });
 
+  // A status chip the list hasn't fetched yet shows "Loading calls…" in the
+  // table's place, so the table unmounts. The groups the user opened must
+  // survive that. A row's persona name only shows while its group is open.
+  it("keeps a group the user expanded open while a filter loads", async () => {
+    const user = userEvent.setup();
+    let loading = false;
+    const base = useRunCalls.getMockImplementation();
+    useRunCalls.mockImplementation((...args) =>
+      loading ? { ...base(...args), tasks: [], groups: [], isLoading: true } : base(...args),
+    );
+    const { rerender } = renderTable();
+
+    await user.click(screen.getByText("Escalate to a human"));
+    expect(screen.getByText("Angry caller")).toBeInTheDocument();
+
+    loading = true;
+    await user.click(screen.getByRole("button", { name: "Failing" }));
+    expect(screen.getByText("Loading calls…")).toBeInTheDocument();
+
+    loading = false;
+    rerender(<RunTraceTable executionId="ex1" onOpenCall={vi.fn()} />);
+    expect(screen.getByText("Angry caller")).toBeInTheDocument();
+  });
+
+  it("keeps each group's own state through a filter with no matches", async () => {
+    const user = userEvent.setup();
+    // The chip's count says one call is inconclusive, but the list comes back
+    // empty (the count is from before a refetch), so the table gives way to
+    // the empty state.
+    const base = useRunCalls.getMockImplementation();
+    useRunCalls.mockImplementation((...args) => ({
+      ...base(...args),
+      facets: { ...FACETS, status: [...FACETS.status, { value: "inconclusive", count: 1 }] },
+    }));
+    renderTable();
+
+    await user.click(screen.getByRole("button", { name: /Expand all/ }));
+    // Expanded, the label shows in the group header and again in the row; the
+    // header comes first.
+    await user.click(screen.getAllByText("Refund a double charge")[0]);
+    expect(screen.queryByText("The Hungry Customer in a Rush")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /Inconclusive/ }));
+    expect(screen.getByText("No calls match that filter")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^All/ }));
+
+    expect(screen.queryByText("The Hungry Customer in a Rush")).toBeNull();
+    expect(screen.getByText("Angry caller")).toBeInTheDocument();
+    expect(screen.getByText("Caller")).toBeInTheDocument();
+  });
+
   it("scopes to handed-over calls until the affected-calls chip is dismissed", async () => {
     const user = userEvent.setup();
     const { container } = renderTable({

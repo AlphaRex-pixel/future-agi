@@ -81,12 +81,21 @@ export default function TraceTable({
   columns,
   activeCallId = null,
   scrollRef,
+  collapsed: collapsedProp,
+  onCollapsedChange,
+  expandedForRef: expandedForRefProp,
 }) {
-  const [collapsed, setCollapsed] = useState(null);
+  // A parent that unmounts this table (a filter's loading or empty state)
+  // passes the open/closed groups in, so they survive the remount. Without
+  // one, the table keeps them itself.
+  const [ownCollapsed, setOwnCollapsed] = useState(null);
+  const collapsed = onCollapsedChange ? collapsedProp : ownCollapsed;
+  const setCollapsed = onCollapsedChange || setOwnCollapsed;
   const activeRowRef = useRef(null);
   // The call already expanded for, so a group the user collapses afterwards
   // stays collapsed across refetches.
-  const expandedForRef = useRef(null);
+  const ownExpandedForRef = useRef(null);
+  const expandedForRef = expandedForRefProp || ownExpandedForRef;
   const visible = columns || defaultTraceColumns();
   const show = (key) => visible.has(key);
   const showEvals = show("evals");
@@ -112,7 +121,7 @@ export default function TraceTable({
       next.delete(activeGroupLabel);
       return next;
     });
-  }, [activeCallId, activeGroupLabel, groups]);
+  }, [activeCallId, activeGroupLabel, groups, expandedForRef, setCollapsed]);
   // Its row only mounts once its group expands, so scroll again when that
   // happens — not just when the call changes.
   const activeGroupCollapsed = collapsedSet.has(activeGroupLabel);
@@ -470,4 +479,9 @@ TraceTable.propTypes = {
   columns: PropTypes.instanceOf(Set),
   activeCallId: PropTypes.string,
   scrollRef: PropTypes.oneOfType([PropTypes.func, PropTypes.object]),
+  // The collapsed group labels, or null for "all collapsed". Pass both, or
+  // neither and the table keeps its own.
+  collapsed: PropTypes.instanceOf(Set),
+  onCollapsedChange: PropTypes.func,
+  expandedForRef: PropTypes.shape({ current: PropTypes.any }),
 };
