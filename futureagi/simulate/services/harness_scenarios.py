@@ -340,11 +340,13 @@ def index_scenarios(
                 setattr(row, name, value)
             row.save(update_fields=[*fields, "updated_at"])
         written += 1
-    # Only an amend prunes: a short suite on a poll may still be mid-write. Hiding keeps call history.
+    # Only an amend prunes: a short suite on a poll may still be mid-write. Called rows are kept.
     if prune:
         HostedHarnessScenario.no_workspace_objects.filter(job=job).exclude(
             scenario_key__in=seen
-        ).update(deleted=True, deleted_at=timezone.now())
+        ).filter(call_execution__isnull=True).update(
+            deleted=True, deleted_at=timezone.now()
+        )
     return written
 
 
