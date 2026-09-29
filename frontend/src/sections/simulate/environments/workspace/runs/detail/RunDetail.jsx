@@ -118,6 +118,9 @@ export default function RunDetail({
     );
 
   const status = headerStatus(identity, stats);
+  // A live run has no final results yet, so its header actions wait for it to
+  // finish. Stop simulation is the exception and stays in its own control.
+  const live = status === "running" || status === "cancelling";
   // finishedAt is a known gap (the executions row carries no end time), so the
   // sub-line reports when the run STARTED rather than inventing a finish.
   const startedLabel = identity?.startedAt ? fToNow(identity.startedAt) : "";
@@ -216,6 +219,7 @@ export default function RunDetail({
           variant="outlined"
           size="small"
           onClick={() => setAddingEvals(true)}
+          disabled={live}
           startIcon={<Iconify icon="solar:add-circle-linear" width={15} />}
           sx={{
             color: "text.primary",
@@ -230,7 +234,7 @@ export default function RunDetail({
           variant="outlined"
           size="small"
           onClick={exportResults}
-          disabled={exporting}
+          disabled={live || exporting}
           startIcon={
             <Iconify icon="solar:download-minimalistic-linear" width={15} />
           }
@@ -246,6 +250,7 @@ export default function RunDetail({
         <Button
           variant="outlined"
           size="small"
+          disabled={live}
           startIcon={<Iconify icon="solar:refresh-linear" width={15} />}
           onClick={() =>
             onStartRun?.(
@@ -267,6 +272,7 @@ export default function RunDetail({
           color="primary"
           size="small"
           onClick={() => setDebugging(true)}
+          disabled={live}
           startIcon={<Iconify icon="solar:magnifer-linear" width={15} />}
           sx={{ typography: "s2", fontWeight: 700 }}
         >
