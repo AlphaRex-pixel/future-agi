@@ -799,3 +799,178 @@ def test_removed_invite_can_be_invited_again(
     assert [row["email"] for row in again.json()["result"]] == [email]
     allowed = api_client.get(f"/tracer/shared/{link['token']}/")
     assert allowed.status_code == status.HTTP_200_OK
+
+
+@pytest.mark.django_db
+def test_restricted_trace_link_matches_the_viewer_email_case_insensitively(
+    api_client,
+    auth_client,
+    organization,
+    trace,
+    observation_span,
+):
+    response = auth_client.post(
+        "/tracer/shared-links/",
+        data={
+            "resource_type": "trace",
+            "resource_id": str(trace.id),
+            "access_type": "restricted",
+            "emails": ["viewer@example.com"],
+        },
+        format="json",
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    link = response.json()["result"]
+
+    viewer = User.objects.create_user(
+        email="Viewer@example.com",
+        password="testpassword123",
+        name="Mixed Case Viewer",
+        organization=organization,
+        organization_role=OrganizationRoles.MEMBER,
+    )
+    api_client.force_authenticate(user=viewer)
+    resolved = api_client.get(f"/tracer/shared/{link['token']}/")
+
+    assert resolved.status_code == status.HTTP_200_OK, resolved.content
+    assert resolved.json()["data"]["trace"]["id"] == str(trace.id)
+
+    # Inviting the same address in another case keeps the one row.
+    again = auth_client.post(
+        f"/tracer/shared-links/{link['id']}/access/",
+        {"emails": ["VIEWER@example.com"]},
+        format="json",
+    )
+    assert again.status_code == status.HTTP_201_CREATED
+    detail = auth_client.get(f"/tracer/shared-links/{link['id']}/")
+    assert [row["email"] for row in detail.json()["result"]["access_list"]] == [
+        "viewer@example.com"
+    ]
+
+
+def _seed_collector_span(project, trace_id):
+    """A root span that only ClickHouse holds, as the collector writes it."""
+    from types import SimpleNamespace
+
+    from tracer.tests._ch_seed import seed_ch_span
+
+    root_id = f"span_{uuid.uuid4().hex[:16]}"
+    started = timezone.now() - timedelta(seconds=5)
+    seed_ch_span(
+        SimpleNamespace(
+            id=root_id,
+            trace_id=trace_id,
+            project_id=project.id,
+            project=project,
+            parent_span_id=None,
+            name="collector root",
+            observation_type="agent",
+            status="OK",
+            start_time=started,
+            end_time=timezone.now(),
+            latency_ms=5000,
+            input={"prompt": "Hello"},
+            output={"response": "World"},
+            metadata={"source": "collector"},
+            tags=["collector"],
+            created_at=started,
+            updated_at=started,
+        )
+    )
+    return root_id
+
+
+def _share_trace(client, trace_id):
+    return client.post(
+        "/tracer/shared-links/",
+        data={
+            "resource_type": "trace",
+            "resource_id": trace_id,
+            "access_type": "public",
+        },
+        format="json",
+    )
+
+
+@pytest.mark.django_db
+def test_collector_trace_shares_from_clickhouse_without_a_postgres_row(
+    api_client,
+    auth_client,
+    project,
+):
+    from tracer.models.trace import Trace
+
+    trace_id = str(uuid.uuid4())
+    root_id = _seed_collector_span(project, trace_id)
+    assert not Trace.no_workspace_objects.filter(id=trace_id).exists()
+
+    response = _share_trace(auth_client, trace_id)
+    assert response.status_code == status.HTTP_201_CREATED, response.content
+
+    resolved = api_client.get(f"/tracer/shared/{response.json()['result']['token']}/")
+
+    assert resolved.status_code == status.HTTP_200_OK, resolved.content
+    data = resolved.json()["data"]
+    assert data["trace"]["id"] == trace_id
+    assert data["trace"]["project_id"] == str(project.id)
+    assert data["trace"]["name"] == "collector root"
+    assert data["summary"]["total_spans"] == 1
+    assert data["observation_spans"][0]["observation_span"]["id"] == root_id
+
+
+@pytest.mark.django_db
+def test_collector_trace_in_another_workspace_cannot_be_shared(
+    auth_client,
+    organization,
+    user,
+):
+    other_workspace = Workspace.no_workspace_objects.create(
+        name=f"Other Collector Workspace {uuid.uuid4().hex[:8]}",
+        organization=organization,
+        created_by=user,
+    )
+    other_project = Project.no_workspace_objects.create(
+        name=f"Other Collector Project {uuid.uuid4().hex[:8]}",
+        organization=organization,
+        workspace=other_workspace,
+        model_type=AIModel.ModelTypes.GENERATIVE_LLM,
+        trace_type="observe",
+    )
+    trace_id = str(uuid.uuid4())
+    _seed_collector_span(other_project, trace_id)
+
+    response = _share_trace(auth_client, trace_id)
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert not SharedLink.no_workspace_objects.filter(
+        resource_type="trace", resource_id=trace_id
+    ).exists()
+
+    unknown = _share_trace(auth_client, str(uuid.uuid4()))
+    assert unknown.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.django_db
+def test_shared_collector_trace_is_gone_not_broken_while_clickhouse_is_down(
+    api_client,
+    auth_client,
+    project,
+):
+    from unittest.mock import patch
+
+    trace_id = str(uuid.uuid4())
+    _seed_collector_span(project, trace_id)
+    link = _share_trace(auth_client, trace_id).json()["result"]
+
+    with patch(
+        "tracer.services.clickhouse.v2.query_service."
+        "V2AnalyticsQueryService.execute_ch_query",
+        side_effect=ConnectionError("clickhouse unavailable"),
+    ):
+        resolved = api_client.get(f"/tracer/shared/{link['token']}/")
+
+    assert resolved.status_code == status.HTTP_404_NOT_FOUND
+    assert "no longer exists" in resolved.json()["detail"]
+    assert SharedLink.objects.filter(id=link["id"]).exists()
+    recovered = api_client.get(f"/tracer/shared/{link['token']}/")
+    assert recovered.status_code == status.HTTP_200_OK

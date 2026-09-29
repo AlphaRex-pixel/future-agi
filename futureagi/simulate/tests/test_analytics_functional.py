@@ -804,6 +804,82 @@ class TestRunResultsV3Views:
         )
         assert row["goal"] == "Verify the caller's guest PIN"
 
+    def test_hosted_call_reads_its_own_run_scenario_before_the_environment_suite(
+        self,
+        auth_client,
+        organization,
+        workspace,
+        test_execution,
+        test_execution_2,
+        analytics_call_executions,
+    ):
+        def job(**fields):
+            return HostedHarnessJob.no_workspace_objects.create(
+                organization=organization,
+                workspace=workspace,
+                run_id=uuid.uuid4(),
+                idempotency_key=uuid.uuid4().hex,
+                request_digest=uuid.uuid4().hex,
+                schema_version="1.6",
+                seed=1,
+                artifact_level="standard",
+                max_artifact_bytes=1024,
+                deadline_at=timezone.now() + timedelta(hours=1),
+                scenario_count=1,
+                payload={"metadata": {}, "runtime": {"max_duration_seconds": 600}},
+                **fields,
+            )
+
+        # Two runs of the same environment, each re-authoring the same keys.
+        environment = job()
+        own_run = job(
+            environment=environment,
+            run_test=test_execution.run_test,
+            test_execution=test_execution,
+        )
+        sibling_run = job(
+            environment=environment,
+            run_test=test_execution.run_test,
+            test_execution=test_execution_2,
+        )
+        suites = (
+            (environment, "Environment goal"),
+            (sibling_run, "Sibling run goal"),
+            (own_run, "Own run goal"),
+        )
+        for owner, goal in suites:
+            HostedHarnessScenario.no_workspace_objects.create(
+                job=owner, scenario_key="pin-reset", use_case=goal
+            )
+        for owner, goal in suites[:2]:
+            HostedHarnessScenario.no_workspace_objects.create(
+                job=owner, scenario_key="refund", use_case=goal
+            )
+        own_key, environment_key, stray_key = analytics_call_executions[:3]
+        for call, key in (
+            (own_key, "pin-reset"),
+            (environment_key, "refund"),
+            (stray_key, "never-authored"),
+        ):
+            call.call_metadata = {"harness_scenario_key": key}
+            call.save(update_fields=["call_metadata"])
+
+        url = f"/simulate/v3/test-executions/{test_execution.id}/calls/"
+        rows = {row["id"]: row for row in auth_client.get(url).json()["results"]}
+        assert rows[str(own_key.id)]["goal"] == "Own run goal"
+        # A key the run never re-authored comes from the environment, not from
+        # a sibling run of the same test, however recent that run is.
+        assert rows[str(environment_key.id)]["goal"] == "Environment goal"
+        # A key no job authored keeps the plain scenario fallback.
+        assert rows[str(stray_key.id)]["goal"] == stray_key.scenario.name
+
+        groups = auth_client.get(url, {"group_by": "goal"}).json()["groups"]
+        by_key = {group["key"]: group["result_ids"] for group in groups}
+        assert by_key["Own run goal"] == [str(own_key.id)]
+        assert by_key["Environment goal"] == [str(environment_key.id)]
+        assert "Sibling run goal" not in by_key
+        assert str(stray_key.id) in by_key[stray_key.scenario.name]
+
     def test_non_numeric_json_metrics_do_not_break_list_or_analytics(
         self,
         auth_client,

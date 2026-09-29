@@ -1750,3 +1750,99 @@ def test_deleting_environment_cancels_active_selected_run(user, workspace):
         )
     assert error.value.code == "environment_not_ready"
     assert environment.simulation_runs.count() == 1
+
+
+@pytest.mark.django_db
+def test_selected_run_returns_structured_usage_limit_response(user, workspace):
+    from ee.usage.exceptions import UsageLimitExceeded
+    from ee.usage.schemas.events import CheckResult
+
+    environment, _ = create_hosted_job(
+        user.organization,
+        _v1_payload(scenario_count=1),
+        idempotency_key="authored-environment-at-limit",
+        workspace=workspace,
+    )
+    attempt = register_attempt(
+        environment.id, endpoint_base_url="https://harness.example.test"
+    ).attempt
+    provision_scenarios(
+        attempt,
+        {
+            "operation": "provision",
+            "name": "Limit suite",
+            "modality": "voice",
+            "personas": [
+                {
+                    "scenario_key": "scenario-a",
+                    "name": "A",
+                    "role": "customer",
+                    "situation": "First situation",
+                    "outcome": "First outcome",
+                    "persona": {"name": "A"},
+                }
+            ],
+        },
+    )
+    environment.refresh_from_db()
+    payload = dict(environment.payload)
+    payload["metadata"] = {
+        **(payload.get("metadata") or {}),
+        "authoring_object_key": "harness/environments/authored.tar.gz",
+    }
+    environment.payload = payload
+    environment.state = environment.State.COMPLETED
+    environment.current_stage = "completed"
+    environment.save(update_fields=["payload", "state", "current_stage", "updated_at"])
+
+    client = APIClient()
+    client.force_authenticate(user=user)
+    refusal = CheckResult(
+        allowed=False,
+        error_code="ENTITLEMENT_LIMIT",
+        dimension="voice_minutes",
+        reason="No voice minutes left this cycle",
+        current_usage=120,
+        limit=120,
+    )
+    with (
+        patch(
+            "simulate.services.harness_usage.require_harness_call_usage",
+            side_effect=UsageLimitExceeded(refusal),
+        ) as usage,
+        patch(
+            "simulate.temporal.client.start_hosted_harness_gateway_workflow"
+        ) as start,
+    ):
+        response = client.post(
+            f"/simulate/api/harness-environments/{environment.id}/run/",
+            {"scenario_ids": ["scenario-a"], "trials": 1},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="submission-at-limit",
+            HTTP_X_WORKSPACE_ID=str(workspace.id),
+        )
+
+    assert response.status_code == 402, response.content
+    assert response.json()["error_code"] == "ENTITLEMENT_LIMIT"
+    assert response.json()["dimension"] == "voice_minutes"
+    assert response.json()["current_usage"] == 120
+    assert usage.call_args.args[0].id == environment.id
+    start.assert_not_called()
+    assert environment.simulation_runs.count() == 0
+
+    # A refused submission consumes nothing: the same key launches once the
+    # limit lifts.
+    with patch(
+        "simulate.temporal.client.start_hosted_harness_gateway_workflow"
+    ) as start:
+        retried = client.post(
+            f"/simulate/api/harness-environments/{environment.id}/run/",
+            {"scenario_ids": ["scenario-a"], "trials": 1},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="submission-at-limit",
+            HTTP_X_WORKSPACE_ID=str(workspace.id),
+        )
+
+    assert retried.status_code == 202, retried.content
+    assert start.call_count == 1
+    assert environment.simulation_runs.count() == 1

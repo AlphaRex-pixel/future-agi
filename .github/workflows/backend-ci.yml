@@ -165,6 +165,9 @@ jobs:
           enable-cache: true
           cache-dependency-glob: futureagi/uv.lock
 
+      - name: Install ffmpeg (pydub reads recordings through ffprobe, as in the runtime image)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
+
       - name: Install dependencies (overlaps with service startup)
         run: uv sync --frozen --all-extras
 
