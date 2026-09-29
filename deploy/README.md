@@ -479,19 +479,21 @@ topics, volumes and obsolete workloads until their explicit retirement is approv
 
 **Retiring RabbitMQ and the catalog sequencer.** The stack no longer runs
 RabbitMQ: Redis carries live updates (the channel layer), and
-`RABBITMQ_USER`/`RABBITMQ_PASSWORD` are no longer read. Nor does it run v1.41's
-Kafka catalog sequencer (`fi-property-catalog-sequencer`,
+`RABBITMQ_USER`/`RABBITMQ_PASSWORD` are no longer read. Nor does it run the
+Kafka catalog sequencer that releases up to v1.41.1 ran (`fi-property-catalog-sequencer`,
 `property-catalog-supervisor`, `property-catalog-postgres-bootstrap`). `up`
 leaves their old containers running, because it never removes containers of
 services the files no longer define. Once the upgraded stack is healthy and
 their retirement is approved, remove them and, when you no longer need their
-data (a rollback to v1.41 does), their volumes, which nothing mounts any more
+data (a rollback to an older release does), their volumes, which nothing mounts any more
 (the prefix is your Compose project name):
 
 ```bash
 docker compose --env-file deploy/.env.production \
   -f docker-compose.distributed.yml -f deploy/docker-compose.production.yml up -d --no-build --remove-orphans
-docker volume rm futureagi_rabbitmq-data futureagi_property-catalog-sequencer-data
+docker volume rm futureagi_rabbitmq-data
+# Only on installs that ran v1.41.1 or earlier:
+docker volume rm futureagi_property-catalog-sequencer-data
 ```
 
 ## Resource sizing
