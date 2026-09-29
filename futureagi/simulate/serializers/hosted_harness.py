@@ -125,6 +125,7 @@ class HarnessCallSerializer(serializers.Serializer):
     stop_reason = serializers.CharField(
         required=False, allow_null=True, allow_blank=False, max_length=128
     )
+    script_completed = serializers.BooleanField(required=False)
     target_metrics = HarnessTargetMetricsSerializer(required=False, allow_null=True)
 
 

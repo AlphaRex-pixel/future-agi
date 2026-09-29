@@ -37,6 +37,13 @@ from simulate.services.run_results_v3_expressions import (
 
 CHART_BUCKETS = 100
 NOT_REPORTED = "Not reported"
+CALLER_END_REASONS = (
+    "customer_end_call",
+    "customer-ended-call",
+    "caller-ended-call",
+    "human-ended",
+    "hangup-by-user",
+)
 # Provider-agnostic end reasons (metric list v1 §5.1), first match wins. The hosted ALK
 # reasons are listed explicitly: none of them appear in any provider's vocabulary.
 END_REASONS = [
@@ -56,14 +63,45 @@ END_REASONS = [
         "Time or turn limit",
         r"max.?duration|exceeded-max|duration-limit|max.?turns|conversation_timeout",
     ),
+    ("Simulator ended", r"^simulator[-_]end(?:ed)?[-_]call$"),
+    ("Agent ended", r"^(?:target|assistant)[-_]end(?:ed)?[-_]call$"),
+    ("Agent disconnected", r"^target[-_]disconnected$"),
+    ("Session closed", r"^(?:session[-_]closed|close[-_]on[-_]disconnect)$"),
+    ("Disconnected", r"^participant[-_]disconnected$"),
     (
         "Caller hung up",
-        r"customer|user|caller|persona|client|human-ended|hangup-by-user|"
-        r"participant-disconnected|simulator_end_call",
+        r"customer|user|caller|persona|client|human-ended|hangup-by-user",
     ),
-    ("Agent ended", r"assistant|agent|end-call|target_disconnected"),
+    ("Agent ended", r"assistant|agent|end-call"),
     ("Completed", r"complete|done|script-completed|outcome_satisfied"),
 ]
+
+
+def annotate_goal_outcome(queryset: QuerySet) -> QuerySet:
+    """Use the same chart outcome for aggregation and call drill-downs."""
+    end_reason = Case(
+        *[
+            When(ended_reason__iregex=pattern, then=Value(label))
+            for label, pattern in END_REASONS
+        ],
+        When(
+            Q(ended_reason__isnull=True) | Q(ended_reason=""),
+            then=Value(NOT_REPORTED),
+        ),
+        default=Value("Unrecognised"),
+        output_field=TextField(),
+    )
+    return queryset.annotate(dashboard_disconnection=end_reason).annotate(
+        dashboard_goal=Case(
+            When(
+                Q(call_metadata__harness_outcome_status__in=["escalated", "handoff"])
+                | Q(dashboard_disconnection="Transferred"),
+                then=Value("escalated"),
+            ),
+            default=F("result_outcome"),
+            output_field=TextField(),
+        )
+    )
 
 
 def _stats(queryset: QuerySet, fields: dict[str, str]) -> dict[str, dict[str, Any]]:
@@ -122,9 +160,8 @@ def _breakdown(
             for value in order
         ]
     if key == "goal_outcome":
-        # Drill-down filters: only the outcomes the calls list can filter on.
         for segment in segments:
-            if segment["label"] in {"passed", "failed", "error", "inconclusive"}:
+            if segment["label"] in order:
                 segment["statuses"] = [segment["label"]]
     preferred = {"goal_outcome": "passed"}.get(key)
     headline = next(
@@ -336,19 +373,7 @@ def build_run_dashboard(
     comparison: dict | None = None,
 ) -> dict[str, Any]:
     total = summary["total"]
-    end_reason = Case(
-        *[
-            When(ended_reason__iregex=pattern, then=Value(label))
-            for label, pattern in END_REASONS
-        ],
-        When(
-            Q(ended_reason__isnull=True) | Q(ended_reason=""),
-            then=Value(NOT_REPORTED),
-        ),
-        default=Value("Unrecognised"),
-        output_field=TextField(),
-    )
-    queryset = queryset.annotate(
+    queryset = annotate_goal_outcome(queryset).annotate(
         # Provider-reported only: the platform does not compute sentiment (v1 D1).
         dashboard_sentiment=Lower(
             Coalesce(
@@ -373,7 +398,6 @@ def build_run_dashboard(
                 _json_text("analysis_data", "successEvaluation"),
             )
         ),
-        dashboard_disconnection=end_reason,
     ).annotate(
         dashboard_provider_success=Case(
             When(
@@ -384,24 +408,13 @@ def build_run_dashboard(
             output_field=TextField(),
         ),
         dashboard_csat=F("result_csat"),
-        dashboard_goal=Case(
-            When(
-                Q(
-                    call_metadata__harness_outcome_status__in=[
-                        "escalated",
-                        "handoff",
-                    ]
-                )
-                | Q(dashboard_disconnection="Transferred"),
-                then=Value("escalated"),
-            ),
-            default=F("result_outcome"),
-            output_field=TextField(),
-        ),
     )
     voice = queryset.filter(simulation_call_type="voice")
     # A run is one modality in practice; a mixed run counts as voice.
     noun = "chat" if total and not voice.exists() else "call"
+    script_completed = Q(
+        call_metadata__hosted_harness_receipt__call__script_completed=True
+    ) | Q(call_metadata__hosted_harness_receipt__call__script_completed=False)
     values = queryset.aggregate(
         csat=Avg("dashboard_csat"),
         csat_measured=Count("dashboard_csat"),
@@ -410,10 +423,16 @@ def build_run_dashboard(
         connected=Count(
             "id", filter=Q(message_count__gt=0) | Q(transcript_available=True)
         ),
+        drop_off_measured=Count(
+            "id", filter=script_completed & Q(result_outcome__in=["passed", "failed"])
+        ),
         drop_off=Count(
             "id",
             filter=Q(
-                dashboard_disconnection="Caller hung up",
+                call_metadata__hosted_harness_receipt__call__script_completed=False,
+                call_metadata__hosted_harness_receipt__call__stop_reason__in=(
+                    CALLER_END_REASONS
+                ),
                 result_outcome="failed",
             ),
         ),
@@ -488,10 +507,15 @@ def build_run_dashboard(
     metric(
         "drop_off",
         "Drop-off",
-        round(values["drop_off"] * 100 / total, 2) if total else None,
+        (
+            round(values["drop_off"] * 100 / values["drop_off_measured"], 2)
+            if values["drop_off_measured"]
+            else None
+        ),
         "percent",
-        total,
-        "Caller hung up and the call failed its evals; passing hangups and run errors are excluded",
+        values["drop_off_measured"],
+        "Caller ended before script completion and failed evaluation; "
+        "calls without completion evidence are unmeasured",
     )
     metric(
         "csat",

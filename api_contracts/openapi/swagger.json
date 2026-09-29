@@ -125460,6 +125460,10 @@
                     "minLength": 1,
                     "x-nullable": true
                 },
+                "script_completed": {
+                    "title": "Script completed",
+                    "type": "boolean"
+                },
                 "target_metrics": {
                     "$ref": "#/definitions/HarnessTargetMetrics"
                 }
@@ -135157,7 +135161,8 @@
                 "latency",
                 "tokens",
                 "cost_cents",
-                "scenario"
+                "scenario",
+                "scenario_key"
             ],
             "type": "object",
             "properties": {
@@ -135191,6 +135196,11 @@
                 },
                 "scenario": {
                     "title": "Scenario",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "scenario_key": {
+                    "title": "Scenario key",
                     "type": "string",
                     "minLength": 1
                 }
@@ -135236,6 +135246,7 @@
                 "error",
                 "inconclusive",
                 "scenario",
+                "scenario_key",
                 "runs",
                 "evaluated",
                 "pass_rate",
@@ -135261,6 +135272,11 @@
                 },
                 "scenario": {
                     "title": "Scenario",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "scenario_key": {
+                    "title": "Scenario key",
                     "type": "string",
                     "minLength": 1
                 },

@@ -417,6 +417,251 @@ class TestRunResultsV3Views:
     """The v3 run-results surface remains independent from legacy contracts."""
 
     @pytest.mark.parametrize(
+        (
+            "output_type",
+            "output",
+            "reverse",
+            "threshold",
+            "choice_scores",
+            "status_value",
+            "expected",
+            "expected_score",
+        ),
+        [
+            ("pass_fail", "Passed", True, 0.5, {}, "completed", "passed", 1),
+            ("pass_fail", "Failed", True, 0.5, {}, "completed", "failed", 0),
+            ("pass_fail", "Failed", True, 0, {}, "completed", "failed", 0),
+            ("pass_fail", {"failure": True}, False, 0, {}, "completed", "failed", 0),
+            ("pass_fail", "yes", False, 0.5, {}, "completed", "passed", 1),
+            ("pass_fail", "no", False, 0.5, {}, "completed", "failed", 0),
+            ("pass_fail", 0.3, False, 0.5, {}, "completed", "passed", 1),
+            ("percentage", 0.9, True, 0.5, {}, "completed", "failed", 0.1),
+            ("percentage", "0.8", False, 0.7, {}, "completed", "passed", 0.8),
+            ("percentage", {"result": 0.8}, False, 0.7, {}, "completed", "passed", 0.8),
+            ("percentage", -2, True, 0.5, {}, "completed", "passed", 1),
+            ("percentage", 200, False, 0.5, {}, "completed", "passed", 1),
+            (
+                "deterministic",
+                "pass",
+                False,
+                0.5,
+                {"pass": 0},
+                "completed",
+                "failed",
+                0,
+            ),
+            (
+                "deterministic",
+                ["good", "bad"],
+                False,
+                0.6,
+                {"good": 1.0, "bad": 0.0},
+                "completed",
+                "failed",
+                0.5,
+            ),
+            ("pass_fail", "Passed", False, 0.5, {}, "error", "inconclusive", None),
+        ],
+    )
+    def test_configured_eval_verdict_agrees_across_rows_filters_and_analytics(
+        self,
+        auth_client,
+        test_execution,
+        scenario,
+        pass_fail_template,
+        pass_fail_eval_config,
+        output_type,
+        output,
+        reverse,
+        threshold,
+        choice_scores,
+        status_value,
+        expected,
+        expected_score,
+    ):
+        from simulate.services.run_results_v3 import call_outcome
+        from simulate.services.run_results_v3_queries import run_calls_queryset
+
+        pass_fail_template.output_type_normalized = output_type
+        pass_fail_template.choice_scores = choice_scores
+        pass_fail_template.save(
+            update_fields=["output_type_normalized", "choice_scores"]
+        )
+        pass_fail_eval_config.config = {
+            "run_config": {
+                "reverse_output": reverse,
+                "pass_threshold": threshold,
+            }
+        }
+        pass_fail_eval_config.save(update_fields=["config"])
+        call = CallExecution.objects.create(
+            test_execution=test_execution,
+            scenario=scenario,
+            phone_number="+9312345678",
+            status="completed",
+            call_metadata={"harness_outcome_status": "passed"},
+            eval_outputs={
+                str(pass_fail_eval_config.id): {
+                    "name": "Quality Gate",
+                    "output": output,
+                    "status": status_value,
+                }
+            },
+        )
+        assert (
+            call_outcome(call, {str(pass_fail_eval_config.id): pass_fail_eval_config})
+            == expected
+        )
+        assert (
+            run_calls_queryset(test_execution).get(pk=call.pk).result_outcome
+            == expected
+        )
+
+        base = f"/simulate/v3/test-executions/{test_execution.id}"
+        rows_response = auth_client.get(f"{base}/calls/")
+        assert rows_response.status_code == 200
+        row = rows_response.json()["results"][0]
+        assert row["outcome"] == expected
+        if expected_score is None:
+            assert row["evaluations"][0]["score"] is None
+        else:
+            assert row["evaluations"][0]["score"] == pytest.approx(expected_score)
+        assert row["evaluations"][0]["passed"] == (
+            True if expected == "passed" else False if expected == "failed" else None
+        )
+
+        filtered = auth_client.get(
+            f"{base}/calls/", {"filters": json.dumps({"status": [expected]})}
+        )
+        assert filtered.status_code == 200
+        assert filtered.json()["count"] == 1
+
+        analytics = auth_client.get(f"{base}/analytics/")
+        assert analytics.status_code == 200
+        body = analytics.json()
+        assert body["summary"]["outcomes"][expected] == 1
+        evaluation = next(
+            item
+            for item in body["evaluations"]
+            if item["id"] == str(pass_fail_eval_config.id)
+        )
+        assert evaluation["passed"] == int(expected == "passed")
+        assert evaluation["failed"] == int(expected == "failed")
+        assert evaluation["errored"] == int(status_value == "error")
+        if expected_score is None:
+            assert evaluation["average_score"] is None
+        else:
+            assert evaluation["average_score"] == pytest.approx(expected_score)
+
+    @pytest.mark.parametrize(
+        "output",
+        [
+            {"score": 1.0, "choice": "Good"},
+            {"score": 1.0, "choices": ["Good"]},
+        ],
+    )
+    def test_formatted_choice_override_agrees_across_run_results(
+        self,
+        auth_client,
+        test_execution,
+        scenario,
+        pass_fail_template,
+        pass_fail_eval_config,
+        output,
+    ):
+        from simulate.services.run_results_v3 import call_outcome
+        from simulate.services.run_results_v3_queries import run_calls_queryset
+
+        pass_fail_template.output_type_normalized = "deterministic"
+        pass_fail_template.choice_scores = {"Good": 1.0}
+        pass_fail_template.save(
+            update_fields=["output_type_normalized", "choice_scores"]
+        )
+        pass_fail_eval_config.config = {
+            "run_config": {"choice_scores": {"Good": 0.0}, "pass_threshold": 0.5}
+        }
+        pass_fail_eval_config.save(update_fields=["config"])
+        call = CallExecution.objects.create(
+            test_execution=test_execution,
+            scenario=scenario,
+            phone_number="+9312345678",
+            status="completed",
+            call_metadata={"harness_outcome_status": "passed"},
+            eval_outputs={
+                str(pass_fail_eval_config.id): {
+                    "name": "Quality Gate",
+                    "output": output,
+                    "status": "completed",
+                }
+            },
+        )
+        configs = {str(pass_fail_eval_config.id): pass_fail_eval_config}
+        assert call_outcome(call, configs) == "failed"
+        assert (
+            run_calls_queryset(test_execution).get(pk=call.pk).result_outcome
+            == "failed"
+        )
+
+        base = f"/simulate/v3/test-executions/{test_execution.id}"
+        rows = auth_client.get(f"{base}/calls/")
+        assert rows.status_code == 200
+        row = rows.json()["results"][0]
+        assert row["outcome"] == "failed"
+        assert row["evaluations"][0]["score"] == pytest.approx(0.0)
+        assert row["evaluations"][0]["passed"] is False
+
+        failed = auth_client.get(
+            f"{base}/calls/", {"filters": json.dumps({"status": ["failed"]})}
+        )
+        assert failed.status_code == 200
+        assert failed.json()["count"] == 1
+        passed = auth_client.get(
+            f"{base}/calls/", {"filters": json.dumps({"status": ["passed"]})}
+        )
+        assert passed.status_code == 200
+        assert passed.json()["count"] == 0
+
+        analytics = auth_client.get(f"{base}/analytics/")
+        assert analytics.status_code == 200
+        body = analytics.json()
+        assert body["summary"]["outcomes"]["failed"] == 1
+        evaluation = next(
+            item
+            for item in body["evaluations"]
+            if item["id"] == str(pass_fail_eval_config.id)
+        )
+        assert evaluation["passed"] == 0
+        assert evaluation["failed"] == 1
+        assert evaluation["average_score"] == pytest.approx(0.0)
+
+    def test_dataset_scenario_uses_name_without_merging_distinct_rows(
+        self, auth_client, test_execution, scenario, dataset_for_scenario
+    ):
+        first_row = Row.objects.filter(dataset=dataset_for_scenario).first()
+        second_row = Row.objects.create(dataset=dataset_for_scenario, order=1)
+        for index, row in enumerate((first_row, second_row)):
+            CallExecution.objects.create(
+                test_execution=test_execution,
+                scenario=scenario,
+                row_id=row.id,
+                phone_number=f"+931234567{index}",
+                status="completed",
+                call_metadata={"harness_outcome_status": "passed"},
+            )
+
+        response = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/analytics/"
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["scenario_risk"]) == 2
+        assert {item["scenario"] for item in body["scenario_risk"]} == {
+            scenario.name
+        }
+        assert len({item["scenario_key"] for item in body["scenario_risk"]}) == 2
+        assert len({item["scenario_key"] for item in body["reliability"]["rows"]}) == 2
+
+    @pytest.mark.parametrize(
         "value,eval_status,expected",
         [
             ("Passed", "completed", 1),
@@ -592,7 +837,12 @@ class TestRunResultsV3Views:
         assert row["latency_ms"] == 240.0
         assert row["turn_count"] == 4
         assert row["tokens"] == 120
-        assert row["cost_cents"] == 12
+        assert row["cost_cents"] is None
+        analytics = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/analytics/"
+        )
+        assert analytics.status_code == 200
+        assert analytics.json()["summary"]["cost_cents"]["measured"] == 0
         assert body["groups"][0]["key"] == "Returns"
         assert body["groups"][0]["result_ids"] == [str(passed_call.id)]
         assert {item["value"] for item in body["facets"]["status"]} == {
@@ -939,8 +1189,115 @@ class TestRunResultsV3Views:
                 if chart["key"] == "disconnection"
             )["segments"]
         }
-        assert endings == {"Caller hung up": 6}
+        assert endings == {"Simulator ended": 6}
+        drop_off = next(
+            metric for metric in dashboard["metrics"] if metric["key"] == "drop_off"
+        )
+        assert drop_off["value"] is None
+        assert drop_off["measured"] == 0
         assert dashboard["evaluation_summary"]["pass_rate"] == 60.0
+
+    def test_end_reason_categories_do_not_imply_early_caller_drop_off(
+        self, auth_client, test_execution, scenario
+    ):
+        cases = {
+            "simulator_end_call": "Simulator ended",
+            "target_end_call": "Agent ended",
+            "target_disconnected": "Agent disconnected",
+            "session_closed": "Session closed",
+            "participant_disconnected": "Disconnected",
+            "some-new-provider-reason": "Unrecognised",
+        }
+        for index, reason in enumerate(cases):
+            CallExecution.objects.create(
+                test_execution=test_execution,
+                scenario=scenario,
+                phone_number=f"+931234560{index}",
+                status="completed",
+                ended_reason=reason,
+                call_metadata={
+                    "harness_outcome_status": "failed",
+                    "hosted_harness_receipt": {
+                        "call": {
+                            "stop_reason": reason,
+                            "script_completed": False,
+                        }
+                    },
+                },
+            )
+
+        response = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/analytics/"
+        )
+        assert response.status_code == status.HTTP_200_OK
+        dashboard = response.json()["dashboard"]
+        chart = next(
+            item for item in dashboard["breakdowns"] if item["key"] == "disconnection"
+        )
+        assert {item["label"]: item["count"] for item in chart["segments"]} == {
+            label: 1 for label in cases.values()
+        }
+        drop_off = next(
+            item for item in dashboard["metrics"] if item["key"] == "drop_off"
+        )
+        assert drop_off["value"] == 0
+        assert drop_off["measured"] == len(cases)
+        assert set(test_execution.calls.values_list("ended_reason", flat=True)) == set(
+            cases
+        )
+
+    @pytest.mark.parametrize(
+        ("stop_reason", "expected_drop_off"),
+        [
+            ("simulator_end_call", 0),
+            ("customer-ended-call", 33.33),
+        ],
+    )
+    def test_drop_off_counts_only_early_caller_hangups_with_failed_evaluations(
+        self,
+        auth_client,
+        test_execution,
+        analytics_call_executions,
+        stop_reason,
+        expected_drop_off,
+    ):
+        cases = [
+            (True, "failed"),
+            (False, "failed"),
+            (False, "passed"),
+            (False, "error"),
+        ]
+        for call, (script_completed, outcome) in zip(
+            analytics_call_executions, cases, strict=True
+        ):
+            call.status = (
+                CallExecution.CallStatus.FAILED
+                if outcome == "error"
+                else CallExecution.CallStatus.COMPLETED
+            )
+            call.ended_reason = stop_reason
+            call.call_metadata = {
+                "harness_outcome_status": outcome,
+                "hosted_harness_receipt": {
+                    "call": {
+                        "stop_reason": stop_reason,
+                        "script_completed": script_completed,
+                    }
+                },
+            }
+            call.save(update_fields=["status", "ended_reason", "call_metadata"])
+
+        response = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/analytics/"
+        )
+        assert response.status_code == status.HTTP_200_OK
+        metric = next(
+            item
+            for item in response.json()["dashboard"]["metrics"]
+            if item["key"] == "drop_off"
+        )
+        assert metric["measured"] == 3
+        assert metric["value"] == expected_drop_off
 
     def test_dashboard_prioritises_decision_metrics_and_shared_scenario_change(
         self,
@@ -1021,9 +1378,8 @@ class TestRunResultsV3Views:
         assert response.status_code == status.HTTP_200_OK
         dashboard = response.json()["dashboard"]
         metrics = {row["key"]: row for row in dashboard["metrics"]}
-        # Only the failed caller hangup is drop-off; a passing hangup and an
-        # infrastructure failure do not count against the agent.
-        assert metrics["drop_off"]["value"] == 25.0
+        assert metrics["drop_off"]["value"] is None
+        assert metrics["drop_off"]["measured"] == 0
         # Spend on the failed call is included, but only the target agent's
         # provider-reported cost is used: (10 + 20 + 30) / 2 passing calls.
         assert metrics["cost_per_pass"]["value"] == 30.0
@@ -1065,6 +1421,44 @@ class TestRunResultsV3Views:
         csv_body = b"".join(response.streaming_content).decode()
         assert str(call.id) in csv_body
         assert str(analytics_call_executions[-1].id) not in csv_body
+
+    def test_goal_outcome_chart_drill_down_matches_list_and_export(
+        self, auth_client, test_execution, analytics_call_executions
+    ):
+        transferred, passed = analytics_call_executions[:2]
+        for call in (transferred, passed):
+            call.call_metadata = {"harness_outcome_status": "passed"}
+            call.save(update_fields=["call_metadata"])
+        transferred.ended_reason = "warm-transfer-completed"
+        transferred.save(update_fields=["ended_reason"])
+
+        base = f"/simulate/v3/test-executions/{test_execution.id}"
+        dashboard = auth_client.get(f"{base}/analytics/").json()["dashboard"]
+        chart = next(
+            item for item in dashboard["breakdowns"] if item["key"] == "goal_outcome"
+        )
+        counts = {segment["label"]: segment["count"] for segment in chart["segments"]}
+        assert counts["passed"] == counts["escalated"] == 1
+
+        for outcome, expected in (("passed", passed), ("escalated", transferred)):
+            filters = {"goal_outcome": [outcome]}
+            response = auth_client.get(
+                f"{base}/calls/", {"filters": json.dumps(filters)}
+            )
+            assert response.status_code == 200
+            assert response.json()["count"] == counts[outcome]
+            assert [row["id"] for row in response.json()["results"]] == [
+                str(expected.id)
+            ]
+
+            export = auth_client.post(
+                f"{base}/export/", {"filters": filters}, format="json"
+            )
+            assert export.status_code == 200
+            csv_body = b"".join(export.streaming_content).decode()
+            assert str(expected.id) in csv_body
+            other = transferred if expected == passed else passed
+            assert str(other.id) not in csv_body
 
     def test_dashboard_distinguishes_missing_metrics_and_tool_verdicts(
         self, auth_client, test_execution, analytics_call_executions

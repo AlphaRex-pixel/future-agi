@@ -37730,6 +37730,7 @@ export const SimulateApiHarnessAttemptsResultsBody = zod.object({
       .min(1)
       .max(simulateApiHarnessAttemptsResultsBodyCallStopReasonMax)
       .optional(),
+    script_completed: zod.boolean().optional(),
     target_metrics: zod
       .object({
         provider: zod.enum(["vapi", "retell", "livekit"]),
@@ -46995,6 +46996,7 @@ export const SimulateV3TestExecutionAnalyticsResponse = zod.object({
         total_value: zod.number(),
       }),
       scenario: zod.string().min(1),
+      scenario_key: zod.string().min(1),
     }),
   ),
   reliability: zod.object({
@@ -47019,6 +47021,7 @@ export const SimulateV3TestExecutionAnalyticsResponse = zod.object({
         error: zod.number(),
         inconclusive: zod.number(),
         scenario: zod.string().min(1),
+        scenario_key: zod.string().min(1),
         runs: zod.number(),
         evaluated: zod.number(),
         pass_rate: zod.number(),

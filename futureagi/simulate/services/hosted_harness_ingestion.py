@@ -1250,12 +1250,13 @@ def _apply_target_metrics(call: CallExecution, target: dict[str, Any] | None) ->
         else None
     )
     usage = target.get("usage") or {}
-    if usage:
-        metrics = dict(call.conversation_metrics_data or {})
-        for source, field in _TARGET_TOKEN_FIELDS.items():
-            if usage.get(source) is not None:
-                metrics[field] = usage[source]
-        call.conversation_metrics_data = metrics
+    metrics = dict(call.conversation_metrics_data or {})
+    for field in _TARGET_TOKEN_FIELDS.values():
+        metrics.pop(field, None)
+    for source, field in _TARGET_TOKEN_FIELDS.items():
+        if usage.get(source) is not None:
+            metrics[field] = usage[source]
+    call.conversation_metrics_data = metrics
 
 
 def _ingest_hosted_transcript(

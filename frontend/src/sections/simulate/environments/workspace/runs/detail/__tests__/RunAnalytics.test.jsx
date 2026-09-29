@@ -48,15 +48,16 @@ const analytics = {
     breakdowns: [
       {
         key: "goal_outcome",
-        total: 4,
-        headline: { label: "passed", count: 2, share: 50 },
+        total: 5,
+        headline: { label: "passed", count: 2, share: 40 },
         segments: [
-          { label: "passed", count: 2, share: 50, statuses: ["passed"] },
-          { label: "failed", count: 1, share: 25, statuses: ["failed"] },
+          { label: "passed", count: 2, share: 40, statuses: ["passed"] },
+          { label: "failed", count: 1, share: 20, statuses: ["failed"] },
+          { label: "escalated", count: 1, share: 20, statuses: ["escalated"] },
           {
             label: "inconclusive",
             count: 1,
-            share: 25,
+            share: 20,
             statuses: ["inconclusive"],
           },
         ],
@@ -305,6 +306,24 @@ describe("RunAnalytics", () => {
     expect(useRunAnalytics).toHaveBeenCalledWith("execution-1");
   });
 
+  it("shows drop-off coverage when completion evidence is unavailable", () => {
+    const data = structuredClone(analytics);
+    const dropOff = data.dashboard.metrics.find(
+      (metric) => metric.key === "drop_off",
+    );
+    dropOff.value = null;
+    dropOff.measured = 0;
+    useRunAnalytics.mockReturnValue({
+      data,
+      isPending: false,
+      isError: false,
+    });
+
+    render(<RunAnalytics executionId="execution-1" />);
+
+    expect(screen.getByText("0 / 4 assessed")).toBeInTheDocument();
+  });
+
   it("shows which scenarios flip when detailed metrics are opened", () => {
     render(<RunAnalytics executionId="execution-1" />);
     fireEvent.click(
@@ -322,6 +341,58 @@ describe("RunAnalytics", () => {
         /2 scenarios × 2 trials · pass rate 95% range 12.5%–95.1%/,
       ),
     ).toBeInTheDocument();
+  });
+
+  it("distinguishes evaluated-trial row verdicts from the strict pass tile", () => {
+    const data = structuredClone(analytics);
+    data.reliability.scenarios = 5;
+    data.reliability.consistent_pass = 1;
+    const row = (scenario, passed, evaluated, error, verdict) => ({
+      scenario_key: scenario,
+      scenario,
+      runs: 2,
+      passed,
+      evaluated,
+      error,
+      verdict,
+    });
+    data.reliability.rows = [
+      row("All pass", 2, 2, 0, "passed"),
+      row("Pass plus error", 1, 1, 1, "passed"),
+      row("Pass plus inconclusive", 1, 1, 0, "passed"),
+      row("Fail plus error", 0, 1, 1, "failed"),
+      row("All error", 0, 0, 2, "not_evaluated"),
+    ];
+    useRunAnalytics.mockReturnValue({ data, isPending: false, isError: false });
+
+    render(<RunAnalytics executionId="execution-1" />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show detailed analytics" }),
+    );
+    const panel = screen.getByRole("region", {
+      name: "Reliability across trials",
+    });
+    const tile = within(panel).getByText("Passed every trial").parentElement;
+    expect(within(tile).getByText("1 / 5")).toBeInTheDocument();
+    const allPass = within(panel).getByText("All pass").closest("tr");
+    expect(
+      within(allPass).getByText("Passed all evaluated trials"),
+    ).toBeInTheDocument();
+    for (const scenario of ["Pass plus error", "Pass plus inconclusive"]) {
+      const row = within(panel).getByText(scenario).closest("tr");
+      expect(
+        within(row).getByText("Passed all evaluated trials"),
+      ).toBeInTheDocument();
+      expect(within(row).getByText("1 / 2")).toBeInTheDocument();
+    }
+    const failed = within(panel).getByText("Fail plus error").closest("tr");
+    expect(
+      within(failed).getByText("Failed all evaluated trials"),
+    ).toBeInTheDocument();
+    expect(within(failed).getByText("1 / 2")).toBeInTheDocument();
+    const allError = within(panel).getByText("All error").closest("tr");
+    expect(within(allError).getByText("Not evaluated")).toBeInTheDocument();
+    expect(within(allError).getByText("0 / 2")).toBeInTheDocument();
   });
 
   it("hides provider-only charts when no provider reported them", () => {
@@ -377,16 +448,20 @@ describe("RunAnalytics", () => {
     ).toBeGreaterThan(5);
   });
 
-  it("forwards server-provided status filters from the outcome chart", () => {
+  it("forwards server-provided goal-outcome filters from the chart", () => {
     const open = vi.fn();
     render(<RunAnalytics executionId="execution-1" onOpenCalls={open} />);
     fireEvent.click(
       screen.getByRole("button", { name: "Show detailed analytics" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Show Failed calls" }));
-    expect(open).toHaveBeenCalledWith({ status: ["failed"] });
+    expect(open).toHaveBeenCalledWith({ goal_outcome: ["failed"] });
     fireEvent.click(screen.getByRole("button", { name: "Show Passed calls" }));
-    expect(open).toHaveBeenLastCalledWith({ status: ["passed"] });
+    expect(open).toHaveBeenLastCalledWith({ goal_outcome: ["passed"] });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show Escalated calls" }),
+    );
+    expect(open).toHaveBeenLastCalledWith({ goal_outcome: ["escalated"] });
   });
 
   it("opens the actual call from a performance-tail widget", () => {

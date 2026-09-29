@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import re
 from collections import Counter, defaultdict
 from typing import Any
 
 from django.core.cache import cache
 from django.db.models import (
     Avg,
+    BooleanField,
     Case,
     CharField,
     Count,
@@ -15,6 +18,7 @@ from django.db.models import (
     FloatField,
     Func,
     JSONField,
+    Max,
     OuterRef,
     Q,
     QuerySet,
@@ -24,7 +28,7 @@ from django.db.models import (
     Value,
     When,
 )
-from django.db.models.fields.json import KeyTransform
+from django.db.models.fields.json import KeyTextTransform, KeyTransform
 from django.db.models.functions import Cast, Coalesce, Lower, NullIf, Trim
 from django.db.models.lookups import (
     Exact,
@@ -33,9 +37,9 @@ from django.db.models.lookups import (
     In,
     LessThan,
     LessThanOrEqual,
+    Regex,
 )
 
-from evaluations.engine.instance import resolve_pass_threshold
 from model_hub.models.develop_dataset import Cell
 from simulate.models import CallExecution, SimulateEvalConfig, TestExecution
 from simulate.semantics import SupportedProviders
@@ -45,6 +49,10 @@ from simulate.services.run_results_v3_expressions import (
     PercentileCont,
     _json_text,
     _safe_json_float,
+)
+from simulate.services.run_results_v3_scoring import (
+    EvalScoringSpec,
+    resolve_eval_scoring_spec,
 )
 
 OUTCOMES = ("passed", "failed", "error", "inconclusive")
@@ -95,82 +103,195 @@ def _eval_errored_q(eval_id: str) -> Q:
     )
 
 
-def _binding_setting(config: SimulateEvalConfig, name: str, fallback: Any) -> Any:
-    runtime = config.config if isinstance(config.config, dict) else {}
-    run_config = runtime.get("run_config")
-    if isinstance(run_config, dict) and run_config.get(name) is not None:
-        return run_config[name]
-    if runtime.get(name) is not None:
-        return runtime[name]
-    return fallback
-
-
-def _eval_score(eval_id: str, choice_scores: dict[str, Any] | None = None):
-    direct = _safe_json_float("eval_outputs", eval_id, "output")
-    nested = _safe_json_float("eval_outputs", eval_id, "output", "score")
-    direct_type = Exact(
+def _choice_array_matches(eval_id: str, label: str, *, nested: bool) -> Q:
+    keys = (eval_id, "output", "choices") if nested else (eval_id, "output")
+    pattern = f"^[[:space:]]*{re.escape(label)}[[:space:]]*$"
+    path = f'$[*] ? (@ like_regex {json.dumps(pattern)} flag "i")'
+    return Q(
         Func(
-            _json_value("eval_outputs", eval_id, "output"),
-            function="jsonb_typeof",
-            output_field=TextField(),
-        ),
-        Value("number"),
+            _json_value("eval_outputs", *keys),
+            Value(path),
+            function="jsonb_path_exists",
+            template="%(function)s(%(expressions)s::jsonpath)",
+            output_field=BooleanField(),
+        )
     )
-    nested_type = Exact(
-        Func(
-            _json_value("eval_outputs", eval_id, "output", "score"),
-            function="jsonb_typeof",
-            output_field=TextField(),
+
+
+def _eval_score(eval_id: str, spec: EvalScoringSpec | None = None):
+    output = _json_value("eval_outputs", eval_id, "output")
+    raw_text = Coalesce(
+        *(
+            KeyTextTransform(key, output)
+            for key in ("score", "result", "output", "choice", "value")
         ),
-        Value("number"),
+        KeyTextTransform("output", _json_value("eval_outputs", eval_id)),
+        output_field=TextField(),
+    )
+    normalized = Lower(Trim(raw_text))
+    numeric = Case(
+        When(
+            Regex(
+                normalized,
+                Value(r"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$"),
+            ),
+            then=Cast(normalized, FloatField()),
+        ),
+        output_field=FloatField(),
+    )
+    if spec is not None and spec.output_type == "pass_fail":
+        numeric_score = Case(
+            When(GreaterThan(numeric, Value(0.0)), then=Value(1.0)),
+            When(LessThanOrEqual(numeric, Value(0.0)), then=Value(0.0)),
+            default=None,
+            output_field=FloatField(),
+        )
+    else:
+        numeric_score = Case(
+            When(GreaterThan(numeric, Value(1.0)), then=numeric / Value(100.0)),
+            default=numeric,
+            output_field=FloatField(),
+        )
+    choice_scores = (
+        spec.choice_scores
+        if spec is not None and spec.output_type == "deterministic"
+        else {}
     )
     choice_cases = [
         When(
             Q(
                 Exact(
                     Lower(Trim(_json_text("eval_outputs", eval_id, "output"))),
-                    Value(str(label).strip().lower()),
+                    Value(label),
                 )
+            )
+            | (
+                Q(
+                    Exact(
+                        Lower(
+                            Trim(
+                                _json_text("eval_outputs", eval_id, "output", "choice")
+                            )
+                        ),
+                        Value(label),
+                    )
+                )
+                & ~Q(**{f"eval_outputs__{eval_id}__output__has_key": "choices"})
             ),
             then=Value(float(score)),
         )
-        for label, score in (choice_scores or {}).items()
-        if isinstance(score, int | float)
+        for label, score in choice_scores.items()
     ]
-    return Case(
-        When(~_eval_measured_q(eval_id), then=Value(None, output_field=FloatField())),
+    choice_score = None
+    if spec is not None and spec.output_type == "deterministic" and choice_scores:
+        weighted = Value(0.0)
+        count = Value(0.0)
+        for label, weight in choice_scores.items():
+            present = _choice_array_matches(
+                eval_id, label, nested=False
+            ) | _choice_array_matches(eval_id, label, nested=True)
+            weighted += Case(
+                When(present, then=Value(weight)),
+                default=Value(0.0),
+                output_field=FloatField(),
+            )
+            count += Case(
+                When(present, then=Value(1.0)),
+                default=Value(0.0),
+                output_field=FloatField(),
+            )
+        choice_score = weighted / NullIf(count, Value(0.0))
+    positive = ["true"]
+    negative = ["false"]
+    if spec is None or spec.output_type == "pass_fail":
+        positive += ["pass", "yes", "success", "successful"]
+        negative += ["fail", "no", "failure", "unsuccessful"]
+    if spec is None:
+        positive.append("passed")
+        negative.append("failed")
+    raw_score = Case(
         When(
-            _eval_verdict_q(
-                {eval_id}, [True, "true", "pass", "passed", "success", "successful"]
-            ),
+            In(normalized, positive),
             then=Value(1.0),
         ),
         When(
-            _eval_verdict_q(
-                {eval_id}, [False, "false", "fail", "failed", "failure", "unsuccessful"]
-            ),
+            In(normalized, negative),
             then=Value(0.0),
         ),
-        *choice_cases,
-        When(
-            nested_type,
-            then=Case(
-                When(GreaterThan(nested, Value(1.0)), then=nested / Value(100.0)),
-                default=nested,
-                output_field=FloatField(),
-            ),
-        ),
-        When(
-            direct_type,
-            then=Case(
-                When(GreaterThan(direct, Value(1.0)), then=direct / Value(100.0)),
-                default=direct,
-                output_field=FloatField(),
-            ),
-        ),
-        default=None,
+        default=numeric_score,
         output_field=FloatField(),
     )
+    selected_score = Case(
+        *choice_cases,
+        default=(
+            Coalesce(choice_score, raw_score, output_field=FloatField())
+            if choice_score is not None
+            else raw_score
+        ),
+        output_field=FloatField(),
+    )
+    return Case(
+        When(~_eval_measured_q(eval_id), then=Value(None, output_field=FloatField())),
+        When(LessThan(selected_score, Value(0.0)), then=Value(0.0)),
+        When(GreaterThan(selected_score, Value(1.0)), then=Value(1.0)),
+        default=selected_score,
+        output_field=FloatField(),
+    )
+
+
+def _configured_eval_verdict(eval_id: str, config: SimulateEvalConfig):
+    spec = resolve_eval_scoring_spec(config)
+    raw_score = _eval_score(eval_id, spec)
+    final_pass = Q(
+        Exact(
+            Lower(Trim(_json_text("eval_outputs", eval_id, "output"))),
+            Value("passed"),
+        )
+    ) | Q(
+        Exact(
+            _json_value("eval_outputs", eval_id, "output", "failure"),
+            Value(False, output_field=JSONField()),
+        )
+    )
+    final_fail = Q(
+        Exact(
+            Lower(Trim(_json_text("eval_outputs", eval_id, "output"))),
+            Value("failed"),
+        )
+    ) | Q(
+        Exact(
+            _json_value("eval_outputs", eval_id, "output", "failure"),
+            Value(True, output_field=JSONField()),
+        )
+    )
+    if spec.output_type != "pass_fail":
+        final_pass = Q(pk__in=[])
+        final_fail = Q(pk__in=[])
+    measured = _eval_measured_q(eval_id)
+    score = Case(
+        When(~measured, then=Value(None, output_field=FloatField())),
+        When(final_pass, then=Value(1.0)),
+        When(final_fail, then=Value(0.0)),
+        default=Value(1.0) - raw_score if spec.reverse_output else raw_score,
+        output_field=FloatField(),
+    )
+    passed = measured & Q(
+        Case(
+            When(final_pass, then=Value(True)),
+            When(final_fail, then=Value(False)),
+            default=GreaterThanOrEqual(score, Value(spec.threshold)),
+            output_field=BooleanField(),
+        )
+    )
+    failed = measured & Q(
+        Case(
+            When(final_fail, then=Value(True)),
+            When(final_pass, then=Value(False)),
+            default=LessThan(score, Value(spec.threshold)),
+            output_field=BooleanField(),
+        )
+    )
+    return score, passed, failed
 
 
 def run_calls_queryset(
@@ -186,25 +307,9 @@ def run_calls_queryset(
     errored_eval = Q(pk__in=[])
     for config in live_configs:
         eval_id = str(config.id)
-        template = config.eval_template
-        choice_scores = _binding_setting(
-            config, "choice_scores", template.choice_scores or {}
-        )
-        score = _eval_score(
-            eval_id, choice_scores if isinstance(choice_scores, dict) else {}
-        )
-        if bool(
-            _binding_setting(
-                config,
-                "reverse_output",
-                (template.config or {}).get("reverse_output", False),
-            )
-        ):
-            score = Value(1.0) - score
-        threshold = resolve_pass_threshold(template, config.config)
-        measured = _eval_measured_q(eval_id)
-        failed_eval |= measured & Q(LessThan(score, Value(threshold)))
-        passed_eval |= measured & Q(GreaterThanOrEqual(score, Value(threshold)))
+        _, passed_q, failed_q = _configured_eval_verdict(eval_id, config)
+        failed_eval |= failed_q
+        passed_eval |= passed_q
         errored_eval |= _eval_errored_q(eval_id)
 
     # The common hosted-harness fields live in JSONB today. These annotations
@@ -300,13 +405,7 @@ def run_calls_queryset(
             _safe_json_float("conversation_metrics_data", "bot_message_count"),
         ),
         result_tokens=_safe_json_float("conversation_metrics_data", "total_tokens"),
-        # Analytics describes the agent under test, not FutureAGI's simulator.
-        # Native and hosted provider integrations put the target's own cost in
-        # customer_cost_cents; legacy ALK reporters used cost_cents instead.
-        result_cost_cents=Coalesce(
-            Cast("customer_cost_cents", FloatField()),
-            Cast("cost_cents", FloatField()),
-        ),
+        result_cost_cents=Cast("customer_cost_cents", FloatField()),
         result_provider=Case(
             *provider_cases,
             default=Coalesce(
@@ -314,11 +413,19 @@ def run_calls_queryset(
             ),
             output_field=CharField(),
         ),
-        result_scenario=Coalesce(
+        result_scenario_key=Coalesce(
             _json_text("call_metadata", "harness_scenario_key"),
             _json_text("call_metadata", "hosted_harness_receipt", "scenario_key"),
             Cast("row_id", TextField()),
-            F("scenario__name"),
+            Cast("scenario_id", TextField()),
+            output_field=CharField(),
+        ),
+        result_scenario=Coalesce(
+            NullIf(F("hosted_registration__name"), Value("")),
+            _json_text("call_metadata", "harness_scenario_key"),
+            _json_text("call_metadata", "hosted_harness_receipt", "scenario_key"),
+            NullIf(F("scenario__name"), Value("")),
+            Cast("row_id", TextField()),
             output_field=CharField(),
         ),
         # One CSAT per call on the 0-10 scale. The scorer's own value comes first.
@@ -376,6 +483,10 @@ def apply_run_call_query(queryset: QuerySet, query: dict[str, Any]) -> QuerySet:
         queryset = queryset.filter(
             result_outcome__in=[str(value).lower() for value in values]
         )
+    if values := filters.get("goal_outcome"):
+        from simulate.services.run_dashboard_v3 import annotate_goal_outcome
+
+        queryset = annotate_goal_outcome(queryset).filter(dashboard_goal__in=values)
     if values := filters.get("sub_goal"):
         sub_goal_query = Q(pk__in=[])
         for value in values:
@@ -596,15 +707,33 @@ def _breakdown_run_calls(queryset: QuerySet, field: str) -> list[dict[str, Any]]
         "modality": "simulation_call_type",
     }
     orm_field = orm_fields[field]
-    rows = (
-        queryset.order_by()
-        .values(orm_field)
-        .annotate(**_aggregate_expressions(include_percentiles=False))
-    )
-    result = [
-        {field: str(values[orm_field] or "Unknown"), **_summary_from_values(values)}
-        for values in rows
-    ]
+    if field == "scenario":
+        rows = (
+            queryset.order_by()
+            .values("result_scenario_key")
+            .annotate(
+                scenario_label=Max("result_scenario"),
+                **_aggregate_expressions(include_percentiles=False),
+            )
+        )
+        result = [
+            {
+                "scenario": str(values["scenario_label"] or "Unknown"),
+                "scenario_key": str(values["result_scenario_key"]),
+                **_summary_from_values(values),
+            }
+            for values in rows
+        ]
+    else:
+        rows = (
+            queryset.order_by()
+            .values(orm_field)
+            .annotate(**_aggregate_expressions(include_percentiles=False))
+        )
+        result = [
+            {field: str(values[orm_field] or "Unknown"), **_summary_from_values(values)}
+            for values in rows
+        ]
     return sorted(result, key=lambda row: (-row["total"], row[field].lower()))
 
 
@@ -618,22 +747,30 @@ def build_run_comparison(
     errors and unevaluated trials do not invent a verdict.
     """
 
-    def verdicts(calls: QuerySet) -> dict[str, bool]:
+    def verdicts(calls: QuerySet) -> tuple[dict[str, bool], dict[str, str]]:
         counts: dict[str, list[int]] = defaultdict(lambda: [0, 0])
-        for scenario, outcome in (
+        labels: dict[str, str] = {}
+        for scenario_key, scenario_label, outcome in (
             calls.order_by()
-            .values_list("result_scenario", "result_outcome")
+            .values_list(
+                "result_scenario_key", "result_scenario", "result_outcome"
+            )
             .iterator(chunk_size=2000)
         ):
+            key = str(scenario_key)
+            labels[key] = str(scenario_label or key)
             if outcome == "passed":
-                counts[str(scenario)][0] += 1
+                counts[key][0] += 1
             elif outcome == "failed":
-                counts[str(scenario)][1] += 1
-        return {
-            scenario: failed == 0
-            for scenario, (passed, failed) in counts.items()
-            if passed or failed
-        }
+                counts[key][1] += 1
+        return (
+            {
+                scenario: failed == 0
+                for scenario, (passed, failed) in counts.items()
+                if passed or failed
+            },
+            labels,
+        )
 
     previous = (
         TestExecution.objects.filter(
@@ -652,20 +789,20 @@ def build_run_comparison(
             "newly_passing": [],
             "newly_failing": [],
         }
-    current_verdicts = verdicts(queryset)
-    previous_verdicts = verdicts(run_calls_queryset(previous))
+    current_verdicts, current_labels = verdicts(queryset)
+    previous_verdicts, _ = verdicts(run_calls_queryset(previous))
     shared = sorted(current_verdicts.keys() & previous_verdicts.keys())
     return {
         "available": True,
         "previous_execution_id": str(previous.id),
         "shared_scenarios": len(shared),
         "newly_passing": [
-            scenario
+            current_labels[scenario]
             for scenario in shared
             if current_verdicts[scenario] and not previous_verdicts[scenario]
         ],
         "newly_failing": [
-            scenario
+            current_labels[scenario]
             for scenario in shared
             if not current_verdicts[scenario] and previous_verdicts[scenario]
         ],
@@ -724,25 +861,9 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
                 [False, "false", "fail", "failed", "failure", "unsuccessful"],
             )
         else:
-            template = scoring_config.eval_template
-            choice_scores = _binding_setting(
-                scoring_config, "choice_scores", template.choice_scores or {}
+            score, passed_q, failed_q = _configured_eval_verdict(
+                eval_id, scoring_config
             )
-            score = _eval_score(
-                eval_id, choice_scores if isinstance(choice_scores, dict) else {}
-            )
-            if bool(
-                _binding_setting(
-                    scoring_config,
-                    "reverse_output",
-                    (template.config or {}).get("reverse_output", False),
-                )
-            ):
-                score = Value(1.0) - score
-            threshold = resolve_pass_threshold(template, scoring_config.config)
-            measured_q = _eval_measured_q(eval_id)
-            passed_q = measured_q & Q(GreaterThanOrEqual(score, Value(threshold)))
-            failed_q = measured_q & Q(LessThan(score, Value(threshold)))
         evaluation_expressions[f"passed_{eval_id}"] = Count("id", filter=passed_q)
         evaluation_expressions[f"failed_{eval_id}"] = Count("id", filter=failed_q)
         evaluation_expressions[f"present_{eval_id}"] = Count(

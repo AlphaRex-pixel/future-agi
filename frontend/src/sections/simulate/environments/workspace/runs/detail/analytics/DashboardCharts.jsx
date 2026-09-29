@@ -173,7 +173,7 @@ export function Donut({ data, onOpen }) {
                   ? (segment) =>
                       segment.count > 0 &&
                       segment.statuses?.length &&
-                      onOpen({ status: segment.statuses })
+                      onOpen({ goal_outcome: segment.statuses })
                   : undefined
               }
               style={{ cursor: onOpen ? "pointer" : "default" }}
@@ -224,7 +224,7 @@ export function Donut({ data, onOpen }) {
             disabled={onOpen ? !segment.count : undefined}
             onClick={
               onOpen && segment.statuses?.length
-                ? () => onOpen({ status: segment.statuses })
+                ? () => onOpen({ goal_outcome: segment.statuses })
                 : undefined
             }
             aria-label={

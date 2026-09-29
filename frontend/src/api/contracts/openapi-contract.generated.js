@@ -92078,6 +92078,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
           minLength: 1,
           "x-nullable": true,
         },
+        script_completed: {
+          title: "Script completed",
+          type: "boolean",
+        },
         target_metrics: {
           $ref: "#/definitions/HarnessTargetMetrics",
         },
@@ -97623,6 +97627,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "tokens",
         "cost_cents",
         "scenario",
+        "scenario_key",
       ],
       type: "object",
       properties: {
@@ -97656,6 +97661,11 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         scenario: {
           title: "Scenario",
+          type: "string",
+          minLength: 1,
+        },
+        scenario_key: {
+          title: "Scenario key",
           type: "string",
           minLength: 1,
         },
@@ -110786,6 +110796,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "error",
         "inconclusive",
         "scenario",
+        "scenario_key",
         "runs",
         "evaluated",
         "pass_rate",
@@ -110811,6 +110822,11 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         scenario: {
           title: "Scenario",
+          type: "string",
+          minLength: 1,
+        },
+        scenario_key: {
+          title: "Scenario key",
           type: "string",
           minLength: 1,
         },

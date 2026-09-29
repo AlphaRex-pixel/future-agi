@@ -84,7 +84,7 @@ class RunCallFiltersSerializer(serializers.Serializer):
     )
 
     def validate_filters(self, value):
-        allowed = {"goal", "sub_goal", "status"}
+        allowed = {"goal", "sub_goal", "status", "goal_outcome"}
         unknown = set(value) - allowed
         if unknown:
             raise serializers.ValidationError(
@@ -106,6 +106,18 @@ class RunCallFiltersSerializer(serializers.Serializer):
         if invalid_statuses:
             raise serializers.ValidationError(
                 f"Unsupported statuses: {', '.join(sorted(invalid_statuses))}."
+            )
+        invalid_goal_outcomes = set(value.get("goal_outcome", [])) - {
+            "passed",
+            "failed",
+            "error",
+            "escalated",
+            "inconclusive",
+        }
+        if invalid_goal_outcomes:
+            raise serializers.ValidationError(
+                "Unsupported goal outcomes: "
+                f"{', '.join(sorted(invalid_goal_outcomes))}."
             )
         return value
 
@@ -294,6 +306,7 @@ class AnalyticsSummarySerializer(RunSummarySerializer):
 
 class RiskSerializer(RunSummarySerializer):
     scenario = serializers.CharField()
+    scenario_key = serializers.CharField()
 
 
 class ReliabilityIntervalSerializer(serializers.Serializer):
@@ -306,6 +319,7 @@ class ReliabilityIntervalSerializer(serializers.Serializer):
 
 class ReliabilityRowSerializer(OutcomeCountsSerializer):
     scenario = serializers.CharField()
+    scenario_key = serializers.CharField()
     runs = serializers.IntegerField()
     evaluated = serializers.IntegerField()
     pass_rate = serializers.FloatField(allow_null=True)

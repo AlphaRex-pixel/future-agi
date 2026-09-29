@@ -37,7 +37,7 @@ def scenario_clustered_interval(
         return None
     passed = sum(k for k, _ in clusters)
     p = passed / evaluated
-    effective_n = float(evaluated)
+    effective_n = float(min(evaluated, len(clusters)))
     if len(clusters) > 1 and 0 < p < 1:
         m = len(clusters)
         variance = (
@@ -63,15 +63,18 @@ def build_reliability(queryset: QuerySet, trials: int) -> dict[str, Any]:
     counts: dict[str, dict[str, int]] = defaultdict(
         lambda: {"passed": 0, "failed": 0, "error": 0, "inconclusive": 0}
     )
-    for scenario, outcome in (
+    labels: dict[str, str] = {}
+    for scenario_key, scenario_label, outcome in (
         queryset.order_by()
-        .values_list("result_scenario", "result_outcome")
+        .values_list("result_scenario_key", "result_scenario", "result_outcome")
         .iterator(chunk_size=2000)
     ):
-        counts[str(scenario)][outcome] += 1
+        key = str(scenario_key)
+        labels[key] = str(scenario_label or key)
+        counts[key][outcome] += 1
 
     rows = []
-    for scenario, outcome_counts in counts.items():
+    for scenario_key, outcome_counts in counts.items():
         passed, failed = outcome_counts["passed"], outcome_counts["failed"]
         ran = sum(outcome_counts.values())
         evaluated = passed + failed
@@ -83,7 +86,8 @@ def build_reliability(queryset: QuerySet, trials: int) -> dict[str, Any]:
             verdict = "passed" if passed else "failed"
         rows.append(
             {
-                "scenario": scenario,
+                "scenario": labels[scenario_key],
+                "scenario_key": scenario_key,
                 "runs": ran,
                 **outcome_counts,
                 "evaluated": evaluated,

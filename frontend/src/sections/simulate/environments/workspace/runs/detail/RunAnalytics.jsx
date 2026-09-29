@@ -130,8 +130,8 @@ const BREAKDOWNS = [
   "sentiment",
 ];
 const VERDICTS = {
-  passed: "Passed every trial",
-  failed: "Failed every trial",
+  passed: "Passed all evaluated trials",
+  failed: "Failed all evaluated trials",
   flaky: "Flipped between trials",
   not_evaluated: "Not evaluated",
 };
@@ -287,7 +287,7 @@ function AnalyticsDashboard({ executionId, onOpenCall, onOpenCalls }) {
       label: "Drop-off",
       value: format(dropOff?.value, "percent"),
       reported: dropOff?.value != null,
-      coverage: `${dropOff?.total ?? 0} attempted`,
+      coverage: `${dropOff?.measured ?? 0} / ${dropOff?.total ?? 0} assessed`,
       note: dropOff?.note,
     },
     {
@@ -741,7 +741,9 @@ function AnalyticsDashboard({ executionId, onOpenCall, onOpenCalls }) {
                 <Typography
                   sx={{ fontSize: 10, color: "text.secondary", mt: 0.3 }}
                 >
-                  {card.reported ? card.coverage : "Not reported"}
+                  {card.reported || card.key === "drop_off"
+                    ? card.coverage
+                    : "Not reported"}
                 </Typography>
               </Box>
             </Tooltip>
@@ -868,12 +870,13 @@ function Reliability({ data }) {
               <TableCell>Scenario</TableCell>
               <TableCell>Result</TableCell>
               <TableCell align="right">Passed / evaluated</TableCell>
+              <TableCell align="right">Evaluated / total trials</TableCell>
               <TableCell align="right">Errored</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {data.rows.map((row) => (
-              <TableRow key={row.scenario}>
+              <TableRow key={row.scenario_key || row.scenario}>
                 <TableCell>{row.scenario}</TableCell>
                 <TableCell
                   sx={{
@@ -889,6 +892,9 @@ function Reliability({ data }) {
                 </TableCell>
                 <TableCell align="right">
                   {row.passed} / {row.evaluated}
+                </TableCell>
+                <TableCell align="right">
+                  {row.evaluated} / {row.runs}
                 </TableCell>
                 <TableCell align="right">{row.error}</TableCell>
               </TableRow>

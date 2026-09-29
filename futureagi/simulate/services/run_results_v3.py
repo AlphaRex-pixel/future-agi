@@ -10,10 +10,12 @@ from typing import Any
 
 from django.core.cache import cache
 
-from evaluations.engine.instance import resolve_pass_threshold
 from model_hub.models.develop_dataset import Cell
-from model_hub.utils.scoring import score_eval_output
 from simulate.models import CallExecution, SimulateEvalConfig, TestExecution
+from simulate.services.run_results_v3_scoring import (
+    judge_stored_eval,
+    resolve_eval_scoring_spec,
+)
 from simulate.utils.eval_summary import iter_live_eval_outputs
 
 GROUP_FIELDS = {
@@ -39,16 +41,6 @@ def _truth_value(eval_data: Any) -> bool | None:
     return None
 
 
-def _binding_setting(config: SimulateEvalConfig, name: str, fallback: Any) -> Any:
-    runtime = config.config if isinstance(config.config, dict) else {}
-    run_config = runtime.get("run_config")
-    if isinstance(run_config, dict) and run_config.get(name) is not None:
-        return run_config[name]
-    if runtime.get(name) is not None:
-        return runtime[name]
-    return fallback
-
-
 def _eval_outcome(
     eval_data: Any, config: SimulateEvalConfig | None = None
 ) -> str | None:
@@ -71,20 +63,7 @@ def _eval_outcome(
                 return "failed"
         return None
 
-    template = config.eval_template
-    score = score_eval_output(value, template, default_score=None)
-    if score is None:
-        return None
-    if bool(
-        _binding_setting(
-            config,
-            "reverse_output",
-            (template.config or {}).get("reverse_output", False),
-        )
-    ):
-        score = 1.0 - score
-    threshold = resolve_pass_threshold(template, config.config)
-    return "passed" if score >= threshold else "failed"
+    return judge_stored_eval(eval_data, resolve_eval_scoring_spec(config)).outcome
 
 
 def call_outcome(
@@ -221,9 +200,13 @@ def _row_dimensions(calls: list[CallExecution]) -> dict[str, dict[str, Any]]:
     return dimensions
 
 
-def _eval_rows(call: CallExecution, live_eval_ids: set[str]) -> list[dict[str, Any]]:
+def _eval_rows(
+    call: CallExecution, live_eval_configs: dict[str, SimulateEvalConfig]
+) -> list[dict[str, Any]]:
     rows = []
-    for eval_id, data in iter_live_eval_outputs(call.eval_outputs, live_eval_ids):
+    for eval_id, data in iter_live_eval_outputs(
+        call.eval_outputs, set(live_eval_configs)
+    ):
         if not isinstance(data, dict):
             continue
         value = data.get("output")
@@ -232,13 +215,23 @@ def _eval_rows(call: CallExecution, live_eval_ids: set[str]) -> list[dict[str, A
             "skipped",
             "error",
         }
-        numeric = _number(value) if measured else None
-        verdict = _truth_value(data)
-        score = numeric
-        if verdict is not None:
-            score = 1.0 if verdict else 0.0
-        elif numeric is not None and numeric > 1:
-            score = numeric / 100
+        config = live_eval_configs.get(str(eval_id))
+        if config is not None:
+            judgement = judge_stored_eval(data, resolve_eval_scoring_spec(config))
+            score = judgement.score
+            verdict = (
+                judgement.outcome == "passed"
+                if judgement.outcome in {"passed", "failed"}
+                else None
+            )
+        else:
+            numeric = _number(value) if measured else None
+            verdict = _truth_value(data)
+            score = numeric
+            if verdict is not None:
+                score = 1.0 if verdict else 0.0
+            elif numeric is not None and numeric > 1:
+                score = numeric / 100
         rows.append(
             {
                 "id": str(eval_id),
@@ -373,7 +366,7 @@ def build_call_rows(
         turn_count = _number(metrics.get("turn_count"))
         if turn_count is None:
             turn_count = _number(metrics.get("bot_message_count"))
-        evaluations = _eval_rows(call, live_eval_ids)
+        evaluations = _eval_rows(call, live_eval_configs)
         for evaluation in evaluations:
             harness_columns[evaluation["id"]] = evaluation["name"]
         rows.append(
@@ -402,11 +395,7 @@ def build_call_rows(
                 "latency_ms": latency,
                 "turn_count": int(turn_count) if turn_count is not None else None,
                 "tokens": int(tokens) if tokens is not None else None,
-                "cost_cents": (
-                    call.customer_cost_cents
-                    if call.customer_cost_cents is not None
-                    else call.cost_cents
-                ),
+                "cost_cents": call.customer_cost_cents,
                 "cost_breakdown_cents": {
                     "stt": call.stt_cost_cents,
                     "llm": call.llm_cost_cents,

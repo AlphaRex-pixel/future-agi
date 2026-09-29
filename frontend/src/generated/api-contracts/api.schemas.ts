@@ -18516,6 +18516,7 @@ export interface HarnessCallApi {
    * @maxLength 128
    */
   stop_reason?: string;
+  script_completed?: boolean;
   target_metrics?: HarnessTargetMetricsApi;
 }
 
@@ -22526,6 +22527,8 @@ export interface RiskApi {
   cost_cents: TotalMetricStatsApi;
   /** @minLength 1 */
   scenario: string;
+  /** @minLength 1 */
+  scenario_key: string;
 }
 
 export interface ReliabilityIntervalApi {
@@ -22553,6 +22556,8 @@ export interface ReliabilityRowApi {
   inconclusive: number;
   /** @minLength 1 */
   scenario: string;
+  /** @minLength 1 */
+  scenario_key: string;
   runs: number;
   evaluated: number;
   pass_rate: number;
