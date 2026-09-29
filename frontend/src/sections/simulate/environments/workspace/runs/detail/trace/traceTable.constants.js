@@ -87,12 +87,11 @@ export const TRACE_COLUMNS = [
 
 // A call's lifecycle status (`execution_status`) as a chip: which STATUS_META
 // colour it takes and the label it reads. Separate from the pass/fail outcome
-// shown under Run details.
+// shown under Run details. Only the statuses a hosted run sets; anything else
+// renders as a dash.
 export const CALL_STATUS_CHIPS = {
   pending: { chip: "queued", label: "Pending" },
-  queued: { chip: "queued", label: "Queued" },
   ongoing: { chip: "running", label: "Running" },
-  analyzing: { chip: "grading", label: "Analyzing" },
   completed: { chip: "finished", label: "Completed" },
   failed: { chip: "failed", label: "Failed" },
   cancelled: { chip: "cancelled", label: "Cancelled" },
