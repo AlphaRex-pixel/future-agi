@@ -20,6 +20,13 @@ export const TRACE_COLUMNS = [
     group: "Run details",
   },
   {
+    key: "status",
+    label: "Status",
+    defaultOn: true,
+    width: 120,
+    group: "Run details",
+  },
+  {
     key: "persona",
     label: "Persona",
     defaultOn: true,
@@ -77,6 +84,19 @@ export const TRACE_COLUMNS = [
   },
   { key: "evals", label: "Evaluations", defaultOn: true, group: "Evaluations" },
 ];
+
+// A call's lifecycle status (`execution_status`) as a chip: which STATUS_META
+// colour it takes and the label it reads. Separate from the pass/fail outcome
+// shown under Run details.
+export const CALL_STATUS_CHIPS = {
+  pending: { chip: "queued", label: "Pending" },
+  queued: { chip: "queued", label: "Queued" },
+  ongoing: { chip: "running", label: "Running" },
+  analyzing: { chip: "grading", label: "Analyzing" },
+  completed: { chip: "finished", label: "Completed" },
+  failed: { chip: "failed", label: "Failed" },
+  cancelled: { chip: "cancelled", label: "Cancelled" },
+};
 
 export const defaultTraceColumns = () =>
   new Set(TRACE_COLUMNS.filter((c) => c.defaultOn).map((c) => c.key));

@@ -15,6 +15,7 @@ import { HEAD_ROW_PX, isBad } from "./traceTable.constants";
 
 const DESC_KEYS = [
   "callDetails",
+  "status",
   "persona",
   "scenario",
   "idealOutcome",
@@ -49,12 +50,13 @@ export default function TraceGroupHeaderRow({
     bgcolor: "background.paper",
     borderBottom: "1px solid",
     borderColor: "divider",
-    borderLeft: "none",
     cursor: "pointer",
     py: 1.25,
-    px: 1.5,
+    px: 2,
     ".MuiTableRow-root:hover &": { backgroundImage: rowHover },
-    "&:not(:first-of-type)": { borderLeft: "none" },
+    // The same column dividers as the head and call rows, so the grid runs
+    // unbroken through the group row.
+    "&:not(:first-of-type)": { borderLeft: "1px solid", borderColor: "divider" },
   };
   const numCellSx = { ...cellSx, textAlign: "left" };
 
@@ -64,6 +66,12 @@ export default function TraceGroupHeaderRow({
   const personaCount = uniqueBy((t) => t.persona);
 
   const descSummary = (key) => {
+    if (key === "status") {
+      const done = group.rows.filter(
+        (t) => t.executionStatus === "completed",
+      ).length;
+      return `${done}/${group.rows.length} completed`;
+    }
     if (key === "persona")
       return personaCount
         ? `${personaCount} persona${personaCount === 1 ? "" : "s"}`
@@ -167,7 +175,7 @@ export default function TraceGroupHeaderRow({
         descColumns.map((key, i) => (
           <TableCell
             key={key}
-            sx={{ ...cellSx, pl: i === 0 ? 2 : 1.5, overflow: "hidden" }}
+            sx={{ ...cellSx, overflow: "hidden" }}
           >
             {i === 0 ? (
               label
