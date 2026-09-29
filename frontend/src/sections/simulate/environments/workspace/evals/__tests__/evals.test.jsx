@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useState } from "react";
-import { render as rtlRender, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render as rtlRender,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import EvalsStep from "../EvalsStep";
 import { EVALS_COPY } from "../evals.constants";
@@ -14,14 +19,14 @@ vi.mock("src/api/simulate-environments/harnessEnvironments", () => ({
   renameHarnessEnvironment: vi.fn(),
   getHarnessEnvironment: vi.fn(),
   deleteAppliedEvaluation: vi.fn(() => Promise.resolve()),
-  getAvailableEvaluations: vi.fn(() => Promise.resolve({ evaluations: [] })),
-  addEvaluation: vi.fn(),
   addRunEvaluation: vi.fn(),
   setToolCallEvaluation: vi.fn(),
 }));
-const { deleteAppliedEvaluation, getHarnessEnvironment, setToolCallEvaluation } = await import(
-  "src/api/simulate-environments/harnessEnvironments"
-);
+const {
+  deleteAppliedEvaluation,
+  getHarnessEnvironment,
+  setToolCallEvaluation,
+} = await import("src/api/simulate-environments/harnessEnvironments");
 
 // EvalsStep now uses a react-query mutation (remove-eval), so every render
 // needs a client. Wrap the library render once so the call sites stay unchanged.
@@ -39,10 +44,20 @@ vi.mock("src/sections/common/EvalPicker", () => ({
     picker.calls.push(p);
     return p.open ? (
       <div data-testid="eval-picker">
-        <button type="button" onClick={() => p.onEvalAdded({ templateId: "a", name: "A", mapping: {} })}>
+        <button
+          type="button"
+          onClick={() =>
+            p.onEvalAdded({ templateId: "a", name: "A", mapping: {} })
+          }
+        >
           save-a
         </button>
-        <button type="button" onClick={() => p.onEvalAdded({ templateId: "b", name: "B", mapping: {} })}>
+        <button
+          type="button"
+          onClick={() =>
+            p.onEvalAdded({ templateId: "b", name: "B", mapping: {} })
+          }
+        >
           save-b
         </button>
         <button type="button" onClick={p.onClose}>
@@ -67,7 +82,15 @@ function Harness({ env = ENV, initial, onGo, patchSpy, backed = false }) {
     patchSpy?.(p);
     setEnvState((s) => ({ ...s, ...p }));
   };
-  return <EvalsStep env={env} envState={envState} patch={patch} onGo={onGo} backed={backed} />;
+  return (
+    <EvalsStep
+      env={env}
+      envState={envState}
+      patch={patch}
+      onGo={onGo}
+      backed={backed}
+    />
+  );
 }
 
 beforeEach(() => {
@@ -77,19 +100,31 @@ beforeEach(() => {
 
 describe("EvalsStep — tool-call evaluation toggle", () => {
   it("keeps the toggle disabled until an agent is connected", () => {
-    render(<Harness initial={{ scenarios: [{ id: "s1" }], evals: [{ id: "e1" }] }} />);
-    expect(screen.getByRole("checkbox", { name: EVALS_COPY.toolCall.title })).toBeDisabled();
+    render(
+      <Harness
+        initial={{ scenarios: [{ id: "s1" }], evals: [{ id: "e1" }] }}
+      />,
+    );
+    expect(
+      screen.getByRole("checkbox", { name: EVALS_COPY.toolCall.title }),
+    ).toBeDisabled();
   });
 
   it("enables it with an agent and patches toolCallEval on flip", () => {
     const patchSpy = vi.fn();
     render(
       <Harness
-        initial={{ scenarios: [{ id: "s1" }], evals: [{ id: "e1" }], agent: { typeId: "voice" } }}
+        initial={{
+          scenarios: [{ id: "s1" }],
+          evals: [{ id: "e1" }],
+          agent: { typeId: "voice" },
+        }}
         patchSpy={patchSpy}
       />,
     );
-    const toggle = screen.getByRole("checkbox", { name: EVALS_COPY.toolCall.title });
+    const toggle = screen.getByRole("checkbox", {
+      name: EVALS_COPY.toolCall.title,
+    });
     expect(toggle).toBeEnabled();
     fireEvent.click(toggle);
     expect(patchSpy).toHaveBeenCalledWith({ toolCallEval: true });
@@ -97,8 +132,15 @@ describe("EvalsStep — tool-call evaluation toggle", () => {
 });
 
 describe("EvalsStep — tool-call evaluation on a backend-backed env", () => {
-  const agentState = { scenarios: [{ id: "s1" }], evals: [], agent: { typeId: "voice" } };
-  const detail = (on) => ({ evaluations: { selected: [] }, settings: { enable_tool_evaluation: on } });
+  const agentState = {
+    scenarios: [{ id: "s1" }],
+    evals: [],
+    agent: { typeId: "voice" },
+  };
+  const detail = (on) => ({
+    evaluations: { selected: [] },
+    settings: { enable_tool_evaluation: on },
+  });
 
   afterEach(() => {
     setToolCallEvaluation.mockReset();
@@ -108,7 +150,9 @@ describe("EvalsStep — tool-call evaluation on a backend-backed env", () => {
   it("reads the switch from settings.enable_tool_evaluation", async () => {
     getHarnessEnvironment.mockResolvedValue(detail(true));
     render(<Harness backed initial={agentState} patchSpy={vi.fn()} />);
-    const toggle = screen.getByRole("checkbox", { name: EVALS_COPY.toolCall.title });
+    const toggle = screen.getByRole("checkbox", {
+      name: EVALS_COPY.toolCall.title,
+    });
     await waitFor(() => expect(toggle).toBeChecked());
   });
 
@@ -117,11 +161,15 @@ describe("EvalsStep — tool-call evaluation on a backend-backed env", () => {
     setToolCallEvaluation.mockResolvedValue(detail(true));
     const patchSpy = vi.fn();
     render(<Harness backed initial={agentState} patchSpy={patchSpy} />);
-    const toggle = screen.getByRole("checkbox", { name: EVALS_COPY.toolCall.title });
+    const toggle = screen.getByRole("checkbox", {
+      name: EVALS_COPY.toolCall.title,
+    });
     await waitFor(() => expect(toggle).toBeEnabled());
 
     fireEvent.click(toggle);
-    await waitFor(() => expect(setToolCallEvaluation).toHaveBeenCalledWith(ENV.id, true));
+    await waitFor(() =>
+      expect(setToolCallEvaluation).toHaveBeenCalledWith(ENV.id, true),
+    );
     await waitFor(() => expect(toggle).toBeChecked());
     expect(patchSpy).not.toHaveBeenCalledWith({ toolCallEval: true });
   });
@@ -130,10 +178,13 @@ describe("EvalsStep — tool-call evaluation on a backend-backed env", () => {
     getHarnessEnvironment.mockResolvedValue(detail(false));
     setToolCallEvaluation.mockRejectedValue({
       statusCode: 409,
-      detail: "Tool-call evaluation is not available for a voice environment yet",
+      detail:
+        "Tool-call evaluation is not available for a voice environment yet",
     });
     render(<Harness backed initial={agentState} patchSpy={vi.fn()} />);
-    const toggle = screen.getByRole("checkbox", { name: EVALS_COPY.toolCall.title });
+    const toggle = screen.getByRole("checkbox", {
+      name: EVALS_COPY.toolCall.title,
+    });
     await waitFor(() => expect(toggle).toBeEnabled());
 
     fireEvent.click(toggle);
@@ -147,7 +198,12 @@ describe("EvalsStep — tool-call evaluation on a backend-backed env", () => {
 describe("EvalsStep — preset auto-seeds into Added (no Suggested card)", () => {
   it("seeds the whole preset into Added on first empty mount", () => {
     const patchSpy = vi.fn();
-    render(<Harness initial={{ scenarios: [{ id: "s1" }], evals: [] }} patchSpy={patchSpy} />);
+    render(
+      <Harness
+        initial={{ scenarios: [{ id: "s1" }], evals: [] }}
+        patchSpy={patchSpy}
+      />,
+    );
 
     // The preset was added for the user — no separate Suggested card to click.
     expect(screen.queryByText(/Suggested evaluations/)).not.toBeInTheDocument();
@@ -166,7 +222,13 @@ describe("EvalsStep — preset auto-seeds into Added (no Suggested card)", () =>
   it("does not seed when evals already exist", () => {
     const patchSpy = vi.fn();
     render(
-      <Harness initial={{ scenarios: [{ id: "s1" }], evals: [{ id: "policy_adherence" }] }} patchSpy={patchSpy} />,
+      <Harness
+        initial={{
+          scenarios: [{ id: "s1" }],
+          evals: [{ id: "policy_adherence" }],
+        }}
+        patchSpy={patchSpy}
+      />,
     );
 
     // Already has one → no evals are seeded, and there is no Suggested card.
@@ -179,7 +241,10 @@ describe("EvalsStep — preset auto-seeds into Added (no Suggested card)", () =>
   it("does not re-seed after the user removes an added eval", () => {
     const patchSpy = vi.fn();
     render(
-      <Harness initial={{ scenarios: [{ id: "s1" }], evals: [{ id: "task_success" }] }} patchSpy={patchSpy} />,
+      <Harness
+        initial={{ scenarios: [{ id: "s1" }], evals: [{ id: "task_success" }] }}
+        patchSpy={patchSpy}
+      />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: EVALS_COPY.remove }));
@@ -194,14 +259,24 @@ describe("EvalsStep — preset auto-seeds into Added (no Suggested card)", () =>
     // The seed guard lives in envState, not a component ref, so unmounting the
     // step (switching tabs) and coming back must NOT re-add the removed evals.
     function RemountHarness() {
-      const [envState, setEnvState] = useState({ scenarios: [{ id: "s1" }], evals: [] });
+      const [envState, setEnvState] = useState({
+        scenarios: [{ id: "s1" }],
+        evals: [],
+      });
       const [mounted, setMounted] = useState(true);
       const patch = (p) => setEnvState((s) => ({ ...s, ...p }));
       return (
         <>
-          <button type="button" onClick={() => setMounted((m) => !m)}>toggle</button>
+          <button type="button" onClick={() => setMounted((m) => !m)}>
+            toggle
+          </button>
           {mounted && (
-            <EvalsStep env={ENV} envState={envState} patch={patch} onGo={vi.fn()} />
+            <EvalsStep
+              env={ENV}
+              envState={envState}
+              patch={patch}
+              onGo={vi.fn()}
+            />
           )}
         </>
       );
@@ -212,7 +287,9 @@ describe("EvalsStep — preset auto-seeds into Added (no Suggested card)", () =>
     expect(screen.getByText("Added evaluations (3)")).toBeInTheDocument();
     // Remove all three.
     for (let i = 0; i < 3; i += 1) {
-      fireEvent.click(screen.getAllByRole("button", { name: EVALS_COPY.remove })[0]);
+      fireEvent.click(
+        screen.getAllByRole("button", { name: EVALS_COPY.remove })[0],
+      );
     }
     expect(screen.getByText("Added evaluations (0)")).toBeInTheDocument();
 
@@ -227,12 +304,20 @@ describe("EvalsStep — locked when scenarios are missing", () => {
   it("does not seed, and routes the empty state to onGo('scenarios')", () => {
     const patchSpy = vi.fn();
     const onGo = vi.fn();
-    render(<Harness initial={{ scenarios: [], evals: [] }} onGo={onGo} patchSpy={patchSpy} />);
+    render(
+      <Harness
+        initial={{ scenarios: [], evals: [] }}
+        onGo={onGo}
+        patchSpy={patchSpy}
+      />,
+    );
 
     expect(screen.queryByText(/Suggested evaluations/)).not.toBeInTheDocument();
     expect(screen.getByText(EVALS_COPY.lockedTitle)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: EVALS_COPY.addScenarios }));
+    fireEvent.click(
+      screen.getByRole("button", { name: EVALS_COPY.addScenarios }),
+    );
 
     expect(onGo).toHaveBeenCalledWith("scenarios");
     // No auto-seed while scenarios are missing.
@@ -249,7 +334,11 @@ describe("EvalsStep — AddEvalsDrawer over the product picker", () => {
     render(
       <Harness
         env={noPreset}
-        initial={{ scenarios: [{ id: "s1" }], evals: [], agent: { typeId: "voice" } }}
+        initial={{
+          scenarios: [{ id: "s1" }],
+          evals: [],
+          agent: { typeId: "voice" },
+        }}
         patchSpy={patchSpy}
       />,
     );
@@ -290,22 +379,37 @@ describe("EvalsStep — AddEvalsDrawer over the product picker", () => {
 describe("EvalsStep — template lock (read-only until forked)", () => {
   const LOCK_TOOLTIP = "Fork this environment to edit.";
   // One applied eval so the header Add and the per-row remove both render.
-  const lockedState = { scenarios: [{ id: "s1" }], evals: [{ id: "policy_adherence" }] };
+  const lockedState = {
+    scenarios: [{ id: "s1" }],
+    evals: [{ id: "policy_adherence" }],
+  };
 
   const renderLocked = (locked) =>
-    render(<EvalsStep env={ENV} envState={lockedState} patch={vi.fn()} onGo={vi.fn()} locked={locked} />);
+    render(
+      <EvalsStep
+        env={ENV}
+        envState={lockedState}
+        patch={vi.fn()}
+        onGo={vi.fn()}
+        locked={locked}
+      />,
+    );
 
   it("disables the add/remove controls with the fork tooltip", () => {
     renderLocked(true);
     expect(screen.getByRole("button", { name: EVALS_COPY.add })).toBeDisabled();
-    expect(screen.getAllByRole("button", { name: EVALS_COPY.remove })[0]).toBeDisabled();
+    expect(
+      screen.getAllByRole("button", { name: EVALS_COPY.remove })[0],
+    ).toBeDisabled();
     expect(screen.getAllByLabelText(LOCK_TOOLTIP).length).toBeGreaterThan(0);
   });
 
   it("keeps the same controls enabled when not locked", () => {
     renderLocked(false);
     expect(screen.getByRole("button", { name: EVALS_COPY.add })).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: EVALS_COPY.remove })[0]).toBeEnabled();
+    expect(
+      screen.getAllByRole("button", { name: EVALS_COPY.remove })[0],
+    ).toBeEnabled();
     expect(screen.queryByLabelText(LOCK_TOOLTIP)).toBeNull();
   });
 });
@@ -351,7 +455,9 @@ describe("EvalsStep — remove on a backend-backed env", () => {
     render(<Harness backed initial={state} patchSpy={vi.fn()} />);
 
     expect(await screen.findByText("no_misselling")).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: EVALS_COPY.remove })[0]);
+    fireEvent.click(
+      screen.getAllByRole("button", { name: EVALS_COPY.remove })[0],
+    );
 
     await waitFor(() =>
       expect(deleteAppliedEvaluation).toHaveBeenCalledWith("env-1", "cfg-1"),
@@ -362,23 +468,37 @@ describe("EvalsStep — remove on a backend-backed env", () => {
     const patchSpy = vi.fn();
     render(
       <Harness
-        initial={{ scenarios: [{ id: "s1" }], evals: [{ id: "task_success", name: "Task success" }] }}
+        initial={{
+          scenarios: [{ id: "s1" }],
+          evals: [{ id: "task_success", name: "Task success" }],
+        }}
         patchSpy={patchSpy}
       />,
     );
 
-    fireEvent.click(screen.getAllByRole("button", { name: EVALS_COPY.remove })[0]);
+    fireEvent.click(
+      screen.getAllByRole("button", { name: EVALS_COPY.remove })[0],
+    );
 
     expect(deleteAppliedEvaluation).not.toHaveBeenCalled();
-    expect(patchSpy).toHaveBeenCalledWith(expect.objectContaining({ evals: [] }));
+    expect(patchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ evals: [] }),
+    );
   });
 
   it("disables remove while a backed env is still building", async () => {
     render(
-      <Harness backed env={{ ...ENV, buildStatus: "building" }} initial={state} patchSpy={vi.fn()} />,
+      <Harness
+        backed
+        env={{ ...ENV, buildStatus: "building" }}
+        initial={state}
+        patchSpy={vi.fn()}
+      />,
     );
     expect(await screen.findByText("no_misselling")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: EVALS_COPY.remove })[0]).toBeDisabled();
+    expect(
+      screen.getAllByRole("button", { name: EVALS_COPY.remove })[0],
+    ).toBeDisabled();
   });
 
   // `selectedFromDetail` collapses a failed read to `[]`, which is the same
@@ -396,7 +516,9 @@ describe("EvalsStep — remove on a backend-backed env", () => {
     });
     render(<Harness backed initial={state} patchSpy={vi.fn()} />);
 
-    expect(await screen.findByText("No environment matches this id")).toBeInTheDocument();
+    expect(
+      await screen.findByText("No environment matches this id"),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Added evaluations (0)")).toBeNull();
     expect(screen.queryByText(EVALS_COPY.emptyTitle)).toBeNull();
     expect(screen.queryByText(EVALS_COPY.emptyNoSuggestions)).toBeNull();
@@ -420,7 +542,9 @@ describe("EvalsStep — remove on a backend-backed env", () => {
     render(<Harness backed initial={state} patchSpy={vi.fn()} />);
 
     await screen.findByText("no_misselling");
-    fireEvent.click(screen.getAllByRole("button", { name: EVALS_COPY.remove })[0]);
+    fireEvent.click(
+      screen.getAllByRole("button", { name: EVALS_COPY.remove })[0],
+    );
 
     // The Alert names which row the refusal belongs to, not just the
     // server's sentence — with several rows a bare "already removed"

@@ -125,6 +125,9 @@ _SOURCE_BY_KEY_VOICE = {
     # offered eval asks for `output` on voice, so no stored mapping migrates.
     "output": "transcript",
     "text": "transcript",
+    # An eval that reads speech from `conversation` and the text record from
+    # `transcript` (action_confirmation_gating) gets both on a voice run.
+    "transcript": "transcript",
     "agent_prompt": "agent_prompt",
     "system_prompt": "agent_prompt",
     # A simulated call has no retrieval context, so the agent's own
@@ -138,6 +141,7 @@ _SOURCE_BY_KEY_TEXT = {
     "conversation": "transcript",
     "output": "transcript",
     "text": "transcript",
+    "transcript": "transcript",
     "agent_prompt": "agent_prompt",
     "system_prompt": "agent_prompt",
     "context": "agent_prompt",
@@ -379,7 +383,10 @@ EVAL_RUN_CREDITS = 0.5
 
 
 def eval_entry(
-    template: EvalTemplate, mapping: dict[str, str], modality: str
+    template: EvalTemplate,
+    mapping: dict[str, str],
+    modality: str,
+    labels: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """One eval in the one list format the harness, the picker and the detail share.
 
@@ -394,7 +401,9 @@ def eval_entry(
     `label` falls back to the source name for a mapping stored before this
     change: the detail builds entries from what is bound, and a row bound
     under the old voice table can carry a source this table no longer
-    produces.
+    produces. `labels` names sources the table does not know — a person's
+    mapping can point at a scenario column by id; the detail passes the
+    column names it resolved.
     """
     return {
         "name": str(template.name or ""),
@@ -414,7 +423,8 @@ def eval_entry(
             {
                 "key": key,
                 "source": mapping[key],
-                "label": _LABEL_BY_SOURCE.get(mapping[key], mapping[key]),
+                "label": (labels or {}).get(mapping[key])
+                or _LABEL_BY_SOURCE.get(mapping[key], mapping[key]),
             }
             for key in sorted(mapping)
         ],

@@ -48,6 +48,28 @@ def _touch_content(job):
     job.save(update_fields=["content_updated_at", "updated_at"])
 
 
+def _bound_by_name(run_test, name):
+    """The live config this environment already binds under ``name``, if any.
+
+    "Grade this run" names an eval the environment already has. A person may
+    have added it from outside the harness's offer or under a name of their
+    own, so the offer's gates would refuse it even though it is bound and
+    gradeable. A config's own name wins over any template's name, so a
+    config cannot be shadowed by an older one whose template happens to be
+    called the same; within each, the oldest binding wins.
+    """
+    from simulate.services.harness_evals import selected_eval_configs
+
+    configs = selected_eval_configs(run_test)
+    for config in configs:
+        if name == str(config.name or ""):
+            return config
+    for config in configs:
+        if name == str(getattr(config.eval_template, "name", "") or ""):
+            return config
+    return None
+
+
 def _uuid_or_none(value):
     """The id as a UUID, or ``None`` when it is not one.
 
@@ -277,11 +299,14 @@ class HarnessEnvironmentViewSet(viewsets.ViewSet):
     def add_run_evaluation(self, request, pk=None, execution_id=None):
         """Add an eval from inside a finished run, and grade that run's calls with it.
 
-        Two things happen inside one ``transaction.atomic()`` block: the eval
-        is bound to the environment exactly as ``add_evaluation`` binds it --
-        same gates, refusals, lock, and idempotency, so adding an
-        already-bound name is not an error and creates no second row -- and
-        this run's finished calls are selected and stamped for grading.
+        Two things happen inside one ``transaction.atomic()`` block. First, the
+        eval is bound: a name this environment already binds, under the
+        config's own name or its template's, is used as it stands, with no
+        offer gate, no lock and no new row, so an eval a person added from
+        outside the harness's offer still grades. Any other name is bound
+        exactly as ``add_evaluation`` binds it, with the same gates, refusals,
+        lock and idempotency. Second, this run's finished calls are selected
+        and stamped for grading.
         Wrapping both together means a failure anywhere in this request rolls
         the bind and the stamps back together: no grading job is ever
         dispatched against a bind that did not survive, because
@@ -297,13 +322,12 @@ class HarnessEnvironmentViewSet(viewsets.ViewSet):
         commits. The answer is the five counts, not the environment detail --
         the client refetches that itself.
 
-        The bind can return an eval config whose ``mapping`` is empty -- one
+        The bind can return an eval config whose ``mapping`` is empty: one
         of the harness's own result columns, bound by ingestion under the
-        same name. Such a config is not something this endpoint can grade
-        with: it is refused 400 with its own reason, distinct from the "does
-        not produce" refusal, because the run demonstrably CAN fill this
-        eval's inputs -- the harness already reports it natively. Checked
-        right after the bind and before anything is stamped.
+        same name, or a person's eval with no inputs mapped. Neither can be
+        graded, so it is refused 400 with its own reason, distinct from the
+        "does not produce" refusal, right after the bind and before anything
+        is stamped.
 
         The run is resolved *before* the eval is bound: a request naming a
         run that is not this environment's must leave nothing behind. A run
@@ -360,20 +384,20 @@ class HarnessEnvironmentViewSet(viewsets.ViewSet):
         # as after this timestamp, while an idempotent bind's -- an
         # already-bound row returned unchanged -- reads as before it. Under
         # contention, two concurrent clicks can both read
-        # `updated_at >= before_bind`, since the second blocks on the same
-        # row's `select_for_update` and observes the first's write --
-        # harmless, an extra clock bump, never a missed one.
+        # `updated_at >= before_bind`, since, when both bind, the second
+        # blocks on the run test's `select_for_update` and observes the
+        # first's write -- harmless, an extra clock bump, never a missed one.
         before_bind = timezone.now()
         try:
             with transaction.atomic():
-                eval_config = add_selected_eval(job.run_test, wanted, modality)
+                eval_config = _bound_by_name(job.run_test, wanted) or add_selected_eval(
+                    job.run_test, wanted, modality
+                )
                 if not eval_config.mapping:
-                    # The idempotent name match above can return one of the
-                    # harness's own result-column rows (empty ``mapping``)
-                    # instead of a selected eval -- not the same condition as
-                    # the "does not produce" refusal, since this run
-                    # demonstrably CAN fill the eval's inputs. It gets its
-                    # own reason before anything is stamped.
+                    # The bind above can return a row with an empty mapping
+                    # -- a harness result column, or a person's eval with no
+                    # inputs -- which has nothing to grade. It gets its own
+                    # reason before anything is stamped.
                     transaction.set_rollback(True)
                     return Response(
                         {

@@ -9495,6 +9495,8 @@ export const ApiSetupChecksListResponse = zod.object({
         status: zod.enum(["passed", "warning", "failed", "skipped"]),
         required: zod.boolean(),
         detail: zod.string(),
+        fix: zod.string(),
+        docs_url: zod.string(),
       }),
     ),
   }),
@@ -12481,6 +12483,7 @@ Includes queues where:
 Query params:
   - source_type, source_id  (single source)
   - OR sources (JSON array of {source_type, source_id} objects for multi-source lookup)
+  - project_id (optional): the project a trace / span drawer shows
  */
 export const ModelHubAnnotationQueuesForSourceQueryParams = zod.object({
   page: zod
@@ -12503,6 +12506,13 @@ export const ModelHubAnnotationQueuesForSourceQueryParams = zod.object({
     .optional(),
   source_id: zod.string().optional(),
   sources: zod.string().optional(),
+  project_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "Tracer project the trace / span was opened from. The same id can exist in several projects; when supplied, only that project's queue items are listed.",
+    ),
 });
 
 export const modelHubAnnotationQueuesForSourceResponseStatusDefault = true;
@@ -22856,6 +22866,14 @@ Query params: page (0-based), page_size, period
 The response is rendered through
 ``EvalUsageStatsResponseResultSerializer(instance=...).data`` at the
 boundary so shape drift surfaces here instead of shipping silently.
+
+Counts and lists only successful runs from the usage ledger
+(``APICallLog`` rows with status ``success``), from every source: tasks,
+playground, composites, datasets and experiments. Errored and skipped runs
+are not usage but stay in the eval logs (task logs, template eval logs);
+an in-flight run counts once it succeeds. ``error_count`` is therefore 0
+and ``pass_rate`` 100 whenever there are runs; both remain for
+compatibility.
  * @summary GET /model-hub/eval-templates/<id>/usage/
  */
 export const ModelHubEvalTemplatesUsageListParams = zod.object({
@@ -22912,9 +22930,21 @@ export const ModelHubEvalTemplatesUsageListResponse = zod.object({
     stats: zod.object({
       total_runs: zod.number(),
       runs_period: zod.number(),
-      success_count: zod.number(),
-      error_count: zod.number(),
-      pass_rate: zod.number(),
+      success_count: zod
+        .number()
+        .describe(
+          "Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period.",
+        ),
+      error_count: zod
+        .number()
+        .describe(
+          "Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the eval logs.",
+        ),
+      pass_rate: zod
+        .number()
+        .describe(
+          "Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0.",
+        ),
     }),
     chart: zod.array(
       zod.object({
@@ -29788,6 +29818,13 @@ export const ModelHubScoresBulkCreateBody = zod.object({
   span_notes: zod.string().optional(),
   span_notes_source_id: zod.string().optional(),
   queue_item_id: zod.string().uuid().optional(),
+  project_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "Tracer project the trace / span was opened from. The same id can exist in several projects; when supplied, the score is written to that project's copy.",
+    ),
 });
 
 export const modelHubScoresBulkCreateResponseStatusDefault = true;
@@ -29858,6 +29895,13 @@ export const ModelHubScoresForSourceQueryParams = zod.object({
     "trace_session",
   ]),
   source_id: zod.string().min(1),
+  project_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "Tracer project the trace / span was opened from. The same id can exist in several projects; when supplied, only that project's scores are listed.",
+    ),
 });
 
 export const modelHubScoresForSourceResponseStatusDefault = true;
@@ -35336,12 +35380,7 @@ export const SimulateApiHarnessEnvironmentsReadResponse = zod.object({
         inputs: zod.array(
           zod.object({
             key: zod.string().min(1),
-            source: zod.enum([
-              "voice_recording",
-              "transcript",
-              "agent_prompt",
-              "scenario_columns.situation.value",
-            ]),
+            source: zod.string().min(1),
             label: zod.string().min(1),
           }),
         ),
@@ -35549,12 +35588,7 @@ export const SimulateApiHarnessEnvironmentsPartialUpdateResponse = zod.object({
         inputs: zod.array(
           zod.object({
             key: zod.string().min(1),
-            source: zod.enum([
-              "voice_recording",
-              "transcript",
-              "agent_prompt",
-              "scenario_columns.situation.value",
-            ]),
+            source: zod.string().min(1),
             label: zod.string().min(1),
           }),
         ),
@@ -35657,12 +35691,7 @@ export const SimulateApiHarnessEnvironmentsEvaluationsAvailableEvaluationsRespon
         inputs: zod.array(
           zod.object({
             key: zod.string().min(1),
-            source: zod.enum([
-              "voice_recording",
-              "transcript",
-              "agent_prompt",
-              "scenario_columns.situation.value",
-            ]),
+            source: zod.string().min(1),
             label: zod.string().min(1),
           }),
         ),
@@ -35830,12 +35859,7 @@ export const SimulateApiHarnessEnvironmentsEvaluationsSetToolCallEvaluationRespo
           inputs: zod.array(
             zod.object({
               key: zod.string().min(1),
-              source: zod.enum([
-                "voice_recording",
-                "transcript",
-                "agent_prompt",
-                "scenario_columns.situation.value",
-              ]),
+              source: zod.string().min(1),
               label: zod.string().min(1),
             }),
           ),
@@ -46002,6 +46026,109 @@ export const SimulateTestExecutionsColumnOrderUpdateResponse = zod.object({
 });
 
 /**
+ * @summary Get Test Execution debug analysis
+ */
+export const SimulateTestExecutionDebugAnalysisRetrieveParams = zod.object({
+  test_execution_id: zod.string(),
+});
+
+export const SimulateTestExecutionDebugAnalysisRetrieveResponse = zod.object({
+  test_execution_id: zod.string().uuid(),
+  status: zod.enum([
+    "not_requested",
+    "pending",
+    "running",
+    "completed",
+    "failed",
+  ]),
+  generation: zod.number(),
+  job_id: zod.string().uuid(),
+  error_message: zod.string().min(1),
+  report: zod.object({
+    id: zod.string().uuid(),
+    execution_status: zod.string().min(1),
+    outcome: zod.string().min(1),
+    coverage: zod.object({
+      scope: zod.string().min(1),
+      observed_call_count: zod.number(),
+      read_complete: zod.boolean(),
+    }),
+    error_message: zod.string().min(1),
+    grouping_status: zod.string().min(1),
+    recorded_at: zod.string().datetime({ offset: true }),
+  }),
+  findings: zod.array(
+    zod.object({
+      id: zod.string().uuid(),
+      kind: zod.string().min(1),
+      statement: zod.string().min(1),
+      recovery: zod.string().min(1),
+      category: zod.string().min(1),
+      group_label: zod.string().min(1),
+      fix_layer: zod.string().min(1),
+      confidence: zod.string().min(1),
+      goal: zod.string().min(1),
+      cluster: zod.object({
+        id: zod.string().uuid(),
+        cluster_id: zod.string().min(1),
+        title: zod.string().min(1),
+        error_type: zod.string().min(1),
+      }),
+      evidence: zod.array(
+        zod.object({
+          evidence_id: zod.string().min(1),
+          call_execution_id: zod.string().uuid(),
+          excerpt: zod.string().min(1),
+        }),
+      ),
+    }),
+  ),
+  summary: zod.object({
+    measured_call_count: zod.number(),
+    broken_goal_count: zod.number(),
+    broken_call_count: zod.number(),
+    one_off_count: zod.number(),
+    excluded_call_ids: zod.array(zod.string().uuid()),
+    unanalyzed_call_ids: zod.array(zod.string().uuid()),
+  }),
+  goals: zod.array(
+    zod.object({
+      goal: zod.string().min(1),
+      label: zod.string().min(1),
+      criteria: zod.string().min(1),
+      broken_call_ids: zod.array(zod.string().uuid()),
+      tested_call_count: zod.number(),
+      ways: zod.array(
+        zod.object({
+          id: zod.string().min(1),
+          title: zod.string().min(1),
+          phrase: zod.string().min(1),
+          call_ids: zod.array(zod.string().uuid()),
+        }),
+      ),
+      unexplained_call_ids: zod.array(zod.string().uuid()),
+    }),
+  ),
+  one_offs: zod.array(
+    zod.object({
+      id: zod.string().min(1),
+      title: zod.string().min(1),
+      phrase: zod.string().min(1),
+      call_ids: zod.array(zod.string().uuid()),
+    }),
+  ),
+});
+
+/**
+ * @summary Request Test Execution debug analysis
+ */
+export const SimulateTestExecutionDebugAnalysisCreateParams = zod.object({
+  test_execution_id: zod.string(),
+});
+
+export const SimulateTestExecutionDebugAnalysisCreateBody = zod.object({});
+
+/**
  * Delete a specific test execution
  */
 export const SimulateTestExecutionsDeleteDeleteParams = zod.object({
@@ -47351,7 +47478,7 @@ export const SimulateV3TestExecutionCallsQueryParams = zod.object({
     .max(simulateV3TestExecutionCallsQueryPageSizeMax)
     .default(simulateV3TestExecutionCallsQueryPageSizeDefault),
   group_by: zod
-    .enum(["goal", "status"])
+    .enum(["goal", "sub_goal", "accent", "age", "attack", "task", "status"])
     .default(simulateV3TestExecutionCallsQueryGroupByDefault),
   group_key: zod.string().optional(),
 });
@@ -52504,14 +52631,23 @@ export const TracerEvalTaskGetUsageResponse = zod.object({
           .min(tracerEvalTaskGetUsageResponseResultStatsRunsPeriodMin),
         success_count: zod
           .number()
-          .min(tracerEvalTaskGetUsageResponseResultStatsSuccessCountMin),
+          .min(tracerEvalTaskGetUsageResponseResultStatsSuccessCountMin)
+          .describe(
+            "Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period.",
+          ),
         error_count: zod
           .number()
-          .min(tracerEvalTaskGetUsageResponseResultStatsErrorCountMin),
+          .min(tracerEvalTaskGetUsageResponseResultStatsErrorCountMin)
+          .describe(
+            "Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the task logs.",
+          ),
         pass_rate: zod
           .number()
           .min(tracerEvalTaskGetUsageResponseResultStatsPassRateMin)
-          .max(tracerEvalTaskGetUsageResponseResultStatsPassRateMax),
+          .max(tracerEvalTaskGetUsageResponseResultStatsPassRateMax)
+          .describe(
+            "Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0.",
+          ),
         total_runs_is_lower_bound: zod.boolean().optional(),
         runs_period_is_lower_bound: zod.boolean().optional(),
       })
@@ -55034,6 +55170,30 @@ export const TracerInternalErrorFeedV2AttemptsPartialUpdateResponse =
     job_state: zod.string().min(1),
   });
 
+export const TracerInternalErrorFeedV2AttemptsSimulationEvidenceCreateParams =
+  zod.object({
+    attempt_id: zod.string(),
+  });
+
+export const tracerInternalErrorFeedV2AttemptsSimulationEvidenceCreateBodyLeaseTokenMax = 255;
+
+export const tracerInternalErrorFeedV2AttemptsSimulationEvidenceCreateBodyCursorMin = 0;
+
+export const TracerInternalErrorFeedV2AttemptsSimulationEvidenceCreateBody =
+  zod.object({
+    lease_token: zod
+      .string()
+      .min(1)
+      .max(
+        tracerInternalErrorFeedV2AttemptsSimulationEvidenceCreateBodyLeaseTokenMax,
+      ),
+    cursor: zod
+      .number()
+      .min(
+        tracerInternalErrorFeedV2AttemptsSimulationEvidenceCreateBodyCursorMin,
+      ),
+  });
+
 export const tracerInternalErrorFeedV2ClaimsCreateBodyWorkerIdMax = 255;
 
 export const tracerInternalErrorFeedV2ClaimsCreateBodyEngineVersionMax = 20;
@@ -55075,10 +55235,16 @@ export const TracerInternalErrorFeedV2ClaimsCreateResponse = zod.object({
   claims: zod.array(
     zod.object({
       organization_id: zod.string().uuid(),
+      organization_name: zod.string().min(1).optional(),
       workspace_id: zod.string().uuid(),
       project_id: zod.string().uuid(),
+      project_name: zod.string().min(1).optional(),
       job_id: zod.string().uuid(),
-      trace_id: zod.string().uuid(),
+      workload_type: zod
+        .enum(["trace", "simulation_test_execution"])
+        .optional(),
+      trace_id: zod.string().uuid().optional(),
+      test_execution_id: zod.string().uuid().optional(),
       generation: zod.number().min(1),
       attempt_id: zod.string().uuid(),
       lease_token: zod.string().min(1),
@@ -55901,6 +56067,7 @@ export const tracerInternalErrorFeedV2ReportsCreateBodyIdempotencyKeyMax = 255;
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyLeaseTokenMax = 255;
 
+export const tracerInternalErrorFeedV2ReportsCreateBodyResultWorkloadTypeDefault = `trace`;
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultEngineVersionMax = 20;
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultMemorySnapshotIdMax = 128;
@@ -55915,13 +56082,21 @@ export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemKindMax
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemStatementMax = 8000;
 
-export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemRequirementIdMax = 128;
+export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemRequirementIdMax = 256;
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemEvidenceIdsItemMax = 128;
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemEvidenceIdsMax = 100;
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemRecoveryMax = 64;
+
+export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemCategoryMax = 100;
+
+export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemGroupLabelMax = 100;
+
+export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemFixLayerMax = 50;
+
+export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemConfidenceMax = 2;
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemAttributionOriginSpanIdMax = 64;
 
@@ -55947,7 +56122,7 @@ export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemAttribu
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemAttributionSymptomExplanationMax = 600;
 
-export const tracerInternalErrorFeedV2ReportsCreateBodyResultRequirementChecksItemRequirementIdMax = 128;
+export const tracerInternalErrorFeedV2ReportsCreateBodyResultRequirementChecksItemRequirementIdMax = 256;
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultRequirementChecksItemRequirementMax = 8000;
 
@@ -55970,6 +56145,8 @@ export const tracerInternalErrorFeedV2ReportsCreateBodyResultVerificationReceipt
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultCoverageScopeMax = 255;
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultCoverageObservedSpanCountMin = 0;
+
+export const tracerInternalErrorFeedV2ReportsCreateBodyResultCoverageObservedCallCountMin = 0;
 
 export const tracerInternalErrorFeedV2ReportsCreateBodyResultUsageModelCallsMin = 0;
 
@@ -56004,14 +56181,23 @@ export const TracerInternalErrorFeedV2ReportsCreateBody = zod.object({
     .min(1)
     .max(tracerInternalErrorFeedV2ReportsCreateBodyLeaseTokenMax),
   result: zod.object({
-    contract_version: zod.enum(["omega-investigation/v1"]),
+    contract_version: zod.enum([
+      "omega-investigation/v1",
+      "omega-simulation/v1",
+    ]),
+    workload_type: zod
+      .enum(["trace", "simulation_test_execution"])
+      .default(
+        tracerInternalErrorFeedV2ReportsCreateBodyResultWorkloadTypeDefault,
+      ),
     organization_id: zod.string().uuid(),
     workspace_id: zod.string().uuid(),
     project_id: zod.string().uuid(),
     job_id: zod.string().uuid(),
     generation: zod.number().min(1),
     attempt_id: zod.string().uuid(),
-    trace_id: zod.string().uuid(),
+    trace_id: zod.string().uuid().optional(),
+    test_execution_id: zod.string().uuid().optional(),
     engine_version: zod
       .string()
       .min(1)
@@ -56033,6 +56219,7 @@ export const TracerInternalErrorFeedV2ReportsCreateBody = zod.object({
       ),
     execution_status: zod.enum(["completed", "failed"]),
     outcome: zod.enum(["success", "failure", "unknown"]),
+    error_message: zod.string().optional(),
     findings: zod.array(
       zod.object({
         finding_id: zod
@@ -56078,6 +56265,34 @@ export const TracerInternalErrorFeedV2ReportsCreateBody = zod.object({
           .max(
             tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemRecoveryMax,
           ),
+        category: zod
+          .string()
+          .min(1)
+          .max(
+            tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemCategoryMax,
+          )
+          .optional(),
+        group_label: zod
+          .string()
+          .min(1)
+          .max(
+            tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemGroupLabelMax,
+          )
+          .optional(),
+        fix_layer: zod
+          .string()
+          .min(1)
+          .max(
+            tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemFixLayerMax,
+          )
+          .optional(),
+        confidence: zod
+          .string()
+          .min(1)
+          .max(
+            tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemConfidenceMax,
+          )
+          .optional(),
         attribution: zod.object({
           origin: zod.object({
             status: zod.enum(["supported", "unsupported", "unknown"]),
@@ -56088,6 +56303,7 @@ export const TracerInternalErrorFeedV2ReportsCreateBody = zod.object({
                 tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemAttributionOriginSpanIdMax,
               )
               .optional(),
+            call_execution_id: zod.string().uuid().optional(),
             evidence_ids: zod
               .array(
                 zod
@@ -56116,6 +56332,7 @@ export const TracerInternalErrorFeedV2ReportsCreateBody = zod.object({
                 tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemAttributionDecisiveSpanIdMax,
               )
               .optional(),
+            call_execution_id: zod.string().uuid().optional(),
             evidence_ids: zod
               .array(
                 zod
@@ -56144,6 +56361,7 @@ export const TracerInternalErrorFeedV2ReportsCreateBody = zod.object({
                 tracerInternalErrorFeedV2ReportsCreateBodyResultFindingsItemAttributionSymptomSpanIdMax,
               )
               .optional(),
+            call_execution_id: zod.string().uuid().optional(),
             evidence_ids: zod
               .array(
                 zod
@@ -56213,7 +56431,9 @@ export const TracerInternalErrorFeedV2ReportsCreateBody = zod.object({
           .min(1)
           .max(
             tracerInternalErrorFeedV2ReportsCreateBodyResultEvidenceReceiptsItemSpanIdMax,
-          ),
+          )
+          .optional(),
+        call_execution_id: zod.string().uuid().optional(),
         parent_span_id: zod
           .string()
           .min(1)
@@ -56245,14 +56465,22 @@ export const TracerInternalErrorFeedV2ReportsCreateBody = zod.object({
       scope: zod
         .string()
         .min(1)
-        .max(tracerInternalErrorFeedV2ReportsCreateBodyResultCoverageScopeMax),
+        .max(tracerInternalErrorFeedV2ReportsCreateBodyResultCoverageScopeMax)
+        .optional(),
       observed_span_count: zod
         .number()
         .min(
           tracerInternalErrorFeedV2ReportsCreateBodyResultCoverageObservedSpanCountMin,
-        ),
+        )
+        .optional(),
+      observed_call_count: zod
+        .number()
+        .min(
+          tracerInternalErrorFeedV2ReportsCreateBodyResultCoverageObservedCallCountMin,
+        )
+        .optional(),
       read_complete: zod.boolean(),
-      future_arrivals_known: zod.boolean(),
+      future_arrivals_known: zod.boolean().optional(),
     }),
     usage: zod.object({
       model_calls: zod
@@ -61987,7 +62215,14 @@ export const TracerSharedLinksListResponse = zod.object({
     zod.object({
       id: zod.string().uuid().optional(),
       resource_type: zod
-        .enum(["trace", "dashboard", "eval_run", "dataset", "project"])
+        .enum([
+          "trace",
+          "dashboard",
+          "eval_run",
+          "dataset",
+          "project",
+          "call_execution",
+        ])
         .optional(),
       resource_id: zod.string().min(1).optional(),
       token: zod.string().min(1).optional(),
@@ -62011,7 +62246,7 @@ export const tracerSharedLinksCreateBodyAccessTypeDefault = `restricted`;
 export const tracerSharedLinksCreateBodyEmailsDefault = [];
 
 export const TracerSharedLinksCreateBody = zod.object({
-  resource_type: zod.enum(["trace", "dashboard", "project"]),
+  resource_type: zod.enum(["trace", "dashboard", "project", "call_execution"]),
   resource_id: zod
     .string()
     .min(1)
@@ -62041,7 +62276,14 @@ export const tracerSharedLinksReadResponseAccessListItemEmailMax = 254;
 export const TracerSharedLinksReadResponse = zod.object({
   id: zod.string().uuid().optional(),
   resource_type: zod
-    .enum(["trace", "dashboard", "eval_run", "dataset", "project"])
+    .enum([
+      "trace",
+      "dashboard",
+      "eval_run",
+      "dataset",
+      "project",
+      "call_execution",
+    ])
     .optional(),
   resource_id: zod.string().min(1).optional(),
   token: zod.string().min(1).optional(),
@@ -62163,6 +62405,7 @@ export const TracerSharedReadResponse = zod.object({
     "eval_run",
     "dataset",
     "project",
+    "call_execution",
   ]),
   resource_id: zod.string().min(1),
   access_type: zod.enum(["public", "restricted"]),
@@ -63684,6 +63927,8 @@ export const TracerTraceGetGraphMethodsQueryParams = zod.object({
 export const tracerTraceGetGraphMethodsBodyFiltersDefault = [];
 export const tracerTraceGetGraphMethodsBodyIntervalDefault = `day`;
 export const tracerTraceGetGraphMethodsBodyPropertyDefault = `average`;
+export const tracerTraceGetGraphMethodsBodyObserveTypeDefault = `trace`;
+export const tracerTraceGetGraphMethodsBodyRemoveSimulationCallsDefault = false;
 
 export const TracerTraceGetGraphMethodsBody = zod.object({
   project_id: zod.string().uuid(),
@@ -63768,6 +64013,18 @@ export const TracerTraceGetGraphMethodsBody = zod.object({
       .describe("Stable Property Registry identity."),
     source: zod.enum(["traces", "sessions"]).optional(),
   }),
+  observe_type: zod
+    .enum(["trace", "voice"])
+    .default(tracerTraceGetGraphMethodsBodyObserveTypeDefault)
+    .describe(
+      "Population the graph counts: every trace, or only voice calls (traces whose root span is a conversation), exactly as list_voice_calls selects them.",
+    ),
+  remove_simulation_calls: zod
+    .boolean()
+    .default(tracerTraceGetGraphMethodsBodyRemoveSimulationCallsDefault)
+    .describe(
+      "Voice graphs only: exclude calls placed by a simulator phone, exactly as list_voice_calls' remove_simulation_calls does.",
+    ),
 });
 
 export const tracerTraceGetGraphMethodsResponseStatusDefault = true;
@@ -64712,6 +64969,13 @@ export const TracerTraceVoiceCallDetailQueryParams = zod.object({
     .describe(
       "Legacy alias for trace_id; when both are supplied they must match.",
     ),
+  project_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "Project the detail was opened from. The same id can exist in several projects; when supplied, only that project's copy is read.",
+    ),
 });
 
 export const TracerTraceVoiceCallDetailResponse = zod.object({
@@ -64792,10 +65056,22 @@ export const TracerTraceVoiceCallDetailResponse = zod.object({
 });
 
 /**
- * Retrieve a trace by its ID.
+ * Query params:
+- project_id (optional) — the project the trace was opened from.
+ * @summary Retrieve a trace by its ID.
  */
 export const TracerTraceReadParams = zod.object({
   id: zod.string(),
+});
+
+export const TracerTraceReadQueryParams = zod.object({
+  project_id: zod
+    .string()
+    .uuid()
+    .optional()
+    .describe(
+      "Project the detail was opened from. The same id can exist in several projects; when supplied, only that project's copy is read.",
+    ),
 });
 
 export const tracerTraceReadResponseStatusDefault = true;

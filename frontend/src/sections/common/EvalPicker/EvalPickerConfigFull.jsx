@@ -154,6 +154,7 @@ const EvalPickerConfigFull = ({
     sourceTimeWindow,
     filterForm: localFilterForm,
     onClose,
+    requireInputs,
   } = useEvalPickerContext();
   const normalizedEvalData = useMemo(
     () => normalizeEvalPickerEval(evalData),
@@ -2271,10 +2272,22 @@ const EvalPickerConfigFull = ({
             addDisabledReason = `Add instructions before ${actionLabel}.`;
           } else if (!hasVariables && !hasDataInjection) {
             addDisabled = true;
+            // A system eval's template can't be edited here (isSystemEval
+            // locks it read-only), so with requireInputs on, telling the
+            // user to add a {{variable}} to it is a dead end — say why the
+            // add is actually blocked instead.
             addDisabledReason =
-              templateFormat === "jinja"
-                ? `Your Jinja template has no variables. Reference an input with a {{ variable }} expression or a {% ... %} block (e.g. {{ input }}) before ${actionLabel}.`
-                : `Your Mustache template has no variables. Add a {{variable}} placeholder (e.g. {{input}}) before ${actionLabel}.`;
+              requireInputs && isSystemEval
+                ? "This evaluation has no inputs to map, so it can't run in an environment."
+                : templateFormat === "jinja"
+                  ? `Your Jinja template has no variables. Reference an input with a {{ variable }} expression or a {% ... %} block (e.g. {{ input }}) before ${actionLabel}.`
+                  : `Your Mustache template has no variables. Add a {{variable}} placeholder (e.g. {{input}}) before ${actionLabel}.`;
+          }
+
+          if (!addDisabled && requireInputs && variables.length === 0) {
+            addDisabled = true;
+            addDisabledReason =
+              "This evaluation has no inputs to map, so it can't run in an environment.";
           }
 
           if (

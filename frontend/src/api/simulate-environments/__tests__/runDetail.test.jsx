@@ -175,7 +175,12 @@ describe("buildRunStats", () => {
   // for both modalities, not the chat-only `connected_calls` borrow.
   it("reads `completed` from kpis.completed_calls on a chat run", () => {
     const stats = buildRunStats(
-      { agent_type: "text", completed_calls: 12, connected_calls: 12, total_calls: 16 },
+      {
+        agent_type: "text",
+        completed_calls: 12,
+        connected_calls: 12,
+        total_calls: 16,
+      },
       null,
       null,
     );
@@ -189,7 +194,12 @@ describe("buildRunStats", () => {
   // so borrowing it again fails this case.
   it("reads `completed` from kpis.completed_calls on a voice run too, never from connected_calls", () => {
     const stats = buildRunStats(
-      { agent_type: "voice", completed_calls: 12, connected_calls: 9, total_calls: 16 },
+      {
+        agent_type: "voice",
+        completed_calls: 12,
+        connected_calls: 9,
+        total_calls: 16,
+      },
       null,
       null,
     );
@@ -222,7 +232,12 @@ describe("buildRunStats", () => {
   // run grows a fake "Completed calls" eval.
   it("never files completed_calls as an eval score (it is a call count, not a verdict)", () => {
     const stats = buildRunStats(
-      { agent_type: "text", completed_calls: 12, total_calls: 16, task_success: 49 },
+      {
+        agent_type: "text",
+        completed_calls: 12,
+        total_calls: 16,
+        task_success: 49,
+      },
       null,
       null,
     );
@@ -233,7 +248,12 @@ describe("buildRunStats", () => {
 
   it("never files completed_calls as an eval score on a voice run either", () => {
     const stats = buildRunStats(
-      { agent_type: "voice", completed_calls: 12, total_calls: 16, task_success: 49 },
+      {
+        agent_type: "voice",
+        completed_calls: 12,
+        total_calls: 16,
+        task_success: 49,
+      },
       null,
       null,
     );
@@ -304,15 +324,18 @@ describe("mapCallDetail", () => {
     ["a single {content} object", { content: "from content" }, "from content"],
     ["a nested list", [[{ content: "deep" }], "flat"], "deep\nflat"],
     ["an empty list", [], ""],
-  ])("turns %s into transcript text without crashing", (_label, content, text) => {
-    const d = mapCallDetail({
-      id: "c",
-      simulation_call_type: "text",
-      transcript: [{ role: "user", content }],
-    });
-    expect(d.turns[0].text).toBe(text);
-    expect(typeof d.stats.words).toBe("number");
-  });
+  ])(
+    "turns %s into transcript text without crashing",
+    (_label, content, text) => {
+      const d = mapCallDetail({
+        id: "c",
+        simulation_call_type: "text",
+        transcript: [{ role: "user", content }],
+      });
+      expect(d.turns[0].text).toBe(text);
+      expect(typeof d.stats.words).toBe("number");
+    },
+  );
 
   it("reads a hosted chat's message content lists as text (real Retell chat shape)", () => {
     // Each transcript row is one chat message whose content is a list of
@@ -445,7 +468,12 @@ describe("mapCallDetail", () => {
       transcript: [],
       recordings: {},
       eval_metrics: {
-        "cfg-live": { name: "Tone", value: "Passed", type: "Pass/Fail", reason: "fine" },
+        "cfg-live": {
+          name: "Tone",
+          value: "Passed",
+          type: "Pass/Fail",
+          reason: "fine",
+        },
         "cfg-gone": {
           name: "no_misselling",
           value: "Failed",
@@ -492,12 +520,16 @@ describe("mapCallDetail", () => {
     });
 
     expect(d.evalResults).toHaveLength(1);
-    expect(d.evalResults.find((e) => e.id === "cfg-gone-empty")).toBeUndefined();
-    expect(d.evalResults.find((e) => e.id === "cfg-gone-valued")).toMatchObject({
-      name: "no_misselling",
-      passed: false,
-      removed: true,
-    });
+    expect(
+      d.evalResults.find((e) => e.id === "cfg-gone-empty"),
+    ).toBeUndefined();
+    expect(d.evalResults.find((e) => e.id === "cfg-gone-valued")).toMatchObject(
+      {
+        name: "no_misselling",
+        passed: false,
+        removed: true,
+      },
+    );
   });
 });
 
@@ -668,8 +700,9 @@ describe("useCallDetail", () => {
     );
     const queryKey = ["simulation-call-detail-v3", "call-localizing"];
     await waitFor(() =>
-      expect(queryClient.getQueryData(queryKey)?.eval_metrics?.["eval-1"])
-        .toMatchObject({ error_localizer_status: "running" }),
+      expect(
+        queryClient.getQueryData(queryKey)?.eval_metrics?.["eval-1"],
+      ).toMatchObject({ error_localizer_status: "running" }),
     );
     const query = queryClient.getQueryCache().find({ queryKey });
 
@@ -738,30 +771,6 @@ describe("useRunDetail", () => {
     );
   });
 
-  // `useKpis` and `useRunsSummary` share the query key
-  // `["test-execution-detail", "KPIS", id]` and must cache the same shape
-  // (the plain body), or whichever one mounts second reads the wrong shape
-  // off the shared cache entry. Seed the cache the way `useRunsSummary` does
-  // and confirm `useRunDetail` still gets a number.
-  it("still reads the KPI body when the Runs summary primed the same cache key first", async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(
-      ["test-execution-detail", "KPIS", "ex-new"],
-      { agent_type: "text", total_calls: 16, completed_calls: 12 },
-    );
-    const Wrapper = ({ children }) => (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
-    );
-    Wrapper.propTypes = { children: PropTypes.node };
-
-    const { result } = renderHook(
-      () => useRunDetail("rt1", "ex-new", { envName: "Refund Copilot" }),
-      { wrapper: Wrapper },
-    );
-
-    await waitFor(() => expect(result.current.stats.completed).toBe(12));
-  });
-
   it("keeps terminal Run failure when some calls already passed", async () => {
     axios.get.mockResolvedValueOnce({
       data: {
@@ -789,7 +798,13 @@ describe("useRunDetail", () => {
   it("marks a running Run stoppable and a cancelling one not", async () => {
     const identityFor = async (status) => {
       axios.get.mockResolvedValueOnce({
-        data: { execution: { id: `ex-${status}`, status, summary: { total: 4, outcomes: {} } } },
+        data: {
+          execution: {
+            id: `ex-${status}`,
+            status,
+            summary: { total: 4, outcomes: {} },
+          },
+        },
       });
       const { result } = renderHook(() => useRunDetail("rt1", `ex-${status}`), {
         wrapper: makeWrapper(),
@@ -806,7 +821,13 @@ describe("useRunDetail", () => {
 
   it("reports a cancelling Run as cancelling, not running", async () => {
     axios.get.mockResolvedValueOnce({
-      data: { execution: { id: "ex-c", status: "cancelling", summary: { total: 4, outcomes: {} } } },
+      data: {
+        execution: {
+          id: "ex-c",
+          status: "cancelling",
+          summary: { total: 4, outcomes: {} },
+        },
+      },
     });
     const { result } = renderHook(() => useRunDetail("rt1", "ex-c"), {
       wrapper: makeWrapper(),

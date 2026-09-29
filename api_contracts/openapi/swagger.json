@@ -18754,7 +18754,7 @@
         "/model-hub/annotation-queues/for-source/": {
             "get": {
                 "operationId": "model-hub_annotation-queues_for_source",
-                "description": "Find annotation queues for a given source that the current user can annotate.\nIncludes queues where:\n- The source is a queue item AND the user is an annotator in that queue\n  (regardless of whether the item is explicitly assigned to them)\n\nQuery params:\n  - source_type, source_id  (single source)\n  - OR sources (JSON array of {source_type, source_id} objects for multi-source lookup)",
+                "description": "Find annotation queues for a given source that the current user can annotate.\nIncludes queues where:\n- The source is a queue item AND the user is an annotator in that queue\n  (regardless of whether the item is explicitly assigned to them)\n\nQuery params:\n  - source_type, source_id  (single source)\n  - OR sources (JSON array of {source_type, source_id} objects for multi-source lookup)\n  - project_id (optional): the project a trace / span drawer shows",
                 "parameters": [
                     {
                         "name": "page",
@@ -18795,6 +18795,15 @@
                         "in": "query",
                         "required": false,
                         "type": "string"
+                    },
+                    {
+                        "name": "project_id",
+                        "in": "query",
+                        "description": "Tracer project the trace / span was opened from. The same id can exist in several projects; when supplied, only that project's queue items are listed.",
+                        "required": false,
+                        "type": "string",
+                        "format": "uuid",
+                        "x-nullable": true
                     }
                 ],
                 "responses": {
@@ -27232,6 +27241,12 @@
                             "$ref": "#/definitions/ModelHubErrorResponse"
                         }
                     },
+                    "503": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/DatasetLimitCheckFailedError"
+                        }
+                    },
                     "default": {
                         "description": "Default error response",
                         "schema": {
@@ -27596,6 +27611,12 @@
                             "$ref": "#/definitions/ModelHubErrorResponse"
                         }
                     },
+                    "503": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/DatasetLimitCheckFailedError"
+                        }
+                    },
                     "default": {
                         "description": "Default error response",
                         "schema": {
@@ -27860,6 +27881,12 @@
                             "$ref": "#/definitions/ModelHubErrorResponse"
                         }
                     },
+                    "503": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/DatasetLimitCheckFailedError"
+                        }
+                    },
                     "default": {
                         "description": "Default error response",
                         "schema": {
@@ -27933,6 +27960,12 @@
                             "$ref": "#/definitions/ModelHubErrorResponse"
                         }
                     },
+                    "503": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/DatasetLimitCheckFailedError"
+                        }
+                    },
                     "default": {
                         "description": "Default error response",
                         "schema": {
@@ -27997,6 +28030,12 @@
                         "description": "",
                         "schema": {
                             "$ref": "#/definitions/ModelHubErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/DatasetLimitCheckFailedError"
                         }
                     },
                     "default": {
@@ -28065,6 +28104,12 @@
                             "$ref": "#/definitions/ModelHubErrorResponse"
                         }
                     },
+                    "503": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/DatasetLimitCheckFailedError"
+                        }
+                    },
                     "default": {
                         "description": "Default error response",
                         "schema": {
@@ -28131,6 +28176,12 @@
                             "$ref": "#/definitions/ModelHubErrorResponse"
                         }
                     },
+                    "503": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/DatasetLimitCheckFailedError"
+                        }
+                    },
                     "default": {
                         "description": "Default error response",
                         "schema": {
@@ -28195,6 +28246,12 @@
                         "description": "",
                         "schema": {
                             "$ref": "#/definitions/ModelHubErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/DatasetLimitCheckFailedError"
                         }
                     },
                     "default": {
@@ -31272,6 +31329,12 @@
                             "$ref": "#/definitions/ModelHubErrorResponse"
                         }
                     },
+                    "503": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/DatasetLimitCheckFailedError"
+                        }
+                    },
                     "default": {
                         "description": "Default error response",
                         "schema": {
@@ -33311,7 +33374,7 @@
             "get": {
                 "operationId": "model-hub_eval-templates_usage_list",
                 "summary": "GET /model-hub/eval-templates/<id>/usage/",
-                "description": "Returns usage stats, chart data, and the paginated usage table.\nQuery params: page (0-based), page_size, period\n(30m|6h|1d|7d|30d|90d|180d|365d), optional start_date/end_date pair\n(overrides period — sent by the FE for Today / Yesterday / Custom).\n\nThe response is rendered through\n``EvalUsageStatsResponseResultSerializer(instance=...).data`` at the\nboundary so shape drift surfaces here instead of shipping silently.",
+                "description": "Returns usage stats, chart data, and the paginated usage table.\nQuery params: page (0-based), page_size, period\n(30m|6h|1d|7d|30d|90d|180d|365d), optional start_date/end_date pair\n(overrides period — sent by the FE for Today / Yesterday / Custom).\n\nThe response is rendered through\n``EvalUsageStatsResponseResultSerializer(instance=...).data`` at the\nboundary so shape drift surfaces here instead of shipping silently.\n\nCounts and lists only successful runs from the usage ledger\n(``APICallLog`` rows with status ``success``), from every source: tasks,\nplayground, composites, datasets and experiments. Errored and skipped runs\nare not usage but stay in the eval logs (task logs, template eval logs);\nan in-flight run counts once it succeeds. ``error_count`` is therefore 0\nand ``pass_rate`` 100 whenever there are runs; both remain for\ncompatibility.",
                 "parameters": [
                     {
                         "name": "page",
@@ -45802,6 +45865,15 @@
                         "required": true,
                         "type": "string",
                         "minLength": 1
+                    },
+                    {
+                        "name": "project_id",
+                        "in": "query",
+                        "description": "Tracer project the trace / span was opened from. The same id can exist in several projects; when supplied, only that project's scores are listed.",
+                        "required": false,
+                        "type": "string",
+                        "format": "uuid",
+                        "x-nullable": true
                     }
                 ],
                 "responses": {
@@ -57094,6 +57166,91 @@
                 }
             ]
         },
+        "/simulate/test-executions/{test_execution_id}/debug-analysis/": {
+            "get": {
+                "operationId": "simulate_test_execution_debug_analysis_retrieve",
+                "summary": "Get Test Execution debug analysis",
+                "description": "",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/TestExecutionDebugAnalysisResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/TestExecutionDebugAnalysisNotFound"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "simulate"
+                ]
+            },
+            "post": {
+                "operationId": "simulate_test_execution_debug_analysis_create",
+                "summary": "Request Test Execution debug analysis",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/EmptyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/TestExecutionDebugAnalysisResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/TestExecutionDebugAnalysisNotFound"
+                        }
+                    },
+                    "409": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/TestExecutionDebugAnalysisError"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "simulate"
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
+            },
+            "parameters": [
+                {
+                    "name": "test_execution_id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
         "/simulate/test-executions/{test_execution_id}/delete/": {
             "delete": {
                 "operationId": "simulate_test-executions_delete_delete",
@@ -57762,6 +57919,11 @@
                         "type": "string",
                         "enum": [
                             "goal",
+                            "sub_goal",
+                            "accent",
+                            "age",
+                            "attack",
+                            "task",
                             "status"
                         ],
                         "default": ""
@@ -59728,6 +59890,12 @@
                         "description": "",
                         "schema": {
                             "$ref": "#/definitions/ObserveDataset"
+                        }
+                    },
+                    "503": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/DatasetLimitCheckFailedError"
                         }
                     },
                     "default": {
@@ -61946,6 +62114,55 @@
                         "description": "",
                         "schema": {
                             "$ref": "#/definitions/InvestigationControlError"
+                        }
+                    },
+                    "409": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/InvestigationControlError"
+                        }
+                    },
+                    "default": {
+                        "description": "Default error response",
+                        "schema": {
+                            "$ref": "#/definitions/ManagementAPIErrorResponse"
+                        }
+                    }
+                },
+                "tags": [
+                    "tracer"
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
+            },
+            "parameters": [
+                {
+                    "name": "attempt_id",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                }
+            ]
+        },
+        "/tracer/internal/error-feed-v2/attempts/{attempt_id}/simulation-evidence/": {
+            "post": {
+                "operationId": "tracer_internal_error-feed-v2_attempts_simulation-evidence_create",
+                "description": "",
+                "parameters": [
+                    {
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/SimulationEvidenceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/SimulationEvidenceRequest"
                         }
                     },
                     "409": {
@@ -68827,7 +69044,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/ObserveGraphDataRequest"
+                            "$ref": "#/definitions/TraceGraphDataRequest"
                         }
                     },
                     {
@@ -69762,7 +69979,7 @@
             "get": {
                 "operationId": "tracer_trace_voice_call_detail",
                 "summary": "Return the heavy / detail-only fields for a single voice call.",
-                "description": "Query params:\n- trace_id or legacy traceId (required) — UUID of the voice call trace.",
+                "description": "Query params:\n- trace_id or legacy traceId (required) — UUID of the voice call trace.\n- project_id (optional) — the project the call was opened from.",
                 "parameters": [
                     {
                         "name": "trace_id",
@@ -69776,6 +69993,14 @@
                         "name": "traceId",
                         "in": "query",
                         "description": "Legacy alias for trace_id; when both are supplied they must match.",
+                        "required": false,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "project_id",
+                        "in": "query",
+                        "description": "Project the detail was opened from. The same id can exist in several projects; when supplied, only that project's copy is read.",
                         "required": false,
                         "type": "string",
                         "format": "uuid"
@@ -69830,8 +70055,18 @@
         "/tracer/trace/{id}/": {
             "get": {
                 "operationId": "tracer_trace_read",
-                "description": "Retrieve a trace by its ID.",
-                "parameters": [],
+                "summary": "Retrieve a trace by its ID.",
+                "description": "Query params:\n- project_id (optional) — the project the trace was opened from.",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "query",
+                        "description": "Project the detail was opened from. The same id can exist in several projects; when supplied, only that project's copy is read.",
+                        "required": false,
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "",
@@ -69866,7 +70101,9 @@
                 },
                 "tags": [
                     "tracer"
-                ]
+                ],
+                "x-runtime-request-validation": true,
+                "x-runtime-response-validation": true
             },
             "put": {
                 "operationId": "tracer_trace_update",
@@ -90147,7 +90384,9 @@
                 "label",
                 "status",
                 "required",
-                "detail"
+                "detail",
+                "fix",
+                "docs_url"
             ],
             "type": "object",
             "properties": {
@@ -90177,6 +90416,14 @@
                 },
                 "detail": {
                     "title": "Detail",
+                    "type": "string"
+                },
+                "fix": {
+                    "title": "Fix",
+                    "type": "string"
+                },
+                "docs_url": {
+                    "title": "Docs url",
                     "type": "string"
                 }
             }
@@ -101700,6 +101947,81 @@
                 }
             }
         },
+        "DatasetLimitCheckFailedError": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "title": "Status",
+                    "type": "boolean",
+                    "default": false
+                },
+                "type": {
+                    "title": "Type",
+                    "type": "string",
+                    "enum": [
+                        "validation_error",
+                        "authentication_error",
+                        "payment_required",
+                        "entitlement_error",
+                        "permission_error",
+                        "not_found",
+                        "conflict",
+                        "client_error",
+                        "rate_limit",
+                        "server_error",
+                        "service_unavailable",
+                        "timeout",
+                        "api_error"
+                    ],
+                    "x-nullable": true
+                },
+                "code": {
+                    "title": "Code",
+                    "type": "string",
+                    "enum": [
+                        "dataset_limit_check_failed"
+                    ]
+                },
+                "detail": {
+                    "title": "Detail",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "result": {
+                    "title": "Result",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "message": {
+                    "title": "Message",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "error": {
+                    "title": "Error",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "attr": {
+                    "title": "Attr",
+                    "type": "string",
+                    "x-nullable": true
+                },
+                "details": {
+                    "title": "Details",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    }
+                }
+            }
+        },
         "ExtractEntitiesRequest": {
             "required": [
                 "column_id",
@@ -107976,14 +108298,17 @@
                 },
                 "success_count": {
                     "title": "Success count",
+                    "description": "Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period.",
                     "type": "integer"
                 },
                 "error_count": {
                     "title": "Error count",
+                    "description": "Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the eval logs.",
                     "type": "integer"
                 },
                 "pass_rate": {
                     "title": "Pass rate",
+                    "description": "Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0.",
                     "type": "number"
                 }
             }
@@ -116124,6 +116449,13 @@
                     "type": "string",
                     "format": "uuid",
                     "x-nullable": true
+                },
+                "project_id": {
+                    "title": "Project id",
+                    "description": "Tracer project the trace / span was opened from. The same id can exist in several projects; when supplied, the score is written to that project's copy.",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
                 }
             }
         },
@@ -122771,12 +123103,7 @@
                 "source": {
                     "title": "Source",
                     "type": "string",
-                    "enum": [
-                        "voice_recording",
-                        "transcript",
-                        "agent_prompt",
-                        "scenario_columns.situation.value"
-                    ]
+                    "minLength": 1
                 },
                 "label": {
                     "title": "Label",
@@ -132789,6 +133116,453 @@
                 }
             }
         },
+        "DebugAnalysisCoverage": {
+            "required": [
+                "scope",
+                "observed_call_count",
+                "read_complete"
+            ],
+            "type": "object",
+            "properties": {
+                "scope": {
+                    "title": "Scope",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "observed_call_count": {
+                    "title": "Observed call count",
+                    "type": "integer"
+                },
+                "read_complete": {
+                    "title": "Read complete",
+                    "type": "boolean"
+                }
+            }
+        },
+        "DebugAnalysisReport": {
+            "required": [
+                "id",
+                "execution_status",
+                "outcome",
+                "coverage",
+                "error_message",
+                "grouping_status",
+                "recorded_at"
+            ],
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "execution_status": {
+                    "title": "Execution status",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "outcome": {
+                    "title": "Outcome",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "coverage": {
+                    "$ref": "#/definitions/DebugAnalysisCoverage"
+                },
+                "error_message": {
+                    "title": "Error message",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "grouping_status": {
+                    "title": "Grouping status",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "recorded_at": {
+                    "title": "Recorded at",
+                    "type": "string",
+                    "format": "date-time"
+                }
+            },
+            "x-nullable": true
+        },
+        "DebugAnalysisCluster": {
+            "required": [
+                "id",
+                "cluster_id",
+                "title",
+                "error_type"
+            ],
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "cluster_id": {
+                    "title": "Cluster id",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "title": {
+                    "title": "Title",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "error_type": {
+                    "title": "Error type",
+                    "type": "string",
+                    "minLength": 1
+                }
+            },
+            "x-nullable": true
+        },
+        "DebugAnalysisEvidence": {
+            "required": [
+                "evidence_id",
+                "call_execution_id",
+                "excerpt"
+            ],
+            "type": "object",
+            "properties": {
+                "evidence_id": {
+                    "title": "Evidence id",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "call_execution_id": {
+                    "title": "Call execution id",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "excerpt": {
+                    "title": "Excerpt",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "DebugAnalysisFinding": {
+            "required": [
+                "id",
+                "kind",
+                "statement",
+                "recovery",
+                "category",
+                "group_label",
+                "fix_layer",
+                "confidence",
+                "goal",
+                "cluster",
+                "evidence"
+            ],
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "kind": {
+                    "title": "Kind",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "statement": {
+                    "title": "Statement",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "recovery": {
+                    "title": "Recovery",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "category": {
+                    "title": "Category",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "group_label": {
+                    "title": "Group label",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "fix_layer": {
+                    "title": "Fix layer",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "confidence": {
+                    "title": "Confidence",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "goal": {
+                    "title": "Goal",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "cluster": {
+                    "$ref": "#/definitions/DebugAnalysisCluster"
+                },
+                "evidence": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/DebugAnalysisEvidence"
+                    }
+                }
+            }
+        },
+        "DebugAnalysisSummary": {
+            "required": [
+                "measured_call_count",
+                "broken_goal_count",
+                "broken_call_count",
+                "one_off_count",
+                "excluded_call_ids",
+                "unanalyzed_call_ids"
+            ],
+            "type": "object",
+            "properties": {
+                "measured_call_count": {
+                    "title": "Measured call count",
+                    "type": "integer"
+                },
+                "broken_goal_count": {
+                    "title": "Broken goal count",
+                    "type": "integer"
+                },
+                "broken_call_count": {
+                    "title": "Broken call count",
+                    "type": "integer"
+                },
+                "one_off_count": {
+                    "title": "One off count",
+                    "type": "integer"
+                },
+                "excluded_call_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                },
+                "unanalyzed_call_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                }
+            },
+            "x-nullable": true
+        },
+        "DebugAnalysisWay": {
+            "required": [
+                "id",
+                "title",
+                "phrase",
+                "call_ids"
+            ],
+            "type": "object",
+            "properties": {
+                "id": {
+                    "title": "Id",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "title": {
+                    "title": "Title",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "phrase": {
+                    "title": "Phrase",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "call_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                }
+            }
+        },
+        "DebugAnalysisGoal": {
+            "required": [
+                "goal",
+                "label",
+                "criteria",
+                "broken_call_ids",
+                "tested_call_count",
+                "ways",
+                "unexplained_call_ids"
+            ],
+            "type": "object",
+            "properties": {
+                "goal": {
+                    "title": "Goal",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "label": {
+                    "title": "Label",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "criteria": {
+                    "title": "Criteria",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "broken_call_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                },
+                "tested_call_count": {
+                    "title": "Tested call count",
+                    "type": "integer"
+                },
+                "ways": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/DebugAnalysisWay"
+                    }
+                },
+                "unexplained_call_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                }
+            }
+        },
+        "TestExecutionDebugAnalysisResponse": {
+            "required": [
+                "test_execution_id",
+                "status",
+                "generation",
+                "job_id",
+                "error_message",
+                "report",
+                "findings",
+                "summary",
+                "goals",
+                "one_offs"
+            ],
+            "type": "object",
+            "properties": {
+                "test_execution_id": {
+                    "title": "Test execution id",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "status": {
+                    "title": "Status",
+                    "type": "string",
+                    "enum": [
+                        "not_requested",
+                        "pending",
+                        "running",
+                        "completed",
+                        "failed"
+                    ]
+                },
+                "generation": {
+                    "title": "Generation",
+                    "type": "integer",
+                    "x-nullable": true
+                },
+                "job_id": {
+                    "title": "Job id",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "error_message": {
+                    "title": "Error message",
+                    "type": "string",
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "report": {
+                    "$ref": "#/definitions/DebugAnalysisReport"
+                },
+                "findings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/DebugAnalysisFinding"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/DebugAnalysisSummary"
+                },
+                "goals": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/DebugAnalysisGoal"
+                    }
+                },
+                "one_offs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/DebugAnalysisWay"
+                    }
+                }
+            }
+        },
+        "TestExecutionDebugAnalysisNotFound": {
+            "required": [
+                "detail"
+            ],
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "title": "Detail",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "TestExecutionDebugAnalysisError": {
+            "required": [
+                "code",
+                "detail"
+            ],
+            "type": "object",
+            "properties": {
+                "code": {
+                    "title": "Code",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "detail": {
+                    "title": "Detail",
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
         "EvalExplanationCluster": {
             "type": "object",
             "properties": {
@@ -139386,16 +140160,19 @@
                 },
                 "success_count": {
                     "title": "Success count",
+                    "description": "Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period.",
                     "type": "integer",
                     "minimum": 0
                 },
                 "error_count": {
                     "title": "Error count",
+                    "description": "Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the task logs.",
                     "type": "integer",
                     "minimum": 0
                 },
                 "pass_rate": {
                     "title": "Pass rate",
+                    "description": "Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0.",
                     "type": "number",
                     "maximum": 100,
                     "minimum": 0
@@ -142478,6 +143255,26 @@
                 }
             }
         },
+        "SimulationEvidenceRequest": {
+            "required": [
+                "lease_token",
+                "cursor"
+            ],
+            "type": "object",
+            "properties": {
+                "lease_token": {
+                    "title": "Lease token",
+                    "type": "string",
+                    "maxLength": 255,
+                    "minLength": 1
+                },
+                "cursor": {
+                    "title": "Cursor",
+                    "type": "integer",
+                    "minimum": 0
+                }
+            }
+        },
         "ClaimInvestigationsRequest": {
             "required": [
                 "worker_id",
@@ -142623,7 +143420,6 @@
                 "workspace_id",
                 "project_id",
                 "job_id",
-                "trace_id",
                 "generation",
                 "attempt_id",
                 "lease_token",
@@ -142643,6 +143439,11 @@
                     "type": "string",
                     "format": "uuid"
                 },
+                "organization_name": {
+                    "title": "Organization name",
+                    "type": "string",
+                    "minLength": 1
+                },
                 "workspace_id": {
                     "title": "Workspace id",
                     "type": "string",
@@ -142654,15 +143455,35 @@
                     "type": "string",
                     "format": "uuid"
                 },
+                "project_name": {
+                    "title": "Project name",
+                    "type": "string",
+                    "minLength": 1
+                },
                 "job_id": {
                     "title": "Job id",
                     "type": "string",
                     "format": "uuid"
                 },
+                "workload_type": {
+                    "title": "Workload type",
+                    "type": "string",
+                    "enum": [
+                        "trace",
+                        "simulation_test_execution"
+                    ]
+                },
                 "trace_id": {
                     "title": "Trace id",
                     "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "test_execution_id": {
+                    "title": "Test execution id",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
                 },
                 "generation": {
                     "title": "Generation",
@@ -143456,6 +144277,12 @@
                     "minLength": 1,
                     "x-nullable": true
                 },
+                "call_execution_id": {
+                    "title": "Call execution id",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
+                },
                 "evidence_ids": {
                     "type": "array",
                     "items": {
@@ -143523,7 +144350,7 @@
                 "requirement_id": {
                     "title": "Requirement id",
                     "type": "string",
-                    "maxLength": 128,
+                    "maxLength": 256,
                     "minLength": 1,
                     "x-nullable": true
                 },
@@ -143542,6 +144369,34 @@
                     "maxLength": 64,
                     "minLength": 1
                 },
+                "category": {
+                    "title": "Category",
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "group_label": {
+                    "title": "Group label",
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "fix_layer": {
+                    "title": "Fix layer",
+                    "type": "string",
+                    "maxLength": 50,
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "confidence": {
+                    "title": "Confidence",
+                    "type": "string",
+                    "maxLength": 2,
+                    "minLength": 1,
+                    "x-nullable": true
+                },
                 "attribution": {
                     "$ref": "#/definitions/FindingAttribution"
                 }
@@ -143559,7 +144414,7 @@
                 "requirement_id": {
                     "title": "Requirement id",
                     "type": "string",
-                    "maxLength": 128,
+                    "maxLength": 256,
                     "minLength": 1
                 },
                 "requirement": {
@@ -143588,7 +144443,6 @@
         "InvestigationEvidenceReceipt": {
             "required": [
                 "evidence_id",
-                "span_id",
                 "excerpt"
             ],
             "type": "object",
@@ -143603,7 +144457,14 @@
                     "title": "Span id",
                     "type": "string",
                     "maxLength": 64,
-                    "minLength": 1
+                    "minLength": 1,
+                    "x-nullable": true
+                },
+                "call_execution_id": {
+                    "title": "Call execution id",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
                 },
                 "parent_span_id": {
                     "title": "Parent span id",
@@ -143647,10 +144508,7 @@
         },
         "InvestigationCoverage": {
             "required": [
-                "scope",
-                "observed_span_count",
-                "read_complete",
-                "future_arrivals_known"
+                "read_complete"
             ],
             "type": "object",
             "properties": {
@@ -143662,6 +144520,11 @@
                 },
                 "observed_span_count": {
                     "title": "Observed span count",
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "observed_call_count": {
+                    "title": "Observed call count",
                     "type": "integer",
                     "minimum": 0
                 },
@@ -143765,7 +144628,6 @@
                 "job_id",
                 "generation",
                 "attempt_id",
-                "trace_id",
                 "engine_version",
                 "read_cutoff",
                 "memory_snapshot_id",
@@ -143788,8 +144650,18 @@
                     "title": "Contract version",
                     "type": "string",
                     "enum": [
-                        "omega-investigation/v1"
+                        "omega-investigation/v1",
+                        "omega-simulation/v1"
                     ]
+                },
+                "workload_type": {
+                    "title": "Workload type",
+                    "type": "string",
+                    "enum": [
+                        "trace",
+                        "simulation_test_execution"
+                    ],
+                    "default": "trace"
                 },
                 "organization_id": {
                     "title": "Organization id",
@@ -143825,7 +144697,14 @@
                 "trace_id": {
                     "title": "Trace id",
                     "type": "string",
-                    "format": "uuid"
+                    "format": "uuid",
+                    "x-nullable": true
+                },
+                "test_execution_id": {
+                    "title": "Test execution id",
+                    "type": "string",
+                    "format": "uuid",
+                    "x-nullable": true
                 },
                 "engine_version": {
                     "title": "Engine version",
@@ -143872,6 +144751,11 @@
                         "failure",
                         "unknown"
                     ]
+                },
+                "error_message": {
+                    "title": "Error message",
+                    "type": "string",
+                    "x-nullable": true
                 },
                 "findings": {
                     "type": "array",
@@ -147100,7 +147984,8 @@
                         "dashboard",
                         "eval_run",
                         "dataset",
-                        "project"
+                        "project",
+                        "call_execution"
                     ],
                     "readOnly": true
                 },
@@ -147174,7 +148059,8 @@
                     "enum": [
                         "trace",
                         "dashboard",
-                        "project"
+                        "project",
+                        "call_execution"
                     ]
                 },
                 "resource_id": {
@@ -147268,7 +148154,8 @@
                         "dashboard",
                         "eval_run",
                         "dataset",
-                        "project"
+                        "project",
+                        "call_execution"
                     ],
                     "readOnly": true
                 },
@@ -147555,7 +148442,8 @@
                         "dashboard",
                         "eval_run",
                         "dataset",
-                        "project"
+                        "project",
+                        "call_execution"
                     ]
                 },
                 "resource_id": {
@@ -149342,6 +150230,187 @@
                 "refresh": {
                     "title": "Refresh",
                     "description": "Recompute and atomically replace the last exact graph snapshot.",
+                    "type": "boolean",
+                    "default": false
+                }
+            }
+        },
+        "TraceGraphDataRequest": {
+            "required": [
+                "project_id",
+                "req_data_config"
+            ],
+            "type": "object",
+            "properties": {
+                "project_id": {
+                    "title": "Project id",
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "filters": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "column_id": {
+                                "type": "string",
+                                "description": "Column or attribute id to filter on."
+                            },
+                            "property_id": {
+                                "type": "string",
+                                "description": "Optional stable namespaced Property Registry identity."
+                            },
+                            "display_name": {
+                                "type": "string",
+                                "description": "Optional UI label for chips and saved views."
+                            },
+                            "source": {
+                                "type": "string",
+                                "description": "Optional source surface for mixed-source filters, for example traces, datasets, or simulation."
+                            },
+                            "output_type": {
+                                "type": "string",
+                                "description": "Optional metric output type metadata used by eval and annotation filters."
+                            },
+                            "filter_config": {
+                                "type": "object",
+                                "properties": {
+                                    "filter_type": {
+                                        "type": "string",
+                                        "description": "Canonical field type, for example text, number, boolean, datetime, categorical, thumbs, annotator, array, or map. Legacy json is value-sensitive for SPAN_ATTRIBUTE filters: list values become array and object values become map."
+                                    },
+                                    "filter_op": {
+                                        "type": "string",
+                                        "description": "Canonical operator from api_contracts/filter_contract.json, for example equals, not_equals, in, not_in, between, not_between, is_null, or is_not_null."
+                                    },
+                                    "filter_value": {
+                                        "description": "Scalar, list, range tuple, boolean, or null depending on filter_op and filter_type."
+                                    },
+                                    "col_type": {
+                                        "type": "string",
+                                        "description": "Column family such as SYSTEM_METRIC, SPAN_ATTRIBUTE, EVAL_METRIC, ANNOTATION, or NORMAL."
+                                    },
+                                    "attribute_value_types": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "enum": [
+                                                "string",
+                                                "number",
+                                                "boolean"
+                                            ],
+                                            "x-nullable": true
+                                        },
+                                        "description": "Optional storage-family provenance aligned one-for-one with filter_value for mixed SPAN_ATTRIBUTE in/not_in filters. Null entries retain filter_type semantics for manually entered values."
+                                    }
+                                },
+                                "required": [
+                                    "filter_type",
+                                    "filter_op"
+                                ],
+                                "additionalProperties": false
+                            }
+                        },
+                        "required": [
+                            "column_id",
+                            "filter_config"
+                        ],
+                        "additionalProperties": false
+                    },
+                    "default": [],
+                    "description": "On trace, span, session, graph, and eval-task bounded reads, created_at/start_time datetime filters support equals, greater_than, greater_than_or_equal, less_than, less_than_or_equal, between, not_equals, not_between, is_null, and is_not_null. Missing bounds retain the finite default window: 30 days ago for the lower bound and request-time now for the upper bound. Between and not_between use half-open [start, end) ranges; not_equals excludes one DateTime64(6) microsecond. Because the physical created_at/start_time field is non-null, is_null returns an exact empty result without a ClickHouse read and is_not_null preserves the base window. Valid contradictions also return an exact empty result.",
+                    "x-boundedDatetimeOperators": [
+                        "between",
+                        "equals",
+                        "greater_than",
+                        "greater_than_or_equal",
+                        "is_not_null",
+                        "is_null",
+                        "less_than",
+                        "less_than_or_equal",
+                        "not_between",
+                        "not_equals"
+                    ]
+                },
+                "interval": {
+                    "title": "Interval",
+                    "type": "string",
+                    "enum": [
+                        "hour",
+                        "day",
+                        "week",
+                        "month"
+                    ],
+                    "default": "day"
+                },
+                "property": {
+                    "title": "Property",
+                    "type": "string",
+                    "default": "average"
+                },
+                "req_data_config": {
+                    "title": "Req data config",
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string"
+                        },
+                        "type": {
+                            "type": "string",
+                            "enum": [
+                                "SYSTEM_METRIC",
+                                "EVAL",
+                                "ANNOTATION"
+                            ]
+                        },
+                        "output_type": {
+                            "type": "string"
+                        },
+                        "eval_output_type": {
+                            "type": "string"
+                        },
+                        "choices": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "value": {},
+                        "filter_op": {
+                            "type": "string"
+                        },
+                        "filter_value": {},
+                        "property_id": {
+                            "type": "string",
+                            "description": "Stable Property Registry identity."
+                        },
+                        "source": {
+                            "type": "string",
+                            "enum": [
+                                "traces",
+                                "sessions"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "id",
+                        "type"
+                    ],
+                    "additionalProperties": false
+                },
+                "observe_type": {
+                    "title": "Observe type",
+                    "description": "Population the graph counts: every trace, or only voice calls (traces whose root span is a conversation), exactly as list_voice_calls selects them.",
+                    "type": "string",
+                    "enum": [
+                        "trace",
+                        "voice"
+                    ],
+                    "default": "trace"
+                },
+                "remove_simulation_calls": {
+                    "title": "Remove simulation calls",
+                    "description": "Voice graphs only: exclude calls placed by a simulator phone, exactly as list_voice_calls' remove_simulation_calls does.",
                     "type": "boolean",
                     "default": false
                 }

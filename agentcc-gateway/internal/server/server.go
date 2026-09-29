@@ -58,6 +58,7 @@ type Server struct {
 	TenantStore      *tenant.Store
 	OrgProviderCache *providers.OrgProviderCache
 	asyncWorker      *async.Worker
+	shadowFlusher    *routing.ShadowFlusher
 	ready            atomic.Bool
 }
 
@@ -185,8 +186,8 @@ func New(cfg *config.Config, configPath string, registry *providers.Registry, en
 					flushInterval = 60 * time.Second
 				}
 				webhookURL := routing.FormatWebhookURL(cfg.ControlPlane.URL)
-				flusher := routing.NewShadowFlusher(shadowStore, webhookURL, cfg.ControlPlane.WebhookSecret, flushInterval)
-				go flusher.Run(context.Background())
+				s.shadowFlusher = routing.NewShadowFlusher(shadowStore, webhookURL, cfg.ControlPlane.WebhookSecret, flushInterval)
+				go s.shadowFlusher.Run(context.Background())
 				slog.Info("shadow result capture enabled",
 					"max_stored", maxStored,
 					"flush_interval", flushInterval.String(),
@@ -927,7 +928,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		s.asyncWorker.Stop()
 	}
 
-	if err := s.httpServer.Shutdown(ctx); err != nil {
+	err := s.httpServer.Shutdown(ctx)
+	// Send the shadow results captured so far with what is left of ctx; if
+	// the requests used it all, this logs how many were not sent.
+	if s.shadowFlusher != nil {
+		s.shadowFlusher.Close(ctx)
+	}
+	if err != nil {
 		return fmt.Errorf("shutdown error: %w", err)
 	}
 

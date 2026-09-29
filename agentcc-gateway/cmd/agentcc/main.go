@@ -665,8 +665,11 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		sig := <-sigCh
+		signal.Stop(sigCh) // a second signal stops the process at once
 		slog.Info("received signal", "signal", sig)
 
 		// Stop periodic sync.
@@ -675,12 +678,14 @@ func main() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 		defer cancel()
 
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			slog.Error("shutdown error", "error", err)
-			os.Exit(1)
+		// When requests outlast shutdown_timeout, still deliver what is
+		// buffered below, then exit 1.
+		shutdownErr := srv.Shutdown(shutdownCtx)
+		if shutdownErr != nil {
+			slog.Error("shutdown error", "error", shutdownErr)
 		}
 
-		// Drain buffered trace records.
+		// Drain buffered trace records and deliver the buffered request logs.
 		loggingPlugin.Close()
 		if auditPlugin != nil {
 			auditPlugin.Close()
@@ -691,12 +696,18 @@ func main() {
 		if redisClient != nil {
 			redisClient.Close()
 		}
+		if shutdownErr != nil {
+			os.Exit(1)
+		}
 	}()
 
 	if err := srv.Start(); err != nil {
 		slog.Error("server error", "error", err)
 		os.Exit(1)
 	}
+	// Start returns as soon as the shutdown begins. Wait for the rest of it
+	// (in-flight requests, the last request-log flush) before exiting.
+	<-shutdownDone
 }
 
 // findRuleConfig extracts the Config map for a named guardrail rule.

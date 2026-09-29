@@ -17,6 +17,7 @@ from django.db.models import (
     F,
     FloatField,
     Func,
+    IntegerField,
     JSONField,
     Max,
     OuterRef,
@@ -42,7 +43,10 @@ from django.db.models.lookups import (
 
 from model_hub.models.develop_dataset import Cell
 from simulate.models import CallExecution, SimulateEvalConfig, TestExecution
+from simulate.models.hosted_harness import HostedHarnessScenario
 from simulate.semantics import SupportedProviders
+from simulate.services.harness_scenarios import GROUP_BY as SCENARIO_GROUP_BY
+from simulate.services.harness_scenarios import level_label
 from simulate.services.run_reliability_v3 import build_reliability
 from simulate.services.run_results_v3 import build_evaluation_catalog
 from simulate.services.run_results_v3_expressions import (
@@ -56,12 +60,41 @@ from simulate.services.run_results_v3_scoring import (
 )
 
 OUTCOMES = ("passed", "failed", "error", "inconclusive")
-GROUP_FIELDS = {"goal": "result_goal", "status": "result_outcome"}
 # Outcomes that judge the agent. Errored and inconclusive calls never ran to a verdict,
 # so they are reported as run health rather than counted against the agent.
 EVALUATED_OUTCOMES = ("passed", "failed")
 # Fewer evaluated calls than this and a slice's pass rate is too noisy to rank.
 MIN_RANKED_SLICE = 3
+# The Scenarios tab's axes, plus the run's own outcome.
+GROUP_FIELDS = {
+    **{axis: f"result_{axis}" for axis in SCENARIO_GROUP_BY},
+    "status": "result_outcome",
+}
+UNGROUPED = "Ungrouped"
+LIST_AXES = frozenset({"sub_goal"})
+
+
+def _authored_level(field: str):
+    """One authored-scenario value for grouping, read from its JSON document."""
+    head, _, tail = field.partition(".")
+    return KeyTextTransform(tail, head)
+
+
+def _group_q(group_by: str, key: str) -> Q:
+    field = GROUP_FIELDS[group_by]
+    if group_by not in LIST_AXES:
+        return Q(**{field: key})
+    if key == UNGROUPED:
+        return Q(**{field: []})
+    return Q(**{f"{field}__contains": [key]})
+
+
+def _group_keys(group_by: str, value: Any) -> list[str]:
+    if group_by not in LIST_AXES:
+        return [str(value)]
+    held = value if isinstance(value, list) else []
+    keys = [str(one).strip() for one in held if str(one or "").strip()]
+    return list(dict.fromkeys(keys)) or [UNGROUPED]
 
 
 def _json_value(field: str, *keys: str):
@@ -334,7 +367,58 @@ def run_calls_queryset(
         ),
         "created_at",
     )
+    # A hosted call's use case, sub-goals, persona and coverage live on its
+    # authored scenario: linked to the call on a direct run, or found by the
+    # call's scenario key on the run's own job or its parent environment.
+    own_run = Q(job__test_execution_id=OuterRef("test_execution_id"))
+    own_environment = Q(
+        job__simulation_runs__test_execution_id=OuterRef("test_execution_id")
+    )
+    authored = (
+        HostedHarnessScenario.no_workspace_objects.filter(
+            Q(call_execution_id=OuterRef("pk"))
+            | Q(own_run | own_environment, scenario_key=OuterRef("result_scenario_key"))
+        )
+        .annotate(
+            match_rank=Case(
+                When(call_execution_id=OuterRef("pk"), then=Value(0)),
+                When(own_run, then=Value(1)),
+                default=Value(2),
+                output_field=IntegerField(),
+            )
+        )
+        .order_by("match_rank", "-created_at")
+    )
     queryset = CallExecution.objects.filter(execution_filter).annotate(
+        result_scenario_key=_json_text("call_metadata", "harness_scenario_key")
+    )
+    queryset = queryset.annotate(
+        **{
+            GROUP_FIELDS[axis]: Coalesce(
+                NullIf(
+                    Subquery(
+                        authored.values(level=_authored_level(field))[:1],
+                        output_field=TextField(),
+                    ),
+                    Value(""),
+                ),
+                Value(UNGROUPED),
+                output_field=CharField(),
+            )
+            for axis, field in SCENARIO_GROUP_BY.items()
+            if axis != "goal" and axis not in LIST_AXES
+        },
+        **{
+            GROUP_FIELDS[axis]: Coalesce(
+                Subquery(
+                    authored.values(SCENARIO_GROUP_BY[axis])[:1],
+                    output_field=JSONField(),
+                ),
+                Value([], output_field=JSONField()),
+                output_field=JSONField(),
+            )
+            for axis in LIST_AXES
+        },
         result_eval_outcome=Case(
             When(failed_eval, then=Value("failed")),
             When(errored_eval, then=Value("inconclusive")),
@@ -343,6 +427,10 @@ def run_calls_queryset(
             output_field=CharField(),
         ),
         result_goal=Coalesce(
+            NullIf(
+                Subquery(authored.values("use_case")[:1], output_field=TextField()),
+                Value(""),
+            ),
             _json_text("call_metadata", "use_case"),
             _json_text("call_metadata", "goal"),
             _json_text("call_metadata", "row_data", "use_case"),
@@ -477,6 +565,8 @@ def apply_run_call_query(queryset: QuerySet, query: dict[str, Any]) -> QuerySet:
             | Q(error_message__icontains=search)
         )
 
+    if values := filters.get("call_execution_id"):
+        queryset = queryset.filter(id__in=values)
     if values := filters.get("goal"):
         queryset = queryset.filter(result_goal__in=values)
     if values := filters.get("status"):
@@ -502,7 +592,7 @@ def apply_run_call_query(queryset: QuerySet, query: dict[str, Any]) -> QuerySet:
     group_by = query.get("group_by")
     group_key = query.get("group_key")
     if group_by in GROUP_FIELDS and group_key is not None:
-        queryset = queryset.filter(**{GROUP_FIELDS[group_by]: group_key})
+        queryset = queryset.filter(_group_q(group_by, group_key))
 
     ordering = str(query.get("ordering") or "-started_at")
     descending = ordering.startswith("-")
@@ -656,17 +746,35 @@ def group_run_calls(
         score = _eval_score(eval_id)
         expressions[f"eval_{index}_average"] = Avg(score)
         expressions[f"eval_{index}_scored"] = Count(score)
-    summaries = queryset.order_by().values(field).annotate(**expressions)
+    page_ids = [str(row["id"]) for row in page_rows]
+    keys_by_id = {
+        str(call_id): _group_keys(group_by, value)
+        for call_id, value in queryset.filter(id__in=page_ids).values_list("id", field)
+    }
     ids_by_key: dict[str, list[str]] = {}
-    page_field = "goal" if group_by == "goal" else "outcome"
-    for row in page_rows:
-        ids_by_key.setdefault(str(row[page_field]), []).append(str(row["id"]))
+    for call_id in page_ids:
+        for key in keys_by_id.get(call_id, []):
+            ids_by_key.setdefault(key, []).append(call_id)
+    if group_by in LIST_AXES:
+        summaries = [
+            {
+                field: key,
+                **queryset.filter(_group_q(group_by, key))
+                .order_by()
+                .aggregate(**expressions),
+            }
+            for key in ids_by_key
+        ]
+    else:
+        summaries = queryset.order_by().values(field).annotate(**expressions)
     labels = {
         "passed": "Passed",
         "failed": "Failed",
         "error": "Errored",
         "inconclusive": "Not measured",
     }
+    # Levels read as the Scenarios tab names them ("none" is "No attack").
+    labelled_axis = group_by in {"sub_goal", "attack", "task"}
     groups = []
     for values in summaries:
         key = str(values[field])
@@ -684,7 +792,11 @@ def group_run_calls(
         groups.append(
             {
                 "key": key,
-                "label": labels.get(key, key),
+                "label": (
+                    level_label(key)
+                    if labelled_axis and key != UNGROUPED
+                    else labels.get(key, key)
+                ),
                 "result_ids": ids_by_key[key],
                 "aggregates": {
                     "csat": values.get("csat_average"),

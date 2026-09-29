@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import uuid
 from collections.abc import Iterator
 from itertools import islice
 from typing import Any
@@ -21,12 +22,12 @@ from simulate.models import CallExecution, TestExecution
 from simulate.serializers.run_dashboard_v3 import RunDashboardV3Serializer
 from simulate.serializers.test_execution import CallExecutionDetailSerializer
 from simulate.services.run_results_v3 import (
-    GROUP_FIELDS,
     build_call_rows,
     build_evaluation_catalog,
     function_calls,
 )
 from simulate.services.run_results_v3_queries import (
+    GROUP_FIELDS,
     apply_run_call_query,
     build_run_analytics,
     group_run_calls,
@@ -84,7 +85,7 @@ class RunCallFiltersSerializer(serializers.Serializer):
     )
 
     def validate_filters(self, value):
-        allowed = {"goal", "sub_goal", "status", "goal_outcome"}
+        allowed = {"goal", "sub_goal", "status", "goal_outcome", "call_execution_id"}
         unknown = set(value) - allowed
         if unknown:
             raise serializers.ValidationError(
@@ -119,6 +120,13 @@ class RunCallFiltersSerializer(serializers.Serializer):
                 "Unsupported goal outcomes: "
                 f"{', '.join(sorted(invalid_goal_outcomes))}."
             )
+        for call_id in value.get("call_execution_id", []):
+            try:
+                uuid.UUID(call_id)
+            except ValueError as exc:
+                raise serializers.ValidationError(
+                    f"Invalid call_execution_id: {call_id}."
+                ) from exc
         return value
 
 
@@ -536,7 +544,14 @@ class RunCallsV3View(APIView):
             else filtered_summary
         )
         facets_cache_key = None
-        if execution.status == TestExecution.ExecutionStatus.COMPLETED:
+        # Facets span the whole run so filter options never vanish, except under
+        # a hand-off of specific calls, which scopes the counts too.
+        facet_queryset = base_queryset
+        if call_ids := (query.get("filters") or {}).get("call_execution_id"):
+            facet_queryset = apply_run_call_query(
+                base_queryset, {"filters": {"call_execution_id": call_ids}}
+            )
+        elif execution.status == TestExecution.ExecutionStatus.COMPLETED:
             version = execution.completed_at or execution.updated_at
             facets_cache_key = (
                 f"simulate:v3:facets:{execution.id}:{version.timestamp()}"
@@ -552,10 +567,49 @@ class RunCallsV3View(APIView):
             "groups": group_run_calls(
                 filtered_queryset, query.get("group_by"), page_rows, columns
             ),
-            "facets": run_call_facets(base_queryset, facets_cache_key),
+            "facets": run_call_facets(facet_queryset, facets_cache_key),
             "evaluation_columns": columns,
         }
         return Response(response)
+
+
+def build_call_execution_detail(
+    call: CallExecution, request=None, workspace=None
+) -> dict[str, Any]:
+    """Build the v3 call-detail payload; shared-link resolve reuses it.
+
+    ``workspace`` scopes the error-localizer lookups when there is no request
+    workspace (a shared link passes its own).
+    """
+    row, _ = build_call_rows(call.test_execution, [call])
+    data = dict(
+        CallExecutionDetailSerializer(
+            call,
+            context={
+                "request": request,
+                "workspace": workspace,
+                "eval_configs": build_eval_configs_map(call),
+                "detail_mode": True,
+            },
+        ).data
+    )
+    normalized = row[0]
+    data.update(
+        {
+            "goal": normalized["goal"],
+            "scenario_details": normalized["scenario_details"],
+            "ideal_outcome": normalized["ideal_outcome"],
+            "conversation_branch": normalized["conversation_branch"],
+            "persona": normalized["persona"],
+            "persona_details": normalized["persona_details"],
+            "sub_goals": normalized["sub_goals"],
+            "outcome": normalized["outcome"],
+            "cost_breakdown_cents": normalized["cost_breakdown_cents"],
+            "evaluations": normalized["evaluations"],
+            "function_calls": function_calls(call),
+        }
+    )
+    return data
 
 
 class CallExecutionV3DetailView(APIView):
@@ -581,34 +635,7 @@ class CallExecutionV3DetailView(APIView):
             test_execution__run_test__organization=organization,
             test_execution__run_test__deleted=False,
         )
-        row, _ = build_call_rows(call.test_execution, [call])
-        data = dict(
-            CallExecutionDetailSerializer(
-                call,
-                context={
-                    "request": request,
-                    "eval_configs": build_eval_configs_map(call),
-                    "detail_mode": True,
-                },
-            ).data
-        )
-        normalized = row[0]
-        data.update(
-            {
-                "goal": normalized["goal"],
-                "scenario_details": normalized["scenario_details"],
-                "ideal_outcome": normalized["ideal_outcome"],
-                "conversation_branch": normalized["conversation_branch"],
-                "persona": normalized["persona"],
-                "persona_details": normalized["persona_details"],
-                "sub_goals": normalized["sub_goals"],
-                "outcome": normalized["outcome"],
-                "cost_breakdown_cents": normalized["cost_breakdown_cents"],
-                "evaluations": normalized["evaluations"],
-                "function_calls": function_calls(call),
-            }
-        )
-        return Response(data)
+        return Response(build_call_execution_detail(call, request=request))
 
 
 class RunAnalyticsV3View(APIView):

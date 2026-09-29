@@ -341,12 +341,15 @@ export default function ScenariosStep({ env, envState, patch, locked = false, on
   };
 
   return (
-    <Box sx={{ p: 2 }}>
+    // The tab's height: the header and coverage keep their size and the
+    // scenario card fills the rest, its table scrolling on its own. The card
+    // never drops below a few rows; on a short panel the panel scrolls instead.
+    <Box sx={{ p: 2, height: "100%", display: "flex", flexDirection: "column" }}>
       <Stack
         direction={{ xs: "column", sm: "row" }}
         alignItems={{ sm: "center" }}
         spacing={1.5}
-        sx={{ mb: 2 }}
+        sx={{ mb: 2, flexShrink: 0 }}
       >
         <Box flex={1} minWidth={0}>
           <Stack direction="row" alignItems="baseline" spacing={0.75}>
@@ -382,7 +385,7 @@ export default function ScenariosStep({ env, envState, patch, locked = false, on
           {loadFailed && (
             <Alert
               severity="error"
-              sx={{ mb: 2, typography: "s3" }}
+              sx={{ mb: 2, typography: "s3", flexShrink: 0 }}
               action={(
                 <Button color="inherit" size="small" onClick={retryLoad}>
                   Retry
@@ -392,17 +395,19 @@ export default function ScenariosStep({ env, envState, patch, locked = false, on
               Couldn&apos;t refresh the scenarios. Showing the last loaded list.
             </Alert>
           )}
-          <Box sx={{ mb: 2 }}>
+          <Box sx={{ mb: 2, flexShrink: 0 }}>
             <CoverageMatrix jobId={env?.id} search={debouncedQuery} filters={filters} />
           </Box>
 
-          <SectionCard sx={{ mb: 2 }}>
+          <SectionCard
+            sx={{ flex: 1, minHeight: 320, display: "flex", flexDirection: "column" }}
+          >
             {/* The bulk-action bar OVERLAYS the toolbar's own row while a
                 selection is active — the toolbar stays mounted underneath and
                 keeps defining the row height, so it's exactly the same height
                 with or without a selection: zero layout shift, the header never
                 moves. Clearing the selection reveals the toolbar again. */}
-            <Box sx={{ position: "relative" }}>
+            <Box sx={{ position: "relative", flexShrink: 0 }}>
               <Box aria-hidden={!locked && sel.count > 0 ? true : undefined}>
                 <ScenarioToolbar
                   query={query}

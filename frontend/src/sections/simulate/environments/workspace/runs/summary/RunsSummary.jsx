@@ -1,40 +1,71 @@
 import PropTypes from "prop-types";
 import { useState } from "react";
 import {
-  Box, Stack, Typography, Button, TextField, MenuItem, Checkbox, ListItemText,
+  Box, Stack, Typography, Button, TextField, MenuItem, Checkbox, ListItemText, CircularProgress,
 } from "@mui/material";
 import Iconify from "src/components/iconify";
 import CustomTooltip from "src/components/tooltip";
 import SectionCard from "../../../components/SectionCard";
 import { useRunsSummary } from "./useRunsSummary";
 import SummaryGraph from "./SummaryGraph";
+import SummaryLegend from "./SummaryLegend";
 import SummaryTable from "./SummaryTable";
 
-// The populated Runs tab: every run of the environment as one summary — the
-// eval-score trend graph over a comparison table. Replaces the pre-flight card
-// once at least one run exists. Comparing/winner/trials are later phases,
+// The Runs tab: every run of the environment as one summary — the eval-score
+// trend graph over the runs table. Choosing a winner is a later phase,
 // surfaced as "coming soon" so the shell matches the design without faking the
 // behaviour.
+// Title, legend, graph and the runs bar (~440px) plus ~320px of table rows.
+const MIN_SUMMARY_PX = 760;
+// How many eval lines the graph draws before the user picks their own.
+const DEFAULT_SHOWN_EVALS = 5;
+
 export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
-  const { rows, rowsChrono, evals, series } = useRunsSummary(env, envState);
+  const { rows, rowsChrono, evals, series, isLoading } = useRunsSummary(env, envState);
   const scenarioCount = envState.scenarios?.length ?? 0;
 
-  // Which eval lines to draw. Defaults to all; the last one cannot be unticked
-  // (an empty chart reads as a bug, not a choice).
-  const [hiddenIds, setHiddenIds] = useState([]);
-  const shown = evals.filter((e) => !hiddenIds.includes(e.id));
+  // Which eval lines to draw. Until the user picks, the first five; the last
+  // one cannot be unticked (an empty chart reads as a bug, not a choice).
+  const [pickedIds, setPickedIds] = useState(null);
+  const [highlightedId, setHighlightedId] = useState(null);
+  const shown = pickedIds
+    ? evals.filter((e) => pickedIds.includes(e.id))
+    : evals.slice(0, DEFAULT_SHOWN_EVALS);
   const shownSeries = series.filter((s) => shown.some((e) => e.id === s.id));
-  const categories = rowsChrono.map((r) => r.label);
+  const categories = rowsChrono.map((r, i) =>
+    i === rowsChrono.length - 1 ? `${r.label} · latest` : r.label,
+  );
 
   const toggleEval = (ids) => {
     // ids = the currently-checked set from the multi-select.
     if (!ids.length) return; // keep at least one line
-    setHiddenIds(evals.filter((e) => !ids.includes(e.id)).map((e) => e.id));
+    setPickedIds(ids);
   };
 
+  // A deep link to ?tab=runs keeps the tab while the runs load; show that
+  // they are loading rather than an empty summary.
+  if (isLoading && rows.length === 0) {
+    return (
+      <Stack alignItems="center" sx={{ py: 6 }}>
+        <CircularProgress size={20} />
+      </Stack>
+    );
+  }
+
   return (
-    <Box sx={{ p: 2 }}>
-      <Stack direction="row" alignItems="flex-start" spacing={2} sx={{ mb: 3 }}>
+    // The tab's height: the header, legend and graph keep their size and the
+    // runs table takes the rest, scrolling on its own, so the graph stays in
+    // view however many runs there are. On a short panel it stops shrinking at
+    // room for the graph plus a few table rows, and the panel scrolls instead.
+    <Box
+      sx={{
+        p: 2,
+        height: `max(100%, ${MIN_SUMMARY_PX}px)`,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <Stack direction="row" alignItems="flex-start" spacing={2} sx={{ mb: 3, flexShrink: 0 }}>
         <Box flex={1} minWidth={0}>
           <Typography sx={{ typography: "m2", fontWeight: "fontWeightSemiBold" }}>
             Simulations summary
@@ -65,9 +96,13 @@ export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
         </Stack>
       </Stack>
 
-      <SectionCard>
+      {/* The graph's tooltip grows down past the chart; a clipping card
+          would cut it off. */}
+      <SectionCard
+        sx={{ overflow: "visible", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+      >
         {/* eval filter + legend */}
-        <Stack direction="row" alignItems="center" spacing={2} sx={{ px: 2.5, pt: 1.5, pb: 0.5 }}>
+        <Stack direction="row" alignItems="center" spacing={2} sx={{ px: 2.5, pt: 1.5, pb: 0.5, flexShrink: 0 }}>
           {evals.length > 0 && (
             <TextField
               select size="small"
@@ -78,7 +113,7 @@ export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
                 renderValue: (ids) =>
                   ids.length === evals.length
                     ? `All ${evals.length} evals`
-                    : evals.filter((x) => ids.includes(x.id)).map((x) => x.name).join(", "),
+                    : `${ids.length} of ${evals.length} evals`,
               }}
               sx={{ width: 200, flexShrink: 0, "& .MuiInputBase-input": { typography: "s2", py: 0.5 } }}
             >
@@ -94,24 +129,14 @@ export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
               })}
             </TextField>
           )}
-          <Stack direction="row" spacing={1.5} flexWrap="wrap" rowGap={0.75} sx={{ flex: 1, minWidth: 0, justifyContent: "flex-end" }}>
-            {shown.map((e) => (
-              <Stack key={e.id} direction="row" alignItems="center" spacing={0.625}>
-                <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: e.color, flexShrink: 0 }} />
-                <Typography noWrap sx={{ typography: "s3", color: "text.secondary" }}>{e.name}</Typography>
-              </Stack>
-            ))}
-          </Stack>
+          <SummaryLegend evals={shown} onHighlight={setHighlightedId} />
         </Stack>
 
-        <SummaryGraph categories={categories} series={shownSeries} />
+        <SummaryGraph categories={categories} series={shownSeries} highlightedId={highlightedId} />
 
-        <Box sx={{ px: 2.5, py: 1.25, borderTop: "1px solid", borderColor: "divider" }}>
+        <Box sx={{ px: 2.5, py: 1.25, borderTop: "1px solid", borderColor: "divider", flexShrink: 0 }}>
           <Typography sx={{ typography: "s1", fontWeight: "fontWeightSemiBold" }}>
             Runs ({rows.length})
-          </Typography>
-          <Typography sx={{ typography: "s3", color: "text.subtitle" }}>
-            Select two or more to compare them scenario by scenario
           </Typography>
         </Box>
 

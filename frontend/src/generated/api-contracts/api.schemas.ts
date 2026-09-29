@@ -4090,6 +4090,8 @@ export interface SetupCheckApi {
   status: SetupCheckApiStatus;
   required: boolean;
   detail: string;
+  fix: string;
+  docs_url: string;
 }
 
 export interface SetupChecksResultApi {
@@ -8700,6 +8702,50 @@ export interface DuplicateDatasetResponseApi {
   result: DuplicateDatasetResultApi;
 }
 
+export type DatasetLimitCheckFailedErrorApiType =
+  (typeof DatasetLimitCheckFailedErrorApiType)[keyof typeof DatasetLimitCheckFailedErrorApiType];
+
+export const DatasetLimitCheckFailedErrorApiType = {
+  validation_error: "validation_error",
+  authentication_error: "authentication_error",
+  payment_required: "payment_required",
+  entitlement_error: "entitlement_error",
+  permission_error: "permission_error",
+  not_found: "not_found",
+  conflict: "conflict",
+  client_error: "client_error",
+  rate_limit: "rate_limit",
+  server_error: "server_error",
+  service_unavailable: "service_unavailable",
+  timeout: "timeout",
+  api_error: "api_error",
+} as const;
+
+export type DatasetLimitCheckFailedErrorApiCode =
+  (typeof DatasetLimitCheckFailedErrorApiCode)[keyof typeof DatasetLimitCheckFailedErrorApiCode];
+
+export const DatasetLimitCheckFailedErrorApiCode = {
+  dataset_limit_check_failed: "dataset_limit_check_failed",
+} as const;
+
+export type DatasetLimitCheckFailedErrorApiDetails = {
+  [key: string]: string[];
+};
+
+export interface DatasetLimitCheckFailedErrorApi {
+  status?: boolean;
+  type?: DatasetLimitCheckFailedErrorApiType;
+  code?: DatasetLimitCheckFailedErrorApiCode;
+  detail?: string;
+  /** @minLength 1 */
+  result?: string;
+  /** @minLength 1 */
+  message?: string;
+  error?: string;
+  attr?: string;
+  details?: DatasetLimitCheckFailedErrorApiDetails;
+}
+
 export interface ExtractEntitiesRequestApi {
   column_id: string;
   /** @minLength 1 */
@@ -11229,8 +11275,11 @@ export const EvalUsageStatsResponseResultApiCompleteness = {
 export interface EvalUsageStatsApi {
   total_runs: number;
   runs_period: number;
+  /** Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period. */
   success_count: number;
+  /** Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the eval logs. */
   error_count: number;
+  /** Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0. */
   pass_rate: number;
 }
 
@@ -14401,6 +14450,8 @@ export interface BulkCreateScoresApi {
   span_notes?: string;
   span_notes_source_id?: string;
   queue_item_id?: string;
+  /** Tracer project the trace / span was opened from. The same id can exist in several projects; when supplied, the score is written to that project's copy. */
+  project_id?: string;
 }
 
 export interface BulkCreateScoresResultApi {
@@ -17342,20 +17393,11 @@ export const HarnessEnvironmentSelectedEvalApiModality = {
   any: "any",
 } as const;
 
-export type HarnessEnvironmentEvalInputApiSource =
-  (typeof HarnessEnvironmentEvalInputApiSource)[keyof typeof HarnessEnvironmentEvalInputApiSource];
-
-export const HarnessEnvironmentEvalInputApiSource = {
-  voice_recording: "voice_recording",
-  transcript: "transcript",
-  agent_prompt: "agent_prompt",
-  scenario_columnssituationvalue: "scenario_columns.situation.value",
-} as const;
-
 export interface HarnessEnvironmentEvalInputApi {
   /** @minLength 1 */
   key: string;
-  source: HarnessEnvironmentEvalInputApiSource;
+  /** @minLength 1 */
+  source: string;
   /** @minLength 1 */
   label: string;
 }
@@ -21762,6 +21804,136 @@ export interface TestExecutionColumnOrderResponseApi {
   readonly column_order?: readonly ColumnOrderApi[];
 }
 
+export type TestExecutionDebugAnalysisResponseApiStatus =
+  (typeof TestExecutionDebugAnalysisResponseApiStatus)[keyof typeof TestExecutionDebugAnalysisResponseApiStatus];
+
+export const TestExecutionDebugAnalysisResponseApiStatus = {
+  not_requested: "not_requested",
+  pending: "pending",
+  running: "running",
+  completed: "completed",
+  failed: "failed",
+} as const;
+
+export interface DebugAnalysisCoverageApi {
+  /** @minLength 1 */
+  scope: string;
+  observed_call_count: number;
+  read_complete: boolean;
+}
+
+export interface DebugAnalysisReportApi {
+  id: string;
+  /** @minLength 1 */
+  execution_status: string;
+  /** @minLength 1 */
+  outcome: string;
+  coverage: DebugAnalysisCoverageApi;
+  /** @minLength 1 */
+  error_message: string;
+  /** @minLength 1 */
+  grouping_status: string;
+  recorded_at: string;
+}
+
+export interface DebugAnalysisClusterApi {
+  id: string;
+  /** @minLength 1 */
+  cluster_id: string;
+  /** @minLength 1 */
+  title: string;
+  /** @minLength 1 */
+  error_type: string;
+}
+
+export interface DebugAnalysisEvidenceApi {
+  /** @minLength 1 */
+  evidence_id: string;
+  call_execution_id: string;
+  /** @minLength 1 */
+  excerpt: string;
+}
+
+export interface DebugAnalysisFindingApi {
+  id: string;
+  /** @minLength 1 */
+  kind: string;
+  /** @minLength 1 */
+  statement: string;
+  /** @minLength 1 */
+  recovery: string;
+  /** @minLength 1 */
+  category: string;
+  /** @minLength 1 */
+  group_label: string;
+  /** @minLength 1 */
+  fix_layer: string;
+  /** @minLength 1 */
+  confidence: string;
+  /** @minLength 1 */
+  goal: string;
+  cluster: DebugAnalysisClusterApi;
+  evidence: DebugAnalysisEvidenceApi[];
+}
+
+export interface DebugAnalysisSummaryApi {
+  measured_call_count: number;
+  broken_goal_count: number;
+  broken_call_count: number;
+  one_off_count: number;
+  excluded_call_ids: string[];
+  unanalyzed_call_ids: string[];
+}
+
+export interface DebugAnalysisWayApi {
+  /** @minLength 1 */
+  id: string;
+  /** @minLength 1 */
+  title: string;
+  /** @minLength 1 */
+  phrase: string;
+  call_ids: string[];
+}
+
+export interface DebugAnalysisGoalApi {
+  /** @minLength 1 */
+  goal: string;
+  /** @minLength 1 */
+  label: string;
+  /** @minLength 1 */
+  criteria: string;
+  broken_call_ids: string[];
+  tested_call_count: number;
+  ways: DebugAnalysisWayApi[];
+  unexplained_call_ids: string[];
+}
+
+export interface TestExecutionDebugAnalysisResponseApi {
+  test_execution_id: string;
+  status: TestExecutionDebugAnalysisResponseApiStatus;
+  generation: number;
+  job_id: string;
+  /** @minLength 1 */
+  error_message: string;
+  report: DebugAnalysisReportApi;
+  findings: DebugAnalysisFindingApi[];
+  summary: DebugAnalysisSummaryApi;
+  goals: DebugAnalysisGoalApi[];
+  one_offs: DebugAnalysisWayApi[];
+}
+
+export interface TestExecutionDebugAnalysisNotFoundApi {
+  /** @minLength 1 */
+  detail: string;
+}
+
+export interface TestExecutionDebugAnalysisErrorApi {
+  /** @minLength 1 */
+  code: string;
+  /** @minLength 1 */
+  detail: string;
+}
+
 export interface EvalExplanationClusterApi {
   /** @minLength 1 */
   readonly kind?: string;
@@ -24350,11 +24522,18 @@ export interface EvalTaskUsageStatsApi {
   total_runs: number;
   /** @minimum 0 */
   runs_period: number;
-  /** @minimum 0 */
+  /**
+   * Deprecated compatibility field. Usage counts only successful runs, so this always equals runs_period.
+   * @minimum 0
+   */
   success_count: number;
-  /** @minimum 0 */
+  /**
+   * Deprecated compatibility field. Usage counts only successful runs, so this is always 0; failed runs stay in the task logs.
+   * @minimum 0
+   */
   error_count: number;
   /**
+   * Deprecated compatibility field. Usage counts only successful runs, so this is 100 when runs_period is above 0, otherwise 0.
    * @minimum 0
    * @maximum 100
    */
@@ -25456,6 +25635,16 @@ export interface InvestigationControlErrorApi {
   details?: InvestigationControlErrorApiDetails;
 }
 
+export interface SimulationEvidenceRequestApi {
+  /**
+   * @minLength 1
+   * @maxLength 255
+   */
+  lease_token: string;
+  /** @minimum 0 */
+  cursor: number;
+}
+
 export interface ClaimInvestigationsRequestApi {
   /**
    * @minLength 1
@@ -25473,6 +25662,14 @@ export interface ClaimInvestigationsRequestApi {
    */
   limit: number;
 }
+
+export type InvestigationClaimApiWorkloadType =
+  (typeof InvestigationClaimApiWorkloadType)[keyof typeof InvestigationClaimApiWorkloadType];
+
+export const InvestigationClaimApiWorkloadType = {
+  trace: "trace",
+  simulation_test_execution: "simulation_test_execution",
+} as const;
 
 export interface InvestigationMemoryEntryApi {
   /**
@@ -25527,10 +25724,16 @@ export interface InvestigationLimitsApi {
 
 export interface InvestigationClaimApi {
   organization_id: string;
+  /** @minLength 1 */
+  organization_name?: string;
   workspace_id: string;
   project_id: string;
+  /** @minLength 1 */
+  project_name?: string;
   job_id: string;
-  trace_id: string;
+  workload_type?: InvestigationClaimApiWorkloadType;
+  trace_id?: string;
+  test_execution_id?: string;
   /** @minimum 1 */
   generation: number;
   attempt_id: string;
@@ -25898,6 +26101,15 @@ export type InvestigationResultApiContractVersion =
 
 export const InvestigationResultApiContractVersion = {
   "omega-investigation/v1": "omega-investigation/v1",
+  "omega-simulation/v1": "omega-simulation/v1",
+} as const;
+
+export type InvestigationResultApiWorkloadType =
+  (typeof InvestigationResultApiWorkloadType)[keyof typeof InvestigationResultApiWorkloadType];
+
+export const InvestigationResultApiWorkloadType = {
+  trace: "trace",
+  simulation_test_execution: "simulation_test_execution",
 } as const;
 
 export type InvestigationResultApiExecutionStatus =
@@ -25933,6 +26145,7 @@ export interface FindingAttributionRoleApi {
    * @maxLength 64
    */
   span_id?: string;
+  call_execution_id?: string;
   /** @maxItems 100 */
   evidence_ids: string[];
   /** @maxLength 600 */
@@ -25963,7 +26176,7 @@ export interface InvestigationFindingApi {
   statement: string;
   /**
    * @minLength 1
-   * @maxLength 128
+   * @maxLength 256
    */
   requirement_id?: string;
   /** @maxItems 100 */
@@ -25973,13 +26186,33 @@ export interface InvestigationFindingApi {
    * @maxLength 64
    */
   recovery: string;
+  /**
+   * @minLength 1
+   * @maxLength 100
+   */
+  category?: string;
+  /**
+   * @minLength 1
+   * @maxLength 100
+   */
+  group_label?: string;
+  /**
+   * @minLength 1
+   * @maxLength 50
+   */
+  fix_layer?: string;
+  /**
+   * @minLength 1
+   * @maxLength 2
+   */
+  confidence?: string;
   attribution: FindingAttributionApi;
 }
 
 export interface InvestigationRequirementCheckApi {
   /**
    * @minLength 1
-   * @maxLength 128
+   * @maxLength 256
    */
   requirement_id: string;
   /**
@@ -26006,7 +26239,8 @@ export interface InvestigationEvidenceReceiptApi {
    * @minLength 1
    * @maxLength 64
    */
-  span_id: string;
+  span_id?: string;
+  call_execution_id?: string;
   /**
    * @minLength 1
    * @maxLength 64
@@ -26034,11 +26268,13 @@ export interface InvestigationCoverageApi {
    * @minLength 1
    * @maxLength 255
    */
-  scope: string;
+  scope?: string;
   /** @minimum 0 */
-  observed_span_count: number;
+  observed_span_count?: number;
+  /** @minimum 0 */
+  observed_call_count?: number;
   read_complete: boolean;
-  future_arrivals_known: boolean;
+  future_arrivals_known?: boolean;
 }
 
 export interface InvestigationUsageApi {
@@ -26081,6 +26317,7 @@ export interface GatewayAccountingApi {
 
 export interface InvestigationResultApi {
   contract_version: InvestigationResultApiContractVersion;
+  workload_type?: InvestigationResultApiWorkloadType;
   organization_id: string;
   workspace_id: string;
   project_id: string;
@@ -26088,7 +26325,8 @@ export interface InvestigationResultApi {
   /** @minimum 1 */
   generation: number;
   attempt_id: string;
-  trace_id: string;
+  trace_id?: string;
+  test_execution_id?: string;
   /**
    * @minLength 1
    * @maxLength 20
@@ -26112,6 +26350,7 @@ export interface InvestigationResultApi {
   evidence_digest: string;
   execution_status: InvestigationResultApiExecutionStatus;
   outcome: InvestigationResultApiOutcome;
+  error_message?: string;
   findings: InvestigationFindingApi[];
   requirement_checks: InvestigationRequirementCheckApi[];
   evidence_receipts: InvestigationEvidenceReceiptApi[];
@@ -27662,6 +27901,7 @@ export const SharedLinkListApiResourceType = {
   eval_run: "eval_run",
   dataset: "dataset",
   project: "project",
+  call_execution: "call_execution",
 } as const;
 
 export type SharedLinkListApiAccessType =
@@ -27695,6 +27935,7 @@ export const SharedLinkCreateApiResourceType = {
   trace: "trace",
   dashboard: "dashboard",
   project: "project",
+  call_execution: "call_execution",
 } as const;
 
 export type SharedLinkCreateApiAccessType =
@@ -27727,6 +27968,7 @@ export const SharedLinkDetailApiResourceType = {
   eval_run: "eval_run",
   dataset: "dataset",
   project: "project",
+  call_execution: "call_execution",
 } as const;
 
 export type SharedLinkDetailApiAccessType =
@@ -27793,6 +28035,7 @@ export const SharedLinkResolveResponseApiResourceType = {
   eval_run: "eval_run",
   dataset: "dataset",
   project: "project",
+  call_execution: "call_execution",
 } as const;
 
 export type SharedLinkResolveResponseApiAccessType =
@@ -28649,6 +28892,108 @@ export interface TraceAgentGraphQueryApi {
   filters?: string;
   /** Recompute and atomically replace the last exact graph snapshot. */
   refresh?: boolean;
+}
+
+export type TraceGraphDataRequestApiFiltersItemFilterConfigAttributeValueTypesItem =
+  (typeof TraceGraphDataRequestApiFiltersItemFilterConfigAttributeValueTypesItem)[keyof typeof TraceGraphDataRequestApiFiltersItemFilterConfigAttributeValueTypesItem];
+
+export const TraceGraphDataRequestApiFiltersItemFilterConfigAttributeValueTypesItem =
+  {
+    string: "string",
+    number: "number",
+    boolean: "boolean",
+  } as const;
+
+export type TraceGraphDataRequestApiFiltersItemFilterConfig = {
+  /** Canonical field type, for example text, number, boolean, datetime, categorical, thumbs, annotator, array, or map. Legacy json is value-sensitive for SPAN_ATTRIBUTE filters: list values become array and object values become map. */
+  filter_type: string;
+  /** Canonical operator from api_contracts/filter_contract.json, for example equals, not_equals, in, not_in, between, not_between, is_null, or is_not_null. */
+  filter_op: string;
+  /** Scalar, list, range tuple, boolean, or null depending on filter_op and filter_type. */
+  filter_value?: unknown;
+  /** Column family such as SYSTEM_METRIC, SPAN_ATTRIBUTE, EVAL_METRIC, ANNOTATION, or NORMAL. */
+  col_type?: string;
+  /** Optional storage-family provenance aligned one-for-one with filter_value for mixed SPAN_ATTRIBUTE in/not_in filters. Null entries retain filter_type semantics for manually entered values. */
+  attribute_value_types?: TraceGraphDataRequestApiFiltersItemFilterConfigAttributeValueTypesItem[];
+};
+
+export type TraceGraphDataRequestApiFiltersItem = {
+  /** Column or attribute id to filter on. */
+  column_id: string;
+  /** Optional stable namespaced Property Registry identity. */
+  property_id?: string;
+  /** Optional UI label for chips and saved views. */
+  display_name?: string;
+  /** Optional source surface for mixed-source filters, for example traces, datasets, or simulation. */
+  source?: string;
+  /** Optional metric output type metadata used by eval and annotation filters. */
+  output_type?: string;
+  filter_config: TraceGraphDataRequestApiFiltersItemFilterConfig;
+};
+
+export type TraceGraphDataRequestApiInterval =
+  (typeof TraceGraphDataRequestApiInterval)[keyof typeof TraceGraphDataRequestApiInterval];
+
+export const TraceGraphDataRequestApiInterval = {
+  hour: "hour",
+  day: "day",
+  week: "week",
+  month: "month",
+} as const;
+
+export type TraceGraphDataRequestApiReqDataConfigType =
+  (typeof TraceGraphDataRequestApiReqDataConfigType)[keyof typeof TraceGraphDataRequestApiReqDataConfigType];
+
+export const TraceGraphDataRequestApiReqDataConfigType = {
+  SYSTEM_METRIC: "SYSTEM_METRIC",
+  EVAL: "EVAL",
+  ANNOTATION: "ANNOTATION",
+} as const;
+
+export type TraceGraphDataRequestApiReqDataConfigSource =
+  (typeof TraceGraphDataRequestApiReqDataConfigSource)[keyof typeof TraceGraphDataRequestApiReqDataConfigSource];
+
+export const TraceGraphDataRequestApiReqDataConfigSource = {
+  traces: "traces",
+  sessions: "sessions",
+} as const;
+
+export type TraceGraphDataRequestApiReqDataConfig = {
+  id: string;
+  type: TraceGraphDataRequestApiReqDataConfigType;
+  output_type?: string;
+  eval_output_type?: string;
+  choices?: string[];
+  value?: unknown;
+  filter_op?: string;
+  filter_value?: unknown;
+  /** Stable Property Registry identity. */
+  property_id?: string;
+  source?: TraceGraphDataRequestApiReqDataConfigSource;
+};
+
+/**
+ * Population the graph counts: every trace, or only voice calls (traces whose root span is a conversation), exactly as list_voice_calls selects them.
+ */
+export type TraceGraphDataRequestApiObserveType =
+  (typeof TraceGraphDataRequestApiObserveType)[keyof typeof TraceGraphDataRequestApiObserveType];
+
+export const TraceGraphDataRequestApiObserveType = {
+  trace: "trace",
+  voice: "voice",
+} as const;
+
+export interface TraceGraphDataRequestApi {
+  project_id: string;
+  /** On trace, span, session, graph, and eval-task bounded reads, created_at/start_time datetime filters support equals, greater_than, greater_than_or_equal, less_than, less_than_or_equal, between, not_equals, not_between, is_null, and is_not_null. Missing bounds retain the finite default window: 30 days ago for the lower bound and request-time now for the upper bound. Between and not_between use half-open [start, end) ranges; not_equals excludes one DateTime64(6) microsecond. Because the physical created_at/start_time field is non-null, is_null returns an exact empty result without a ClickHouse read and is_not_null preserves the base window. Valid contradictions also return an exact empty result. */
+  filters?: TraceGraphDataRequestApiFiltersItem[];
+  interval?: TraceGraphDataRequestApiInterval;
+  property?: string;
+  req_data_config: TraceGraphDataRequestApiReqDataConfig;
+  /** Population the graph counts: every trace, or only voice calls (traces whose root span is a conversation), exactly as list_voice_calls selects them. */
+  observe_type?: TraceGraphDataRequestApiObserveType;
+  /** Voice graphs only: exclude calls placed by a simulator phone, exactly as list_voice_calls' remove_simulation_calls does. */
+  remove_simulation_calls?: boolean;
 }
 
 export interface TracePropertiesResponseApi {
@@ -32137,6 +32482,10 @@ export type ModelHubAnnotationQueuesForSourceParams = {
   source_type?: ModelHubAnnotationQueuesForSourceSourceType;
   source_id?: string;
   sources?: string;
+  /**
+   * Tracer project the trace / span was opened from. The same id can exist in several projects; when supplied, only that project's queue items are listed.
+   */
+  project_id?: string;
 };
 
 export type ModelHubAnnotationQueuesForSourceSourceType =
@@ -33297,6 +33646,10 @@ export type ModelHubScoresForSourceParams = {
    * @minLength 1
    */
   source_id: string;
+  /**
+   * Tracer project the trace / span was opened from. The same id can exist in several projects; when supplied, only that project's scores are listed.
+   */
+  project_id?: string;
 };
 
 export type ModelHubScoresForSourceSourceType =
@@ -34013,6 +34366,11 @@ export type SimulateV3TestExecutionCallsGroupBy =
 
 export const SimulateV3TestExecutionCallsGroupBy = {
   goal: "goal",
+  sub_goal: "sub_goal",
+  accent: "accent",
+  age: "age",
+  attack: "attack",
+  task: "task",
   status: "status",
 } as const;
 
@@ -35534,6 +35892,17 @@ export type TracerTraceVoiceCallDetailParams = {
    * Legacy alias for trace_id; when both are supplied they must match.
    */
   traceId?: string;
+  /**
+   * Project the detail was opened from. The same id can exist in several projects; when supplied, only that project's copy is read.
+   */
+  project_id?: string;
+};
+
+export type TracerTraceReadParams = {
+  /**
+   * Project the detail was opened from. The same id can exist in several projects; when supplied, only that project's copy is read.
+   */
+  project_id?: string;
 };
 
 export type TracerUserAlertLogsListParams = {

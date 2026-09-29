@@ -8,7 +8,6 @@ import {
   STOPPABLE_EXECUTION_STATUSES,
   runColor,
 } from "src/sections/simulate/environments/workspace/runs/runs.constants";
-import useKpis from "src/hooks/useKpis";
 
 /**
  * The run/execution DETAIL data source.
@@ -179,11 +178,6 @@ export function useRunDetail(runTestId, executionId, { envName } = {}) {
         : false,
     staleTime: 1000 * 60 * 5,
   });
-  // `completed` is its own KPI field, cached under the key `useRunsSummary`
-  // primes (`useKpis`), so reading it here shares that entry rather than
-  // refetching. Stays null — never 0 — until the KPIs load, per the RunStats
-  // contract. Everything else on `stats` comes from the run-results summary.
-  const kpisQuery = useKpis(executionId);
   const execution = query.data?.execution;
   const summary = execution?.summary;
   const identity = useMemo(() => {
@@ -222,7 +216,6 @@ export function useRunDetail(runTestId, executionId, { envName } = {}) {
       passed: summary?.outcomes?.passed ?? 0,
       failed:
         (summary?.outcomes?.failed ?? 0) + (summary?.outcomes?.error ?? 0),
-      completed: kpisQuery.data?.completed_calls ?? null,
       passRate: summary?.pass_rate ?? 0,
       durationS: summary?.duration?.average ?? null,
       avgDurationMs:
@@ -246,7 +239,7 @@ export function useRunDetail(runTestId, executionId, { envName } = {}) {
       dropped: 0,
       failedCritical: 0,
     }),
-    [execution, summary, kpisQuery.data],
+    [execution, summary],
   );
 
   const isLoading = !!executionId && query.isPending;
@@ -293,16 +286,16 @@ export function useRunDetail(runTestId, executionId, { envName } = {}) {
 // keep importing the run-detail data hooks from one module.
 export { useRunCalls, mapCallRow, buildTraceColumns } from "./runCalls";
 
-// The fix-my-agent (Debug-failures) data source (Phase 4): the run diagnosis and
-// the past-optimization runs list, both over REAL product endpoints. Re-exported
-// so callers import every run-detail data hook from one module.
+// The Debug-failures data sources: Omega's execution-scoped diagnosis and the
+// past-optimization runs list. Re-exported so callers import every run-detail
+// data hook from one module.
 export {
-  useOptimizerAnalysis,
-  mapOptimizerAnalysis,
-  useOptimizationRuns,
-  mapOptimizationRuns,
-  ANALYSIS_WORKING_STATES,
-} from "./optimizer";
+  useDebugAnalysis,
+  mapDebugAnalysis,
+  withCallContext,
+  DEBUG_ANALYSIS_WORKING_STATES,
+} from "./debugAnalysis";
+export { useOptimizationRuns, mapOptimizationRuns } from "./optimizer";
 
 /**
  * @typedef {Object} CallDetail
@@ -557,9 +550,11 @@ export function mapCallDetail(raw) {
  * The raw v3 call-detail data source shared by the voice and chat drawers.
  * @param {?string} callExecId
  * @param {boolean} [enabled]
+ * @param {Object} [options]  Extra react-query options (e.g. `retry`, `meta`).
  */
-export function useCallExecutionV3Detail(callExecId, enabled = true) {
+export function useCallExecutionV3Detail(callExecId, enabled = true, options) {
   return useQuery({
+    ...options,
     queryKey: ["simulation-call-detail-v3", callExecId],
     queryFn: () =>
       axios

@@ -26,8 +26,11 @@ import CallDrawer from "./CallDrawer";
 import FixMyAgentDrawer from "./fixmyagent/FixMyAgentDrawer";
 import OptimizationRunsList from "./fixmyagent/OptimizationRunsList";
 import LaunchOptimizationDrawer from "./fixmyagent/LaunchOptimizationDrawer";
+import BetaChip from "./fixmyagent/BetaChip";
+import { useSelfImprovementOpen } from "./fixmyagent/selfImprovement";
 import RunAnalytics from "./RunAnalytics";
 import useCallListNavigation from "./useCallListNavigation";
+import useOpenCallParam from "./useOpenCallParam";
 
 // Terminal execution failures/cancellations outrank call-level outcomes.
 // Otherwise mixed pass/fail results are a completed run with findings.
@@ -65,13 +68,25 @@ export default function RunDetail({
 }) {
   const navigate = useNavigate();
   const [tab, setTab] = useState("tasks");
-  const [analyticsFilters, setAnalyticsFilters] = useState({});
+  // Filters handed to the calls table from elsewhere on the page (an analytics
+  // tile, a diagnosis issue). `seq` remounts the table so a repeat hand-off
+  // re-applies even after the table's own filters were changed.
+  const [tableHandoff, setTableHandoff] = useState({ filters: {}, seq: 0 });
+  const openCallsWith = (filters) => {
+    setTableHandoff((current) => ({ filters, seq: current.seq + 1 }));
+    setTab("tasks");
+  };
   const [addingEvals, setAddingEvals] = useState(false);
-  // The open call, where it was opened from ("table" or "analytics") and, after
-  // a prev/next step, the table page it sits on so the table can follow.
-  const [openCall, setOpenCall] = useState(null);
   // The exact query the trace table reads, or null when it isn't mounted.
   const [tableQuery, setTableQuery] = useState(null);
+  // The open call, where it was opened from ("table", "analytics" or "link")
+  // and, after a prev/next step, the table page it sits on so the table can
+  // follow. Mirrored in `?rowId=`.
+  const { openCall, showCall } = useOpenCallParam({
+    executionId,
+    tableQuery,
+    tableShown: tab === "tasks",
+  });
   const [debugging, setDebugging] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -83,7 +98,7 @@ export default function RunDetail({
     openCall,
     tableQuery,
     live: identity?.status === "running",
-    onStep: setOpenCall,
+    onStep: showCall,
   });
 
   // The past self-improvement (optimization) runs for this execution — REAL,
@@ -92,6 +107,7 @@ export default function RunDetail({
   const { runs: optimizationRuns, isLoading: optimizationsLoading } =
     useOptimizationRuns(executionId);
   const hasTrials = optimizationRuns.length > 0;
+  const selfImprovementOpen = useSelfImprovementOpen();
   // Keep the client bound: `useQueryClient().invalidateQueries` detached from
   // the client throws on `this.#queryCache` in react-query v5.
   const queryClient = useQueryClient();
@@ -102,6 +118,9 @@ export default function RunDetail({
     );
 
   const status = headerStatus(identity, stats);
+  // A live run has no final results yet, so its header actions wait for it to
+  // finish. Stop simulation is the exception and stays in its own control.
+  const live = status === "running" || status === "cancelling";
   // finishedAt is a known gap (the executions row carries no end time), so the
   // sub-line reports when the run STARTED rather than inventing a finish.
   const startedLabel = identity?.startedAt ? fToNow(identity.startedAt) : "";
@@ -200,6 +219,7 @@ export default function RunDetail({
           variant="outlined"
           size="small"
           onClick={() => setAddingEvals(true)}
+          disabled={live}
           startIcon={<Iconify icon="solar:add-circle-linear" width={15} />}
           sx={{
             color: "text.primary",
@@ -214,7 +234,7 @@ export default function RunDetail({
           variant="outlined"
           size="small"
           onClick={exportResults}
-          disabled={exporting}
+          disabled={live || exporting}
           startIcon={
             <Iconify icon="solar:download-minimalistic-linear" width={15} />
           }
@@ -230,6 +250,7 @@ export default function RunDetail({
         <Button
           variant="outlined"
           size="small"
+          disabled={live}
           startIcon={<Iconify icon="solar:refresh-linear" width={15} />}
           onClick={() =>
             onStartRun?.(
@@ -251,6 +272,7 @@ export default function RunDetail({
           color="primary"
           size="small"
           onClick={() => setDebugging(true)}
+          disabled={live}
           startIcon={<Iconify icon="solar:magnifer-linear" width={15} />}
           sx={{ typography: "s2", fontWeight: 700 }}
         >
@@ -288,7 +310,13 @@ export default function RunDetail({
             {hasTrials && (
               <Tab
                 value="trials"
-                label={`Trials (${optimizationRuns.length})`}
+                disabled={!selfImprovementOpen}
+                label={
+                  <>
+                    Trials ({optimizationRuns.length})
+                    {!selfImprovementOpen && <BetaChip />}
+                  </>
+                }
                 sx={{ minHeight: 38 }}
               />
             )}
@@ -297,14 +325,15 @@ export default function RunDetail({
 
           {tab === "tasks" && (
             <RunTraceTable
+              key={tableHandoff.seq}
               executionId={executionId}
               onOpenCall={(task) =>
-                setOpenCall({ task, source: "table", page: null })
+                showCall({ task, source: "table", page: null })
               }
               onQueryChange={setTableQuery}
               activeCallId={openCall?.task.id ?? null}
               activePage={openCall?.page ?? null}
-              initialFilters={analyticsFilters}
+              initialFilters={tableHandoff.filters}
             />
           )}
 
@@ -344,12 +373,9 @@ export default function RunDetail({
             <RunAnalytics
               executionId={executionId}
               onOpenCall={(task) =>
-                setOpenCall({ task, source: "analytics", page: null })
+                showCall({ task, source: "analytics", page: null })
               }
-              onOpenCalls={(filters) => {
-                setAnalyticsFilters(filters);
-                setTab("tasks");
-              }}
+              onOpenCalls={openCallsWith}
             />
           )}
         </Box>
@@ -357,17 +383,16 @@ export default function RunDetail({
 
       {/* The same picker the Evaluations tab opens. Adding from here binds
           the eval to the environment exactly as the tab's add does and then
-          queues this run's finished calls that hold no verdict for it; the
-          drawer shows the counts the 202 returns. Only a backed environment
-          has a backend to call — a client/template env (reachable here
-          via the `?mockRuns=1` QA switch) gets the same store-only picker the
+          grades this run's finished calls by name; the drawer shows the
+          counts the run endpoint returns. Only a backed environment has a
+          backend to call — a client/template env (reachable here via the
+          `?mockRuns=1` QA switch) gets the same store-only picker the
           Evaluations tab falls back to. */}
       {backed ? (
         <AddEvaluationDrawer
           open={addingEvals}
           env={env}
           executionId={executionId}
-          completedCallsCount={stats.completed}
           onClose={() => setAddingEvals(false)}
         />
       ) : (
@@ -376,7 +401,13 @@ export default function RunDetail({
           onClose={() => setAddingEvals(false)}
           env={env}
           envState={envState}
-          existingIds={new Set((envState?.evals || []).map((e) => (typeof e === "string" ? e : e?.id)))}
+          existingIds={
+            new Set(
+              (envState?.evals || []).map((e) =>
+                typeof e === "string" ? e : e?.id,
+              ),
+            )
+          }
           onAdd={() => setAddingEvals(false)}
         />
       )}
@@ -384,7 +415,7 @@ export default function RunDetail({
       <CallDrawer
         task={openCall?.task ?? null}
         agentType={stats.agentType}
-        onClose={() => setOpenCall(null)}
+        onClose={() => showCall(null)}
         hasPrev={callNav.hasPrev}
         hasNext={callNav.hasNext}
         onPrev={callNav.onPrev}
@@ -399,6 +430,10 @@ export default function RunDetail({
         onLaunch={() => {
           setDebugging(false);
           setLaunching(true);
+        }}
+        onViewCalls={(callExecutionIds) => {
+          setDebugging(false);
+          openCallsWith({ callExecutionId: callExecutionIds });
         }}
       />
 

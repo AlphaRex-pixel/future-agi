@@ -123,6 +123,24 @@ describe("mapCallRow", () => {
     expect(cell.score).toBe(1);
   });
 
+  it("keeps each eval's status, lowercased, so an unscored cell can say why", () => {
+    const row = {
+      id: "c9",
+      evaluations: [
+        { id: "e-failed", status: "Failed", score: null, value: null, reason: "Timed out" },
+        { id: "e-skip", status: "skipped", score: null, value: null, reason: "No transcript data available" },
+        { id: "e-ok", score: 1, value: "Passed" },
+      ],
+    };
+    const [failed, skipped, ok] = mapCallRow(row, [
+      { id: "e-failed" }, { id: "e-skip" }, { id: "e-ok" },
+    ]).evalResults;
+    expect(failed.status).toBe("failed");
+    expect(failed.reason).toBe("Timed out");
+    expect(skipped.status).toBe("skipped");
+    expect(ok.status).toBe("completed");
+  });
+
   it("keeps the server's verdict on a choice and the score of a label-less object", () => {
     const row = {
       id: "c9",
@@ -411,6 +429,12 @@ describe("runCallsQueryOptions", () => {
         group_by: "goal",
       },
     });
+  });
+
+  it("leaves group_by off the request when no grouping is chosen", async () => {
+    const options = runCallsQueryOptions("ex1", { groupBy: "" });
+    await options.queryFn();
+    expect(axios.get.mock.calls.at(-1)[1].params).not.toHaveProperty("group_by");
   });
 
   it("lets a reader switch the table hook off", () => {

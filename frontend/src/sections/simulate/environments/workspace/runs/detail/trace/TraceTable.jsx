@@ -21,20 +21,27 @@ import { BUILD_TONES } from "../../../../buildEnvironment/buildTones";
 import {
   defaultTraceColumns,
   headCellSx,
+  HEAD_ROW_PX,
+  GROUP_ROW_PX,
   numCellSx,
   bodyCellSx,
   runOutcome,
+  CALL_STATUS_CHIPS,
 } from "./traceTable.constants";
-import { MetricValue, Score, Field } from "./traceCells";
+import StatusChip from "../../StatusChip";
+import { MetricValue, Score, Field, UnscoredEval } from "./traceCells";
 import TraceGroupHeaderRow from "./TraceGroupHeaderRow";
 
 // The theme hides every border on a table's last row, which here is the head
 // row and the final call row. The column dividers are cell left borders, so put
 // those back, and the head's bottom line; the body's last bottom line stays
-// hidden so it doesn't double up with the container edge.
+// hidden so it doesn't double up with the container edge. Separate borders,
+// because collapsed ones stay behind when the head and group rows stick.
 const lastRowDividersSx = {
   minWidth: 1000,
   tableLayout: "auto",
+  borderCollapse: "separate",
+  borderSpacing: 0,
   [`& .${tableRowClasses.root}:last-of-type .${tableCellClasses.root}:not(:first-of-type)`]:
     { borderLeftColor: "divider" },
   [`& .${tableHeadClasses.root} .${tableCellClasses.root}`]: {
@@ -50,6 +57,9 @@ const lastRowDividersSx = {
 // The free-text columns stay narrow so a collapsed table (one count per group)
 // doesn't stretch; long text is cut at four lines — the drawer has the rest.
 const TEXT_COL_WIDTH = { long: 260, short: 200 };
+// A call still in flight — its eval cells can only be waiting. `analyzing`
+// is a finished conversation whose evals are grading (the chat path).
+const LIVE_CALL_STATUSES = new Set(["pending", "queued", "ongoing", "analyzing"]);
 const textCellSx = (width) => ({
   ...bodyCellSx,
   width,
@@ -68,10 +78,12 @@ const clampSx = {
 
 export default function TraceTable({
   groups,
+  rows = null,
   evals,
   onOpen,
   columns,
   activeCallId = null,
+  scrollRef,
 }) {
   const [collapsed, setCollapsed] = useState(null);
   const activeRowRef = useRef(null);
@@ -120,6 +132,7 @@ export default function TraceTable({
 
   const renderRow = (t) => {
     const outcome = runOutcome(t.status);
+    const callLive = LIVE_CALL_STATUSES.has(t.executionStatus);
     const active = t.id === activeCallId;
     return (
       <TableRow
@@ -129,6 +142,8 @@ export default function TraceTable({
         sx={{
           cursor: "pointer",
           bgcolor: active ? "action.selected" : "transparent",
+          // Scrolled into view below the pinned head and group rows, not under.
+          scrollMarginTop: HEAD_ROW_PX + GROUP_ROW_PX,
         }}
       >
         {show("callDetails") && (
@@ -200,6 +215,23 @@ export default function TraceTable({
           </TableCell>
         )}
 
+        {show("status") && (
+          <TableCell sx={bodyCellSx} onClick={() => onOpen(t)}>
+            {CALL_STATUS_CHIPS[t.executionStatus] ? (
+              <Box sx={{ display: "inline-flex" }}>
+                <StatusChip
+                  status={CALL_STATUS_CHIPS[t.executionStatus].chip}
+                  label={CALL_STATUS_CHIPS[t.executionStatus].label}
+                />
+              </Box>
+            ) : (
+              <Typography sx={{ typography: "s3", color: "text.disabled" }}>
+                -
+              </Typography>
+            )}
+          </TableCell>
+        )}
+
         {show("persona") && (
           <TableCell sx={bodyCellSx} onClick={() => onOpen(t)}>
             {t.personaDetails?.name ? (
@@ -262,22 +294,22 @@ export default function TraceTable({
 
         {show("csat") && (
           <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
-            <MetricValue metric="csat" value={t.csat} />
+            <MetricValue metric="csat" value={t.csat} loading={callLive} />
           </TableCell>
         )}
         {show("turns") && (
           <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
-            <MetricValue metric="turns" value={t.turns} />
+            <MetricValue metric="turns" value={t.turns} loading={callLive} />
           </TableCell>
         )}
         {show("latency") && (
           <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
-            <MetricValue metric="latency" value={t.latencyMs} suffix="ms" />
+            <MetricValue metric="latency" value={t.latencyMs} suffix="ms" loading={callLive} />
           </TableCell>
         )}
         {show("tokens") && (
           <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
-            <MetricValue metric="tokens" value={t.tokens} />
+            <MetricValue metric="tokens" value={t.tokens} loading={callLive} />
           </TableCell>
         )}
 
@@ -290,12 +322,14 @@ export default function TraceTable({
                 sx={{ ...bodyCellSx, p: 0, position: "relative" }}
                 onClick={() => onOpen(t)}
               >
-                {r ? (
+                {r?.score != null || r?.label ? (
                   <Score result={r} />
                 ) : (
-                  <Box sx={{ p: 2, typography: "s2", color: "text.disabled" }}>
-                    -
-                  </Box>
+                  <UnscoredEval
+                    result={r}
+                    callLive={callLive}
+                    callStatus={t.executionStatus}
+                  />
                 )}
               </TableCell>
             );
@@ -304,53 +338,63 @@ export default function TraceTable({
     );
   };
 
+  // The table scrolls both ways in its own box, below the "Collapse all" bar,
+  // so the head and group rows stick to it rather than to the page.
   return (
-    <Box>
-      <Stack
-        direction="row"
-        alignItems="center"
-        spacing={1}
-        sx={{
-          px: 1.5,
-          py: 1,
-          borderBottom: "1px solid",
-          borderColor: "divider",
-        }}
-      >
-        <Button
-          size="small"
-          variant="text"
-          onClick={toggleAllGroups}
-          startIcon={
-            <Iconify
-              icon={
-                allCollapsed
-                  ? "solar:alt-arrow-down-linear"
-                  : "solar:alt-arrow-right-linear"
-              }
-              width={14}
-            />
-          }
+    <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      {!rows && (
+        <Stack
+          direction="row"
+          alignItems="center"
+          spacing={1}
           sx={{
-            typography: "s3",
-            fontWeight: "fontWeightSemiBold",
-            color: "text.secondary",
-            "&:hover": { bgcolor: "action.hover" },
+            flexShrink: 0,
+            px: 1.5,
+            py: 1,
+            borderBottom: "1px solid",
+            borderColor: "divider",
           }}
         >
-          {allCollapsed ? "Expand all" : "Collapse all"}
-        </Button>
-        <Typography sx={{ typography: "s3", color: "text.subtitle" }}>
-          {groups.length} {groups.length === 1 ? "group" : "groups"}
-        </Typography>
-      </Stack>
-      <Box sx={{ overflowX: "auto" }}>
+          <Button
+            size="small"
+            variant="text"
+            onClick={toggleAllGroups}
+            startIcon={
+              <Iconify
+                icon={
+                  allCollapsed
+                    ? "solar:alt-arrow-down-linear"
+                    : "solar:alt-arrow-right-linear"
+                }
+                width={14}
+              />
+            }
+            sx={{
+              typography: "s3",
+              fontWeight: "fontWeightSemiBold",
+              color: "text.secondary",
+              "&:hover": { bgcolor: "action.hover" },
+            }}
+          >
+            {allCollapsed ? "Expand all" : "Collapse all"}
+          </Button>
+          <Typography sx={{ typography: "s3", color: "text.subtitle" }}>
+            {groups.length} {groups.length === 1 ? "group" : "groups"}
+          </Typography>
+        </Stack>
+      )}
+      <Box ref={scrollRef} sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <Table size="small" sx={lastRowDividersSx}>
           <TableHead>
             <TableRow>
               {show("callDetails") && (
                 <TableCell sx={{ ...headCellSx, width: 200 }}>
                   Run details
+                </TableCell>
+              )}
+              {show("status") && (
+                <TableCell sx={{ ...headCellSx, width: 120 }}>
+                  Status
                 </TableCell>
               )}
               {show("persona") && (
@@ -403,19 +447,21 @@ export default function TraceTable({
             </TableRow>
           </TableHead>
           <TableBody>
-            {groups.map((g) => (
-              <React.Fragment key={g.label}>
-                <TraceGroupHeaderRow
-                  group={g}
-                  collapsed={collapsedSet.has(g.label)}
-                  onToggle={() => toggleCollapsed(g.label)}
-                  show={show}
-                  showEvals={showEvals}
-                  evals={evals}
-                />
-                {!collapsedSet.has(g.label) && g.rows.map(renderRow)}
-              </React.Fragment>
-            ))}
+            {rows
+              ? rows.map(renderRow)
+              : groups.map((g) => (
+                  <React.Fragment key={g.label}>
+                    <TraceGroupHeaderRow
+                      group={g}
+                      collapsed={collapsedSet.has(g.label)}
+                      onToggle={() => toggleCollapsed(g.label)}
+                      show={show}
+                      showEvals={showEvals}
+                      evals={evals}
+                    />
+                    {!collapsedSet.has(g.label) && g.rows.map(renderRow)}
+                  </React.Fragment>
+                ))}
           </TableBody>
         </Table>
       </Box>
@@ -424,8 +470,10 @@ export default function TraceTable({
 }
 TraceTable.propTypes = {
   groups: PropTypes.array.isRequired,
+  rows: PropTypes.array,
   evals: PropTypes.array.isRequired,
   onOpen: PropTypes.func,
   columns: PropTypes.instanceOf(Set),
   activeCallId: PropTypes.string,
+  scrollRef: PropTypes.oneOfType([PropTypes.func, PropTypes.object]),
 };

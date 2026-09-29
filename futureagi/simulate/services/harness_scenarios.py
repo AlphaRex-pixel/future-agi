@@ -6,6 +6,7 @@ from typing import Any
 
 from django.db.models import Q, QuerySet, Value
 from django.db.models.functions import Replace
+from django.utils import timezone
 
 from simulate.models.hosted_harness import HostedHarnessJob, HostedHarnessScenario
 
@@ -13,17 +14,37 @@ from simulate.models.hosted_harness import HostedHarnessJob, HostedHarnessScenar
 FIELDS: tuple[dict[str, Any], ...] = (
     {"value": "name", "label": "Scenario", "type": "string", "category": "scenario"},
     {"value": "use_case", "label": "Use case", "type": "enum", "category": "scenario"},
-    {"value": "instruction", "label": "Situation", "type": "string", "category": "scenario"},
+    {
+        "value": "instruction",
+        "label": "Situation",
+        "type": "string",
+        "category": "scenario",
+    },
     {"value": "persona.name", "label": "Name", "type": "enum", "category": "persona"},
-    {"value": "persona.accent", "label": "Accent", "type": "enum", "category": "persona"},
+    {
+        "value": "persona.accent",
+        "label": "Accent",
+        "type": "enum",
+        "category": "persona",
+    },
     {
         "value": "persona.languages",
         "label": "Language",
         "type": "enum",
         "category": "persona",
     },
-    {"value": "persona.age_group", "label": "Age", "type": "enum", "category": "persona"},
-    {"value": "persona.gender", "label": "Gender", "type": "enum", "category": "persona"},
+    {
+        "value": "persona.age_group",
+        "label": "Age",
+        "type": "enum",
+        "category": "persona",
+    },
+    {
+        "value": "persona.gender",
+        "label": "Gender",
+        "type": "enum",
+        "category": "persona",
+    },
     {
         "value": "persona.location",
         "label": "Location",
@@ -42,7 +63,6 @@ FIELDS: tuple[dict[str, Any], ...] = (
         "type": "enum",
         "category": "persona",
     },
-
     {
         "value": "background_noise",
         "label": "Background",
@@ -138,7 +158,9 @@ def axis_label(axis: str, spoken: bool = True) -> str:
     """The reader-facing name for one axis."""
     if not spoken and axis in CHAT_AXIS_LABELS:
         return CHAT_AXIS_LABELS[axis]
-    return AXIS_LABELS.get(axis) or str(axis or "").replace("_", " ").strip().capitalize()
+    return (
+        AXIS_LABELS.get(axis) or str(axis or "").replace("_", " ").strip().capitalize()
+    )
 
 
 # Only levels whose key reads badly; the rest fall back to the key with underscores removed.
@@ -164,9 +186,12 @@ NOISE_LABELS: dict[str, str] = {
     "present": "Background noise",
     "street": "Street",
     "vehicle": "In a car",
-    "transit": "Airport / station",
+    "transit": "Station / transit",
+    "airport": "Airport",
     "retail": "Shop / mall",
     "office": "Office",
+    "home": "Home",
+    "hospital": "Hospital",
     "outdoors": "Outdoors",
     "crowd": "Crowded room",
 }
@@ -186,6 +211,42 @@ def level_label(level: str) -> str:
 _ALIASES = {"status": "call_execution__status"}
 
 
+def authored_scenarios(run_test_id, *, call_execution_id, scenario_key) -> QuerySet:
+    """A call's authored scenario, newest first: linked to the call on a direct
+    run, or found by the call's scenario key on the run's own job or its parent
+    environment. Arguments may be ``OuterRef``s for a per-call subquery."""
+    run_jobs = HostedHarnessJob.no_workspace_objects.filter(run_test_id=run_test_id)
+    return HostedHarnessScenario.no_workspace_objects.filter(
+        Q(call_execution_id=call_execution_id)
+        | Q(
+            Q(job_id__in=run_jobs.values("id"))
+            | Q(job_id__in=run_jobs.values("environment_id")),
+            scenario_key=scenario_key,
+        )
+    ).order_by("-created_at")
+
+
+def authored_scenarios_for_calls(run_test_id, calls) -> dict:
+    """Each call's authored scenario, found with one query for the whole run."""
+    run_jobs = HostedHarnessJob.no_workspace_objects.filter(run_test_id=run_test_id)
+    call_ids = [call.id for call in calls]
+    rows = HostedHarnessScenario.no_workspace_objects.filter(
+        Q(call_execution_id__in=call_ids)
+        | Q(job_id__in=run_jobs.values("id"))
+        | Q(job_id__in=run_jobs.values("environment_id"))
+    ).order_by("created_at")
+    linked, by_key = {}, {}
+    for row in rows:
+        if row.call_execution_id:
+            linked[row.call_execution_id] = row
+        by_key[row.scenario_key] = row  # newest wins, as in authored_scenarios
+    return {
+        call.id: linked.get(call.id)
+        or by_key.get((call.call_metadata or {}).get("harness_scenario_key"))
+        for call in calls
+    }
+
+
 def _orm_path(field: str) -> str:
     """The ORM lookup for a filter property, dotted paths reaching into the JSON document."""
     head, _, tail = field.partition(".")
@@ -200,9 +261,16 @@ def index_scenarios(
     """Persist the authored suite so it can be queried, and return how many rows it holds."""
     if not docs:
         return 0
-    existing = {
-        row.scenario_key: row
-        for row in HostedHarnessScenario.no_workspace_objects.filter(job=job)
+    from simulate.services.hosted_harness_gateway import _scenario_token
+
+    # Dropped rows are hidden, not deleted: a run's history still points at them.
+    rows = list(HostedHarnessScenario.all_objects.filter(job=job))
+    existing = {row.scenario_key: row for row in rows}
+    by_token = {
+        token: row
+        for row in sorted(rows, key=lambda row: not row.deleted)
+        for token in (_scenario_token(row.scenario_key), _scenario_token(row.name))
+        if token
     }
     # Numbers are stable across re-indexing; only a new row gets the next free number.
     taken = max(
@@ -211,11 +279,22 @@ def index_scenarios(
     written = 0
     seen: set[str] = set()
     for position, doc in enumerate(docs, start=1):
-        key = str(doc.get("scenario_key") or doc.get("name") or "").strip()
+        held = next(
+            (
+                by_token[token]
+                for value in (doc.get("scenario_key"), doc.get("name"))
+                if (token := _scenario_token(value)) in by_token
+            ),
+            None,
+        )
+        key = (
+            held.scenario_key
+            if held is not None
+            else str(doc.get("scenario_key") or doc.get("name") or "").strip()
+        )
         if not key:
             continue
         seen.add(key)
-        held = existing.get(key)
         if held is not None and held.number is not None:
             number = held.number
         elif not existing:
@@ -237,10 +316,16 @@ def index_scenarios(
             "sub_goals": doc.get("sub_goals") or None,
             # Older suites carry keywords on the persona.
             "keywords": (
-                doc.get("keywords") or (doc.get("persona") or {}).get("keywords") or None
+                doc.get("keywords")
+                or (doc.get("persona") or {}).get("keywords")
+                or None
             ),
             "background_noise": (
-                noise if isinstance(noise, str) else "present" if noise else "quiet line"
+                noise
+                if isinstance(noise, str)
+                else "present"
+                if noise
+                else "quiet line"
             )[:64],
             "max_turns": doc.get("max_turns") or None,
         }
@@ -250,15 +335,19 @@ def index_scenarios(
                 job=job, scenario_key=key, **fields
             )
         else:
+            fields.update(deleted=False, deleted_at=None)
             for name, value in fields.items():
                 setattr(row, name, value)
             row.save(update_fields=[*fields, "updated_at"])
         written += 1
-    # Only an amend prunes: a short suite on a poll may still be mid-write. Called rows are kept.
+    # Only an amend prunes: a short suite on a poll may still be mid-write. Called rows are kept,
+    # whether a direct run or a selected run's execution points at them.
     if prune:
         HostedHarnessScenario.no_workspace_objects.filter(job=job).exclude(
             scenario_key__in=seen
-        ).filter(call_execution__isnull=True).delete()
+        ).filter(call_execution__isnull=True, executions__isnull=True).update(
+            deleted=True, deleted_at=timezone.now()
+        )
     return written
 
 
@@ -273,10 +362,16 @@ def apply_filters(queryset: QuerySet, params) -> QuerySet:
         if not values:
             continue
         path = _orm_path(field)
-        lookup = f"{path}__contains" if _BY_VALUE[field]["value"] in _LIST_FIELDS else f"{path}__in"
+        lookup = (
+            f"{path}__contains"
+            if _BY_VALUE[field]["value"] in _LIST_FIELDS
+            else f"{path}__in"
+        )
         matches = Q()
         for value in values:
-            matches |= Q(**{lookup: [value] if lookup.endswith("contains") else [value]})
+            matches |= Q(
+                **{lookup: [value] if lookup.endswith("contains") else [value]}
+            )
         queryset = queryset.exclude(matches) if negated else queryset.filter(matches)
     return queryset
 
@@ -317,7 +412,7 @@ def field_catalogue(queryset: QuerySet, spoken: bool = True) -> list[dict[str, A
     for field in FIELDS:
         if not spoken and field["value"] in VOICE_ONLY_FIELDS:
             continue
-        entry = {key: value for key, value in field.items()}
+        entry = dict(field)
         if field["type"] != "enum":
             catalogue.append(entry)
             continue
@@ -325,7 +420,8 @@ def field_catalogue(queryset: QuerySet, spoken: bool = True) -> list[dict[str, A
         if not counts:
             continue
         entry["choices"] = [
-            name for name, _ in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+            name
+            for name, _ in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
         ]
         entry["counts"] = counts
         catalogue.append(entry)
@@ -362,7 +458,9 @@ def coverage_grid(
                 "label": axis_label(axis, spoken),
                 "levels": len(held),
                 "scenarios": sum(held.values()),
-                "counts": dict(sorted(held.items(), key=lambda pair: (-pair[1], pair[0]))),
+                "counts": dict(
+                    sorted(held.items(), key=lambda pair: (-pair[1], pair[0]))
+                ),
             }
             for axis, held in levels.items()
             if held
@@ -385,9 +483,7 @@ def coverage_grid(
         "axes": list(AXES),
         "axis_labels": {axis: axis_label(axis, spoken) for axis in AXES},
         "level_labels": {
-            level: level_label(level)
-            for axis in levels
-            for level in levels[axis]
+            level: level_label(level) for axis in levels for level in levels[axis]
         },
     }
 
@@ -401,10 +497,15 @@ def level_labels_for(
     for field in fields or []:
         if field.get("value") == "background_noise":
             beds.update(str(one) for one in field.get("choices") or [])
-        elif str(field.get("value") or "").startswith("coverage.") or field.get("value") == "sub_goals":
+        elif (
+            str(field.get("value") or "").startswith("coverage.")
+            or field.get("value") == "sub_goals"
+        ):
             levels.update(str(one) for one in field.get("choices") or [])
     for row in rows or []:
-        levels.update(str(one) for one in row.get("sub_goals") or [] if str(one).strip())
+        levels.update(
+            str(one) for one in row.get("sub_goals") or [] if str(one).strip()
+        )
         for value in (row.get("coverage") or {}).values():
             said = str(value or "").strip()
             if said:

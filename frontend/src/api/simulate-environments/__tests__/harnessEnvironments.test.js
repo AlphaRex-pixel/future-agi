@@ -17,8 +17,6 @@ import {
   runHarnessEnvironment,
   renameHarnessEnvironment,
   deleteAppliedEvaluation,
-  getAvailableEvaluations,
-  addEvaluation,
   addRunEvaluation,
 } from "../harnessEnvironments";
 
@@ -72,7 +70,12 @@ describe("runHarnessEnvironment", () => {
   beforeEach(() => axios.post.mockClear());
 
   it("POSTs stable scenario keys, trials, and one idempotency key", async () => {
-    await runHarnessEnvironment("env-6", ["scenario-a", "scenario-b"], 3, "request-1");
+    await runHarnessEnvironment(
+      "env-6",
+      ["scenario-a", "scenario-b"],
+      3,
+      "request-1",
+    );
     expect(axios.post).toHaveBeenCalledWith(
       `${BASE}env-6/run/`,
       { scenario_ids: ["scenario-a", "scenario-b"], trials: 3 },
@@ -97,27 +100,9 @@ describe("deleteAppliedEvaluation", () => {
 
   it("DELETEs the eval config by id (path now in the generated contract)", async () => {
     await deleteAppliedEvaluation("env-9", "cfg-1");
-    expect(axios.delete).toHaveBeenCalledWith(`${BASE}env-9/evaluations/cfg-1/`);
-  });
-});
-
-describe("getAvailableEvaluations", () => {
-  beforeEach(() => axios.get.mockClear());
-
-  it("GETs the available-evals catalogue for the environment", async () => {
-    await getAvailableEvaluations("env-10");
-    expect(axios.get).toHaveBeenCalledWith(`${BASE}env-10/evaluations/available/`);
-  });
-});
-
-describe("addEvaluation", () => {
-  beforeEach(() => axios.post.mockClear());
-
-  it("POSTs the eval name only (mapping is resolved server-side)", async () => {
-    await addEvaluation("env-10", "advice_authority_boundary");
-    expect(axios.post).toHaveBeenCalledWith(`${BASE}env-10/evaluations/`, {
-      name: "advice_authority_boundary",
-    });
+    expect(axios.delete).toHaveBeenCalledWith(
+      `${BASE}env-9/evaluations/cfg-1/`,
+    );
   });
 });
 

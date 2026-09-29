@@ -18,11 +18,6 @@ from simulate.services.run_results_v3_scoring import (
 )
 from simulate.utils.eval_summary import iter_live_eval_outputs
 
-GROUP_FIELDS = {
-    "goal": "goal",
-    "status": "outcome",
-}
-
 
 def _number(value: Any) -> float | None:
     if isinstance(value, bool):
@@ -200,7 +195,7 @@ def _row_dimensions(calls: list[CallExecution]) -> dict[str, dict[str, Any]]:
     return dimensions
 
 
-def _eval_rows(
+def eval_rows(
     call: CallExecution, live_eval_configs: dict[str, SimulateEvalConfig]
 ) -> list[dict[str, Any]]:
     rows = []
@@ -366,7 +361,7 @@ def build_call_rows(
         turn_count = _number(metrics.get("turn_count"))
         if turn_count is None:
             turn_count = _number(metrics.get("bot_message_count"))
-        evaluations = _eval_rows(call, live_eval_configs)
+        evaluations = eval_rows(call, live_eval_configs)
         for evaluation in evaluations:
             harness_columns[evaluation["id"]] = evaluation["name"]
         rows.append(

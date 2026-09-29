@@ -144,21 +144,14 @@ class HarnessEnvironmentToolCallEvaluationSerializer(serializers.Serializer):
 
 
 class HarnessEnvironmentEvalInputSerializer(serializers.Serializer):
-    """Which stored piece of a call fills one of an eval's required keys.
+    """Which stored piece of a call fills one of an eval's inputs: one of the harness's own sources, or any field or scenario column a person mapped.
 
     ``label`` is the only text a picker shows for a source: the frontend never
     computes which source fills a key.
     """
 
     key = serializers.CharField()
-    source = serializers.ChoiceField(
-        choices=(
-            "voice_recording",
-            "transcript",
-            "agent_prompt",
-            "scenario_columns.situation.value",
-        )
-    )
+    source = serializers.CharField()
     label = serializers.CharField()
 
 
