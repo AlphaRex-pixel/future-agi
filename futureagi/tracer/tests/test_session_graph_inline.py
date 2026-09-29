@@ -424,6 +424,26 @@ def test_an_unknown_estimate_never_guesses_inline(scheduled, estimate):
 
 
 @pytest.mark.unit
+def test_a_failed_estimate_is_logged_with_its_stack(scheduled):
+    import structlog
+
+    analytics = _Analytics(
+        estimate=_raises(ServerException("unknown", code=ErrorCodes.UNKNOWN_IDENTIFIER))
+    )
+
+    with structlog.testing.capture_logs() as records:
+        _fetch(analytics, [WINDOW])
+
+    (record,) = [
+        record
+        for record in records
+        if record["event"] == "session_graph_inline_estimate_unavailable"
+    ]
+    assert record["log_level"] == "warning"
+    assert record["exc_info"] is True
+
+
+@pytest.mark.unit
 def test_an_empty_estimate_answer_is_zero_rows(scheduled):
     analytics = _Analytics(
         estimate=lambda _call: SimpleNamespace(data=[], columns=list(ESTIMATE_COLUMNS))

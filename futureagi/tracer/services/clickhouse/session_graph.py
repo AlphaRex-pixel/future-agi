@@ -709,9 +709,12 @@ def _session_graph_root_estimate(
             server_execution_cap_ms=_GRAPH_SEED_ESTIMATE_QUERY_MS,
         )
     except _GRAPH_SEED_PROBE_ERRORS as exc:
-        logger.info(
+        # Fail open to the worker, loudly, as the raw graph's seed probe does:
+        # a broken estimate statement must not silently turn inline off.
+        logger.warning(
             "session_graph_inline_estimate_unavailable",
             error_type=type(exc).__name__,
+            exc_info=True,
         )
         return None
     return reduce_spans_estimate(
