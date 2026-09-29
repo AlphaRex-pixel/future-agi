@@ -1,5 +1,7 @@
 """env_int: the one parser for integer environment variables."""
 
+import sys
+
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
@@ -27,8 +29,22 @@ def test_anything_else_raises_and_names_the_variable(raw):
 def test_a_minimum_is_enforced():
     assert env_int("N", 7, env={"N": "1"}, minimum=1) == 1
     for raw in ("0", "-1"):
-        with pytest.raises(ImproperlyConfigured, match=r"^N must be at least 1"):
+        with pytest.raises(ImproperlyConfigured, match=r"^N must be between 1 and "):
             env_int("N", 7, env={"N": raw}, minimum=1)
+
+
+def test_a_minimum_of_zero_is_enforced():
+    assert env_int("N", 7, env={"N": "0"}, minimum=0) == 0
+    with pytest.raises(ImproperlyConfigured, match=r"^N must be between 0 and "):
+        env_int("N", 7, env={"N": "-1"}, minimum=0)
+
+
+def test_a_value_beyond_64_bits_is_refused():
+    # Postgres and ClickHouse take these as LIMITs and sizes: Int64 at most.
+    assert env_int("N", 7, env={"N": str(sys.maxsize)}) == sys.maxsize
+    for raw in (str(sys.maxsize + 1), str(-sys.maxsize - 2)):
+        with pytest.raises(ImproperlyConfigured, match=r"^N must be between "):
+            env_int("N", 7, env={"N": raw})
 
 
 def test_reads_the_process_environment_by_default(monkeypatch):

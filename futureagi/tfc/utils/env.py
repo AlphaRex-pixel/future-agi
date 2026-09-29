@@ -1,15 +1,18 @@
 """Integer settings read from environment variables.
 
-Stdlib and django.core.exceptions only, so settings.py and the Django-free
-CLIs (the outbox CDC installer) can use it.
+Stdlib, django.core.exceptions and runtime_setting_specs (stdlib-only) only,
+so settings.py and the Django-free CLIs (the outbox CDC installer) can use it.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Mapping
 
 from django.core.exceptions import ImproperlyConfigured
+
+from tfc.settings.runtime_setting_specs import NumericSettingSpec
 
 
 def env_int(
@@ -21,17 +24,18 @@ def env_int(
 ) -> int:
     """``name`` from ``env`` (default ``os.environ``) as an int.
 
-    Unset or blank means ``default``. A value that is not an integer, or is
-    below ``minimum``, raises ImproperlyConfigured naming the variable: never
-    a bare ValueError, and never a silent fallback to the default.
+    Parsed as NumericSettingSpec parses the runtime numeric settings: unset or
+    blank means ``default``; a value that is not an integer, is below
+    ``minimum`` or does not fit in 64 bits raises ImproperlyConfigured naming
+    the variable, never a bare ValueError and never a silent fallback.
     """
-    raw = (os.environ if env is None else env).get(name, "").strip()
-    if not raw:
-        return default
+    spec = NumericSettingSpec(
+        int,
+        default,
+        -sys.maxsize - 1 if minimum is None else minimum,
+        sys.maxsize,
+    )
     try:
-        value = int(raw)
-    except ValueError:
-        raise ImproperlyConfigured(f"{name} must be an integer, not {raw!r}") from None
-    if minimum is not None and value < minimum:
-        raise ImproperlyConfigured(f"{name} must be at least {minimum}, not {value}")
-    return value
+        return int(spec.parse(name, (os.environ if env is None else env).get(name)))
+    except ValueError as exc:
+        raise ImproperlyConfigured(str(exc)) from None
