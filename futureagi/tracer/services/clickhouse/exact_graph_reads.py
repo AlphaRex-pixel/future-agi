@@ -3068,6 +3068,32 @@ def _finite_survivor_map_ctes(
     """
 
 
+def _session_span_filters(filters: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The filters a Sessions statement compiles as span-level membership leaves.
+
+    Window, session-id, message and post-aggregate filters are applied by the
+    statement itself, not by membership.
+    """
+
+    return [
+        item
+        for item in filters
+        if _is_raw_attribute_filter(item)
+        or (item.get("column_id") or item.get("columnId"))
+        not in {
+            *_SESSION_POST_AGGREGATE_FILTERS,
+            *_SESSION_MESSAGE_FILTER_COLUMNS,
+            *SESSION_ID_FILTER_COLS,
+        }
+    ]
+
+
+def _membership_plan_is_lean(plan: _SessionMembershipPlan) -> bool:
+    """Whether a membership plan has no span-level leaf (the lean source)."""
+
+    return not (plan.scalar_predicates or plan.relational_predicates)
+
+
 def _session_membership_plan(
     *,
     project_id: str,
@@ -3360,17 +3386,7 @@ def _session_aggregate_source_sql(
 
     if lean_graph_source and not anchor_by_session_start:
         raise ValueError("the lean Session graph source is anchored by session start")
-    span_filters = [
-        item
-        for item in filters
-        if _is_raw_attribute_filter(item)
-        or (item.get("column_id") or item.get("columnId"))
-        not in {
-            *_SESSION_POST_AGGREGATE_FILTERS,
-            *_SESSION_MESSAGE_FILTER_COLUMNS,
-            *SESSION_ID_FILTER_COLS,
-        }
-    ]
+    span_filters = _session_span_filters(filters)
     membership_plan = _session_membership_plan(
         project_id=project_id,
         filters=span_filters,
@@ -3473,9 +3489,7 @@ def _session_aggregate_source_sql(
         WHERE 1 = 1
           {candidate_trace_clause}
     )"""
-    if lean_graph_source and not (
-        membership_plan.scalar_predicates or membership_plan.relational_predicates
-    ):
+    if lean_graph_source and _membership_plan_is_lean(membership_plan):
         # Root versions only, no FINAL: every exact candidate's latest live
         # root is one of these rows (same session, same exact start_time).
         # PREWHERE keeps to the immutable project/replacement-hour key, as the
@@ -4849,17 +4863,7 @@ def session_graph_reads_lean_roots(
 
     if _session_filters_need_message_aggregates(filters):
         return False
-    span_filters = [
-        item
-        for item in filters
-        if _is_raw_attribute_filter(item)
-        or (item.get("column_id") or item.get("columnId"))
-        not in {
-            *_SESSION_POST_AGGREGATE_FILTERS,
-            *_SESSION_MESSAGE_FILTER_COLUMNS,
-            *SESSION_ID_FILTER_COLS,
-        }
-    ]
+    span_filters = _session_span_filters(filters)
     if any(
         not _is_raw_attribute_filter(item)
         and (item.get("column_id") or item.get("columnId")) == "has_annotation"
@@ -4871,7 +4875,7 @@ def session_graph_reads_lean_roots(
     except Exception:
         logger.warning("session_graph_lean_classification_failed", exc_info=True)
         return False
-    return not (plan.scalar_predicates or plan.relational_predicates)
+    return _membership_plan_is_lean(plan)
 
 
 def session_graph_root_estimate_sql(
