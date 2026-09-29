@@ -2170,6 +2170,18 @@ class TestWorkEmailGate:
         with pytest.raises(Exception, match="work email address"):
             first_signup(_first_signup_payload("solo.dev@gmail.com"))
 
+    @pytest.mark.parametrize("region", ["us", " EU "])
+    def test_any_spelling_of_a_cloud_region_rejects_a_free_provider_address(
+        self, db, no_outbound_email, monkeypatch, region
+    ):
+        from accounts.utils import first_signup
+
+        monkeypatch.delenv("ALLOW_ANY_EMAIL", raising=False)
+        monkeypatch.setattr(settings, "CLOUD_DEPLOYMENT", region)
+
+        with pytest.raises(Exception, match="work email address"):
+            first_signup(_first_signup_payload("solo.dev@gmail.com"))
+
     def test_cloud_rejects_every_domain_on_the_list(
         self, db, no_outbound_email, monkeypatch
     ):

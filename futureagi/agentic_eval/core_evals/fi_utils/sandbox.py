@@ -37,14 +37,12 @@ import urllib.error
 import urllib.request
 from django.conf import settings
 
+from tfc.ee_loader import is_cloud_env
+
 logger = structlog.get_logger(__name__)
 
 # Code executor service URL (nsjail-based sandbox container)
 CODE_EXECUTOR_URL = os.environ.get("CODE_EXECUTOR_URL", "http://code-executor:8060")
-
-# FutureAGI cloud deployments always run the code executor, so they never run
-# eval code in the worker, whatever CODE_EXECUTOR_LOCAL_FALLBACK says.
-CLOUD_DEPLOYMENTS = frozenset({"US", "EU", "DEV"})
 
 # Connection errors that mean the executor was never reached.
 _UNREACHABLE_ERRNOS = frozenset(
@@ -569,12 +567,13 @@ def _local_fallback_allowed(language: str) -> bool:
     """Whether eval code may run in this worker because the executor is unreachable.
 
     Only self-hosted installs that set CODE_EXECUTOR_LOCAL_FALLBACK get the
-    local runner; cloud deployments refuse it.
+    local runner. Future AGI Cloud always runs the code executor, so it
+    refuses it whatever CODE_EXECUTOR_LOCAL_FALLBACK says.
     """
     if not getattr(settings, "CODE_EXECUTOR_LOCAL_FALLBACK", False):
         return False
-    deployment = str(getattr(settings, "CLOUD_DEPLOYMENT", "") or "").strip().upper()
-    if deployment in CLOUD_DEPLOYMENTS:
+    deployment = str(getattr(settings, "CLOUD_DEPLOYMENT", "") or "")
+    if is_cloud_env(deployment):
         logger.warning(
             "code_executor_local_fallback_refused",
             language=language,

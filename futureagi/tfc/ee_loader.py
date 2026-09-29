@@ -25,7 +25,8 @@ CLOUD_DEPLOYMENTS = ("US", "EU", "DEV")
 
 
 def is_cloud_env(deployment: str | None = None) -> bool:
-    """Whether CLOUD_DEPLOYMENT names a Future AGI Cloud region.
+    """Whether CLOUD_DEPLOYMENT names a Future AGI Cloud region, in any case
+    and with surrounding whitespace ignored.
 
     ``deployment`` defaults to the environment variable; runtime code passes
     ``settings.CLOUD_DEPLOYMENT``. Any other value, "false" included, means a
@@ -33,7 +34,7 @@ def is_cloud_env(deployment: str | None = None) -> bool:
     """
     if deployment is None:
         deployment = os.environ.get("CLOUD_DEPLOYMENT", "")
-    return deployment in CLOUD_DEPLOYMENTS
+    return deployment.strip().upper() in CLOUD_DEPLOYMENTS
 
 
 def _is_oss_mode() -> bool:

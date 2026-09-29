@@ -4,6 +4,8 @@ import structlog
 from django.apps import AppConfig
 from django.db.models.signals import post_migrate
 
+from tfc.ee_loader import is_cloud_env
+
 logger = structlog.get_logger(__name__)
 
 STARTUP_SAFE_MANAGEMENT_COMMANDS = frozenset(
@@ -29,7 +31,6 @@ STARTUP_SAFE_MANAGEMENT_COMMANDS = frozenset(
 )
 
 HOSTED_ENV_TYPES = frozenset({"prod", "production", "staging"})
-HOSTED_DEPLOYMENTS = frozenset({"US", "EU", "DEV"})
 
 # Application processes are never schema/bootstrap runners. A one-shot operator
 # job may run one of these explicit management commands, but it does not enable
@@ -82,8 +83,7 @@ def hosted_startup_environment() -> bool:
     """Return whether this process belongs to a hosted deployment."""
 
     return (
-        os.getenv("ENV_TYPE", "").strip().lower() in HOSTED_ENV_TYPES
-        or os.getenv("CLOUD_DEPLOYMENT", "").strip().upper() in HOSTED_DEPLOYMENTS
+        os.getenv("ENV_TYPE", "").strip().lower() in HOSTED_ENV_TYPES or is_cloud_env()
     )
 
 

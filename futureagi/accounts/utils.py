@@ -32,6 +32,7 @@ from analytics.utils import (
 from saml2_auth.models import SAMLMetadataModel
 from tfc.constants.email import FREE_EMAIL_DOMAINS
 from tfc.constants.levels import Level
+from tfc.ee_loader import is_cloud_env
 from tfc.settings.settings import ssl
 from tfc.utils.email import email_helper
 from tfc.utils.parse_errors import parse_serialized_errors
@@ -287,7 +288,7 @@ def first_signup(data, mode=None):
     # Only managed cloud requires a work address. A self-hosted install — EE
     # licensed or not — is run by people signing up on whatever address they
     # have, and the operator already controls who can reach the instance.
-    is_cloud = settings.CLOUD_DEPLOYMENT in ("US", "EU", "DEV")
+    is_cloud = is_cloud_env(settings.CLOUD_DEPLOYMENT)
     allow_any_email = (
         os.getenv("ALLOW_ANY_EMAIL", "false" if is_cloud else "true").lower() == "true"
     )

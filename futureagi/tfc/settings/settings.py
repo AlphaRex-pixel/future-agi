@@ -283,11 +283,7 @@ if has_ee("ee.usage"):
     INSTALLED_APPS.append("ee.usage")
 if has_ee("ee.licensing"):
     INSTALLED_APPS.append("ee.licensing")
-if has_ee("ee.cloud.control_plane") and os.environ.get("CLOUD_DEPLOYMENT", "") in (
-    "US",
-    "EU",
-    "DEV",
-):
+if has_ee("ee.cloud.control_plane") and is_cloud_env():
     INSTALLED_APPS.append("ee.cloud.control_plane.apps.CloudControlPlaneConfig")
 
 # Site ID for django.contrib.sites
