@@ -8,10 +8,12 @@ fallback runner is the exception: it runs real (tiny) subprocesses."""
 from __future__ import annotations
 
 import configparser
+import ctypes
 import importlib.util
 import json
 import os
 import re
+import socket
 import sys
 import time
 import types
@@ -358,6 +360,12 @@ def test_supervisor_runs_the_contracted_processes() -> None:
     assert sandbox["command"].startswith("/usr/bin/env -i ")
     # No user site-packages an eval could plant code in for the server.
     assert "PYTHONNOUSERSITE=1" in sandbox["command"]
+    # The only setting of the container's that the server's scrubbed
+    # environment keeps: .env's egress ports.
+    assert (
+        'CODE_EXECUTOR_EGRESS_PORTS="%(ENV_CODE_EXECUTOR_EGRESS_PORTS)s"'
+        in sandbox["command"]
+    )
     assert "HOME=/tmp" not in sandbox["command"]
     assert programs["bootstrap"]["autorestart"] == "unexpected"
     # The API stops first: its worker drains while everything it calls
@@ -526,6 +534,21 @@ def test_installer_build_args_are_declared_in_the_standalone_dockerfile(
     backend = set(re.findall(build_arg, text)) - passed
     assert backend == {"IMAGE_VARIANT"}
     assert backend <= _dockerfile_args(ROOT / "futureagi" / "Dockerfile.oss")
+
+
+def test_start_exports_every_value_supervisor_interpolates() -> None:
+    """supervisord does not start when an %(ENV_X)s it reads is unset."""
+    settings = [
+        line
+        for line in (STANDALONE / "supervisord.conf").read_text().splitlines()
+        if not line.startswith(";")
+    ]
+    start = (STANDALONE / "bin" / "start").read_text(encoding="utf-8")
+    before_supervisor = start[: start.index("exec supervisord")]
+    names = set(re.findall(r"%\(ENV_([A-Z0-9_]+)\)s", "\n".join(settings)))
+    assert "CODE_EXECUTOR_EGRESS_PORTS" in names
+    for name in names:
+        assert re.search(rf"^\s*export {name}\b", before_supervisor, re.M), name
 
 
 def test_start_runs_one_off_commands_without_supervisor() -> None:
@@ -873,8 +896,7 @@ def test_cdc_defaults_cover_schedules_and_an_adopted_peerdb() -> None:
 # --- code-executor fallback (no nsjail), as run in the standalone install --------
 
 
-@pytest.fixture()
-def executor(monkeypatch):
+def _load_executor(monkeypatch):
     # server.py imports falcon at module level; the backend venv lacks it.
     falcon = types.ModuleType("falcon")
 
@@ -888,6 +910,21 @@ def executor(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.fixture()
+def executor(monkeypatch):
+    monkeypatch.delenv("CODE_EXECUTOR_EGRESS_PORTS", raising=False)
+    return _load_executor(monkeypatch)
+
+
+def _landlock_abi() -> int:
+    """Asked of the kernel here, not of server.py."""
+    if not sys.platform.startswith("linux"):
+        return 0
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.syscall.restype = ctypes.c_long
+    return libc.syscall(ctypes.c_long(444), None, ctypes.c_long(0), ctypes.c_long(1))
 
 
 def _alive(pid: int) -> bool:
@@ -993,6 +1030,98 @@ def test_fallback_limits_memory(executor) -> None:
     # The eval script reports the MemoryError as a runtime error.
     assert result["status"] == "error"
     assert result["data"].startswith("Runtime error"), result
+
+
+def _listening() -> socket.socket:
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen()
+    return server
+
+
+# Connects to each port, then tries to listen, and reports what happened.
+EGRESS_PROBE = """
+import errno, socket
+def evaluate(ports, **kwargs):
+    outcomes = []
+    for port in ports:
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=5).close()
+            outcomes.append("connected")
+        except OSError as e:
+            outcomes.append(errno.errorcode.get(e.errno, str(e)))
+    try:
+        socket.socket().bind(("127.0.0.1", 0))
+        outcomes.append("listened")
+    except OSError as e:
+        outcomes.append(errno.errorcode.get(e.errno, str(e)))
+    return {"result": 1.0, "reason": " ".join(outcomes)}
+"""
+
+
+@pytest.mark.skipif(
+    _landlock_abi() < 4, reason="needs Landlock's TCP rules (Linux 6.7+)"
+)
+def test_fallback_connects_only_to_the_egress_ports(monkeypatch) -> None:
+    """Temporal (7233, no auth), ClickHouse, Postgres and Redis listen next to
+    the Standalone sandbox: a run may reach only the listed ports."""
+    with _listening() as allowed, _listening() as internal:
+        ports = [allowed.getsockname()[1], internal.getsockname()[1]]
+        monkeypatch.setenv("CODE_EXECUTOR_EGRESS_PORTS", str(ports[0]))
+        executor = _load_executor(monkeypatch)
+        result = executor._execute_python_fallback(EGRESS_PROBE, {"ports": ports}, 10)
+    assert result["status"] == "success", result
+    assert result["data"]["reason"] == "connected EACCES EACCES"
+
+
+def test_fallback_reaches_every_port_where_the_kernel_cannot_restrict_it(
+    executor, monkeypatch
+) -> None:
+    monkeypatch.setattr(executor, "LANDLOCK_TCP_RULES", False)
+    with _listening() as internal:
+        port = internal.getsockname()[1]
+        result = executor._execute_python_fallback(EGRESS_PROBE, {"ports": [port]}, 10)
+    assert result["status"] == "success", result
+    assert result["data"]["reason"] == "connected listened"
+
+
+@pytest.mark.parametrize(
+    ("nsjail", "landlock", "ports"),
+    [(False, True, [80, 443]), (False, False, None), (True, True, None)],
+)
+def test_health_says_which_ports_code_evals_can_reach(
+    executor, monkeypatch, capsys, nsjail, landlock, ports
+) -> None:
+    monkeypatch.setattr(executor, "NSJAIL_AVAILABLE", nsjail)
+    monkeypatch.setattr(executor, "LANDLOCK_TCP_RULES", landlock)
+
+    class Response:
+        media = None
+
+    executor.HealthResource().on_get(None, Response)
+    assert Response.media["egress_ports"] == ports
+    executor._warn_if_egress_is_open()
+    # The server's log says so once, at start, when runs reach every port.
+    assert ("no Landlock network rules" in capsys.readouterr().err) == (
+        not nsjail and not landlock
+    )
+
+
+@pytest.mark.parametrize(
+    ("setting", "ports"), [("8443,443", (8443, 443)), ("", (80, 443))]
+)
+def test_the_egress_ports_come_from_the_environment(
+    monkeypatch, setting, ports
+) -> None:
+    monkeypatch.setenv("CODE_EXECUTOR_EGRESS_PORTS", setting)
+    assert _load_executor(monkeypatch).FALLBACK_EGRESS_PORTS == ports
+
+
+@pytest.mark.parametrize("setting", ["80,", "https", "0", "70000", "80;443"])
+def test_a_malformed_egress_port_list_stops_the_server(monkeypatch, setting) -> None:
+    monkeypatch.setenv("CODE_EXECUTOR_EGRESS_PORTS", setting)
+    with pytest.raises(ValueError, match="CODE_EXECUTOR_EGRESS_PORTS"):
+        _load_executor(monkeypatch)
 
 
 @pytest.mark.parametrize(

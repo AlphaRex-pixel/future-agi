@@ -5,10 +5,13 @@ Provides a simple HTTP endpoint for executing untrusted code in nsjail sandboxes
 Falls back to subprocess isolation when nsjail is not available: each run is a
 child in its own session and private temp dir, with an empty environment and
 CPU, address-space, process, file-size and open-file limits; the session is
-killed when the run ends or times out. The fallback does not isolate the
-network or the filesystem beyond what the server's own (unprivileged) user can
-reach. Concurrent runs share that user, and a process that starts a session of
-its own outlives its run (RLIMIT_NPROC caps how many can).
+killed when the run ends or times out. Where the kernel has Landlock network
+rules (Linux 6.7+), a run may open TCP connections only to
+CODE_EXECUTOR_EGRESS_PORTS (80 and 443) and listen on none; elsewhere it
+reaches every port the server can. The fallback does not isolate the
+filesystem beyond what the server's own (unprivileged) user can reach.
+Concurrent runs share that user, and a process that starts a session of its
+own outlives its run (RLIMIT_NPROC caps how many can).
 
 POST /execute
 {
@@ -25,6 +28,7 @@ Returns:
 }
 """
 
+import ctypes
 import json
 import os
 import shutil
@@ -77,10 +81,65 @@ FALLBACK_ENV = {
     "NUMEXPR_NUM_THREADS": "1",
     "MALLOC_ARENA_MAX": "2",
 }
-# Sets the limits (never above an inherited hard limit), then execs the run.
-# A launcher process instead of preexec_fn, which is unsafe in this threaded
-# server. Only Linux must honour every limit (macOS rejects RLIMIT_AS, for
-# local runs of this file).
+
+
+def _egress_ports_setting() -> tuple:
+    value = os.environ.get("CODE_EXECUTOR_EGRESS_PORTS") or "80,443"
+    try:
+        ports = tuple(int(port) for port in value.split(","))
+    except ValueError:
+        ports = ()
+    if not ports or not all(0 < port < 65536 for port in ports):
+        raise ValueError(
+            f"CODE_EXECUTOR_EGRESS_PORTS must list TCP ports, comma-separated: {value!r}"
+        )
+    return ports
+
+
+def _landlock_abi() -> int:
+    """This kernel's Landlock ABI, 0 without Landlock."""
+    if not sys.platform.startswith("linux"):
+        return 0
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.syscall.restype = ctypes.c_long
+    # landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)
+    abi = libc.syscall(ctypes.c_long(444), None, ctypes.c_long(0), ctypes.c_long(1))
+    return max(abi, 0)
+
+
+# TCP ports a fallback run may connect to. It shares the server's network, so
+# it would otherwise reach the Temporal dev server (7233, no authentication),
+# Postgres, ClickHouse, Redis, object storage, the API and the gateway.
+FALLBACK_EGRESS_PORTS = _egress_ports_setting()
+# Landlock's TCP rules came with ABI 4 (Linux 6.7). Without them a fallback
+# run reaches every port.
+LANDLOCK_TCP_RULES = _landlock_abi() >= 4
+
+
+def _egress_ports() -> list | None:
+    """The ports runs may connect to; None when they reach every one."""
+    if NSJAIL_AVAILABLE or not LANDLOCK_TCP_RULES:
+        return None
+    return list(FALLBACK_EGRESS_PORTS)
+
+
+def _warn_if_egress_is_open() -> None:
+    if not NSJAIL_AVAILABLE and not LANDLOCK_TCP_RULES:
+        print(
+            "code-executor: this kernel has no Landlock network rules (Linux "
+            "6.7+), so code evals can connect to every port this container can",
+            file=sys.stderr,
+        )
+
+
+_warn_if_egress_is_open()
+
+# Sets the limits (never above an inherited hard limit) and, unless its port
+# list is "-", allows TCP connections to those ports only and no TCP listening
+# (Landlock), then execs the run. A launcher process instead of preexec_fn,
+# which is unsafe in this threaded server. Only Linux must honour every limit
+# (macOS rejects RLIMIT_AS, for local runs of this file). Syscall numbers are
+# those of x86_64 and arm64.
 _LIMITS_LAUNCHER = """\
 import os, resource, sys
 names = ("RLIMIT_CPU", "RLIMIT_AS", "RLIMIT_NPROC", "RLIMIT_FSIZE", "RLIMIT_NOFILE", "RLIMIT_CORE")
@@ -93,7 +152,29 @@ for name, value in zip(names, sys.argv[1:7]):
     except (ValueError, OSError):
         if sys.platform.startswith("linux"):
             raise
-os.execv(sys.argv[7], sys.argv[7:])
+if sys.argv[7] != "-":
+    import ctypes, struct
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.syscall.restype = ctypes.c_long
+    def check(result, name):
+        if result < 0:
+            raise OSError(ctypes.get_errno(), name)
+        return result
+    def syscall(number, *args):
+        args = [a if isinstance(a, bytes) else ctypes.c_long(a) for a in args]
+        return check(libc.syscall(ctypes.c_long(number), *args), f"syscall {number}")
+    BIND_TCP, CONNECT_TCP, RULE_NET_PORT = 1, 2, 2
+    # landlock_create_ruleset: handled_access_fs 0, handled_access_net
+    attr = struct.pack("QQ", 0, BIND_TCP | CONNECT_TCP)
+    ruleset = syscall(444, attr, len(attr), 0)
+    for port in sys.argv[7].split(","):
+        # landlock_add_rule
+        syscall(445, ruleset, RULE_NET_PORT, struct.pack("QQ", CONNECT_TCP, int(port)), 0)
+    no_new_privs = [ctypes.c_ulong(value) for value in (1, 0, 0, 0)]
+    check(libc.prctl(ctypes.c_int(38), *no_new_privs), "prctl")  # PR_SET_NO_NEW_PRIVS
+    syscall(446, ruleset, 0)  # landlock_restrict_self
+    os.close(ruleset)
+os.execv(sys.argv[8], sys.argv[8:])
 """
 
 
@@ -213,6 +294,11 @@ def _run_contained(
             proc = subprocess.Popen(
                 [PYTHON_PATH, "-I", "-c", _LIMITS_LAUNCHER]
                 + [str(limit) for limit in limits]
+                + [
+                    ",".join(str(port) for port in FALLBACK_EGRESS_PORTS)
+                    if LANDLOCK_TCP_RULES
+                    else "-"
+                ]
                 + argv
                 + [script_path],
                 stdin=subprocess.DEVNULL,
@@ -496,6 +582,8 @@ class HealthResource:
             "nsjail": NSJAIL_AVAILABLE,
             "python": PYTHON_PATH,
             "node": NODE_PATH,
+            # null: runs can connect to every port.
+            "egress_ports": _egress_ports(),
         }
 
 

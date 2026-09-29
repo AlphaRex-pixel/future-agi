@@ -359,14 +359,20 @@ cannot read `/data` (object storage, Temporal's database) or the mounted
 secrets (the gateway config and a Google credentials file), and the
 container's Redis requires a password.
 
-What it does not isolate is the network. Eval code shares the app container's
-network namespace, so it can connect to everything the app reaches: the
-Temporal dev server on loopback (no authentication), Postgres and ClickHouse
-over the Docker network (their passwords are not in the eval's environment;
-ClickHouse has none on installs made before the installer generated
-`CH_PASSWORD`), and anything else your network allows. Concurrent evals also
-run as the same user. The `app` container is unprivileged, so it cannot
-firewall one user's traffic (that needs `NET_ADMIN`) or give an eval a network
+Eval code shares the app container's network namespace. Where the Docker
+host runs Linux 6.7 or later with Landlock enabled, the sandbox lets it open
+TCP connections only to ports 80 and 443 (`CODE_EXECUTOR_EGRESS_PORTS`) and
+listen on no TCP port, which keeps the Temporal dev server on loopback (no
+authentication), Postgres, ClickHouse, Redis, object storage, the API and the
+gateway out of its reach; whatever your network serves on 80 or 443, and UDP,
+stay reachable. On older kernels, which the app's log names at start
+(`docker compose logs app`), an eval can connect to everything the app
+reaches: the Temporal dev server, Postgres and ClickHouse over the Docker
+network (their passwords are not in the eval's environment; ClickHouse has
+none on installs made before the installer generated `CH_PASSWORD`), and
+anything else your network allows. Concurrent evals also run as the same
+user. The `app` container is unprivileged, so it cannot firewall one user's
+traffic by address (that needs `NET_ADMIN`) or give an eval a network
 namespace of its own (Docker's default seccomp profile refuses one without
 `SYS_ADMIN`), and the platform does not add either capability to it.
 
