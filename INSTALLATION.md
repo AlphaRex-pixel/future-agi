@@ -705,10 +705,11 @@ installer leaves it empty and warns. To give such an install a password,
 set `CH_PASSWORD` and run `docker compose up -d`: the bootstrap then
 re-creates the dictionaries with it. On Distributed the Postgres →
 ClickHouse sync stops until the `ch_dest` peer in PeerDB carries the new
-password too, so leave it empty there unless you update that peer.
-Changing a password that is already set is not supported yet: the
-dictionaries keep the old one. No `<`, `>` or `&` in it: ClickHouse reads
-it into its XML configuration.
+password too, so leave it empty there unless you update that peer. A
+password that is already set changes the same way, with the same caveat on
+Distributed, but removing one is not supported: the bootstrap re-creates the
+dictionaries only with a password, so they would keep the old one. No `<`,
+`>` or `&` in it: ClickHouse reads it into its XML configuration.
 
 ### Ports reference
 
