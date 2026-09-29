@@ -236,6 +236,7 @@ from tracer.services.clickhouse.v2.query_builders.user_list import (
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, the manager imports us.
     from tracer.services.users_list_manager import UserCursorRead, UsersListManager
+    from tracer.services.users_walk_witness import WalkedTypedFilter
 
 logger = structlog.get_logger(__name__)
 
@@ -1141,7 +1142,7 @@ def _tail_has_no_user(
 
 def _witness_candidates(
     manager: Any,
-) -> list[tuple[MatchingActivityWitness, Any]]:
+) -> list[tuple[MatchingActivityWitness, WalkedTypedFilter | None]]:
     """The eligible witnesses a first page costs: none when fewer than two.
 
     At most ``USER_LIST_WALK_WITNESS_CANDIDATES`` of them, always including
@@ -1172,7 +1173,8 @@ def _witness_candidates(
 
 
 def _choose_witness(
-    state: _WalkState, candidates: list[tuple[MatchingActivityWitness, Any]]
+    state: _WalkState,
+    candidates: list[tuple[MatchingActivityWitness, WalkedTypedFilter | None]],
 ) -> int:
     """Walk the candidate whose whole-window scan the index says is cheapest.
 
@@ -1458,7 +1460,7 @@ def _native_certification_deadline(state: _WalkState) -> ReadDeadline:
 def _read_native_certification(
     state: _WalkState,
     rows: list[dict],
-    builder: Any,
+    builder: UserListQueryBuilderV2,
     *,
     newest: int | None,
     head: bool,
@@ -1854,7 +1856,7 @@ def witness_fingerprint(witness: MatchingActivityWitness) -> str:
 
 def _eligible_witnesses(
     manager: Any,
-) -> list[tuple[MatchingActivityWitness, Any]]:
+) -> list[tuple[MatchingActivityWitness, WalkedTypedFilter | None]]:
     """The witnesses the walk may discover on, in static rank order.
 
     ``UsersListManager.matching_activity_walk_applies`` computes them from the
