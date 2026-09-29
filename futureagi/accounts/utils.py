@@ -11,6 +11,7 @@ from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import close_old_connections, transaction
 from django.db.models.functions import Lower
 from django.utils.encoding import force_bytes
@@ -370,10 +371,14 @@ def create_owner_account(email, full_name, password):
     """An account that owns a new organization, as a first signup creates it:
     ``manage.py create_user`` and the Helm chart's first admin
     (``bootstrap_install``). Raises ValidationError, with messages for the
-    operator, for a missing field or a password AUTH_PASSWORD_VALIDATORS
-    reject, before anything is created."""
+    operator, for a missing field, a malformed or taken email, or a password
+    AUTH_PASSWORD_VALIDATORS reject, before anything is created."""
     if not email or not full_name or not password:
         raise ValidationError("Email, name, and password are all required.")
+    validate_email(email)
+    # Before the password: ./bin/install counts "already exists" as success.
+    if User.objects.filter(email__iexact=email).exists():
+        raise ValidationError(f"A user with the email {email} already exists.")
     # UserSignupSerializer trims the password before it validates and stores it.
     validate_password(password.strip())
     return first_signup(

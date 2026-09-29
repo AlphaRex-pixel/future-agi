@@ -421,8 +421,9 @@ def first_admin(log: Callable[[str], None], env=None) -> None:
         )
     except ValidationError as exc:
         raise BootstrapError(
-            f"the first admin {email}: {' '.join(exc.messages)} Set FAGI_ADMIN_NAME "
-            "and FAGI_ADMIN_PASSWORD (Helm: bootstrap.admin.existingSecret)."
+            f"the first admin {email}: {' '.join(exc.messages)} Check "
+            "FAGI_ADMIN_EMAIL, FAGI_ADMIN_NAME and FAGI_ADMIN_PASSWORD (Helm: "
+            "bootstrap.admin.existingSecret)."
         ) from None
     log(f"first admin {email} created")
 

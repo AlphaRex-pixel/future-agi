@@ -1050,7 +1050,9 @@ class _Users:
 
 @pytest.fixture
 def signups(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    """The sign-ups create_owner_account makes, with no user in the way."""
     created: list[dict] = []
+    monkeypatch.setattr("accounts.utils.User", _Users())
     monkeypatch.setattr("accounts.utils.first_signup", created.append)
     return created
 
@@ -1115,6 +1117,20 @@ def test_first_admin_needs_a_name_and_a_password_the_validators_accept(
 
     with pytest.raises(command.BootstrapError, match=reason) as refused:
         command.first_admin(lambda line: None, env={**ADMIN_ENV, **overrides})
+    assert "bootstrap.admin.existingSecret" in str(refused.value)
+    assert signups == []
+
+
+@pytest.mark.parametrize("email", ["owner", "owner@example"])
+def test_first_admin_refuses_a_malformed_email_with_guidance(
+    monkeypatch, signups, email
+) -> None:
+    monkeypatch.setattr("django.contrib.auth.get_user_model", lambda: _Users())
+
+    with pytest.raises(command.BootstrapError, match="valid email") as refused:
+        command.first_admin(
+            lambda line: None, env={**ADMIN_ENV, "FAGI_ADMIN_EMAIL": email}
+        )
     assert "bootstrap.admin.existingSecret" in str(refused.value)
     assert signups == []
 
