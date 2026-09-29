@@ -885,10 +885,11 @@ docker compose up -d
 
 Anyone who can add a provider can then point the gateway and the API at any
 address on those networks, the databases included (ClickHouse's `default` user
-has no password in either Compose setup), so allow it only where all of them
-are trusted. Loopback, link-local and cloud metadata addresses stay refused. A
-gateway or API from before this setting ignores it and refuses every private
-URL. On Helm, set `agentccGateway.allowPrivateProviderURLs=true`.
+has no password while `CH_PASSWORD` is empty, as on installs made before the
+installer generated one), so allow it only where all of them are trusted.
+Loopback, link-local and cloud metadata addresses stay refused. A gateway or
+API from before this setting ignores it and refuses every private URL. On
+Helm, set `agentccGateway.allowPrivateProviderURLs=true`.
 
 - **On the Docker host:** use `http://host.docker.internal:11434/v1` (Ollama)
   or `http://host.docker.internal:8000/v1` (vLLM), and make the server listen
