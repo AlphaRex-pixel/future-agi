@@ -552,6 +552,101 @@ def test_hosted_text_transcript_is_materialized_for_chat_ui(organization, worksp
     response.release_conn.assert_called_once_with()
 
 
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("call_start_offset", "expected_starts"),
+    [
+        # The recording starts at the call start, 6.8s before the first word.
+        (-6.8, [6800, 10540, 13800]),
+        # A call start after the first word (clock skew) falls back to it.
+        (1.0, [0, 3740, 7000]),
+    ],
+)
+def test_hosted_voice_transcript_offsets_follow_the_recording(
+    organization, workspace, call_start_offset, expected_starts
+):
+    job, _ = create_hosted_job(
+        organization,
+        _payload(),
+        idempotency_key=f"hosted-voice-transcript-{call_start_offset}",
+        workspace=workspace,
+    )
+    capability = register_attempt(job.id, endpoint_base_url="https://platform.example")
+    client = APIClient()
+    provision = client.post(
+        f"{BASE}/{capability.attempt.id}/scenarios/",
+        {
+            "operation": "provision",
+            "name": "Voice transcript",
+            "modality": "text",
+            "personas": [
+                {
+                    "scenario_key": "voice-one",
+                    "name": "Customer",
+                    "situation": "Wants to cancel an order",
+                    "outcome": "Gets an answer",
+                }
+            ],
+        },
+        format="json",
+        **_headers(capability),
+    )
+    result = provision.json()["result"]
+    client.post(
+        f"{BASE}/{capability.attempt.id}/scenarios/",
+        {
+            "operation": "begin",
+            "run_test_id": result["run_test_id"],
+            "scenario_keys": ["voice-one"],
+        },
+        format="json",
+        **_headers(capability),
+    )
+    first_word = datetime(2026, 9, 29, 9, 51, 56, 603000, tzinfo=UTC)
+    call = CallExecution.objects.get(hosted_registration__scenario_key="voice-one")
+    call.simulation_call_type = CallExecution.SimulationCallType.VOICE
+    call.started_at = first_word + timedelta(seconds=call_start_offset)
+    call.save(update_fields=["simulation_call_type", "started_at"])
+    at = first_word.timestamp()
+    response = MagicMock()
+    response.read.return_value = json.dumps(
+        {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "Hi. This is Byte from QuickByte support.",
+                    "started_speaking_at": at,
+                    "stopped_speaking_at": at + 3.74,
+                },
+                # Untimed: sits where the greeting ended.
+                {"role": "assistant", "content": "How can I help you today?"},
+                {
+                    "role": "user",
+                    "content": "I need to cancel my order.",
+                    "started_speaking_at": at + 7.0,
+                    "stopped_speaking_at": at + 14.18,
+                },
+            ]
+        }
+    ).encode()
+    storage = MagicMock()
+    storage.get_object.return_value = response
+
+    with patch(
+        "simulate.services.hosted_harness_ingestion.get_storage_client",
+        return_value=storage,
+    ):
+        _ingest_hosted_transcript(call, SimpleNamespace(object_key="transcript.json"))
+
+    rows = call.transcripts.order_by("start_time_ms", "created_at")
+    assert [row.start_time_ms for row in rows] == expected_starts
+    assert [row.end_time_ms for row in rows] == [
+        expected_starts[1],
+        expected_starts[1],
+        expected_starts[2] + 7180,
+    ]
+
+
 def _upload_required_artifacts(client, capability, headers):
     entries = []
     storage = MagicMock()
