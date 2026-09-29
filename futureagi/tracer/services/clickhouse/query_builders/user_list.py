@@ -832,7 +832,7 @@ class UserListQueryBuilder(BaseQueryBuilder):
         """
         if limit <= 0:
             raise ValueError("matching activity slice limit must be positive")
-        params = self._matching_activity_range_params(slice_start, slice_end)
+        params = self._witnessed_range_params(slice_start, slice_end)
         params["slice_user_limit"] = int(limit)
         keyset = ""
         if before is not None:
@@ -885,7 +885,7 @@ class UserListQueryBuilder(BaseQueryBuilder):
         """
         if limit <= 0:
             raise ValueError("matching activity instant limit must be positive")
-        params = self._matching_activity_range_params(
+        params = self._witnessed_range_params(
             instant, instant + timedelta(microseconds=1)
         )
         params["slice_user_limit"] = int(limit)
@@ -937,9 +937,7 @@ class UserListQueryBuilder(BaseQueryBuilder):
         (application reads carry no server row, byte or time cap).
         ``witness`` names a witness other than the walk's (``walk_witness``).
         """
-        params = self._matching_activity_range_params(
-            range_start, range_end, witness=witness
-        )
+        params = self._witnessed_range_params(range_start, range_end, witness=witness)
         query = f"""
         SELECT 1 AS witnessed
         FROM spans
@@ -967,9 +965,6 @@ class UserListQueryBuilder(BaseQueryBuilder):
         that statement, under a server cap.
         """
         params = self._matching_activity_range_params(range_start, range_end)
-        params.pop("_witness_sql")
-        for name in self.walk_witness.params if self.walk_witness else {}:
-            params.pop(name, None)
         query = f"""
         SELECT 1 AS present
         FROM spans
@@ -1041,33 +1036,41 @@ class UserListQueryBuilder(BaseQueryBuilder):
         return estimate if counted_any else None
 
     def _matching_activity_range_params(
-        self,
-        range_start: Any,
-        range_end: Any,
-        *,
-        witness: MatchingActivityWitness | None = None,
+        self, range_start: Any, range_end: Any
     ) -> dict[str, Any]:
+        """The parameters of ``_matching_activity_range_predicate``."""
         if range_start is None or range_end is None or range_start >= range_end:
             raise ValueError("matching activity slice is invalid")
-        witness = witness if witness is not None else self.walk_witness
-        if witness is None:
-            raise UnsupportedBoundedUserListQuery(
-                "the matching-activity walk chose no witness for this page"
-            )
-        witness_sql, witness_params = witness.sql, witness.params
         params: dict[str, Any] = {
-            **witness_params,
             "slice_start_date": range_start,
             "slice_end_date": range_end,
             "slice_start_us": _unix_microseconds(range_start),
             "slice_end_us": _unix_microseconds(range_end),
-            "_witness_sql": witness_sql,
         }
         if self.project_ids is not None:
             params["project_ids"] = tuple(self.project_ids)
         else:
             params["project_id"] = self.project_id
         return params
+
+    def _witnessed_range_params(
+        self,
+        range_start: Any,
+        range_end: Any,
+        *,
+        witness: MatchingActivityWitness | None = None,
+    ) -> dict[str, Any]:
+        """The range parameters, the witness's own and its SQL (``_witness_sql``).
+
+        ``witness`` defaults to the walk's (``walk_witness``).
+        """
+        range_params = self._matching_activity_range_params(range_start, range_end)
+        witness = witness if witness is not None else self.walk_witness
+        if witness is None:
+            raise UnsupportedBoundedUserListQuery(
+                "the matching-activity walk chose no witness for this page"
+            )
+        return {**witness.params, **range_params, "_witness_sql": witness.sql}
 
     def _matching_activity_range_predicate(self) -> str:
         return f"""{self._project_predicate("spans")}
