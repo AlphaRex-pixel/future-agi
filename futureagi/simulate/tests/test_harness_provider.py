@@ -1753,7 +1753,9 @@ def test_deleting_environment_cancels_active_selected_run(user, workspace):
 
 
 @pytest.mark.django_db
-def test_selected_run_returns_structured_usage_limit_response(user, workspace):
+def test_selected_run_returns_structured_usage_limit_response(
+    user, workspace, auth_client
+):
     from ee.usage.exceptions import UsageLimitExceeded
     from ee.usage.schemas.events import CheckResult
 
@@ -1795,8 +1797,6 @@ def test_selected_run_returns_structured_usage_limit_response(user, workspace):
     environment.current_stage = "completed"
     environment.save(update_fields=["payload", "state", "current_stage", "updated_at"])
 
-    client = APIClient()
-    client.force_authenticate(user=user)
     refusal = CheckResult(
         allowed=False,
         error_code="ENTITLEMENT_LIMIT",
@@ -1814,7 +1814,7 @@ def test_selected_run_returns_structured_usage_limit_response(user, workspace):
             "simulate.temporal.client.start_hosted_harness_gateway_workflow"
         ) as start,
     ):
-        response = client.post(
+        response = auth_client.post(
             f"/simulate/api/harness-environments/{environment.id}/run/",
             {"scenario_ids": ["scenario-a"], "trials": 1},
             format="json",
@@ -1835,7 +1835,7 @@ def test_selected_run_returns_structured_usage_limit_response(user, workspace):
     with patch(
         "simulate.temporal.client.start_hosted_harness_gateway_workflow"
     ) as start:
-        retried = client.post(
+        retried = auth_client.post(
             f"/simulate/api/harness-environments/{environment.id}/run/",
             {"scenario_ids": ["scenario-a"], "trials": 1},
             format="json",
