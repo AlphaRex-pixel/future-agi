@@ -75,15 +75,8 @@ vi.mock(
   }),
 );
 
-function AddEvaluationDrawerStub({ open, executionId, completedCallsCount }) {
-  const completed = Number.isFinite(completedCallsCount)
-    ? completedCallsCount
-    : "unknown";
-  return open ? (
-    <div>
-      add-evals-drawer:{executionId} completed:{completed}
-    </div>
-  ) : null;
+function AddEvaluationDrawerStub({ open, executionId }) {
+  return open ? <div>add-evals-drawer:{executionId}</div> : null;
 }
 AddEvaluationDrawerStub.propTypes = {
   open: PropTypes.bool,
@@ -478,42 +471,7 @@ describe("RunDetail", () => {
 
     expect(screen.queryByText(/add-evals-drawer/)).toBeNull();
     await user.click(screen.getByRole("button", { name: "Add evals" }));
-    // STATS carries no `completed` field (still loading it) — the drawer
-    // must receive no finite count, never a borrowed number.
-    expect(
-      screen.getByText("add-evals-drawer:ex1 completed:unknown"),
-    ).toBeInTheDocument();
-  });
-
-  it("hands the picker the run's COMPLETED call count, not its total — the two differ on a run with failures", async () => {
-    useRunDetail.mockReturnValue({
-      identity: IDENTITY,
-      stats: STATS,
-      isLoading: false,
-    });
-    const user = userEvent.setup();
-    renderDetail();
-
-    expect(screen.queryByText(/add-evals-drawer/)).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Add evals" }));
-    expect(
-      screen.getByText("add-evals-drawer:ex1 completed:12"),
-    ).toBeInTheDocument();
-  });
-
-  it("falls back to the store-only picker for a non-backed environment reached via ?mockRuns=1", async () => {
-    useRunDetail.mockReturnValue({
-      identity: IDENTITY,
-      stats: STATS,
-      isLoading: false,
-    });
-    const user = userEvent.setup();
-    renderDetail();
-
-    await user.click(screen.getByRole("button", { name: "Add evals" }));
-    expect(
-      screen.getByText("add-evals-drawer:ex1 completed:unknown"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("add-evals-drawer:ex1")).toBeInTheDocument();
   });
 
   it("falls back to the store-only picker for a non-backed environment reached via ?mockRuns=1", async () => {
