@@ -18,16 +18,20 @@ import SummaryTable from "./SummaryTable";
 // behaviour.
 // Title, legend, graph and the runs bar (~440px) plus ~320px of table rows.
 const MIN_SUMMARY_PX = 760;
+// How many eval lines the graph draws before the user picks their own.
+const DEFAULT_SHOWN_EVALS = 5;
 
 export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
   const { rows, rowsChrono, evals, series } = useRunsSummary(env, envState);
   const scenarioCount = envState.scenarios?.length ?? 0;
 
-  // Which eval lines to draw. Defaults to all; the last one cannot be unticked
-  // (an empty chart reads as a bug, not a choice).
-  const [hiddenIds, setHiddenIds] = useState([]);
+  // Which eval lines to draw. Until the user picks, the first five; the last
+  // one cannot be unticked (an empty chart reads as a bug, not a choice).
+  const [pickedIds, setPickedIds] = useState(null);
   const [highlightedId, setHighlightedId] = useState(null);
-  const shown = evals.filter((e) => !hiddenIds.includes(e.id));
+  const shown = pickedIds
+    ? evals.filter((e) => pickedIds.includes(e.id))
+    : evals.slice(0, DEFAULT_SHOWN_EVALS);
   const shownSeries = series.filter((s) => shown.some((e) => e.id === s.id));
   const categories = rowsChrono.map((r, i) =>
     i === rowsChrono.length - 1 ? `${r.label} · latest` : r.label,
@@ -36,7 +40,7 @@ export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
   const toggleEval = (ids) => {
     // ids = the currently-checked set from the multi-select.
     if (!ids.length) return; // keep at least one line
-    setHiddenIds(evals.filter((e) => !ids.includes(e.id)).map((e) => e.id));
+    setPickedIds(ids);
   };
 
   return (
@@ -100,7 +104,7 @@ export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
                 renderValue: (ids) =>
                   ids.length === evals.length
                     ? `All ${evals.length} evals`
-                    : evals.filter((x) => ids.includes(x.id)).map((x) => x.name).join(", "),
+                    : `${ids.length} of ${evals.length} evals`,
               }}
               sx={{ width: 200, flexShrink: 0, "& .MuiInputBase-input": { typography: "s2", py: 0.5 } }}
             >

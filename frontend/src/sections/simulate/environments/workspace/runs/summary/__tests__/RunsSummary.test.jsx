@@ -192,6 +192,39 @@ describe("RunsSummary", () => {
     ]);
   });
 
+  describe("graph eval selection", () => {
+    const SEVEN = ["e1", "e2", "e3", "e4", "e5", "e6", "e7"];
+    const manyEvals = [
+      {
+        ...RUNS[1],
+        scores: Object.fromEntries(SEVEN.map((k, i) => [k, 10 * (i + 1)])),
+      },
+    ];
+
+    it("draws only the first five evals by default", () => {
+      renderSummary({}, manyEvals);
+      expect(lastChart().series.map((x) => x.name)).toEqual([
+        "E1", "E2", "E3", "E4", "E5",
+      ]);
+      expect(screen.getByText("5 of 7 evals")).toBeInTheDocument();
+    });
+
+    it("draws every eval when there are five or fewer", () => {
+      renderSummary();
+      expect(lastChart().series).toHaveLength(2);
+      expect(screen.getByText("All 2 evals")).toBeInTheDocument();
+    });
+
+    it("keeps the user's pick once they change it", () => {
+      renderSummary({}, manyEvals);
+      fireEvent.mouseDown(screen.getByRole("combobox"));
+      fireEvent.click(screen.getByRole("option", { name: /E7/ }));
+      expect(lastChart().series.map((x) => x.name)).toEqual([
+        "E1", "E2", "E3", "E4", "E5", "E7",
+      ]);
+    });
+  });
+
   it("pins the runs table's header, since the table scrolls under a fixed graph", () => {
     renderSummary();
     const heads = document.querySelectorAll("thead th");
