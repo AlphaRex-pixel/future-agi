@@ -78,10 +78,7 @@ class TestStatisticMaps:
         for surface in ("trace", "session", "users"):
             assert system_metric_statistic(surface, "latency") == "mean"
 
-    def test_choices_match_the_serializer_enum(self):
-        from tracer.serializers.filters import OBSERVE_GRAPH_METRIC_STATISTIC_CHOICES
-
-        assert METRIC_STATISTIC_CHOICES == OBSERVE_GRAPH_METRIC_STATISTIC_CHOICES
+    def test_every_published_statistic_is_a_declared_choice(self):
         for statistics in (
             TRACE_METRIC_STATISTICS,
             SESSION_METRIC_STATISTICS,

@@ -10,6 +10,9 @@ from tfc.utils.api_serializers import (
     StrictInputSerializer,
 )
 from tfc.utils.serializer_fields import JSON_VALUE_SCHEMA, JsonValueField  # noqa: F401
+from tracer.services.clickhouse.graph_metric_statistic import (
+    METRIC_STATISTIC_CHOICES as OBSERVE_GRAPH_METRIC_STATISTIC_CHOICES,
+)
 from tracer.utils.attribute_suggestion_contract import (
     TYPED_STRING_SUGGESTION_MAX_UTF8_BYTES,
 )
@@ -1139,16 +1142,6 @@ class MetricSortParamListQueryParamField(serializers.CharField):
     def to_internal_value(self, data):
         sort_params = parse_filter_list_payload(data)
         return MetricSortParamListField().run_validation(sort_params)
-
-
-# The statistic of a published system-metric series. Kept equal to
-# ``graph_metric_statistic.METRIC_STATISTIC_CHOICES`` (pinned by a test).
-OBSERVE_GRAPH_METRIC_STATISTIC_CHOICES = (
-    "count",
-    "sum",
-    "mean",
-    "percentage",
-)
 
 
 class ObserveGraphDataRequestSerializer(StrictInputSerializer):
