@@ -49,7 +49,7 @@
             },
             "noProxy": {
               "type": "string",
-              "description": "[NO_PROXY, no_proxy] extra hosts, domains or CIDRs that bypass the proxy, comma-separated. The chart always adds localhost, 127.0.0.1, the release's Services, `.<namespace>`, `.svc`, `.cluster.local` and the PostgreSQL, ClickHouse, Redis and Temporal hosts; add an external object-storage endpoint here when it is reachable without the proxy (MinIO in your network, an S3 VPC endpoint). Set only with `httpProxy` or `httpsProxy`."
+              "description": "[NO_PROXY, no_proxy] extra hosts, domains or CIDRs that bypass the proxy, comma-separated. The chart always adds localhost, 127.0.0.1, the release's Services, `.<namespace>`, `.svc`, `.cluster.local` and the PostgreSQL, ClickHouse, Redis and Temporal hosts; add an external object-storage endpoint here when it is reachable without the proxy (MinIO in your network, an S3 VPC endpoint). Object storage requests match against the host they go to: with `objectStorage.external.endpoint` empty (AWS S3), that is `<bucket>.s3.<region>.amazonaws.com`, so list `.s3.<region>.amazonaws.com`, not `s3.amazonaws.com`. Set only with `httpProxy` or `httpsProxy`."
             }
           }
         },

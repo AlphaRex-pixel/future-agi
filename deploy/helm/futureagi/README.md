@@ -680,7 +680,10 @@ turns on the Enterprise features in the public `futureagi/future-agi` image.
   set `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` on every application pod.
   `NO_PROXY` always includes the cluster's names, the release's Services and
   the datastore hosts; add an S3 or MinIO endpoint to `noProxy` when it is
-  reachable directly. The LLM gateway does not use the proxy yet.
+  reachable directly. Object storage goes through the proxy too, unless the
+  host it connects to matches `noProxy` (for AWS S3 with no endpoint set,
+  `<bucket>.s3.<region>.amazonaws.com`). The LLM gateway does not use the
+  proxy yet.
 - **Custom CA.** `global.caBundle.configMap` (or `.secret`) mounts a PEM
   bundle at `/etc/futureagi/ca/ca.crt` and points `SSL_CERT_FILE`,
   `REQUESTS_CA_BUNDLE` and friends at it. It replaces the pods' trust store,
@@ -1074,7 +1077,7 @@ Bracketed names are the environment variables a key sets;
 | `global.airgap` | `false` | Air-gapped install: turns off the platform's own calls to the internet. Turns telemetry off [FUTURE_AGI_TELEMETRY_DISABLED=true] (one minimal registration attempt remains; offline it fails harmlessly and is retried), the license heartbeat off unless `license.heartbeat` is `true` [FUTURE_AGI_ENTERPRISE_HEARTBEAT_DISABLED=true], sets [LITELLM_LOCAL_MODEL_COST_MAP=True] on the Python pods and serving, and [HF_HUB_OFFLINE=1, TRANSFORMERS_OFFLINE=1] on serving, whose models must then be pre-seeded on `serving.persistence` (examples/airgap.yaml). Mirror the images first (`hack/list-images.sh`) and set `global.imageRegistry` and `global.imagePullSecrets`. |
 | `global.proxy.httpProxy` | `""` | [HTTP_PROXY, http_proxy] e.g. `http://proxy.example.com:3128`. Empty: no proxy. |
 | `global.proxy.httpsProxy` | `""` | [HTTPS_PROXY, https_proxy] e.g. `http://proxy.example.com:3128`. Empty: no proxy. |
-| `global.proxy.noProxy` | `""` | [NO_PROXY, no_proxy] extra hosts, domains or CIDRs that bypass the proxy, comma-separated. The chart always adds localhost, 127.0.0.1, the release's Services, `.<namespace>`, `.svc`, `.cluster.local` and the PostgreSQL, ClickHouse, Redis and Temporal hosts; add an external object-storage endpoint here when it is reachable without the proxy (MinIO in your network, an S3 VPC endpoint). Set only with `httpProxy` or `httpsProxy`. |
+| `global.proxy.noProxy` | `""` | [NO_PROXY, no_proxy] extra hosts, domains or CIDRs that bypass the proxy, comma-separated. The chart always adds localhost, 127.0.0.1, the release's Services, `.<namespace>`, `.svc`, `.cluster.local` and the PostgreSQL, ClickHouse, Redis and Temporal hosts; add an external object-storage endpoint here when it is reachable without the proxy (MinIO in your network, an S3 VPC endpoint). Object storage requests match against the host they go to: with `objectStorage.external.endpoint` empty (AWS S3), that is `<bucket>.s3.<region>.amazonaws.com`, so list `.s3.<region>.amazonaws.com`, not `s3.amazonaws.com`. Set only with `httpProxy` or `httpsProxy`. |
 | `global.caBundle.configMap` | `""` | ConfigMap holding the PEM bundle. Use `configMap` or `secret`, not both. |
 | `global.caBundle.secret` | `""` | Secret holding the PEM bundle. |
 | `global.caBundle.key` | `"ca.crt"` | Key of the PEM bundle in the ConfigMap or Secret. It must contain every CA the pods need, public roots included when the pods also reach the internet: it replaces the image's trust store [SSL_CERT_FILE, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE, NODE_EXTRA_CA_CERTS; PGSSLROOTCERT when `postgres.external.sslMode` is verify-ca or verify-full]. |
