@@ -553,7 +553,6 @@ class UsersListManager:
         # A native span column has no key in the attribute maps, so reading it
         # as a custom attribute evaluates it as NULL for every user. Keep those
         # leaves in their own namespace, answered from the span row.
-        native_dimension_filters: dict[str, str] = {}
         native_dimension_leaves: list[tuple[int, dict[str, Any]]] = []
         for filter_index, item in enumerate(self.filters):
             if UserListQueryBuilderV2._is_date_filter(item):
@@ -563,15 +562,12 @@ class UsersListManager:
             column_id = item.get("column_id") or item.get("columnId")
             if not column_id or UserListQueryBuilderV2._is_output_filter(item):
                 continue
-            native_column = UserListQueryBuilderV2.native_span_dimension(item)
-            if native_column:
-                native_dimension_filters[str(column_id)] = native_column
+            if UserListQueryBuilderV2.native_span_dimension(item):
                 native_dimension_leaves.append((filter_index, item))
                 continue
             attribute_key = str(column_id)
             requested_attribute_keys.append(attribute_key)
             attribute_filter_items.setdefault(attribute_key, []).append(item)
-        self.native_dimension_filters = native_dimension_filters
         # Each native leaf keyed by its index in ``self.filters``: two leaves on
         # one column are two decisions.
         self.native_dimension_leaves = tuple(native_dimension_leaves)
@@ -691,7 +687,7 @@ class UsersListManager:
         self.filters_need_enrichment = bool(
             self.relation_filters
             or attribute_filter_items
-            or native_dimension_filters
+            or native_dimension_leaves
             or filter_columns
             & (_USER_LIST_EXTRA_METRIC_FIELDS | _USER_LIST_EVAL_FIELDS)
         )
@@ -1286,7 +1282,7 @@ class UsersListManager:
         if self.metric_keys:
             metrics = self._read_page_metrics(rows, builder, deadline)
             self._apply_page_metrics(rows, metrics)
-        if self.native_dimension_filters and not skip_native_read:
+        if self.native_dimension_leaves and not skip_native_read:
             self._read_native_span_dimensions(rows, builder, deadline)
         if self.attribute_keys and skip_attribute_read:
             self._apply_span_attributes(

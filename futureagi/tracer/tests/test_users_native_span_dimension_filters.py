@@ -81,9 +81,9 @@ def test_native_dimensions_are_the_span_compilers_own_columns():
 def test_native_leaf_never_becomes_a_custom_attribute_key(column_id):
     manager = manager_for(leaf(column_id, "equals", "OK"))
     assert manager.attribute_keys == ()
-    assert manager.native_dimension_filters == {
-        column_id: USER_NATIVE_SPAN_DIMENSIONS[column_id]
-    }
+    assert [item for _index, item in manager.native_dimension_leaves] == [
+        leaf(column_id, "equals", "OK")
+    ]
     assert manager.filters_need_enrichment is True
 
 
@@ -92,7 +92,7 @@ def test_raw_attribute_of_the_same_name_keeps_its_attribute_identity():
     manager = manager_for(raw)
     assert UserListQueryBuilderV2.native_span_dimension(raw) is None
     assert manager.attribute_keys == ("status",)
-    assert manager.native_dimension_filters == {}
+    assert manager.native_dimension_leaves == ()
 
 
 @pytest.mark.parametrize("column_id", ["status", "model", "name"])
@@ -112,7 +112,7 @@ def test_a_custom_attribute_identity_wins_without_a_col_type(column_id):
     manager = manager_for(raw)
     assert UserListQueryBuilderV2.native_span_dimension(raw) is None
     assert manager.attribute_keys == (column_id,)
-    assert manager.native_dimension_filters == {}
+    assert manager.native_dimension_leaves == ()
 
 
 OPERATIONS = [
