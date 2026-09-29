@@ -68,12 +68,12 @@ def locked_out_user(transactional_db):
 
 
 def test_reset_password_as_documented_sets_the_new_password(locked_out_user):
+    # INSTALLATION.md pipes the password in, off the command line.
     result = _manage_py(
         "reset_password",
         "--email",
         "owner@example.com",
-        "--password",
-        "Recovered-Passw0rd!",
+        stdin="Recovered-Passw0rd!\n",
     )
 
     assert result.returncode == 0, result.stdout + result.stderr

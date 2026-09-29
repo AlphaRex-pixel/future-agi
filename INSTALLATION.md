@@ -131,13 +131,14 @@ docker compose exec backend python manage.py create_user   # Distributed
 ```
 
 You are asked for your email, full name and password. Then sign in at
-<http://localhost:3000>. To pass them non-interactively:
+<http://localhost:3000>. To pass them non-interactively, pipe the password in
+instead of putting it on the command line, where every process in the
+container (in Standalone, code evals too) can read it:
 
 ```bash
-docker compose exec app python manage.py create_user \
+printf '%s\n' "$PASSWORD" | docker compose exec -T app python manage.py create_user \
   --email you@example.com \
-  --name "Your Name" \
-  --password yourpassword
+  --name "Your Name"
 ```
 
 On Helm: `kubectl -n futureagi exec -it deploy/futureagi-backend -c backend -- python manage.py create_user`.
@@ -157,8 +158,14 @@ kubectl -n futureagi exec -it deploy/futureagi-backend -c backend -- \
   python manage.py reset_password --email you@example.com                             # Helm
 ```
 
-You are asked for the new password, or pass `--password` to supply it
-non-interactively. Any session already signed in as that account is signed out.
+You are asked for the new password. To supply it non-interactively, pipe it
+in as for `create_user`:
+
+```bash
+printf '%s\n' "$PASSWORD" | docker compose exec -T app python manage.py reset_password --email you@example.com
+```
+
+Any session already signed in as that account is signed out.
 
 **In the browser**, as an alternative: set `OSS_RETURN_PASSWORD_RESET_LINK=true`
 in `.env` and run `docker compose up -d`. "Forgot password" then returns the
