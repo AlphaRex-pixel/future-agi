@@ -106,8 +106,8 @@ Go-based gateway with **~9.9 ns weighted routing**, **~29 k req/s on t3.xlarge**
 Run the whole platform on your own machine in three steps. Rather not run
 anything? [Try Cloud free](https://app.futureagi.com/auth/jwt/register).
 
-**You need** Docker Desktop or Docker Engine with Compose, and for the default
-Standalone setup **2 vCPUs and 4 GB of memory** given to Docker.
+**You need** Docker Desktop or Docker Engine with Compose v2.24 or newer, and
+for the default Standalone setup **2 vCPUs and 4 GB of memory** given to Docker.
 
 **1. Install**
 
@@ -154,7 +154,7 @@ machine only.
 | Install | `./bin/install` | `./bin/install --distributed` |
 | Runs | one app container, Postgres, ClickHouse | one container per service, PeerDB, Kafka |
 | Docker resources | 2 vCPUs, 4 GB | 4+ vCPUs, 12–16 GB |
-| Kubernetes | | [Helm chart](deploy/helm/futureagi) |
+| Kubernetes | | [Helm chart](deploy/helm/futureagi): about 4 CPUs and 8 GiB free for an evaluation |
 
 Choose before you add data: there is no supported way to move a Standalone
 install's data to Distributed or Helm later
@@ -163,15 +163,16 @@ install's data to Distributed or Helm later
 - **Configure:** every variable in `.env` is described in
   [docs/configuration.md](docs/configuration.md). Nothing is required for a
   local install; add LLM provider keys, a public URL or email when you need them.
-- **Manage:** `docker compose logs -f app`; stop with `docker compose down` or
-  `./bin/uninstall` (both keep your data); upgrade with
-  `git pull && ./bin/install`; remove everything, data included, with
+- **Manage:** `docker compose logs -f app` (Distributed: `backend`); stop with
+  `docker compose down` or `./bin/uninstall` (both keep your data); upgrade
+  with `git pull && ./bin/install`; remove everything, data included, with
   `./bin/uninstall --purge`.
 - **Develop:** on a branch other than `main`, add `--from-source` to build the
   images from your checkout; `./bin/dev` runs it with hot reload
   ([docs/development.md](docs/development.md)).
-- **More:** [INSTALLATION.md](INSTALLATION.md) (every option and
-  troubleshooting) and [deploy/README.md](deploy/README.md) (production).
+- **More:** the [self-hosting guide](https://docs.futureagi.com/docs/self-hosting),
+  [INSTALLATION.md](INSTALLATION.md) (every option and troubleshooting) and
+  [deploy/README.md](deploy/README.md) (production).
 
 ### Instrument your first agent
 
@@ -304,7 +305,7 @@ Six prompt-optimization algorithms (GEPA, PromptWizard, ProTeGi, Bayesian, Meta-
 |---|:---:|---|
 |  Docker Compose: Standalone | ✅ | `./bin/install`: one app container next to Postgres and ClickHouse, for a laptop or a single VM |
 |  Docker Compose: Distributed | ✅ | `./bin/install --distributed`: one container per service, for scale on one host |
-|  Production Compose overlay | ✅ | `./deploy/setup.sh` on the Distributed setup: generates secrets, pins image tags, pulls images and starts the stack ([deploy/README.md](deploy/README.md)) |
+|  Production Compose overlay | ✅ | `./deploy/setup.sh` on the Distributed setup: `--skip-up` writes `deploy/.env.production` (generating only the secrets you do not supply; you give every image version), then, once the databases are initialized, `--confirm-initialized` pulls the images and starts the stack ([deploy/README.md](deploy/README.md)) |
 |  Kubernetes / Helm | ✅ | Distributed on Kubernetes: `helm install futureagi oci://ghcr.io/future-agi/charts/futureagi --version X.Y.Z`, one signed chart for the open-source and Enterprise editions ([chart README](deploy/helm/futureagi/README.md)) |
 |  AWS / GCP / Azure | ✅ | Docker Compose on a VM, or the Helm chart on a Kubernetes 1.27+ cluster |
 |  AWS Marketplace | ⏳ | Coming soon |
@@ -330,7 +331,7 @@ Every arrow is an open, documented interface: **OpenTelemetry OTLP** for traces,
   <img alt="Future AGI architecture — client SDKs → traceAI + Agent Command Center → Django platform → PostgreSQL, ClickHouse, Redis, Temporal" src=".github/assets/architecture.svg" width="100%">
 </picture> -->
 
-**Runtime:** Python 3.11+ (Django 5.1 + Channels) · Go 1.23+ (gateway) · React 18 + Vite · Node 20+.
+**Runtime:** Python 3.11+ (Django 5.1 + Channels) · Go 1.25+ (gateway), 1.24+ (trace collector) · React 18 + Vite · Node 22.18+.
 **Data:** PostgreSQL (metadata) · ClickHouse (spans + time-series) · Redis (state, live updates) · Temporal (jobs).
 
 <details><summary>Component breakdown (per-package)</summary>
@@ -536,13 +537,13 @@ We love contributions — bug fixes, new evaluators, framework integrations, doc
 | 📺 [**YouTube**](https://www.youtube.com/@Future_AGI) | Walkthroughs & demos |
 | 📊 [**Status**](https://status.futureagi.com) | Cloud uptime + incident history |
 | 📧 **support@futureagi.com** | Cloud account / billing |
-| 🔐 **security@futureagi.com** | Private vulnerability disclosure (24h ack — see [SECURITY.md](SECURITY.md)) |
+| 🔐 **security@futureagi.com** | Private vulnerability disclosure (24h ack on weekdays — see [SECURITY.md](SECURITY.md)) |
 
 ---
 
 ##  Telemetry
 
-Self-hosted Future AGI sends deployment telemetry, **on by default**, so we can count installs and size release testing: one registration with the **email addresses of the install's owner and administrator accounts**, then usage counts on a schedule. **No trace data, no prompts, no completions, no datasets, no API keys**, ever.
+Self-hosted Future AGI sends deployment telemetry, **on by default**, so we can count installs and size release testing: one registration with the **email addresses and email domains of the install's owner, admin and staff/superuser accounts**, then usage counts on a schedule. **No trace data, no prompts, no completions, no datasets, no API keys**, ever.
 
 To opt out, install with `./bin/install --no-telemetry`, or set `FUTURE_AGI_TELEMETRY_DISABLED=true` in `.env` (`deploy/.env.production` for the production overlay, `config.telemetry=false` for Helm) and run `docker compose up -d`. Opting out still sends one registration, without email addresses; block `api.futureagi.com` to send nothing. Everything else that could leave your install (HubSpot, Slack, Mixpanel, PostHog, reCAPTCHA, Sentry, Mailgun) is **off until you set its key**.
 

@@ -32,7 +32,7 @@ For installing and running Future AGI without changing its code, see
 - The checkout under your home directory. The stack bind-mounts it, and Colima
   shares only `$HOME` with its VM.
 - For running tests on the host: Python 3.11 with
-  [uv](https://docs.astral.sh/uv/) (backend), Node 20 with Yarn (frontend).
+  [uv](https://docs.astral.sh/uv/) (backend), Node 22.18 or newer with Yarn (frontend).
 
 ## Quick start
 

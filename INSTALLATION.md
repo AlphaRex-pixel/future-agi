@@ -406,8 +406,8 @@ of the installer and plain `docker compose` commands stay on Distributed.
 `COMPOSE_PROFILES=all` in `.env` adds the per-queue workers, the Temporal UI
 and the PeerDB UI; `workers`, `observability` and `peerdb` add one group each.
 
-The UI, API, gateway, serving and code-executor ports listen on all
-interfaces; the data stores on `127.0.0.1` (see
+The UI, API, gateway and serving ports listen on all interfaces; the
+code-executor and the data stores on `127.0.0.1` (see
 [Host ports](docs/configuration.md#host-ports)). Put a reverse proxy in front for HTTPS in
 any non-laptop deployment. For production on Compose, layer the
 [production overlay](deploy/README.md) on this file.
