@@ -3186,6 +3186,97 @@ def test_sparse_bursts_over_six_months_page_exactly_once_in_order(seed):
     assert names == expected
 
 
+def _sparse_native_world(newest: datetime, size: int = 30) -> tuple[World, list[str]]:
+    """``size`` native members a second apart, the newest at ``newest``."""
+
+    world = World()
+    for ordinal in range(1, size + 1):
+        moment = newest - timedelta(seconds=ordinal - 1)
+        world.user(ordinal, key=moment, raw=(moment,), native=True)
+    return world, [f"user-{ordinal}" for ordinal in range(1, size + 1)]
+
+
+def test_a_native_witness_resumes_the_walk_above_its_newest_row_under_a_cap():
+    """The newest-row resume on a native witness, through the capped probe.
+
+    The tail's existence statement asks the walked NATIVE witness for its
+    newest row, under the server cap the estimate left it, and the next slice
+    ends just above that row: the first request publishes the first page of
+    a six-month window whose newest match is 79 days back.
+    """
+    window_start = WINDOW_END - timedelta(days=183)
+    filters = [*_filters(window_start=window_start)[:1], _native_status_leaf()]
+    newest = WINDOW_END - timedelta(days=79)
+    world, expected = _sparse_native_world(newest)
+
+    read, engine = _page(world, page_size=25, filters=filters)
+
+    assert _names(read) == expected[:25], "an empty checkpoint before the first rows"
+    kinds = _kinds(engine)
+    assert kinds[:4] == ["slice", "estimate", "probe", "slice"]
+    probe = engine.calls[2]
+    assert "SELECT start_time AS witnessed" in probe
+    assert "ORDER BY start_time DESC" in probe
+    assert "lowerUTF8(toString(status)) = %(native_leaf_1_0_col_1)s" in probe
+    cap = engine.caps[2]
+    assert cap is not None and 25 <= cap <= walk.USER_LIST_WALK_PROBE_WALL_MS
+    assert engine.probe_ranges == [(window_start, engine.slice_ranges[0][0])]
+    assert engine.slice_ranges[1][1] == newest + timedelta(microseconds=1)
+
+    names, counts, _engines = _walk_every_page(
+        world, max_hops=3, page_size=25, filters=filters
+    )
+    assert names == expected and counts == [25, 5]
+
+
+@pytest.mark.parametrize(
+    ("estimates", "walked", "other"),
+    [
+        ({"tag": 10, "error": 3}, "lowerUTF8(toString(status))", "attrs_string"),
+        ({"tag": 0, "error": 10}, "attrs_string", "lowerUTF8(toString(status))"),
+    ],
+)
+def test_a_resumed_walk_continues_on_the_witness_its_first_page_chose(
+    estimates, walked, other
+):
+    """Cursor v2 binds the chosen witness, and every probe after it asks it.
+
+    A raw + native page costs both witnesses and walks the cheaper one; its
+    tail probe asks that witness (native or raw) for the newest row and
+    resumes above it, and the continuation walks and probes the same witness
+    without measuring the choice again. Every member once, in order.
+    """
+    window_start = WINDOW_END - timedelta(days=183)
+    filters = [*_filters(window_start=window_start), _native_status_leaf()]
+    newest = WINDOW_END - timedelta(days=79)
+    world, expected = _sparse_native_world(newest)
+
+    engine = Engine(world)
+    engine.estimate_by = dict(estimates)
+    read, engine = _page(world, page_size=25, filters=filters, engine=engine)
+    names = _names(read)
+    kinds = _kinds(engine)
+    assert kinds[:2] == ["estimate", "estimate"]
+    assert kinds[2:6] == ["slice", "estimate", "probe", "slice"]
+    first = [call for call in engine.calls if kind_of(call) in {"slice", "probe"}]
+    assert all(walked in call and other not in call for call in first)
+    assert engine.slice_ranges[1][1] == newest + timedelta(microseconds=1)
+    assert names == expected[:25]
+
+    hops = 1
+    while read.has_more:
+        hops += 1
+        assert hops <= 3
+        read, engine = _page(
+            world, page_size=25, filters=filters, cursor=_signed_cursor(read)
+        )
+        names.extend(_names(read))
+        assert _kinds(engine)[:1] != ["estimate"]
+        later = [call for call in engine.calls if kind_of(call) in {"slice", "probe"}]
+        assert later and all(walked in call and other not in call for call in later)
+    assert names == expected
+
+
 @_plain_count
 def test_a_probe_the_budget_refuses_or_that_fails_licenses_nothing():
     from clickhouse_driver.errors import ServerException
