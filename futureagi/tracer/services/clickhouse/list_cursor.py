@@ -209,11 +209,13 @@ def canonical_filter_leaf(item: Any) -> str:
 def normalize_filter_conjunction(filters: list[Any] | tuple[Any, ...]) -> list[Any]:
     """Canonicalize one AND-conjunction without presentation-only metadata."""
 
-    normalized = [_normalized_filter(item) for item in (filters or [])]
     # Repeated identical leaves are idempotent under conjunction. Removing them
     # keeps cursor/cache identities stable and bounds redundant query predicates.
-    by_json = {_canonical_json(item): item for item in normalized}
-    return [by_json[key] for key in sorted(by_json)]
+    by_leaf = {
+        canonical_filter_leaf(item): _normalized_filter(item)
+        for item in (filters or [])
+    }
+    return [by_leaf[key] for key in sorted(by_leaf)]
 
 
 def normalize_cursor_query(query: dict[str, Any]) -> dict[str, Any]:
