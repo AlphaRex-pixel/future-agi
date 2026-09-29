@@ -4,7 +4,10 @@
 package netguard
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"strings"
 	"syscall"
@@ -105,16 +108,40 @@ func (e *BlockedError) Error() string {
 	return fmt.Sprintf("refused to connect to %s (%s address)", e.IP, e.Class)
 }
 
-// Dialer returns d set to refuse connections to any address not Allowed. The
-// check runs on the address actually dialled, after DNS, so a host that
-// passed an earlier check and now resolves elsewhere (DNS rebinding), or a
-// redirect to such a host, is refused too. It replaces d.Control.
-func Dialer(d net.Dialer, allowPrivate bool) *net.Dialer {
+// DialContext returns d's DialContext set to refuse connections to any address
+// not Allowed. The check runs on the address actually dialled, after DNS, so a
+// host that passed an earlier check and now resolves elsewhere (DNS
+// rebinding), or a redirect to such a host, is refused too. It replaces
+// d.Control.
+//
+// A refusal is logged with the address, and its error leaves the address out:
+// the error can reach the API caller who chose the host, and the address it
+// resolved to would map the operator's network for them. errors.As still
+// finds the *BlockedError.
+func DialContext(d net.Dialer, allowPrivate bool) func(ctx context.Context, network, address string) (net.Conn, error) {
 	d.Control = func(_, address string, _ syscall.RawConn) error {
 		return check(address, allowPrivate)
 	}
-	return &d
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		conn, err := d.DialContext(ctx, network, address)
+		var blocked *BlockedError
+		if errors.As(err, &blocked) {
+			slog.Warn("refused an outbound connection",
+				"address", address, "ip", blocked.IP, "class", blocked.Class)
+			return nil, &refusedError{blocked}
+		}
+		return conn, err
+	}
 }
+
+// refusedError is a refused connection as the dialer's caller sees it.
+type refusedError struct{ blocked *BlockedError }
+
+func (e *refusedError) Error() string {
+	return "refused to connect: the destination address is not allowed"
+}
+
+func (e *refusedError) Unwrap() error { return e.blocked }
 
 func check(address string, allowPrivate bool) error {
 	host, _, err := net.SplitHostPort(address)

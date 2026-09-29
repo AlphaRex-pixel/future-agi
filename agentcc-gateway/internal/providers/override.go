@@ -257,7 +257,7 @@ var (
 	// orgDialContext opens the connections of an org provider that names its
 	// own base_url; a variable so tests can reach a test server on loopback.
 	orgDialContext = func(allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return netguard.Dialer(net.Dialer{}, allowPrivate).DialContext
+		return netguard.DialContext(net.Dialer{}, allowPrivate)
 	}
 
 	baseURLRejections = map[netguard.Class]BaseURLRejection{

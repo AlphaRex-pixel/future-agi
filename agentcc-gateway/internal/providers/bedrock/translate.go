@@ -25,7 +25,7 @@ var sharedDownloadClient = &http.Client{
 		IdleConnTimeout:     90 * time.Second,
 		// SSRF protection at connect time: a request's URL must not reach
 		// private, loopback, link-local or cloud metadata addresses.
-		DialContext: netguard.Dialer(net.Dialer{Timeout: 10 * time.Second}, false).DialContext,
+		DialContext: netguard.DialContext(net.Dialer{Timeout: 10 * time.Second}, false),
 	},
 }
 

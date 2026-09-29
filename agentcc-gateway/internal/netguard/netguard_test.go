@@ -1,8 +1,10 @@
 package netguard
 
 import (
+	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 )
 
@@ -48,7 +50,8 @@ func TestCheck(t *testing.T) {
 }
 
 // The check sees the address the dialer connects to, whatever name it was
-// given.
+// given, and the error leaves that address out: it can reach the API caller
+// who chose the name.
 func TestDialerRefusesBeforeConnecting(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -57,10 +60,13 @@ func TestDialerRefusesBeforeConnecting(t *testing.T) {
 	defer ln.Close()
 	_, port, _ := net.SplitHostPort(ln.Addr().String())
 
-	_, err = Dialer(net.Dialer{}, true).Dial("tcp", net.JoinHostPort("localhost", port))
+	_, err = DialContext(net.Dialer{}, true)(context.Background(), "tcp", net.JoinHostPort("localhost", port))
 
 	var blocked *BlockedError
 	if !errors.As(err, &blocked) || blocked.Class != Loopback {
 		t.Fatalf("Dial = %v, want a loopback *BlockedError", err)
+	}
+	if msg := err.Error(); strings.Contains(msg, "127.0.0.1") || strings.Contains(msg, "::1") {
+		t.Errorf("Dial error %q names the address localhost resolved to", msg)
 	}
 }

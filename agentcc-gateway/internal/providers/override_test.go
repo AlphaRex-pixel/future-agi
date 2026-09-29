@@ -236,6 +236,12 @@ func TestGetOrCreate_DialRefusesAHostThatNoLongerResolvesPublic(t *testing.T) {
 		cancel()
 		if err == nil {
 			t.Errorf("allowPrivate=%v: ChatCompletion succeeded against a loopback upstream", allowPrivate)
+			continue
+		}
+		// The error reaches the API caller, who chose the host: the address
+		// it resolved to would map the operator's network for them.
+		if msg := err.Error(); strings.Contains(msg, "127.0.0.1") || strings.Contains(msg, "::1") {
+			t.Errorf("allowPrivate=%v: error %q names the address the host resolved to", allowPrivate, msg)
 		}
 	}
 	if got := orgHits.Load(); got != 0 {
