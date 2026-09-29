@@ -680,7 +680,7 @@ class UserListQueryBuilder(BaseQueryBuilder):
         other leaf are decided at certification over the whole window. A
         condition that is one absence term (``is_null`` without a family:
         ``countIf(present) = 0``) is witnessed by ``NOT present``
-        (``native_span_dimension_witness_flag``); its order key is then the
+        (``_native_witness_flag``); its order key is then the
         member's newest latest live span. The terms come from the compiler as
         data, never from parsing its SQL.
         """
@@ -690,13 +690,12 @@ class UserListQueryBuilder(BaseQueryBuilder):
             column = self.native_span_dimension(item)
             if column is None:
                 continue
-            existence = self.native_span_dimension_witness_flag(item, index=index)
+            _flags, _condition, params, existence = (
+                self.native_span_dimension_membership(item, index=index)
+            )
             if existence is None:
                 continue
             alias, predicate = existence
-            _flags, _condition, params = self.native_span_dimension_membership(
-                item, index=index
-            )
             yield MatchingActivityWitness(
                 family="native",
                 key=column,
@@ -1991,16 +1990,18 @@ class UserListQueryBuilder(BaseQueryBuilder):
 
     def native_span_dimension_membership(
         self, item: dict[str, Any], *, index: int
-    ) -> tuple[tuple[str, ...], str, dict[str, Any]]:
+    ) -> tuple[tuple[str, ...], str, dict[str, Any], tuple[str, str] | None]:
         """The users graph's membership SQL for native leaf ``index``.
 
-        The per-span flags, the per-user condition over them and their
-        parameters, compiled by the graph's own compiler
-        (``compile_user_membership_leaf``) under a namespace unique to the
-        leaf. For a SYSTEM_METRIC leaf that is ``countIf(<span predicate>) >
-        0``: a user matches when ANY latest live span in the window satisfies
-        the span compiler's predicate, which treats ``''`` as null on these
-        non-nullable text columns and compares case-insensitively.
+        The per-span flags, the per-user condition over them, their
+        parameters and the leaf's witness flag, compiled once by the graph's
+        own compiler (``compile_user_membership_leaf``) under a namespace
+        unique to the leaf. For a SYSTEM_METRIC leaf that is
+        ``countIf(<span predicate>) > 0``: a user matches when ANY latest live
+        span in the window satisfies the span compiler's predicate, which
+        treats ``''`` as null on these non-nullable text columns and compares
+        case-insensitively. The witness flag is ``_native_witness_flag`` of
+        the condition's terms.
         """
 
         # exact_graph_reads imports this module; resolve it at call time.
@@ -2009,18 +2010,19 @@ class UserListQueryBuilder(BaseQueryBuilder):
         )
 
         project_id = self.project_id or (self.project_ids or [""])[0]
-        return compile_user_membership_leaf(
+        flags, condition, params, terms = compile_user_membership_leaf(
             item, project_id=str(project_id), namespace=f"native_leaf_{index}"
         )
+        return flags, condition, params, self._native_witness_flag(terms)
 
-    def native_span_dimension_witness_flag(
-        self, item: dict[str, Any], *, index: int
+    @staticmethod
+    def _native_witness_flag(
+        terms: tuple[tuple[str, str, str], ...],
     ) -> tuple[str, str] | None:
-        """``(alias, predicate)`` of native leaf ``index``'s witness flag.
+        """``(alias, predicate)`` of a native leaf's witness flag.
 
         The first term of the graph's condition for the leaf that is
-        ``countIf(alias) > 0`` (``compile_user_membership_leaf_terms``, same
-        namespace and parameters as ``native_span_dimension_membership``).
+        ``countIf(alias) > 0``.
 
         A condition that is one absence term, ``countIf(present) = 0`` (an
         ``is_null`` without a family), has a witness too: a member has a
@@ -2035,14 +2037,6 @@ class UserListQueryBuilder(BaseQueryBuilder):
         ``None`` for any other condition with no existence term.
         """
 
-        from tracer.services.clickhouse.exact_graph_reads import (
-            compile_user_membership_leaf_terms,
-        )
-
-        project_id = self.project_id or (self.project_ids or [""])[0]
-        terms = compile_user_membership_leaf_terms(
-            item, project_id=str(project_id), namespace=f"native_leaf_{index}"
-        )
         for alias, predicate, comparison in terms:
             if comparison.strip() == "> 0":
                 return alias, predicate
@@ -2070,7 +2064,7 @@ class UserListQueryBuilder(BaseQueryBuilder):
         ``newest`` names the leaf a native matching-activity walk discovers
         on: the row also carries ``native_leaf_<newest>_newest``, the newest
         latest live span in the window satisfying that leaf's existence flag
-        (``native_span_dimension_witness_flag``), the user's order key. A user
+        (``_native_witness_flag``), the user's order key. A user
         with no such span reads the epoch there (``maxIf`` over nothing).
         """
 
@@ -2082,15 +2076,14 @@ class UserListQueryBuilder(BaseQueryBuilder):
             column = self.native_span_dimension(item)
             if column is None:
                 continue
-            flags, condition, leaf_params = self.native_span_dimension_membership(
-                item, index=index
+            flags, condition, leaf_params, existence = (
+                self.native_span_dimension_membership(item, index=index)
             )
             if index == newest:
-                existence = self.native_span_dimension_witness_flag(item, index=index)
                 if existence is None:
                     raise ValueError(f"native leaf {index} has no existence flag")
                 newest_alias, flag = existence
-                if not any(f.endswith(f" AS {newest_alias}") for f in flags):
+                if newest_alias.endswith("_absent"):
                     # An absence witness: its flag is not one of the leaf's.
                     flags = (*flags, f"({flag}) AS {newest_alias}")
             compiled.append((index, flags, condition))

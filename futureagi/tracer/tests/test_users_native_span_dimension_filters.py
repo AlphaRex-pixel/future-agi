@@ -135,7 +135,9 @@ def test_native_leaf_is_the_users_graphs_own_membership_sql(
     builder = UserListQueryBuilderV2(
         organization_id=ORG, project_ids=[PROJECT], filters=[item]
     )
-    flags, condition, params = builder.native_span_dimension_membership(item, index=3)
+    flags, condition, params, _witness = builder.native_span_dimension_membership(
+        item, index=3
+    )
 
     def renamed(text):
         return text.replace("user_member", "native_leaf_3")
@@ -154,7 +156,7 @@ def test_every_operator_is_one_any_span_condition(column_id, operation, value):
     builder = UserListQueryBuilderV2(
         organization_id=ORG, project_ids=[PROJECT], filters=[]
     )
-    flags, condition, _params = builder.native_span_dimension_membership(
+    flags, condition, _params, _witness = builder.native_span_dimension_membership(
         leaf(column_id, operation, value), index=0
     )
     assert len(flags) == 1
@@ -435,7 +437,7 @@ def test_a_native_witness_is_the_leafs_existence_flag(
     }
     builder = _builder(date, item)
     witness = builder.native_matching_activity_witness()
-    flags, condition, params = compile_user_membership_leaf(
+    flags, condition, params, _terms = compile_user_membership_leaf(
         item, project_id=PROJECT, namespace="native_leaf_1"
     )
     if col_type is None and operation == "is_null":
@@ -514,7 +516,7 @@ def test_the_walk_statements_carry_the_chosen_witness_and_never_recompute_it():
             limit=10,
         )
     builder.walk_witness = builder.native_matching_activity_witness()
-    flags, _condition, params = compile_user_membership_leaf(
+    flags, _condition, params, _terms = compile_user_membership_leaf(
         item, project_id=PROJECT, namespace="native_leaf_0"
     )
     presence = flags[0].removesuffix(" AS native_leaf_0_match_0")

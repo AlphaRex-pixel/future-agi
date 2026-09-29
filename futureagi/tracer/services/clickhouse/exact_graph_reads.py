@@ -3957,32 +3957,16 @@ def _user_membership_parts(
 
 def compile_user_membership_leaf(
     item: dict[str, Any], *, project_id: str, namespace: str
-) -> tuple[tuple[str, ...], str, dict[str, Any]]:
+) -> tuple[tuple[str, ...], str, dict[str, Any], tuple[tuple[str, str, str], ...]]:
     """The users graph's own membership SQL for one filter leaf.
 
-    Returns the per-span flags (``(predicate) AS alias``), the per-user
-    condition over them (``countIf(alias) ...``) and their parameters, all
-    under ``namespace``. The Users list decides native span-dimension leaves
+    ``_user_membership_parts`` for ``[item]`` under ``namespace``: the per-span
+    flags, the per-user condition over them, their parameters and the
+    condition's terms. The Users list decides native span-dimension leaves
     with exactly this SQL so both surfaces answer the same leaf identically.
     """
 
-    return _user_membership_having([item], project_id=project_id, namespace=namespace)
-
-
-def compile_user_membership_leaf_terms(
-    item: dict[str, Any], *, project_id: str, namespace: str
-) -> tuple[tuple[str, str, str], ...]:
-    """The terms of ``compile_user_membership_leaf``'s condition, in order.
-
-    Each is ``(alias, predicate, comparison)``: the condition is
-    ``countIf(alias) <comparison>`` for each, joined by AND, and ``predicate``
-    is the per-span flag the alias names, with the same parameters.
-    """
-
-    _flags, _condition, _params, terms = _user_membership_parts(
-        [item], project_id=project_id, namespace=namespace
-    )
-    return terms
+    return _user_membership_parts([item], project_id=project_id, namespace=namespace)
 
 
 def _owned_user_eval_config_ids(

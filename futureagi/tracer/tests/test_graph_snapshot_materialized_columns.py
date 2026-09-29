@@ -120,7 +120,7 @@ def _compiled_sql() -> dict[str, str]:
         for col_type in ("SYSTEM_METRIC", None):
             for operation in ("equals", "not_equals", "is_null"):
                 try:
-                    flags, condition, _params = (
+                    flags, condition, _params, _terms = (
                         exact_graph_reads.compile_user_membership_leaf(
                             _leaf(column_id, operation, col_type),
                             project_id=PROJECT,
