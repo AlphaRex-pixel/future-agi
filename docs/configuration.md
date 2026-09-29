@@ -130,7 +130,7 @@ Read by `./bin/install` from the shell environment, not from `.env`.
 
 | Key | Default | Setups | What it does |
 | --- | --- | --- | --- |
-| `FAGI_ADMIN_EMAIL`, `FAGI_ADMIN_NAME`, `FAGI_ADMIN_PASSWORD` | unset | S D H | With `-y` (non-interactive), create the first account from these three. If any is missing, account creation is skipped. Helm: the bootstrap job reads them from `bootstrap.admin.existingSecret` and creates the account only if no user with that email exists. |
+| `FAGI_ADMIN_EMAIL`, `FAGI_ADMIN_NAME`, `FAGI_ADMIN_PASSWORD` | unset | S D H | With `-y` (non-interactive), create the first account from these three. If any is missing, account creation is skipped. Helm: the bootstrap job reads them from `bootstrap.admin.existingSecret` and creates the account only if no user with that email exists; with the email set, a missing name or password, a malformed email, or a password the sign-up rules reject fails the job, which says why. |
 | `SKIP_USER_CREATION` | `0` | S D | `1` skips the first-account prompt (same as `--skip-user-creation`). |
 | `CI` | unset | S D | Any value makes the installer non-interactive (same as `-y`). |
 
