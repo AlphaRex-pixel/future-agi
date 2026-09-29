@@ -30,6 +30,8 @@ from tracer.services.clickhouse.graph_dispatch import (
     OBSERVE_SYSTEM_GRAPH_PAYLOAD_VERSION,
 )
 
+pytestmark = pytest.mark.unit
+
 PROJECT = str(uuid4())
 ORG = str(uuid4())
 

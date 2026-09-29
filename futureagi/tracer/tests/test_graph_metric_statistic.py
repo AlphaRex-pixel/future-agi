@@ -32,6 +32,8 @@ from tracer.services.clickhouse.graph_metric_statistic import (
     system_metric_statistic,
 )
 
+pytestmark = pytest.mark.unit
+
 PROJECT = str(uuid4())
 ORG = str(uuid4())
 

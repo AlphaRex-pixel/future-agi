@@ -33,6 +33,8 @@ from tracer.services.clickhouse.graph_metric_statistic import (
     snapshot_names_its_statistic,
 )
 
+pytestmark = pytest.mark.unit
+
 PROJECT = str(uuid4())
 ORG = str(uuid4())
 SESSION_NS = "observe-session-system-graph"
