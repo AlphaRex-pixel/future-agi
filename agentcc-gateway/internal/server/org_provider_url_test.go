@@ -2,7 +2,10 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -207,4 +210,78 @@ func TestUnlistedModelStillNotAvailableForOrgKey(t *testing.T) {
 	if status != http.StatusForbidden || !strings.Contains(apiErr.Message, "not available for this API key") {
 		t.Fatalf("status = %d message = %q, want 403 not available for this API key", status, apiErr.Message)
 	}
+}
+
+// orgProviderBuildFailures counts the org provider build failures the gateway
+// logs while fn runs.
+func orgProviderBuildFailures(fn func()) int {
+	var logs bytes.Buffer
+	orig := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	fn()
+	slog.SetDefault(orig)
+	return strings.Count(logs.String(), "failed to create org provider for model")
+}
+
+// An org provider that lists the model but cannot be built is tried, and its
+// failure logged, once per request.
+func TestOrgProviderBuildFailureLoggedOncePerRequest(t *testing.T) {
+	operator := startMockOpenAI(t)
+	defer operator.Close()
+
+	srv := newOrgProviderURLTestServer(t, operator.URL, map[string]*tenant.ProviderConfig{
+		"custom": {
+			APIKey:    "org-key",
+			BaseURL:   "http://10.255.255.1:8080",
+			APIFormat: "openai",
+			Models:    []string{"mock-custom"},
+			Enabled:   true,
+		},
+	})
+
+	t.Run("chat completions", func(t *testing.T) {
+		var status int
+		var apiErr models.ErrorDetail
+		logged := orgProviderBuildFailures(func() { status, apiErr = postChat(t, srv, "mock-custom") })
+
+		if status != http.StatusForbidden || apiErr.Code != "provider_base_url_blocked" {
+			t.Fatalf("status = %d code = %q, want 403 provider_base_url_blocked", status, apiErr.Code)
+		}
+		if logged != 1 {
+			t.Errorf("build failure logged %d times, want once", logged)
+		}
+	})
+
+	t.Run("anthropic messages", func(t *testing.T) {
+		body := `{"model":"mock-custom","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}`
+		req := httptest.NewRequest("POST", "/v1/messages", bytes.NewBufferString(body))
+		req.Header.Set("Authorization", "Bearer sk-agentcc-org-urls")
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		logged := orgProviderBuildFailures(func() { srv.httpServer.Handler.ServeHTTP(w, req) })
+
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "private network address") {
+			t.Fatalf("status = %d body = %s, want 403 explaining the private base_url", w.Code, w.Body.String())
+		}
+		if logged != 1 {
+			t.Errorf("build failure logged %d times, want once", logged)
+		}
+	})
+
+	t.Run("resolveProviderWithOrgFallback", func(t *testing.T) {
+		rc := &models.RequestContext{Metadata: map[string]string{"key_type": "byok", tenant.MetadataKeyOrgID: "org-urls"}}
+		orgID, orgCfg := srv.handlers.resolveOrgConfig(rc)
+		var err error
+		logged := orgProviderBuildFailures(func() {
+			_, err = srv.handlers.resolveProviderWithOrgFallback(context.Background(), rc, orgID, orgCfg, "mock-custom")
+		})
+
+		var apiErr *models.APIError
+		if !errors.As(err, &apiErr) || apiErr.Code != "provider_base_url_blocked" {
+			t.Fatalf("err = %v, want provider_base_url_blocked", err)
+		}
+		if logged != 1 {
+			t.Errorf("build failure logged %d times, want once", logged)
+		}
+	})
 }
