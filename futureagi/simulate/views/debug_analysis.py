@@ -13,6 +13,7 @@ from simulate.serializers.test_execution import (
 )
 from simulate.views.scoping import run_test_workspace_filter
 from tfc.utils.api_contracts import validated_request
+from tfc.utils.api_errors import build_error_envelope
 from tfc.utils.api_serializers import EmptyRequestSerializer
 from tracer.services.simulation_investigation import (
     SimulationInvestigationConflict,
@@ -66,7 +67,11 @@ class TestExecutionDebugAnalysisView(APIView):
             ensure_simulation_investigation(execution)
         except SimulationInvestigationConflict as exc:
             return Response(
-                {"code": "execution_not_completed", "detail": str(exc)},
+                build_error_envelope(
+                    str(exc),
+                    status_code=status.HTTP_409_CONFLICT,
+                    code="execution_not_completed",
+                ),
                 status=status.HTTP_409_CONFLICT,
             )
         return Response(
