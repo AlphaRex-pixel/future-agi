@@ -83,7 +83,7 @@ every user with such a row is represented and its newest witness is exact.
 Empty tail, costed. After an untruncated empty slice, when the rest of the
 window needs more slices at the cap than the statement budget has left, the
 walk may prove the whole tail empty in one existence statement
-(``build_matching_activity_existence_query``, ``LIMIT 1`` through the same
+(``build_matching_activity_existence_query``, the newest row through the same
 blooms) instead of one slice per day. That statement is wider than the slice
 cap, and nothing on the application read path bounds a statement's rows,
 bytes or time, so it is COSTED FIRST: ``EXPLAIN ESTIMATE`` of the identical
@@ -102,16 +102,18 @@ half the probe wall, and the existence statement under what it left. An
 estimate over the target, over its time, stopped at its cap, or one the walk
 cannot read, licenses nothing: the walk slices at the cap. The estimate never
 decides coverage - only the existence statement's own answer does: none
-proves the tail exhausted by the same rule an empty slice uses; a row proves
-existence, never a position, and leaves the walk slicing at the cap exactly
-where it was. The pair is asked at most once per page and once more after
-each populated slice, never twice in a row. When the estimate does not
-license the existence statement, one witness-free statement asks, once per
-request, on top of the count and under a server cap no slow estimate can
-starve, whether the tail holds any span with a user at all
-(``build_matching_activity_presence_query``): none proves the tail
-exhausted (a scope with no end users over twelve months completes in three
-statements, not one per day until the count runs out); a row licenses
+proves the tail exhausted by the same rule an empty slice uses; a row is the
+tail's newest witnessed row, so the same rule proves the range above it empty,
+and the walk resumes just above it instead of slicing down to it a day at a
+time (a six-month window whose newest match lay 79 days back spent four
+requests, each an empty checkpoint, before its first rows). The pair is asked
+at most once per page and once more after each populated slice, never twice
+in a row. When the estimate does not license the existence statement, one
+witness-free statement asks, once per request, on top of the count and under
+a server cap no slow estimate can starve, whether the tail holds any span
+with a user at all (``build_matching_activity_presence_query``): none proves
+the tail exhausted (a scope with no end users over twelve months completes in
+three statements, not one per day until the count runs out); a row licenses
 nothing.
 
 Budget. The walk owns a wall (``USER_LIST_PAGE_WALL_MS``) and a statement
@@ -979,8 +981,15 @@ def _answered_probe(
         return None
 
 
-def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
-    """Whether no witnessed row lies in ``[window_start, below)``.
+@dataclass(frozen=True)
+class _Tail:
+    """The probe's answer: the newest witnessed row below, ``None`` for none."""
+
+    newest: datetime | None
+
+
+def _probe_tail(state: _WalkState, *, below: datetime) -> _Tail | None:
+    """The newest witnessed row in ``[window_start, below)``, or proof of none.
 
     Two statements under ONE budget, ``USER_LIST_WALK_PROBE_WALL_MS`` or what
     is left of the page wall, whichever is smaller: the estimate, which costs
@@ -994,11 +1003,14 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
     issued only when that time fits what the probe budget has left - at most
     half of it. Each carries a server cap: the estimate half the probe wall
     (a longer one could license nothing), the existence statement what the
-    estimate left. ``None`` when the walk's budget stops either, when the
-    estimate refuses on rows or on time, or when either statement is
-    stopped at its cap or fails on a read budget: a probe that cannot answer
-    inside its budget licenses nothing, and the walk goes on slicing at the
-    cap exactly as it would have without it.
+    estimate left. The existence statement answers with the newest row of the
+    walked witness (native or raw, the one the cursor binds), so a row proves
+    the range above it empty and the walk resumes just above it. ``None``
+    when the walk's budget stops either, when the estimate refuses on rows or
+    on time, when either statement is stopped at its cap or fails on a read
+    budget, or when the row's time cannot be read inside the tail: a probe
+    that cannot answer inside its budget licenses nothing, and the walk goes
+    on slicing at the cap exactly as it would have without it.
 
     Except for one question the estimate cannot refuse: when it does not
     license the existence statement (over the target, over its time,
@@ -1045,7 +1057,7 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
             "users_matching_walk_tail_estimate_failed", error_type=type(exc).__name__
         )
         spent_ms = (time.monotonic() - started) * 1000.0
-        return _tail_has_no_user(
+        return _presence_tail(
             state,
             below=below,
             left_ms=max(presence_floor_ms, probe_wall_ms - spent_ms),
@@ -1066,14 +1078,14 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
             target_rows=USER_LIST_WALK_PROBE_TARGET_READ_ROWS,
             estimate_ms=round(estimate_ms, 1),
         )
-        return _tail_has_no_user(state, below=below, left_ms=presence_ms)
+        return _presence_tail(state, below=below, left_ms=presence_ms)
     if estimate_ms > probe_left_ms:
         logger.info(
             "users_matching_walk_tail_probe_over_budget",
             estimate_ms=round(estimate_ms, 1),
             probe_wall_ms=probe_wall_ms,
         )
-        return _tail_has_no_user(state, below=below, left_ms=presence_ms)
+        return _presence_tail(state, below=below, left_ms=presence_ms)
     if not state.budget.take(1):
         return None
     query, params = state.builder.build_matching_activity_existence_query(
@@ -1089,7 +1101,22 @@ def _tail_is_empty(state: _WalkState, *, below: datetime) -> bool | None:
     )
     if result is None:
         return None
-    return not list(result.data or ())
+    found = list(result.data or ())
+    if not found:
+        return _Tail(newest=None)
+    newest = _utc(found[0].get("witnessed"))
+    if newest is None or not state.window_start <= newest < below:
+        return None
+    return _Tail(newest=newest)
+
+
+def _presence_tail(
+    state: _WalkState, *, below: datetime, left_ms: float
+) -> _Tail | None:
+    """``_tail_has_no_user`` as the probe's answer: no row, or nothing licensed."""
+    if _tail_has_no_user(state, below=below, left_ms=left_ms):
+        return _Tail(newest=None)
+    return None
 
 
 def _tail_has_no_user(
@@ -2066,21 +2093,34 @@ def walk_matching_activity_page(
         ):
             # The tail below this empty slice does not fit the statements
             # left at the cap: cost one existence statement over it and, if
-            # it fits, ask once whether anything witnessed is down there at
-            # all. Nothing means the window is exhausted; a row, an estimate
-            # over the target, or a statement the budget refuses or that
-            # fails, changes nothing: the walk slices on at the cap.
+            # it fits, ask once for the newest witnessed row down there.
+            # Nothing means the window is exhausted. A row means nothing any
+            # slice reads lies above it, as a run of empty slices down to it
+            # would have proven, so the walk resumes just above it. An
+            # estimate over the target, or a statement the budget refuses or
+            # that fails, changes nothing: the walk slices on at the cap.
             probed = True
-            empty = _tail_is_empty(state, below=slice_end)
-            if empty is None and state.budget.exhausted_by is not None:
+            tail = _probe_tail(state, below=slice_end)
+            if tail is None and state.budget.exhausted_by is not None:
                 state.stopped = True
                 break
-            if empty:
+            if tail is not None and tail.newest is None:
                 exhausted = True
                 boundary = None
                 if not _publish(state, boundary):
                     state.stopped = True
                 break
+            if tail is not None and tail.newest + _TICK < slice_end:
+                logger.info(
+                    "users_matching_walk_tail_resumed",
+                    skipped_seconds=(slice_end - tail.newest).total_seconds(),
+                )
+                boundary = tail.newest
+                if not _publish(state, boundary):
+                    state.stopped = True
+                    break
+                slice_end = tail.newest + _TICK
+                continue
         # An empty slice on an index-pruned witness cost only its fixed
         # overhead (the bloom pruned every granule), so its time says nothing
         # about a wider one: widen hard as long as another statement like it

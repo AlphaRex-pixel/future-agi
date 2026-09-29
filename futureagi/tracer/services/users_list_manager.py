@@ -30,6 +30,7 @@ from tracer.services.clickhouse.query_builders.filters import (
 )
 from tracer.services.clickhouse.query_builders.user_list import (
     MatchingActivityWitness,
+    UnsupportedBoundedUserListQuery,
 )
 from tracer.services.clickhouse.read_budget import (
     ReadDeadline,
@@ -739,6 +740,9 @@ class UsersListManager:
         )
         if self.empty_scope:
             return [], 0, builder
+        # Build the page first: a filter/sort this path refuses is refused by
+        # its shape, before any read, whether or not the window has user spans.
+        query, params = builder.build_candidate_page_query()
         physical_query, physical_params = builder.build_physical_user_presence_query()
         physical_presence = analytics.execute_ch_query(
             physical_query,
@@ -752,7 +756,6 @@ class UsersListManager:
         )
         if not physical_presence.data:
             return [], 0, builder
-        query, params = builder.build_candidate_page_query()
         result_row_cap = max_rows or limit or 1
         result = analytics.execute_ch_query(
             query,
@@ -2523,6 +2526,10 @@ class UsersListManager:
                 organization_id=self.organization_id,
                 project_id=self.project_id,
             )
+            raise
+        except UnsupportedBoundedUserListQuery:
+            # A request shape this path refuses by contract, not a failed
+            # read: the HTTP boundary answers it with a typed 422.
             raise
         except Exception as exc:
             _log_user_read_failure(
