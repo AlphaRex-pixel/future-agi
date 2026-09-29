@@ -398,6 +398,7 @@ def _raises(exc):
         lambda _call: SimpleNamespace(
             data=[{"table": "spans", "rows": 10}], columns=["rows"]
         ),
+        lambda _call: SimpleNamespace(data=None, columns=list(ESTIMATE_COLUMNS)),
     ],
     ids=[
         "stopped",
@@ -411,6 +412,7 @@ def _raises(exc):
         "bool-rows",
         "another-table",
         "rows-column-only",
+        "no-data",
     ],
 )
 def test_an_unknown_estimate_never_guesses_inline(scheduled, estimate):

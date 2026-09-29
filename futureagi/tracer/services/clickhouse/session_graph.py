@@ -58,9 +58,9 @@ from tracer.services.clickhouse.v2.query_builders.trace_list import (
     TraceListQueryBuilderV2,
 )
 from tracer.services.exact_aggregation_cache import (
-    _refresh_failure_seconds,
     raw_observe_identity_key,
     read_or_schedule_exact_snapshot,
+    refresh_failure_seconds,
 )
 
 logger = structlog.get_logger(__name__)
@@ -717,9 +717,12 @@ def _session_graph_root_estimate(
             exc_info=True,
         )
         return None
-    return reduce_spans_estimate(
-        getattr(result, "data", None), getattr(result, "columns", None)
-    )
+    rows = getattr(result, "data", None)
+    if rows is None:
+        # The shared reducer reads a missing result set as zero rows (the raw
+        # graph's gate wants that); here it is an unknown answer, never inline.
+        return None
+    return reduce_spans_estimate(rows, getattr(result, "columns", None))
 
 
 def session_latency_may_inline(
@@ -766,7 +769,7 @@ def _remember_inline_failure(identity: dict[str, Any]) -> None:
     if key is None:
         return
     try:
-        cache.set(key, 1, timeout=_refresh_failure_seconds())
+        cache.set(key, 1, timeout=refresh_failure_seconds())
     except Exception:
         logger.warning("session_graph_inline_backoff_unavailable", exc_info=True)
 
