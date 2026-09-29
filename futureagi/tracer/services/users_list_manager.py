@@ -10,7 +10,7 @@ import io
 import json
 from collections.abc import Iterator
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -232,10 +232,10 @@ def _candidate_statement_timeout(deadline: ReadDeadline | None) -> dict[str, Any
     proven checkpoint (``_is_page_wall_stop``). The first batch has no
     deadline and runs as before.
     """
-    if deadline is None:
-        return {"timeout_ms": None}
-    timeout_ms = deadline.remaining_ms(USER_LIST_QUERY_TIMEOUT_MS)
-    return {"timeout_ms": timeout_ms, "server_execution_cap_ms": timeout_ms}
+    return _statement_timeout(
+        replace(deadline, enforce_on_server=True) if deadline is not None else None,
+        USER_LIST_QUERY_TIMEOUT_MS,
+    )
 
 
 def _log_user_read_failure(event: str, exc: Exception, **context: object) -> None:
