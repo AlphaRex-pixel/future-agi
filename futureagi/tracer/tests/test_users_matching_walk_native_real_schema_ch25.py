@@ -25,19 +25,17 @@ and whole-window totals that sit on spans the witness never sees.
 
 from __future__ import annotations
 
-import os
 import uuid
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from conftest import _ch_test_native_client
 from tracer.services import users_matching_walk as walk
 from tracer.services.clickhouse import exact_graph_reads
 from tracer.services.clickhouse.list_cursor import ListCursor
 from tracer.services.users_list_manager import UsersListManager
+from tracer.tests._users_live_ch import LiveExecutor, lane_client
 
 pytestmark = pytest.mark.integration
 
@@ -51,38 +49,9 @@ WINDOW_END = WINDOW_START + timedelta(days=3)
 SERVICE = "tracer.services.users_list_manager.V2AnalyticsQueryService"
 
 
-def _lane_database() -> str:
-    database = (os.environ.get("CH25_DATABASE") or "").strip()
-    if not database:
-        pytest.skip("no lane database named: set CH25_DATABASE")
-    # CI gives every job its own throwaway ClickHouse, whose test_tfc carries
-    # the deployed schema and runs one test at a time. Locally test_tfc is shared
-    # with other runs, and this module stops merges on spans, so a local run needs
-    # its own database provisioned with provision-lane-ch-db.sh.
-    if database == "test_tfc" and os.environ.get("GITHUB_ACTIONS") == "true":
-        return database
-    if database == "test_tfc" or not database.startswith("test_"):
-        pytest.skip(
-            f"not writing to {database!r}: point CH25_DATABASE at a database "
-            "provisioned with provision-lane-ch-db.sh"
-        )
-    return database
-
-
 @pytest.fixture(scope="module")
 def ch_client():
-    database = _lane_database()
-    with _ch_test_native_client(database=database) as client:
-        kind = client.execute(
-            "SELECT default_kind FROM system.columns WHERE database = "
-            "currentDatabase() AND table = 'spans' AND name = 'trace_name'"
-        )
-        if kind != [("MATERIALIZED",)]:
-            pytest.fail(
-                f"{database} does not carry the deployed spans schema; "
-                "provision it with provision-lane-ch-db.sh"
-            )
-        client.database_name = database
+    with lane_client() as client:
         yield client
 
 
@@ -250,32 +219,6 @@ def survivor_of_e(ch_client):
         )
 
 
-class _LiveExecutor:
-    def __init__(self, client):
-        self.client = client
-        self.statements: list[str] = []
-
-    def execute_ch_query(
-        self,
-        query,
-        params=None,
-        timeout_ms=None,
-        settings=None,
-        *,
-        server_execution_cap_ms=None,
-    ):
-        self.statements.append(query)
-        rows, columns = self.client.execute(
-            query, params or {}, with_column_types=True, settings=settings or {}
-        )
-        names = [name for name, _type in columns]
-        return SimpleNamespace(
-            data=[dict(zip(names, row, strict=True)) for row in rows],
-            columns=names,
-            query_time_ms=1.0,
-        )
-
-
 def _date_filter(window_start=WINDOW_START):
     return {
         "column_id": "created_at",
@@ -326,7 +269,7 @@ def _never_seed(**kwargs):
 
 def _walk_page(ch_client, items, *, page_size, cursor=None, window_start=WINDOW_START):
     manager = _manager(*items, window_start=window_start)
-    executor = _LiveExecutor(ch_client)
+    executor = LiveExecutor(ch_client)
     with (
         patch(SERVICE, return_value=executor),
         patch.object(manager, "_read_dimension_candidates", side_effect=_never_seed),
@@ -379,7 +322,7 @@ def _seeded_all(ch_client, items):
     cursor = None
     for _ in range(10):
         manager = _manager(*items)
-        executor = _LiveExecutor(ch_client)
+        executor = LiveExecutor(ch_client)
         with (
             patch(SERVICE, return_value=executor),
             patch.object(manager, "matching_activity_walk_applies", return_value=False),

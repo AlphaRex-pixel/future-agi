@@ -13,7 +13,6 @@ exactly the any-span answer written out below.
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -27,6 +26,7 @@ from tracer.services.clickhouse.v2.query_builders.user_list import (
     UserListQueryBuilderV2,
 )
 from tracer.services.users_list_manager import UsersListManager
+from tracer.tests._users_live_ch import LiveExecutor
 
 pytestmark = pytest.mark.integration
 
@@ -213,32 +213,6 @@ def seeded(ch_client):
     assert ch_client.execute("SELECT count() FROM spans WHERE id = 'd1'")[0][0] == 2
 
 
-class _LiveExecutor:
-    def __init__(self, client):
-        self.client = client
-        self.statements: list[str] = []
-
-    def execute_ch_query(
-        self,
-        query,
-        params=None,
-        timeout_ms=None,
-        settings=None,
-        *,
-        server_execution_cap_ms=None,
-    ):
-        self.statements.append(query)
-        rows, columns = self.client.execute(
-            query, params or {}, with_column_types=True, settings=settings or {}
-        )
-        names = [name for name, _type in columns]
-        return SimpleNamespace(
-            data=[dict(zip(names, row, strict=True)) for row in rows],
-            columns=names,
-            query_time_ms=1.0,
-        )
-
-
 def _date_filter():
     return {
         "column_id": "created_at",
@@ -278,7 +252,7 @@ def _list_members(ch_client, item):
         organization_id=ORGANIZATION, project_ids=[PROJECT], filters=filters
     )
     rows = [{"end_user_id": user} for user in USERS.values()]
-    executor = _LiveExecutor(ch_client)
+    executor = LiveExecutor(ch_client)
     with patch(SERVICE, return_value=executor):
         manager._read_native_span_dimensions(rows, builder, None)
     assert len(executor.statements) == 1
@@ -354,7 +328,7 @@ def test_two_leaves_on_one_column_are_decided_independently(ch_client, seeded):
         organization_id=ORGANIZATION, project_ids=[PROJECT], filters=filters
     )
     rows = [{"end_user_id": user} for user in USERS.values()]
-    with patch(SERVICE, return_value=_LiveExecutor(ch_client)):
+    with patch(SERVICE, return_value=LiveExecutor(ch_client)):
         manager._read_native_span_dimensions(rows, builder, None)
     members = {
         label

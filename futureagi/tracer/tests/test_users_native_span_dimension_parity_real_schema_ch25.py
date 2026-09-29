@@ -21,15 +21,12 @@ For every native column and operator, with and without ``col_type``:
 
 from __future__ import annotations
 
-import os
 import uuid
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from conftest import _ch_test_native_client
 from tracer.services.clickhouse import exact_graph_reads
 from tracer.services.clickhouse.query_builders.user_list import (
     USER_NATIVE_SPAN_DIMENSIONS,
@@ -41,6 +38,7 @@ from tracer.services.clickhouse.v2.query_builders.user_time_series import (
     UserTimeSeriesQueryBuilderV2,
 )
 from tracer.services.users_list_manager import UsersListManager
+from tracer.tests._users_live_ch import LiveExecutor, lane_client
 
 pytestmark = pytest.mark.integration
 
@@ -80,52 +78,19 @@ OPERATIONS = [(operation, value) for operation, value, _expected in MODEL_EXPECT
 OPERATION_IDS = [f"{operation}-{value}" for operation, value in OPERATIONS]
 
 
-def _lane_database() -> str:
-    database = (os.environ.get("CH25_DATABASE") or "").strip()
-    if not database:
-        pytest.skip("no lane database named: set CH25_DATABASE")
-    # CI gives every job its own throwaway ClickHouse, whose test_tfc carries
-    # the deployed schema and runs one test at a time. Locally test_tfc is shared
-    # with other runs, and this module stops merges on spans, so a local run needs
-    # its own database provisioned with provision-lane-ch-db.sh.
-    if database == "test_tfc" and os.environ.get("GITHUB_ACTIONS") == "true":
-        return database
-    if database == "test_tfc" or not database.startswith("test_"):
-        pytest.skip(
-            f"not writing to {database!r}: point CH25_DATABASE at a database "
-            "provisioned with provision-lane-ch-db.sh"
-        )
-    return database
-
-
 @pytest.fixture(scope="module")
 def ch_client():
-    database = _lane_database()
-    with _ch_test_native_client(database=database) as client:
-        kinds = dict(
-            client.execute(
-                "SELECT name, default_kind FROM system.columns "
-                "WHERE database = currentDatabase() AND table = 'spans' "
-                "AND name IN ('trace_name', 'trace_id')"
-            )
+    with lane_client() as client:
+        trace_id = client.execute(
+            "SELECT type FROM system.columns WHERE database = currentDatabase() "
+            "AND table = 'spans' AND name = 'trace_id'"
         )
-        types = dict(
-            client.execute(
-                "SELECT name, type FROM system.columns "
-                "WHERE database = currentDatabase() AND table = 'spans' "
-                "AND name = 'trace_id'"
-            )
-        )
-        if kinds.get("trace_name") != "MATERIALIZED" or types.get("trace_id") != (
-            "String"
-        ):
+        if trace_id != [("String",)]:
             pytest.fail(
-                f"{database} does not carry the deployed spans schema "
-                f"(trace_name {kinds.get('trace_name')!r}, trace_id "
-                f"{types.get('trace_id')!r}); provision it with "
+                f"{client.database_name} does not carry the deployed spans "
+                f"schema (trace_id {trace_id!r}); provision it with "
                 "provision-lane-ch-db.sh"
             )
-        client.database_name = database
         yield client
 
 
@@ -309,32 +274,6 @@ def seeded(ch_client):
         )
 
 
-class _LiveExecutor:
-    def __init__(self, client):
-        self.client = client
-        self.statements: list[str] = []
-
-    def execute_ch_query(
-        self,
-        query,
-        params=None,
-        timeout_ms=None,
-        settings=None,
-        *,
-        server_execution_cap_ms=None,
-    ):
-        self.statements.append(query)
-        rows, columns = self.client.execute(
-            query, params or {}, with_column_types=True, settings=settings or {}
-        )
-        names = [name for name, _type in columns]
-        return SimpleNamespace(
-            data=[dict(zip(names, row, strict=True)) for row in rows],
-            columns=names,
-            query_time_ms=1.0,
-        )
-
-
 def _date_filter():
     return {
         "column_id": "created_at",
@@ -379,7 +318,7 @@ def _list_members(ch_client, survivor, item) -> set[str]:
         organization_id=ORGANIZATION, project_ids=[PROJECT], filters=filters
     )
     users = [user for label, user in USERS.items() if label != "F"] + [survivor]
-    executor = _LiveExecutor(ch_client)
+    executor = LiveExecutor(ch_client)
     with patch(SERVICE, return_value=executor):
         manager._read_native_span_dimensions(
             [{"end_user_id": user} for user in users], builder, None
@@ -493,7 +432,7 @@ def test_the_native_statement_returns_each_users_newest_witnessed_span(
     )
     assert builder.native_matching_activity_witness().leaf_index == 1
     users = [user for label, user in USERS.items() if label != "F"] + [seeded]
-    with patch(SERVICE, return_value=_LiveExecutor(ch_client)):
+    with patch(SERVICE, return_value=LiveExecutor(ch_client)):
         manager._read_native_span_dimensions(
             [{"end_user_id": user} for user in users], builder, None, newest=1
         )

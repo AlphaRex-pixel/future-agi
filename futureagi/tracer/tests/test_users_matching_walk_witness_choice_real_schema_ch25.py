@@ -31,7 +31,6 @@ own, so ``system.query_log`` proves what the PRODUCT sent, not a harness clamp.
 
 from __future__ import annotations
 
-import os
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -40,7 +39,6 @@ from unittest.mock import patch
 
 import pytest
 
-from conftest import _ch_test_native_client
 from tracer.services import users_matching_walk as walk
 from tracer.services.clickhouse import exact_graph_reads
 from tracer.services.clickhouse.application_read_policy import (
@@ -53,6 +51,7 @@ from tracer.services.clickhouse.v2.query_builders.user_list import (
     UserListQueryBuilderV2,
 )
 from tracer.services.users_list_manager import UsersListManager
+from tracer.tests._users_live_ch import lane_client
 
 pytestmark = pytest.mark.integration
 
@@ -70,37 +69,9 @@ SERVICE = "tracer.services.users_list_manager.V2AnalyticsQueryService"
 TAG = f"r5live-{uuid.uuid4().hex[:10]}"
 
 
-def _lane_database() -> str:
-    database = (os.environ.get("CH25_DATABASE") or "").strip()
-    if not database:
-        pytest.skip("no lane database named: set CH25_DATABASE")
-    # CI gives every job its own throwaway ClickHouse, whose test_tfc carries
-    # the deployed schema and runs one test at a time. Locally test_tfc is
-    # shared with other runs, so a local run needs its own database
-    # provisioned with provision-lane-ch-db.sh.
-    if database == "test_tfc" and os.environ.get("GITHUB_ACTIONS") == "true":
-        return database
-    if database == "test_tfc" or not database.startswith("test_"):
-        pytest.skip(
-            f"not writing to {database!r}: point CH25_DATABASE at a database "
-            "provisioned with provision-lane-ch-db.sh"
-        )
-    return database
-
-
 @pytest.fixture(scope="module")
 def ch_client():
-    database = _lane_database()
-    with _ch_test_native_client(database=database) as client:
-        kind = client.execute(
-            "SELECT default_kind FROM system.columns WHERE database = "
-            "currentDatabase() AND table = 'spans' AND name = 'trace_name'"
-        )
-        if kind != [("MATERIALIZED",)]:
-            pytest.fail(
-                f"{database} does not carry the deployed spans schema; "
-                "provision it with provision-lane-ch-db.sh"
-            )
+    with lane_client() as client:
         yield client
 
 
