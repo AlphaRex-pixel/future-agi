@@ -150,11 +150,11 @@ def snapshot_names_its_statistic(namespace: str, metric_id: Any, payload: Any) -
 
     During a rolling deploy an older worker can take a refresh job keyed by
     the new identity (it ignores ``payload_version``) and cache its own
-    latency statistic under the new key for up to 30 days: one built before
-    the statistic was named writes no ``metric_statistic``, and one built for
-    the retired median writes ``"median"``. So a LATENCY snapshot is served
-    only when its payload says ``metric_statistic == "mean"``; anything else
-    is a cache miss that a current worker recomputes. The check keys on the
+    latency statistic under the new key for up to 30 days, and one built
+    before the statistic was named writes no ``metric_statistic``. So a
+    LATENCY snapshot is served only when its payload says
+    ``metric_statistic == "mean"``; anything else is a cache miss that a
+    current worker recomputes. The check keys on the
     series being latency, not on the statistic's name: other series (cost,
     durations) are means too, did not change meaning, and are always
     accepted, marked or not.

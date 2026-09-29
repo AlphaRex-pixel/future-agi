@@ -80,8 +80,7 @@ _OPEN_WINDOW_REVALIDATION_NAMESPACES = frozenset(
 #   allow one refresh in flight, and the next cannot start before
 #   ``completed_at + floor``. A continuously viewed identity whose exact read
 #   takes D seconds therefore occupies a worker slot at most D / (D + floor) of
-#   the time. For the ~27 s 7-day session read on the largest tenant that is
-#   27/327 = 8% at 300 s, against 27/87 = 31% at 60 s.
+#   the time.
 # - Per admission scope (the identity's project_id, else workspace_id, else
 #   organization_id), a revalidation claims admission only while it leaves a
 #   slot free (``_revalidation_admission_limit``): with the default two
@@ -104,9 +103,7 @@ _OPEN_WINDOW_REVALIDATION_NAMESPACES = frozenset(
 #     viewer changes it, so there is no bound at all.
 #   (Yesterday and the sub-day presets end by the time they are computed, so
 #   they never revalidate.) In every case the only sign is completed_at
-#   ("Last updated"). Serving it marked refreshing, polling for a free slot,
-#   claiming the reserved slot past a second, larger age floor, or raising the
-#   default to three slots, are owner decisions left open.
+#   ("Last updated").
 # - A revalidation whose Temporal dispatch is accepted but never starts keeps
 #   its "running" state for the dispatch lease, exactly like an explicit
 #   refresh today: hit polls never reconcile against Temporal, so the chart

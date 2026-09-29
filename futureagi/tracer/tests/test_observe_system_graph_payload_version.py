@@ -10,10 +10,10 @@ graph) keep their snapshots.
 
 A worker that computes the latency mean writes ``metric_statistic: "mean"``
 into the payload it caches. During a rolling deploy an older worker can still
-take a job keyed by the current identity (it ignores ``payload_version``); it
-writes no marker (built before the statistic was named) or ``"median"`` (built
-for the retired median). Either is a cache miss on every read, never served
-under the "avg" label. Only latency is guarded; every other series (cost and
+take a job keyed by the current identity (it ignores ``payload_version``) and
+write no marker (built before the statistic was named). Any snapshot not
+marked ``"mean"`` is a cache miss on every read, never served under the "avg"
+label. Only latency is guarded; every other series (cost and
 durations are means too) is served marked or not.
 """
 
@@ -50,11 +50,6 @@ class _Analytics:
 
 def _pending(**_):
     return graph_dispatch._pending_graph_payload("latency")
-
-
-def test_version_is_two():
-    # 1 was the never-released median; 2 is the mean on every path.
-    assert OBSERVE_SYSTEM_GRAPH_PAYLOAD_VERSION == 2
 
 
 def test_trace_graph_identity_is_versioned(monkeypatch):

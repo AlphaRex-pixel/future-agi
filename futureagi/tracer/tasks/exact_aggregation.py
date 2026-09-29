@@ -304,7 +304,7 @@ def _load_exact_payload(namespace: str, identity: dict[str, Any]) -> Any:
 
         # The statistic travels in the cached payload. Readers serve a latency
         # snapshot only when it says "mean", so one an older worker cached
-        # during a rolling deploy (unmarked, or "median") is a miss
+        # during a rolling deploy (unmarked) is a miss
         # (graph_metric_statistic.snapshot_names_its_statistic).
         return stamp_snapshot_statistic(
             namespace,

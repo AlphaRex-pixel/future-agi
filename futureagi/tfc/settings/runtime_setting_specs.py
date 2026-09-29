@@ -356,7 +356,7 @@ INTERACTIVE_READ_SETTING_SPECS = {
             # Age after which a revisited Observe chart whose exact snapshot
             # ran while its window was open refreshes that snapshot in the
             # background (0 = off; values 1-59 are raised to 60 in code). The
-            # default and its load arithmetic are documented at
+            # default's load bound is documented at
             # _DEFAULT_REVALIDATE_AFTER_SECONDS in
             # tracer/services/exact_aggregation_cache.py.
             ("EXACT_AGGREGATION_REVALIDATE_AFTER_SECONDS", 300, 0, 86_400),

@@ -4817,8 +4817,8 @@ def _session_numeric_absence_probe_sql(
 
 
 def _session_graph_read_settings() -> dict[str, Any]:
-    """Settings for the Sessions graph statement, which only the background
-    exact-aggregation worker runs.
+    """The background exact-aggregation worker's settings for the Sessions
+    graph statement (an inline run keeps ``EXACT_GRAPH_READ_SETTINGS``).
 
     It is the shared exact envelope with one change: the statement may use
     ``EXACT_GRAPH_SESSION_READ_MAX_THREADS`` workers, which parallel FINAL
