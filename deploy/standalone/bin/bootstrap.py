@@ -626,7 +626,7 @@ def unapplied_migrations(migrations: list[str]) -> set[str]:
 def migrate_and_seed() -> str:
     """bootstrap_install's migrate and seeds, skipped while the image and the
     applied migrations are unchanged since the last successful boot."""
-    from tfc.management.commands import bootstrap_install
+    import tfc.management.commands.bootstrap_install as steps
 
     fingerprint, migrations = schema_fingerprint()
     stored = FINGERPRINT.read_text().strip() if FINGERPRINT.exists() else None
@@ -636,19 +636,19 @@ def migrate_and_seed() -> str:
         )
         return fingerprint
     set_phase("migrating")
-    bootstrap_install.migrate_and_seed(log)
+    steps.migrate_and_seed(log)
     return fingerprint
 
 
 def collect_static() -> None:
     """Done at image build (which writes STATIC_COLLECTED); here only when
     that step failed, and then once per container."""
-    from tfc.management.commands.bootstrap_install import call
+    import tfc.management.commands.bootstrap_install as steps
 
     if STATIC_COLLECTED.exists():
         return
     try:
-        call("collectstatic", log, interactive=False, verbosity=0)
+        steps.call("collectstatic", log, interactive=False, verbosity=0)
     except Exception as exc:  # non-fatal, as in entrypoint.sh
         log(f"collectstatic failed (continuing): {exc}")
         return
