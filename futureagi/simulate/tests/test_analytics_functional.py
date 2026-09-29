@@ -1249,6 +1249,100 @@ class TestRunResultsV3Views:
         assert len(body["results"]) == 1
         assert body["groups"][0]["result_ids"] == [body["results"][0]["id"]]
 
+    def test_sub_goal_groups_batch_exact_memberships_across_pages(
+        self, test_execution, analytics_call_executions, django_assert_num_queries
+    ):
+        from django.db.models import Case, JSONField, Value, When
+
+        from simulate.services.run_results_v3_queries import (
+            group_run_calls,
+            run_calls_queryset,
+        )
+
+        first, second = analytics_call_executions[:2]
+        queryset = run_calls_queryset(test_execution).annotate(
+            result_sub_goal=Case(
+                When(
+                    pk=first.pk,
+                    then=Value(
+                        ["alpha", "alpha", " beta ", "Ungrouped"],
+                        output_field=JSONField(),
+                    ),
+                ),
+                When(
+                    pk=second.pk,
+                    then=Value(["alpha", "beta"], output_field=JSONField()),
+                ),
+                default=Value([], output_field=JSONField()),
+                output_field=JSONField(),
+            )
+        )
+        with django_assert_num_queries(2):
+            groups = group_run_calls(queryset, "sub_goal", [{"id": str(first.pk)}], [])
+        by_key = {group["key"]: group for group in groups}
+        assert {key: group["total"] for key, group in by_key.items()} == {
+            "alpha": 2,
+            "beta": 1,
+            "Ungrouped": 2,
+        }
+        assert all(group["result_ids"] == [str(first.pk)] for group in groups)
+
+    def test_sub_goal_group_keeps_zero_total_for_normalized_unmatched_key(
+        self, test_execution, analytics_call_executions, django_assert_num_queries
+    ):
+        from django.db.models import JSONField, Value
+
+        from simulate.services.run_results_v3_queries import (
+            group_run_calls,
+            run_calls_queryset,
+        )
+
+        queryset = run_calls_queryset(test_execution).annotate(
+            result_sub_goal=Value([" padded "], output_field=JSONField())
+        )
+        with django_assert_num_queries(2):
+            groups = group_run_calls(
+                queryset, "sub_goal", [{"id": str(analytics_call_executions[0].pk)}], []
+            )
+        assert len(groups) == 1
+        assert groups[0]["key"] == "padded"
+        assert groups[0]["total"] == 0
+
+    def test_empty_group_page_does_not_query(
+        self, test_execution, django_assert_num_queries
+    ):
+        from simulate.services.run_results_v3_queries import (
+            group_run_calls,
+            run_calls_queryset,
+        )
+
+        queryset = run_calls_queryset(test_execution)
+        with django_assert_num_queries(0):
+            assert group_run_calls(queryset, "sub_goal", [], []) == []
+
+    def test_visible_groups_preserve_null_keys_and_off_page_totals(
+        self, test_execution, analytics_call_executions, django_assert_num_queries
+    ):
+        from django.db.models import Case, CharField, Value, When
+
+        from simulate.services.run_results_v3_queries import (
+            group_run_calls,
+            run_calls_queryset,
+        )
+
+        first = analytics_call_executions[0]
+        queryset = run_calls_queryset(test_execution).annotate(
+            result_goal=Case(
+                When(pk=first.pk, then=Value(None, output_field=CharField())),
+                default=Value("None"),
+                output_field=CharField(),
+            )
+        )
+        with django_assert_num_queries(2):
+            groups = group_run_calls(queryset, "goal", [{"id": str(first.pk)}], [])
+        assert sorted(group["total"] for group in groups) == [1, 3]
+        assert all(group["key"] == "None" for group in groups)
+
     def test_detail_uses_v3_route(self, auth_client, analytics_call_executions):
         call = analytics_call_executions[0]
         call.call_metadata = {"harness_outcome_status": "passed", "use_case": "Returns"}

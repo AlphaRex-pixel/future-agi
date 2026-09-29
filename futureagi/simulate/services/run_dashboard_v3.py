@@ -420,6 +420,9 @@ def build_run_dashboard(
         csat_measured=Count("dashboard_csat"),
         turns=Avg("result_turn_count"),
         turns_measured=Count("result_turn_count"),
+        cost_passed=Count(
+            "id", filter=Q(result_cost_cents__isnull=False, result_outcome="passed")
+        ),
         connected=Count(
             "id", filter=Q(message_count__gt=0) | Q(transcript_available=True)
         ),
@@ -588,15 +591,12 @@ def build_run_dashboard(
         "End-to-end task wall-clock time",
     )
     cost = summary["cost_cents"]
-    cost_calls = queryset.filter(result_cost_cents__isnull=False).aggregate(
-        passed=Count("id", filter=Q(result_outcome="passed")),
-    )
     metric(
         "cost_per_pass",
         "Cost / pass",
         (
-            cost["total_value"] / cost_calls["passed"]
-            if cost_calls["passed"] and cost["total_value"] is not None
+            cost["total_value"] / values["cost_passed"]
+            if values["cost_passed"] and cost["total_value"] is not None
             else None
         ),
         "cents",

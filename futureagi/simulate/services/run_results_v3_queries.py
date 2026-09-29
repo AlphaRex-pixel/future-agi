@@ -14,6 +14,7 @@ from django.db.models import (
     Case,
     CharField,
     Count,
+    Expression,
     F,
     FloatField,
     Func,
@@ -29,8 +30,16 @@ from django.db.models import (
     Value,
     When,
 )
-from django.db.models.fields.json import KeyTextTransform, KeyTransform
-from django.db.models.functions import Cast, Coalesce, Lower, NullIf, Trim
+from django.db.models.fields.json import HasKey, KeyTextTransform, KeyTransform
+from django.db.models.functions import (
+    Cast,
+    Coalesce,
+    Greatest,
+    Least,
+    Lower,
+    NullIf,
+    Trim,
+)
 from django.db.models.lookups import (
     Exact,
     GreaterThan,
@@ -38,7 +47,6 @@ from django.db.models.lookups import (
     In,
     LessThan,
     LessThanOrEqual,
-    Regex,
 )
 
 from model_hub.models.develop_dataset import Cell
@@ -50,6 +58,8 @@ from simulate.services.harness_scenarios import level_label
 from simulate.services.run_reliability_v3 import build_reliability
 from simulate.services.run_results_v3 import build_evaluation_catalog
 from simulate.services.run_results_v3_expressions import (
+    MatchingListGroups,
+    NormalizedEvalNumber,
     PercentileCont,
     _json_text,
     _safe_json_float,
@@ -97,8 +107,8 @@ def _group_keys(group_by: str, value: Any) -> list[str]:
     return list(dict.fromkeys(keys)) or [UNGROUPED]
 
 
-def _json_value(field: str, *keys: str):
-    expression = F(field)
+def _json_value(field: str | Expression, *keys: str):
+    expression = F(field) if isinstance(field, str) else field
     for key in keys:
         expression = KeyTransform(key, expression)
     return expression
@@ -114,13 +124,13 @@ def _eval_verdict_q(eval_ids: set[str], values: list[Any]) -> Q:
     return verdict
 
 
-def _eval_measured_q(eval_id: str) -> Q:
+def _eval_measured_q(eval_id: str, field: str | Expression = "eval_outputs") -> Q:
     status = Coalesce(
-        _json_text("eval_outputs", eval_id, "status"),
+        _json_text(field, eval_id, "status"),
         Value(""),
         output_field=TextField(),
     )
-    return Q(eval_outputs__has_key=eval_id) & ~Q(
+    return Q(HasKey(_json_value(field), eval_id)) & ~Q(
         In(Lower(Trim(status)), ["pending", "skipped", "error", "failed"])
     )
 
@@ -136,13 +146,15 @@ def _eval_errored_q(eval_id: str) -> Q:
     )
 
 
-def _choice_array_matches(eval_id: str, label: str, *, nested: bool) -> Q:
+def _choice_array_matches(
+    eval_id: str, label: str, *, nested: bool, field: str | Expression = "eval_outputs"
+) -> Q:
     keys = (eval_id, "output", "choices") if nested else (eval_id, "output")
     pattern = f"^[[:space:]]*{re.escape(label)}[[:space:]]*$"
     path = f'$[*] ? (@ like_regex {json.dumps(pattern)} flag "i")'
     return Q(
         Func(
-            _json_value("eval_outputs", *keys),
+            _json_value(field, *keys),
             Value(path),
             function="jsonb_path_exists",
             template="%(function)s(%(expressions)s::jsonpath)",
@@ -151,40 +163,24 @@ def _choice_array_matches(eval_id: str, label: str, *, nested: bool) -> Q:
     )
 
 
-def _eval_score(eval_id: str, spec: EvalScoringSpec | None = None):
-    output = _json_value("eval_outputs", eval_id, "output")
+def _expanded_eval_score(
+    eval_id: str,
+    spec: EvalScoringSpec | None = None,
+    field: str | Expression = "eval_outputs",
+):
+    output = _json_value(field, eval_id, "output")
     raw_text = Coalesce(
         *(
             KeyTextTransform(key, output)
             for key in ("score", "result", "output", "choice", "value")
         ),
-        KeyTextTransform("output", _json_value("eval_outputs", eval_id)),
+        KeyTextTransform("output", _json_value(field, eval_id)),
         output_field=TextField(),
     )
     normalized = Lower(Trim(raw_text))
-    numeric = Case(
-        When(
-            Regex(
-                normalized,
-                Value(r"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$"),
-            ),
-            then=Cast(normalized, FloatField()),
-        ),
-        output_field=FloatField(),
+    numeric_score = NormalizedEvalNumber(
+        normalized, pass_fail=spec is not None and spec.output_type == "pass_fail"
     )
-    if spec is not None and spec.output_type == "pass_fail":
-        numeric_score = Case(
-            When(GreaterThan(numeric, Value(0.0)), then=Value(1.0)),
-            When(LessThanOrEqual(numeric, Value(0.0)), then=Value(0.0)),
-            default=None,
-            output_field=FloatField(),
-        )
-    else:
-        numeric_score = Case(
-            When(GreaterThan(numeric, Value(1.0)), then=numeric / Value(100.0)),
-            default=numeric,
-            output_field=FloatField(),
-        )
     choice_scores = (
         spec.choice_scores
         if spec is not None and spec.output_type == "deterministic"
@@ -194,46 +190,69 @@ def _eval_score(eval_id: str, spec: EvalScoringSpec | None = None):
         When(
             Q(
                 Exact(
-                    Lower(Trim(_json_text("eval_outputs", eval_id, "output"))),
+                    Lower(Trim(_json_text(field, eval_id, "output"))),
                     Value(label),
                 )
             )
             | (
                 Q(
                     Exact(
-                        Lower(
-                            Trim(
-                                _json_text("eval_outputs", eval_id, "output", "choice")
-                            )
-                        ),
+                        Lower(Trim(_json_text(field, eval_id, "output", "choice"))),
                         Value(label),
                     )
                 )
-                & ~Q(**{f"eval_outputs__{eval_id}__output__has_key": "choices"})
+                & ~Q(HasKey(output, "choices"))
             ),
-            then=Value(float(score)),
+            then=Value(min(max(float(score), 0.0), 1.0)),
         )
         for label, score in choice_scores.items()
     ]
     choice_score = None
     if spec is not None and spec.output_type == "deterministic" and choice_scores:
-        weighted = Value(0.0)
-        count = Value(0.0)
+        weighted = [Value(0.0)]
+        count = [Value(0.0)]
         for label, weight in choice_scores.items():
             present = _choice_array_matches(
-                eval_id, label, nested=False
-            ) | _choice_array_matches(eval_id, label, nested=True)
-            weighted += Case(
-                When(present, then=Value(weight)),
-                default=Value(0.0),
-                output_field=FloatField(),
+                eval_id, label, nested=False, field=field
+            ) | _choice_array_matches(eval_id, label, nested=True, field=field)
+            weighted.append(
+                Case(
+                    When(present, then=Value(weight)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
             )
-            count += Case(
-                When(present, then=Value(1.0)),
-                default=Value(0.0),
-                output_field=FloatField(),
+            count.append(
+                Case(
+                    When(present, then=Value(1.0)),
+                    default=Value(0.0),
+                    output_field=FloatField(),
+                )
             )
-        choice_score = weighted / NullIf(count, Value(0.0))
+        weighted_sum = Func(
+            *weighted,
+            function="",
+            template="(%(expressions)s)",
+            arg_joiner=" + ",
+            output_field=FloatField(),
+        )
+        count_sum = Func(
+            *count,
+            function="",
+            template="(%(expressions)s)",
+            arg_joiner=" + ",
+            output_field=FloatField(),
+        )
+        choice_score = Case(
+            When(
+                GreaterThan(count_sum, Value(0.0)),
+                then=Least(
+                    Greatest(weighted_sum / NullIf(count_sum, Value(0.0)), Value(0.0)),
+                    Value(1.0),
+                ),
+            ),
+            output_field=FloatField(),
+        )
     positive = ["true"]
     negative = ["false"]
     if spec is None or spec.output_type == "pass_fail":
@@ -264,17 +283,94 @@ def _eval_score(eval_id: str, spec: EvalScoringSpec | None = None):
         output_field=FloatField(),
     )
     return Case(
-        When(~_eval_measured_q(eval_id), then=Value(None, output_field=FloatField())),
-        When(LessThan(selected_score, Value(0.0)), then=Value(0.0)),
-        When(GreaterThan(selected_score, Value(1.0)), then=Value(1.0)),
+        When(
+            ~_eval_measured_q(eval_id, field),
+            then=Value(None, output_field=FloatField()),
+        ),
         default=selected_score,
         output_field=FloatField(),
+    )
+
+
+class _EvalScoreExpression(Func):
+    """Reuse compiled scoring across clones of a request's expression."""
+
+    output_field = FloatField()
+
+    def __init__(
+        self,
+        eval_id: str,
+        output_type: str | None,
+        choices: tuple[tuple[str, float], ...],
+    ):
+        super().__init__(F("eval_outputs"))
+        self._compiled_sql = {}
+        self.eval_id = eval_id
+        # Threshold and reversal are applied separately by the verdict expression.
+        self.spec = (
+            None
+            if output_type is None
+            else EvalScoringSpec(output_type, 0.5, False, dict(choices))
+        )
+
+    def as_sql(self, compiler, connection, **extra_context):
+        source = self.source_expressions[0]
+        key = (
+            self.eval_id,
+            self.spec.output_type if self.spec else None,
+            tuple(self.spec.choice_scores.items()) if self.spec else (),
+            source,
+        )
+        expression_key = (connection.alias, connection.vendor, type(compiler), key)
+        if expression_key in self._compiled_sql:
+            sql, params = self._compiled_sql[expression_key]
+            return sql, list(params)
+        cache = getattr(compiler, "_simulation_score_sql", None)
+        # SQL only: this cache never survives its compiler or stores query results.
+        if cache is None:
+            cache = compiler._simulation_score_sql = {}
+        if key not in cache:
+            expression = _expanded_eval_score(self.eval_id, self.spec, source)
+            sql, params = compiler.compile(
+                expression.resolve_expression(compiler.query)
+            )
+            cache[key] = (sql, tuple(params))
+        sql, params = cache[key]
+        self._compiled_sql[expression_key] = (sql, params)
+        return sql, list(params)
+
+
+def _eval_score(eval_id: str, spec: EvalScoringSpec | None = None):
+    return _EvalScoreExpression(
+        eval_id,
+        spec.output_type if spec else None,
+        tuple(spec.choice_scores.items()) if spec else (),
     )
 
 
 def _configured_eval_verdict(eval_id: str, config: SimulateEvalConfig):
     spec = resolve_eval_scoring_spec(config)
     raw_score = _eval_score(eval_id, spec)
+    if spec.output_type != "pass_fail":
+        score = Value(1.0) - raw_score if spec.reverse_output else raw_score
+        # Raw scores already exclude missing and unmeasured evaluations.
+        passed = Q(
+            Case(
+                When(
+                    GreaterThanOrEqual(score, Value(spec.threshold)), then=Value(True)
+                ),
+                default=Value(False),
+                output_field=BooleanField(),
+            )
+        )
+        failed = Q(
+            Case(
+                When(LessThan(score, Value(spec.threshold)), then=Value(True)),
+                default=Value(False),
+                output_field=BooleanField(),
+            )
+        )
+        return score, passed, failed
     final_pass = Q(
         Exact(
             Lower(Trim(_json_text("eval_outputs", eval_id, "output"))),
@@ -297,9 +393,6 @@ def _configured_eval_verdict(eval_id: str, config: SimulateEvalConfig):
             Value(True, output_field=JSONField()),
         )
     )
-    if spec.output_type != "pass_fail":
-        final_pass = Q(pk__in=[])
-        final_fail = Q(pk__in=[])
     measured = _eval_measured_q(eval_id)
     score = Case(
         When(~measured, then=Value(None, output_field=FloatField())),
@@ -736,7 +829,7 @@ def group_run_calls(
     page_rows: list[dict[str, Any]],
     columns: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
-    if group_by not in GROUP_FIELDS:
+    if group_by not in GROUP_FIELDS or not page_rows:
         return []
     field = GROUP_FIELDS[group_by]
     expressions = _aggregate_expressions(include_percentiles=False)
@@ -756,17 +849,24 @@ def group_run_calls(
         for key in keys_by_id.get(call_id, []):
             ids_by_key.setdefault(key, []).append(call_id)
     if group_by in LIST_AXES:
-        summaries = [
-            {
-                field: key,
-                **queryset.filter(_group_q(group_by, key))
-                .order_by()
-                .aggregate(**expressions),
-            }
-            for key in ids_by_key
-        ]
+        grouped = queryset.annotate(
+            result_group_key=MatchingListGroups(F(field), list(ids_by_key), UNGROUPED)
+        )
+        # Keep empty summaries for normalized page keys with no exact JSON match.
+        found = {
+            row["result_group_key"]: row
+            for row in grouped.order_by()
+            .values("result_group_key")
+            .annotate(**expressions)
+        }
+        summaries = [{field: key, **found.get(key, {})} for key in ids_by_key]
     else:
-        summaries = queryset.order_by().values(field).annotate(**expressions)
+        visible = Q(**{f"{field}__in": list(ids_by_key)})
+        if str(None) in ids_by_key:
+            visible |= Q(**{f"{field}__isnull": True})
+        summaries = (
+            queryset.filter(visible).order_by().values(field).annotate(**expressions)
+        )
     labels = {
         "passed": "Passed",
         "failed": "Failed",
@@ -925,7 +1025,6 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
     from simulate.services.run_dashboard_v3 import build_run_dashboard
 
     queryset = run_calls_queryset(execution)
-    summary = summarize_run_calls(queryset)
     configs, _ = build_evaluation_catalog(execution)
     scoring_configs = {
         str(config.id): config
@@ -985,9 +1084,21 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
             "id", filter=_eval_errored_q(eval_id)
         )
         evaluation_expressions[f"score_{eval_id}"] = Avg(score)
-    evaluation_values = (
-        queryset.aggregate(**evaluation_expressions) if evaluation_expressions else {}
+    cost_fields = {
+        "stt": "stt_cost_cents",
+        "llm": "llm_cost_cents",
+        "tts": "tts_cost_cents",
+        "storage": "storage_cost_cents",
+        "customer": "customer_cost_cents",
+    }
+    cost_expressions = {}
+    for key, field in cost_fields.items():
+        cost_expressions[f"{key}_total"] = Sum(field)
+        cost_expressions[f"{key}_measured"] = Count(field)
+    evaluation_values = queryset.aggregate(
+        **_aggregate_expressions(), **evaluation_expressions, **cost_expressions
     )
+    summary = _summary_from_values(evaluation_values)
     evaluations = []
     for config in configs:
         eval_id = config["id"]
@@ -1034,22 +1145,10 @@ def build_run_analytics(execution: TestExecution) -> dict[str, Any]:
     )
     failure_total = sum(failure_counts.values())
 
-    cost_fields = {
-        "stt": "stt_cost_cents",
-        "llm": "llm_cost_cents",
-        "tts": "tts_cost_cents",
-        "storage": "storage_cost_cents",
-        "customer": "customer_cost_cents",
-    }
-    cost_expressions = {}
-    for key, field in cost_fields.items():
-        cost_expressions[f"{key}_total"] = Sum(field)
-        cost_expressions[f"{key}_measured"] = Count(field)
-    cost_values = queryset.aggregate(**cost_expressions)
     cost_breakdown = {
         key: {
-            "total": cost_values[f"{key}_total"],
-            "measured": cost_values[f"{key}_measured"],
+            "total": evaluation_values[f"{key}_total"],
+            "measured": evaluation_values[f"{key}_measured"],
             "calls": summary["total"],
         }
         for key in cost_fields

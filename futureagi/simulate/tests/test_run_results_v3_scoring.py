@@ -15,6 +15,7 @@ from simulate.services.run_results_v3_queries import (
     run_calls_queryset,
 )
 from simulate.services.run_results_v3_scoring import (
+    EvalScoringSpec,
     judge_stored_eval,
     resolve_eval_scoring_spec,
 )
@@ -28,6 +29,83 @@ def _config(output_type: str):
         pass_threshold=0.5,
     )
     return SimpleNamespace(eval_template=template, config={"reverse_output": True})
+
+
+def test_score_compilation_is_scoped_to_expression_and_resolved_alias():
+    from simulate.services import run_results_v3_queries as queries
+
+    query = CallExecution.objects.all().query
+    compiler = query.get_compiler(connection=connection)
+    score = queries._eval_score("eval-1").resolve_expression(query)
+    table = CallExecution._meta.db_table
+    with patch.object(
+        queries, "_expanded_eval_score", wraps=queries._expanded_eval_score
+    ) as expand:
+        sql, params = compiler.compile(score)
+        expected_params = list(params)
+        params.append("must not leak into the next compilation")
+        assert compiler.compile(score.copy()) == (sql, expected_params)
+        assert expand.call_count == 1
+
+        aliased_sql, aliased_params = compiler.compile(
+            score.relabeled_clone({table: "other_call"})
+        )
+        assert '"other_call"."eval_outputs"' in aliased_sql
+        assert aliased_params == expected_params
+        assert expand.call_count == 2
+
+        assert query.get_compiler(connection=connection).compile(score) == (
+            sql,
+            expected_params,
+        )
+        assert expand.call_count == 2
+
+        fresh_score = queries._eval_score("eval-1").resolve_expression(query)
+        assert query.get_compiler(connection=connection).compile(fresh_score) == (
+            sql,
+            expected_params,
+        )
+        assert expand.call_count == 3
+        with patch.object(connection, "alias", "other_database"):
+            assert query.get_compiler(connection=connection).compile(score) == (
+                sql,
+                expected_params,
+            )
+        assert expand.call_count == 4
+        assert query.get_compiler(connection=connection).compile(score) == (
+            sql,
+            expected_params,
+        )
+        assert expand.call_count == 4
+
+
+def test_score_compilation_distinguishes_evaluators_types_and_choice_weights():
+    from simulate.services import run_results_v3_queries as queries
+
+    query = CallExecution.objects.all().query
+    compiler = query.get_compiler(connection=connection)
+    specifications = [
+        ("eval-1", None),
+        ("eval-2", None),
+        ("eval-1", EvalScoringSpec("pass_fail", 0.5, False, {})),
+        ("eval-1", EvalScoringSpec("percentage", 0.5, False, {})),
+        ("eval-1", EvalScoringSpec("deterministic", 0.5, False, {"good": 0.1})),
+        ("eval-1", EvalScoringSpec("deterministic", 0.5, False, {"good": 0.9})),
+    ]
+    original = queries._expanded_eval_score
+    with patch.object(
+        queries, "_expanded_eval_score", wraps=queries._expanded_eval_score
+    ) as expand:
+        for eval_id, spec in specifications:
+            score = queries._eval_score(eval_id, spec).resolve_expression(query)
+            actual = compiler.compile(score)
+            expected = compiler.compile(
+                original(eval_id, spec).resolve_expression(query)
+            )
+            assert actual == expected
+            # A fresh compiler must produce exactly the same SQL and parameters.
+            assert actual == query.get_compiler(connection=connection).compile(score)
+        assert expand.call_count == len(specifications)
 
 
 @pytest.mark.parametrize(
@@ -57,10 +135,13 @@ def test_reversed_pass_fail_uses_stored_final_verdict(stored_output, expected):
     [(0.9, "failed"), (0.1, "passed")],
 )
 def test_reversed_raw_numeric_score_is_still_reversed(raw_score, expected):
-    assert _eval_outcome(
-        {"status": "completed", "output_type": "score", "output": raw_score},
-        _config("percentage"),
-    ) == expected
+    assert (
+        _eval_outcome(
+            {"status": "completed", "output_type": "score", "output": raw_score},
+            _config("percentage"),
+        )
+        == expected
+    )
 
 
 @pytest.mark.parametrize(
@@ -154,17 +235,30 @@ SCORING_PARITY_CASES = [
     ("deterministic", ["good", "bad"], 0.5, {"good": 1, "bad": 0}),
     ("deterministic", "good", 0.5, {"good": 2}),
     ("deterministic", ["bad"], 0.5, {"bad": -2}),
+    ("deterministic", [" GOOD ", "good", "bad"], 0.5, {"good": 2, "bad": -1}),
+    ("deterministic", {"choices": ["good", "bad"]}, 0.5, {"good": 2, "bad": -1}),
+    ("deterministic", ["unmatched"], 0.5, {"good": 1}),
+    ("percentage", None, 0.5, {}),
+    ("percentage", True, 0.5, {}),
+    ("percentage", False, 0.5, {}),
+    ("percentage", "NaN", 0.5, {}),
+    ("percentage", "-Infinity", 0.5, {}),
 ]
 
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize(
+    "eval_status", ["completed", "pending", "skipped", "error", "failed"]
+)
 @pytest.mark.parametrize("output_type,output,threshold,choices", SCORING_PARITY_CASES)
-def test_sql_scoring_matches_python(output_type, output, threshold, choices, reverse):
+def test_sql_scoring_matches_python(
+    output_type, output, threshold, choices, reverse, eval_status
+):
     config = _config(output_type)
     config.config = {"reverse_output": reverse, "pass_threshold": threshold}
     config.eval_template.choice_scores = choices
-    stored = {"status": "completed", "output": output}
+    stored = {"status": eval_status, "output": output}
     expected = judge_stored_eval(stored, resolve_eval_scoring_spec(config))
     score, passed, failed = _configured_eval_verdict("eval-1", config)
     query = CallExecution.objects.all().query
