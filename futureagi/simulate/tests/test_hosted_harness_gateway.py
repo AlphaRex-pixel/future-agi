@@ -41,6 +41,7 @@ from simulate.services.hosted_harness_gateway import (
     _provider_egress_domains,
     _provider_import_authoring_material,
     _resolved_egress_domains,
+    _scenarios_cli_command,
     _validate_resolved_egress_domains,
     _webrtc_egress_cidrs,
     attach_platform_simulator_secret_refs,
@@ -78,21 +79,42 @@ def _isolate_platform_simulator_environment(settings, monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-def test_private_pin_policy_is_org_scoped_and_fails_closed(monkeypatch) -> None:
+def test_private_pin_policy_is_org_and_phone_scoped_and_fails_closed(monkeypatch) -> None:
     monkeypatch.setenv("ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER", "+15551234567")
     monkeypatch.setenv("ALK_CAB_GUEST_POC_PIN", "7682")
+    job = SimpleNamespace(
+        organization_id="org-approved",
+        payload={
+            "agent": {
+                "connector": "phone",
+                "config": {"phone_number": "+15551234567"},
+            }
+        },
+    )
     values = {}
-    _add_scoped_guest_pin_policy(values, "org-approved")
+    _add_scoped_guest_pin_policy(values, job)
     assert values == {}
 
     monkeypatch.setenv("ALK_CAB_GUEST_POC_ALLOWED_ORGANIZATION_ID", "org-approved")
-    _add_scoped_guest_pin_policy(values, "org-other")
+    job.organization_id = "org-other"
+    _add_scoped_guest_pin_policy(values, job)
     assert values == {}
-    _add_scoped_guest_pin_policy(values, "org-approved")
+    job.organization_id = "org-approved"
+    job.payload["agent"]["config"]["phone_number"] = "+15557654321"
+    _add_scoped_guest_pin_policy(values, job)
+    assert values == {}
+    job.payload["agent"]["config"]["phone_number"] = "+15551234567"
+    _add_scoped_guest_pin_policy(values, job)
     assert values == {
         "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER": "+15551234567",
         "ALK_CAB_GUEST_POC_PIN": "7682",
     }
+
+
+def test_add_scenarios_carries_job_for_target_scoped_policy() -> None:
+    command = _scenarios_cli_command(name="guest", count=12, guidance=[])
+
+    assert "--job /work/job.json" in command
 
 
 def test_guest_failure_cause_preserves_legacy_runnable_entrypoint_blocker() -> None:
