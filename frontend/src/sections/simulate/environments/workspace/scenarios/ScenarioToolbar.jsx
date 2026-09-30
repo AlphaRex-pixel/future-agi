@@ -60,7 +60,7 @@ export default function ScenarioToolbar({
           onChange={(e) => onQueryChange(e.target.value)}
           placeholder={SCENARIOS_COPY.searchPlaceholder}
           InputProps={{
-            sx: { typography: "s2" },
+            sx: { typography: "s2", height: 38 },
             startAdornment: (
               <Box sx={{ pr: 0.75, pl: 0.25, display: "flex", color: "text.subtitle" }}>
                 <Iconify icon="solar:magnifer-linear" width={14} />
@@ -70,7 +70,7 @@ export default function ScenarioToolbar({
           sx={{ maxWidth: 380, flex: 1 }}
         />
         <Button
-          size="small" variant="outlined"
+          size="medium" variant="outlined"
           onClick={(e) => setGroupByAnchor(e.currentTarget)}
           startIcon={<Iconify icon={groupingIcon(activeGrouping.value)} width={14} />}
           endIcon={<Iconify icon="solar:alt-arrow-down-linear" width={12} />}
@@ -108,7 +108,7 @@ export default function ScenarioToolbar({
           })}
         </Popover>
         <Button
-          size="small" variant="outlined"
+          size="medium" variant="outlined"
           onClick={(e) => setFilterAnchor(e.currentTarget)}
           startIcon={<Iconify icon="mage:filter" width={14} />}
           endIcon={<Iconify icon="solar:alt-arrow-down-linear" width={12} />}
