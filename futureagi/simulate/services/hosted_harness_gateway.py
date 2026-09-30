@@ -347,17 +347,34 @@ def _platform_simulator_material() -> tuple[dict[str, str], bytes | None]:
         "HARNESS_BACKGROUND_NOISE_VOLUME",
         # Off has to travel: decided here, enforced inside the sandbox.
         "ALK_VOICEMAIL_SCENARIOS",
-        # Temporary Cab Guest Booking POC authoring policy. These values are read only from
-        # deployment configuration and travel on the platform simulator-secret channel; they
-        # never come from the customer's RL-environment values.
-        "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER",
-        "ALK_CAB_GUEST_POC_PIN",
         "ALK_HARNESS_WORKERS_AT_ONCE",
         "ALK_VALIDATION_INSTANCES",
     ):
         value = str(os.environ.get(name) or "").strip()
         if value:
             values[name] = value
+    # The platform and pinned ALK templates can be upgraded independently. Accept either
+    # deployment spelling, reject conflicting values, and send both aliases over the private
+    # simulator channel so old and new templates see the same target-specific policy.
+    for canonical, legacy in (
+        (
+            "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER",
+            "ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER",
+        ),
+        ("ALK_CAB_GUEST_POC_PIN", "ALK_UBER_GUEST_POC_PIN"),
+    ):
+        canonical_value = str(os.environ.get(canonical) or "").strip()
+        legacy_value = str(os.environ.get(legacy) or "").strip()
+        if canonical_value and legacy_value and canonical_value != legacy_value:
+            raise HostedHarnessError(
+                "guest_poc_config_conflict",
+                f"Conflicting deployment values for {canonical} and {legacy}",
+                status_code=503,
+            )
+        selected = canonical_value or legacy_value
+        if selected:
+            values[canonical] = selected
+            values[legacy] = selected
     catalogue = _noise_catalogue_setting()
     if catalogue:
         values["ALK_BACKGROUND_NOISE_CATALOG"] = catalogue

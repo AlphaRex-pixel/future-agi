@@ -70,6 +70,10 @@ def _isolate_platform_simulator_environment(settings, monkeypatch):
         "ALK_HOSTED_AGENTCC_MODEL",
         "ALK_HARNESS",
         "ALK_HARNESS_MODEL",
+        "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER",
+        "ALK_CAB_GUEST_POC_PIN",
+        "ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER",
+        "ALK_UBER_GUEST_POC_PIN",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -124,12 +128,34 @@ def test_platform_simulator_material_uses_deployment_credentials_only(
     assert values["SIP_OUTBOUND_FROM_NUMBER"] == "+14155550123"
     assert values["ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER"] == "+15551234567"
     assert values["ALK_CAB_GUEST_POC_PIN"] == "7682"
+    assert values["ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER"] == "+15551234567"
+    assert values["ALK_UBER_GUEST_POC_PIN"] == "7682"
     assert values["ALK_HARNESS"] == "claude"
     assert values["ALK_HARNESS_MODEL"] == "vertex_ai/gemini-3.7-flash"
     assert values["ALK_CLAUDE_GATEWAY_URL"] == "https://gateway.futureagi.test"
     assert values["ALK_CLAUDE_GATEWAY_API_KEY"] == "harness-key"
     assert values["ANTHROPIC_VERTEX_PROJECT_ID"] == "platform-simulator-project"
     assert credential_bytes == credentials.read_bytes()
+
+
+def test_platform_simulator_material_accepts_legacy_guest_poc_names(monkeypatch):
+    monkeypatch.setenv("ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER", "+15551234567")
+    monkeypatch.setenv("ALK_UBER_GUEST_POC_PIN", "7682")
+
+    values, _ = _platform_simulator_material()
+
+    assert values["ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER"] == "+15551234567"
+    assert values["ALK_CAB_GUEST_POC_PIN"] == "7682"
+    assert values["ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER"] == "+15551234567"
+    assert values["ALK_UBER_GUEST_POC_PIN"] == "7682"
+
+
+def test_platform_simulator_material_rejects_conflicting_guest_poc_names(monkeypatch):
+    monkeypatch.setenv("ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER", "+15551234567")
+    monkeypatch.setenv("ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER", "+15557654321")
+
+    with pytest.raises(HostedHarnessError, match="Conflicting deployment values"):
+        _platform_simulator_material()
 
 
 def test_platform_simulator_defaults_to_claude_authoring_and_gemini_caller(
