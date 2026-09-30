@@ -554,22 +554,19 @@ def test_hosted_text_transcript_is_materialized_for_chat_ui(organization, worksp
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
-    ("call_start_offset", "recording_offset_ms", "untimed_created_at", "expected_starts"),
+    ("call_start_offset", "recording_offset_ms", "expected_starts"),
     [
         # The runner reports how long the recording ran before the first word;
         # that anchors the turns even though the call started 6.8s earlier.
-        (-6.8, 3000, None, [3000, 6740, 10000]),
-        # A direct interjection carries its wall clock even without speech metrics.
-        (-6.8, 3000, 4.2, [3000, 7200, 10000]),
+        (-6.8, 3000, [3000, 6740, 10000]),
         # Without it, the recording is taken to start at the call start.
-        (-6.8, None, None, [6800, 10540, 13800]),
+        (-6.8, None, [6800, 10540, 13800]),
         # A call start after the first word (clock skew) falls back to it.
-        (1.0, None, None, [0, 3740, 7000]),
+        (1.0, None, [0, 3740, 7000]),
     ],
 )
 def test_hosted_voice_transcript_offsets_follow_the_recording(
-    organization, workspace, call_start_offset, recording_offset_ms,
-    untimed_created_at, expected_starts
+    organization, workspace, call_start_offset, recording_offset_ms, expected_starts
 ):
     job, _ = create_hosted_job(
         organization,
@@ -625,15 +622,7 @@ def test_hosted_voice_transcript_offsets_follow_the_recording(
                 "stopped_speaking_at": at + 3.74,
             },
             # Untimed: sits where the greeting ended.
-            {
-                "role": "assistant",
-                "content": "How can I help you today?",
-                **(
-                    {"created_at": at + untimed_created_at}
-                    if untimed_created_at is not None
-                    else {}
-                ),
-            },
+            {"role": "assistant", "content": "How can I help you today?"},
             {
                 "role": "user",
                 "content": "I need to cancel my order.",

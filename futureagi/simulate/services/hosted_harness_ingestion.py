@@ -1350,25 +1350,11 @@ def _ingest_hosted_transcript(
                     )
                     previous_end_ms = end_ms
                 elif base_time is not None:
-                    # Direct caller interjections are added to LiveKit history
-                    # outside the normal speech handle. Older runners record
-                    # their creation time but no speech metrics; use that clock
-                    # to place them near the actual overlap instead of at the
-                    # row index (or the previous turn's end).
-                    created = message.get("created_at")
-                    plausible_window = max(
-                        float(call.duration_seconds or 0) + 30.0, 600.0
-                    )
-                    if (
-                        isinstance(created, (int, float))
-                        and base_time <= created <= base_time + plausible_window
-                    ):
-                        start_ms = int(round((created - base_time) * 1000))
-                    else:
-                        # Untimed legacy turns without a usable wall clock
-                        # remain adjacent to the preceding spoken turn.
-                        start_ms = previous_end_ms
-                    end_ms = start_ms
+                    # An untimed message in a timed transcript (e.g. the second
+                    # half of a greeting) sits where the turn before it ended,
+                    # not at its row index near the start of the call.
+                    start_ms = previous_end_ms
+                    end_ms = previous_end_ms
                 else:
                     # Older guests emit no timing; preserve turn order only.
                     start_ms = index
