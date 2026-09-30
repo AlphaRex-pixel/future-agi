@@ -220,6 +220,13 @@ def test_platform_ambience_clips_reach_the_harness_and_its_egress(monkeypatch):
     assert {urlparse(clip["url"]).hostname for clip in clips} <= domains
 
 
+def test_caller_barge_in_rate_comes_from_platform_configuration(monkeypatch):
+    monkeypatch.setenv("ALK_HARNESS", "gemini")
+    monkeypatch.setenv("HARNESS_CALLER_BARGE_IN_RATE", "0.2")
+    values, _ = _platform_simulator_material()
+    assert values["HARNESS_CALLER_BARGE_IN_RATE"] == "0.2"
+
+
 def test_a_deployment_catalogue_overrides_the_platform_clips(monkeypatch, tmp_path):
     monkeypatch.delenv(
         "ALK_HOSTED_SIMULATOR_GOOGLE_APPLICATION_CREDENTIALS", raising=False

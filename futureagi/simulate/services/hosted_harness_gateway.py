@@ -345,6 +345,7 @@ def _platform_simulator_material() -> tuple[dict[str, str], bytes | None]:
         # whatever the scenario asked for, because the simulator reads them from its environment.
         "ALK_BACKGROUND_NOISE",
         "HARNESS_BACKGROUND_NOISE_VOLUME",
+        "HARNESS_CALLER_BARGE_IN_RATE",
         # Off has to travel: decided here, enforced inside the sandbox.
         "ALK_VOICEMAIL_SCENARIOS",
         # Temporary Cab Guest Booking POC authoring policy. These values are read only from
