@@ -190,4 +190,38 @@ describe("VoiceRightPanel", () => {
       expect(screen.queryByText("Fix with Falcon")).not.toBeInTheDocument();
     });
   });
+
+  it("shows the Scenario tab for a call with a persona but no scenario columns", () => {
+    renderWithQueryClient(
+      <VoiceRightPanel
+        data={{
+          id: "call-3",
+          module: "simulate",
+          status: "completed",
+          provider: "livekit",
+          transcript: [],
+          scenario_columns: {},
+          persona_details: { name: "Siddharth Nair", voice: null, age: null, traits: [] },
+        }}
+      />,
+    );
+    expect(screen.getByRole("tab", { name: "Scenario" })).toBeInTheDocument();
+  });
+
+  it("still has no Scenario tab when there is neither", () => {
+    renderWithQueryClient(
+      <VoiceRightPanel
+        data={{
+          id: "call-4",
+          module: "simulate",
+          status: "completed",
+          provider: "livekit",
+          transcript: [],
+          scenario_columns: {},
+          persona_details: { name: null, voice: null, age: null, traits: [] },
+        }}
+      />,
+    );
+    expect(screen.queryByRole("tab", { name: "Scenario" })).not.toBeInTheDocument();
+  });
 });

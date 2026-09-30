@@ -27,12 +27,7 @@ export const environmentVersions = (env, envState) => {
   // which — and nothing downstream should care.
   const stored = envState?.envVersions;
   const list = stored?.length
-    ? // A real environment mints its version without a count; give it the
-      // live one so the header never reads "undefined scenarios".
-      [...stored].reverse().map((v) => ({
-        ...v,
-        scenarios: v.scenarios ?? envState?.scenarios?.length ?? 0,
-      }))
+    ? [...stored].reverse()
     : (() => {
         // The seeded history counts against the scenarios this environment
         // actually has, rather than carrying literal counts that disagree with

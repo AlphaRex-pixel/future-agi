@@ -64,4 +64,43 @@ describe("ScenarioView persona", () => {
     );
     expect(screen.queryByText("Persona")).toBeNull();
   });
+
+  it("treats a persona cell stored as an empty dict string as empty", () => {
+    render(
+      <ScenarioView
+        data={{
+          scenario: "Riley",
+          scenario_columns: { persona: { column_name: "persona", value: "{}" } },
+          persona_details: PERSONA_DETAILS,
+        }}
+      />,
+    );
+    expect(screen.getByText(/Name: Siddharth/i)).toBeInTheDocument();
+  });
+
+  it("reads a Python-style dict string with None as empty too", () => {
+    render(
+      <ScenarioView
+        data={{
+          scenario: "Riley",
+          scenario_columns: { persona: { column_name: "persona", value: "{'name': None}" } },
+          persona_details: PERSONA_DETAILS,
+        }}
+      />,
+    );
+    expect(screen.getByText(/Name: Siddharth/i)).toBeInTheDocument();
+  });
+
+  it("still renders a filled dict string from the cell", () => {
+    render(
+      <ScenarioView
+        data={{
+          scenario: "Riley",
+          scenario_columns: { persona: { column_name: "persona", value: "{'name': 'Helena Rostova'}" } },
+          persona_details: PERSONA_DETAILS,
+        }}
+      />,
+    );
+    expect(screen.getByText(/Name: Helena/i)).toBeInTheDocument();
+  });
 });
