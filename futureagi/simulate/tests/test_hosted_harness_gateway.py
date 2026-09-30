@@ -74,12 +74,11 @@ def _isolate_platform_simulator_environment(settings, monkeypatch):
         "ALK_HARNESS_MODEL",
         "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER",
         "ALK_CAB_GUEST_POC_PIN",
-        "ALK_CAB_GUEST_POC_ALLOWED_ORGANIZATION_ID",
     ):
         monkeypatch.delenv(name, raising=False)
 
 
-def test_private_pin_policy_is_org_and_phone_scoped_and_fails_closed(monkeypatch) -> None:
+def test_private_pin_policy_is_phone_scoped_and_fails_closed(monkeypatch) -> None:
     monkeypatch.setenv("ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER", "+15551234567")
     monkeypatch.setenv("ALK_CAB_GUEST_POC_PIN", "7682")
     job = SimpleNamespace(
@@ -93,22 +92,23 @@ def test_private_pin_policy_is_org_and_phone_scoped_and_fails_closed(monkeypatch
     )
     values = {}
     _add_scoped_guest_pin_policy(values, job)
-    assert values == {}
+    assert values == {
+        "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER": "+15551234567",
+        "ALK_CAB_GUEST_POC_PIN": "7682",
+    }
 
-    monkeypatch.setenv("ALK_CAB_GUEST_POC_ALLOWED_ORGANIZATION_ID", "org-approved")
+    values.clear()
     job.organization_id = "org-other"
-    _add_scoped_guest_pin_policy(values, job)
-    assert values == {}
-    job.organization_id = "org-approved"
-    job.payload["agent"]["config"]["phone_number"] = "+15557654321"
-    _add_scoped_guest_pin_policy(values, job)
-    assert values == {}
-    job.payload["agent"]["config"]["phone_number"] = "+15551234567"
     _add_scoped_guest_pin_policy(values, job)
     assert values == {
         "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER": "+15551234567",
         "ALK_CAB_GUEST_POC_PIN": "7682",
     }
+
+    values.clear()
+    job.payload["agent"]["config"]["phone_number"] = "+15557654321"
+    _add_scoped_guest_pin_policy(values, job)
+    assert values == {}
 
 
 def test_add_scenarios_carries_job_for_target_scoped_policy() -> None:

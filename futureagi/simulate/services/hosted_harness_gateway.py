@@ -374,10 +374,7 @@ def _platform_simulator_material() -> tuple[dict[str, str], bytes | None]:
 def _add_scoped_guest_pin_policy(
     values: dict[str, str], job: HostedHarnessJob
 ) -> None:
-    """Release the private POC policy only for its approved org and phone target."""
-    allowed = str(os.environ.get("ALK_CAB_GUEST_POC_ALLOWED_ORGANIZATION_ID") or "").strip()
-    if not allowed or str(job.organization_id) != allowed:
-        return
+    """Release the private POC policy only for its exact phone target."""
     target = str(os.environ.get("ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER") or "").strip()
     pin = str(os.environ.get("ALK_CAB_GUEST_POC_PIN") or "").strip()
     agent = (job.payload or {}).get("agent") or {}
