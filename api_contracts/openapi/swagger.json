@@ -4944,6 +4944,12 @@
                             "$ref": "#/definitions/AccountsErrorResponse"
                         }
                     },
+                    "503": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/AccountsErrorResponse"
+                        }
+                    },
                     "default": {
                         "description": "Default error response",
                         "schema": {
@@ -86501,9 +86507,11 @@
                 "name",
                 "owner",
                 "key_hash",
+                "key_prefix",
                 "models",
                 "providers",
-                "metadata"
+                "metadata",
+                "expires_at"
             ],
             "type": "object",
             "properties": {
@@ -86526,6 +86534,10 @@
                     "type": "string",
                     "minLength": 1
                 },
+                "key_prefix": {
+                    "title": "Key prefix",
+                    "type": "string"
+                },
                 "models": {
                     "type": "array",
                     "items": {
@@ -86547,6 +86559,12 @@
                         "type": "string",
                         "x-nullable": true
                     }
+                },
+                "expires_at": {
+                    "title": "Expires at",
+                    "type": "string",
+                    "format": "date-time",
+                    "x-nullable": true
                 }
             }
         },

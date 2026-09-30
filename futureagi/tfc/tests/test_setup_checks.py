@@ -347,7 +347,7 @@ class TestSkipped:
     @pytest.mark.parametrize("mode", [LIVE, EXPERIMENT])
     @pytest.mark.parametrize(
         "setup, how_to_enable",
-        [(STANDALONE, "--profile ml"), (DISTRIBUTED, "MODEL_SERVING_URL")],
+        [(STANDALONE, "`ml` to COMPOSE_PROFILES"), (DISTRIBUTED, "MODEL_SERVING_URL")],
     )
     def test_absent_model_serving_is_skipped_in_both_modes(
         self, api_client, mode, setup, how_to_enable
@@ -406,7 +406,7 @@ class TestSkipped:
         assert check["status"] == status_when_down
         assert check["required"] is blocks
         assert "up -d serving" in check["fix"]
-        assert "--profile ml" not in check["fix"]
+        assert "COMPOSE_PROFILES" not in check["fix"]
         assert (result["status"] == "issues") is blocks
 
     def test_absent_is_down_for_a_check_that_cannot_be_optional(self, api_client):

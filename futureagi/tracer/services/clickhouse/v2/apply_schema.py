@@ -47,11 +47,11 @@ from pathlib import Path
 import clickhouse_connect  # HTTP — easier to debug than native here
 import structlog
 
+from tfc.utils.redaction import redact_secret
 from tracer.services.clickhouse.v2.apply_schema_rewriter import (
     extract_table_name as _extract_table_name,
 )
 from tracer.services.clickhouse.v2.apply_schema_rewriter import (
-    redact_secret,
     rewrite_for_replicated,
     split_statements,
     with_dictionary_credentials,

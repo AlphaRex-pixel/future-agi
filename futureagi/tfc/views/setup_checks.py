@@ -657,7 +657,7 @@ CHECKS = (
                 "off; everything else works"
             ),
             "fix": {
-                STANDALONE: "Optional. Turn it on with the `ml` profile: `docker compose --profile ml up -d`.",
+                STANDALONE: "Optional. Turn it on: add `ml` to COMPOSE_PROFILES in .env and run `docker compose up -d`.",
                 DISTRIBUTED: "Optional. `MODEL_SERVING_URL` is empty; point it at the serving service to turn it on.",
                 HELM: "Optional. Turn it on with `serving.enabled=true` in your values.",
             },

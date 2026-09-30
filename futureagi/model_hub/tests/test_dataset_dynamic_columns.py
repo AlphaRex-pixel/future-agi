@@ -1384,7 +1384,7 @@ class TestAddVectorDBColumnView(DynamicColumnsBaseTestCase):
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "--profile ml" in json.dumps(response.json())
+        assert "COMPOSE_PROFILES" in json.dumps(response.json())
         mock_task.assert_not_called()
         assert not Column.objects.filter(
             dataset=dataset, name="Vector Result", deleted=False
