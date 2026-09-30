@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.43.3](https://github.com/future-agi/future-agi/compare/v1.43.2...v1.43.3) (2026-09-30)
+
+
+### Bug Fixes
+
+* **simulate:** provision a finished suite when rows indexed for dropped scenarios remain ([dccb76b](https://github.com/future-agi/future-agi/commit/dccb76b00c34999f49db4ca21d1d283f625ff936))
+* **simulate:** provision a finished suite when rows indexed for dropped scenarios remain ([39fc7a0](https://github.com/future-agi/future-agi/commit/39fc7a0ad0ae6c52075b35250adacadee4021e8a))
+
 ## [1.43.2](https://github.com/future-agi/future-agi/compare/v1.43.1...v1.43.2) (2026-09-30)
 
 
