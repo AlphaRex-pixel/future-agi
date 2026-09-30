@@ -16,6 +16,7 @@ from agentic_eval.core.embeddings.embedding_manager import (
     EmbeddingManager,
     log_performance,
 )
+from agentic_eval.core.embeddings.serving_client import SERVING_START_HINT
 from tfc.telemetry import wrap_for_thread
 
 logger = structlog.get_logger(__name__)
@@ -26,14 +27,10 @@ KB_TABLE_NAME = "syn"
 KB_INDEX_COL_TYPE = "text"
 KB_INDEX_COL_NAME = "chunk_text"
 
-# Shown to the user as the file's / knowledge base's error. Standalone runs
-# serving only with the `ml` profile, so each setup gets its own command.
+# Shown to the user as the file's / knowledge base's error.
 KB_EMBEDDINGS_UNAVAILABLE_ERROR = (
     "Knowledge bases need the model serving service to embed documents, and it "
-    "is not reachable. Self-hosted installs: on Standalone, add `ml` to "
-    "COMPOSE_PROFILES in .env and run `docker compose up -d`; on Distributed, "
-    "run `docker compose up -d serving`; on Helm, set `serving.enabled=true`. "
-    "Or point MODEL_SERVING_URL at a running instance. Then upload the file again."
+    f"is not reachable. {SERVING_START_HINT} Then upload the file again."
 )
 
 

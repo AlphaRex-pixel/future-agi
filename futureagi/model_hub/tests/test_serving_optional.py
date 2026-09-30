@@ -26,6 +26,7 @@ from structlog.testing import capture_logs
 from agentic_eval.core.embeddings import serving_client
 from agentic_eval.core.embeddings.serving_client import (
     SERVING_PROBE_TTL_SECONDS,
+    SERVING_START_HINT,
     SERVING_UNAVAILABLE_MESSAGE,
     ModelServingClient,
     ServingUnavailableError,
@@ -230,7 +231,24 @@ class TestServingUnavailableError:
         with pytest.raises(ServingUnavailableError) as excinfo:
             require_serving()
 
-        assert "--profile ml" in str(excinfo.value)
+        assert str(excinfo.value) == SERVING_UNAVAILABLE_MESSAGE
+        assert SERVING_UNAVAILABLE_MESSAGE.endswith(SERVING_START_HINT)
+
+    def test_the_guidance_names_each_setup_s_way_to_turn_serving_on(self):
+        """Cloud users see it too, so the commands are scoped to self-hosted
+        installs. Standalone keeps the `ml` profile in .env: a bare
+        `--profile ml` is not active on the next `docker compose up -d`."""
+        assert SERVING_START_HINT.startswith("Self-hosted installs: ")
+        assert (
+            "on Standalone, add `ml` to COMPOSE_PROFILES in .env and run "
+            "`docker compose up -d`;" in SERVING_START_HINT
+        )
+        assert (
+            "on Distributed, run `docker compose up -d serving`" in SERVING_START_HINT
+        )
+        assert "on Helm, set `serving.enabled=true`" in SERVING_START_HINT
+        assert "MODEL_SERVING_URL" in SERVING_START_HINT
+        assert "--profile" not in SERVING_START_HINT
 
     def test_it_is_caught_by_existing_connection_error_handlers(self):
         assert isinstance(ServingUnavailableError(), ConnectionError)

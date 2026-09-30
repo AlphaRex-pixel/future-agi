@@ -17,6 +17,7 @@ import tempfile
 
 import pytest
 
+from agentic_eval.core.embeddings.serving_client import SERVING_START_HINT
 from model_hub.utils.kb_indexer import (
     KB_EMBEDDINGS_UNAVAILABLE_ERROR,
     KB_INDEX_COL_NAME,
@@ -256,17 +257,9 @@ class TestEmbeddingFailuresFailTheFile:
             indexer.process_content("word " * 500, "file-1", "kb-1", "org-1")
 
         assert str(exc_info.value) == KB_EMBEDDINGS_UNAVAILABLE_ERROR
-        # Cloud users see this text too, so the commands are scoped to
-        # self-hosted installs. Standalone runs serving only with the `ml`
-        # profile, where `docker compose up -d serving` starts nothing.
-        message = str(exc_info.value)
-        assert (
-            "Self-hosted installs: on Standalone, add `ml` to COMPOSE_PROFILES "
-            "in .env and run `docker compose up -d`;" in message
-        )
-        assert "on Distributed, run `docker compose up -d serving`" in message
-        assert "on Helm, set `serving.enabled=true`" in message
-        assert "MODEL_SERVING_URL" in message
+        # The same per-setup way to turn serving on as every other feature
+        # that needs it (test_serving_optional pins what it says).
+        assert SERVING_START_HINT in str(exc_info.value)
         indexer._test_embedding_manager.parallel_process_metadata.assert_not_called()
         assert indexer.chunks == []
 

@@ -263,7 +263,7 @@ class BootSummaryTest(RunDir):
             bootstrap.socket, "getaddrinfo", side_effect=socket.gaierror
         ):
             self.assertIn(
-                "off (`docker compose --profile ml up -d`",
+                "off (add `ml` to COMPOSE_PROFILES in .env",
                 self.summary(MODEL_SERVING_URL="http://serving:8080"),
             )
         with mock.patch.object(bootstrap.socket, "getaddrinfo", return_value=[]):

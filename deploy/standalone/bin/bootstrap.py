@@ -364,7 +364,7 @@ def model_serving_summary() -> str:
             return "on"
         except OSError:
             pass
-    return "off (`docker compose --profile ml up -d` turns it on)"
+    return "off (add `ml` to COMPOSE_PROFILES in .env and run `docker compose up -d`)"
 
 
 def boot_summary() -> list[str]:

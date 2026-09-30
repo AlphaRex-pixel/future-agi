@@ -16,9 +16,21 @@ logger = structlog.get_logger(__name__)
 
 # The standalone install runs `serving` only with the `ml` compose profile, so
 # every embedding-backed feature has to cope with it being absent.
+#
+# How each self-hosted setup turns serving on; every message that reports it
+# missing ends with this. Standalone keeps `ml` in COMPOSE_PROFILES in .env
+# (INSTALLATION.md): a profile given only as `--profile ml` is not active on
+# the next `docker compose up -d`, so an upgrade would leave `serving` on its
+# old image. Cloud users can see these messages too, hence the scope.
+SERVING_START_HINT = (
+    "Self-hosted installs: on Standalone, add `ml` to COMPOSE_PROFILES in .env "
+    "and run `docker compose up -d`; on Distributed, run "
+    "`docker compose up -d serving`; on Helm, set `serving.enabled=true`. "
+    "Or point MODEL_SERVING_URL at a running instance."
+)
 SERVING_UNAVAILABLE_MESSAGE = (
     "Model serving is not running, so embedding-based features are unavailable. "
-    "Start it with the ml profile: `docker compose --profile ml up -d`."
+    + SERVING_START_HINT
 )
 
 # How long a probe result is trusted. Short enough that enabling the profile
