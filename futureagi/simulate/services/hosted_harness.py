@@ -1024,12 +1024,12 @@ def provision_scenarios(
         locked.content_updated_at = timezone.now()
         locked.save(update_fields=["run_test", "content_updated_at", "updated_at"])
         if existing_registrations:
-            # Rows indexed during authoring can outlive the scenarios they named; the
-            # request is the final suite, so unregistered leftovers are hidden, not fatal.
+            # Rows indexed for scenarios the final suite dropped are hidden, not fatal.
+            requested = set(requested_keys)
             stale = [
                 registration
                 for key, registration in existing_by_key.items()
-                if key not in set(requested_keys)
+                if key not in requested
             ]
             if any(row.scenario_id or row.call_execution_id for row in stale):
                 raise HostedHarnessError(
@@ -1048,7 +1048,7 @@ def provision_scenarios(
                 for row in HostedHarnessScenario.all_objects.filter(
                     job=locked,
                     deleted=True,
-                    scenario_key__in=set(requested_keys) - set(existing_by_key),
+                    scenario_key__in=requested - set(existing_by_key),
                 )
             }
             registrations = []
