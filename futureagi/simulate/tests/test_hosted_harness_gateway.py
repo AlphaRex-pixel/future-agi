@@ -91,7 +91,7 @@ def test_private_pin_policy_is_phone_scoped_and_fails_closed(monkeypatch) -> Non
         },
     )
     values = {}
-    _add_scoped_guest_pin_policy(values, job)
+    assert _add_scoped_guest_pin_policy(values, job) is True
     assert values == {
         "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER": "+15551234567",
         "ALK_CAB_GUEST_POC_PIN": "7682",
@@ -99,7 +99,7 @@ def test_private_pin_policy_is_phone_scoped_and_fails_closed(monkeypatch) -> Non
 
     values.clear()
     job.organization_id = "org-other"
-    _add_scoped_guest_pin_policy(values, job)
+    assert _add_scoped_guest_pin_policy(values, job) is True
     assert values == {
         "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER": "+15551234567",
         "ALK_CAB_GUEST_POC_PIN": "7682",
@@ -107,14 +107,18 @@ def test_private_pin_policy_is_phone_scoped_and_fails_closed(monkeypatch) -> Non
 
     values.clear()
     job.payload["agent"]["config"]["phone_number"] = "+15557654321"
-    _add_scoped_guest_pin_policy(values, job)
+    assert _add_scoped_guest_pin_policy(values, job) is False
     assert values == {}
 
 
-def test_add_scenarios_carries_job_for_target_scoped_policy() -> None:
-    command = _scenarios_cli_command(name="guest", count=12, guidance=[])
+def test_add_scenarios_carries_job_only_for_target_scoped_policy() -> None:
+    scoped = _scenarios_cli_command(
+        name="guest", count=12, guidance=[], include_job=True
+    )
+    generic = _scenarios_cli_command(name="guest", count=12, guidance=[])
 
-    assert "--job /work/job.json" in command
+    assert "--job /work/job.json" in scoped
+    assert "--job /work/job.json" not in generic
 
 
 def test_guest_failure_cause_preserves_legacy_runnable_entrypoint_blocker() -> None:
