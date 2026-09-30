@@ -82660,9 +82660,11 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "name",
         "owner",
         "key_hash",
+        "key_prefix",
         "models",
         "providers",
         "metadata",
+        "expires_at",
       ],
       type: "object",
       properties: {
@@ -82685,6 +82687,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "string",
           minLength: 1,
         },
+        key_prefix: {
+          title: "Key prefix",
+          type: "string",
+        },
         models: {
           type: "array",
           items: {
@@ -82706,6 +82712,12 @@ export const OPENAPI_CONTRACT = Object.freeze({
             type: "string",
             "x-nullable": true,
           },
+        },
+        expires_at: {
+          title: "Expires at",
+          type: "string",
+          format: "date-time",
+          "x-nullable": true,
         },
       },
     },
