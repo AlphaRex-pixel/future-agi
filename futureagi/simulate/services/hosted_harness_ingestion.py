@@ -877,6 +877,7 @@ def _apply_receipt_to_call(
     scenario_key = getattr(allocation, "execution_key", None) or allocation.scenario_key
     call.status = _call_lifecycle_status(body)
     call_data = body.get("call")
+    call.ended_reason = (call_data or {}).get("stop_reason") or ""
     resolved_modality = _resolve_scenario_modality(job, body)
     if call_data and call_data.get("recording_artifacts"):
         # A persisted audio recording is definitive evidence of a voice call,
@@ -888,7 +889,6 @@ def _apply_receipt_to_call(
         call.ended_at = call_data["ended_at"]
         call.completed_at = call_data["ended_at"]
         call.duration_seconds = round(call_data["duration_ms"] / 1000)
-        call.ended_reason = call_data.get("stop_reason") or ""
     elif body["status"] == "skipped":
         call.completed_at = timezone.now()
     metadata = dict(call.call_metadata or {})
@@ -1232,7 +1232,7 @@ _TARGET_TOKEN_FIELDS = {
 
 
 def _apply_target_metrics(call: CallExecution, target: dict[str, Any] | None) -> None:
-    """Store provider-reported identity, end reason, cost, latency and tokens.
+    """Store provider-reported identity, cost, latency and tokens.
 
     These go in the customer fields the native Vapi flow fills, never in ``cost_cents`` (the
     platform's own cost). A rerun reuses this row, so a receipt without them clears the last
@@ -1240,8 +1240,6 @@ def _apply_target_metrics(call: CallExecution, target: dict[str, Any] | None) ->
     """
     target = target or {}
     call.customer_call_id = target.get("provider_call_id")
-    if target.get("provider_end_reason"):
-        call.ended_reason = target["provider_end_reason"]
     call.customer_cost_cents = target.get("cost_cents")
     latency = dict(target.get("latency") or {})
     turns = latency.pop("turns", [])

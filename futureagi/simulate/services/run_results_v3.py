@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import math
+import re
 from collections import defaultdict
 from typing import Any
 
@@ -12,6 +13,7 @@ from django.core.cache import cache
 
 from model_hub.models.develop_dataset import Cell
 from simulate.models import CallExecution, SimulateEvalConfig, TestExecution
+from simulate.services.run_results_v3_expressions import NUMERIC_JSON_PATTERN
 from simulate.services.run_results_v3_scoring import (
     judge_stored_eval,
     resolve_eval_scoring_spec,
@@ -25,6 +27,14 @@ def _number(value: Any) -> float | None:
     if isinstance(value, int | float) and math.isfinite(float(value)):
         return float(value)
     return None
+
+
+def _csat_score(metrics: Any) -> float | None:
+    value = metrics.get("csat_score") if isinstance(metrics, dict) else None
+    if isinstance(value, str) and re.fullmatch(NUMERIC_JSON_PATTERN, value):
+        value = float(value)
+    score = _number(value)
+    return score if score is not None and 0 <= score <= 10 else None
 
 
 def _truth_value(eval_data: Any) -> bool | None:
@@ -399,7 +409,7 @@ def build_call_rows(
                     "storage": call.storage_cost_cents,
                     "customer": call.customer_cost_cents,
                 },
-                "csat": call.overall_score,
+                "csat": _csat_score(metrics),
                 "ended_reason": call.ended_reason,
                 "error_message": call.error_message,
                 "evaluations": evaluations,

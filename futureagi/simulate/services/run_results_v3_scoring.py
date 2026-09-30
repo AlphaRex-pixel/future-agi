@@ -13,7 +13,7 @@ from simulate.models import SimulateEvalConfig
 @dataclass(frozen=True)
 class EvalScoringSpec:
     output_type: str
-    threshold: float
+    threshold: float | None
     reverse_output: bool
     choice_scores: dict[str, float]
 
@@ -48,9 +48,22 @@ def resolve_eval_scoring_spec(config: SimulateEvalConfig) -> EvalScoringSpec:
         for label, value in choices.items():
             if isinstance(value, bool | int | float) and math.isfinite(float(value)):
                 choice_scores[str(label).strip().lower()] = float(value)
+    configured_threshold = _binding_setting(
+        config, "pass_threshold", getattr(template, "pass_threshold", None)
+    )
+    try:
+        threshold = resolve_pass_threshold(template, config.config)
+    except (TypeError, ValueError, OverflowError):
+        threshold = None
+    if threshold is not None and (
+        isinstance(configured_threshold, bool)
+        or not math.isfinite(threshold)
+        or not 0 <= threshold <= 1
+    ):
+        threshold = None
     return EvalScoringSpec(
         output_type=output_type,
-        threshold=resolve_pass_threshold(template, config.config),
+        threshold=threshold,
         reverse_output=bool(
             _binding_setting(
                 config, "reverse_output", template_config.get("reverse_output", False)
@@ -123,9 +136,15 @@ def judge_stored_eval(eval_data: Any, spec: EvalScoringSpec) -> EvalJudgement:
         return EvalJudgement("error", None)
     if status in {"pending", "skipped"}:
         return EvalJudgement(None, None)
+    if spec.threshold is None:
+        return EvalJudgement(None, None)
 
     value = eval_data.get("output")
-    if spec.output_type == "pass_fail":
+    stored_output_type = str(eval_data.get("output_type") or "").strip().lower()
+    if spec.output_type == "pass_fail" or stored_output_type in {
+        "pass/fail",
+        "pass_fail",
+    }:
         if isinstance(value, dict) and isinstance(value.get("failure"), bool):
             passed = not value["failure"]
             return EvalJudgement("passed" if passed else "failed", float(passed))
@@ -137,8 +156,8 @@ def judge_stored_eval(eval_data: Any, spec: EvalScoringSpec) -> EvalJudgement:
     score = _raw_score(value, spec)
     if score is None:
         return EvalJudgement(None, None)
+    passed = score > 0 if spec.output_type == "pass_fail" else score >= spec.threshold
     if spec.reverse_output:
+        passed = not passed
         score = 1.0 - score
-    return EvalJudgement(
-        "passed" if score >= spec.threshold else "failed", score
-    )
+    return EvalJudgement("passed" if passed else "failed", score)

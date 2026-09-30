@@ -37,13 +37,6 @@ from simulate.services.run_results_v3_expressions import (
 
 CHART_BUCKETS = 100
 NOT_REPORTED = "Not reported"
-CALLER_END_REASONS = (
-    "customer_end_call",
-    "customer-ended-call",
-    "caller-ended-call",
-    "human-ended",
-    "hangup-by-user",
-)
 # Provider-agnostic end reasons (metric list v1 §5.1), first match wins. The hosted ALK
 # reasons are listed explicitly: none of them appear in any provider's vocabulary.
 END_REASONS = [
@@ -433,9 +426,7 @@ def build_run_dashboard(
             "id",
             filter=Q(
                 call_metadata__hosted_harness_receipt__call__script_completed=False,
-                call_metadata__hosted_harness_receipt__call__stop_reason__in=(
-                    CALLER_END_REASONS
-                ),
+                dashboard_disconnection="Caller hung up",
                 result_outcome="failed",
             ),
         ),

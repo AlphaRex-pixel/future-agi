@@ -786,6 +786,7 @@ class TestRunResultsV3Views:
             call.overall_score = 6 + i * 2
             call.avg_agent_latency_ms = 100 + i * 100
             call.conversation_metrics_data = {
+                "csat_score": 6 + i * 2,
                 "turn_count": 2 + i * 2,
                 "total_tokens": 100 + i * 100,
             }
@@ -1404,7 +1405,9 @@ class TestRunResultsV3Views:
             )
         )
         with django_assert_num_queries(2):
-            groups = group_run_calls(queryset, "sub_goal", [{"id": str(first.pk)}], [])
+            groups = group_run_calls(
+                queryset, "sub_goal", [{"id": str(first.pk)}], [], execution=test_execution
+            )
         by_key = {group["key"]: group for group in groups}
         assert {key: group["total"] for key, group in by_key.items()} == {
             "alpha": 2,
@@ -1428,7 +1431,11 @@ class TestRunResultsV3Views:
         )
         with django_assert_num_queries(2):
             groups = group_run_calls(
-                queryset, "sub_goal", [{"id": str(analytics_call_executions[0].pk)}], []
+                queryset,
+                "sub_goal",
+                [{"id": str(analytics_call_executions[0].pk)}],
+                [],
+                execution=test_execution,
             )
         assert len(groups) == 1
         assert groups[0]["key"] == "padded"
@@ -1444,7 +1451,10 @@ class TestRunResultsV3Views:
 
         queryset = run_calls_queryset(test_execution)
         with django_assert_num_queries(0):
-            assert group_run_calls(queryset, "sub_goal", [], []) == []
+            assert (
+                group_run_calls(queryset, "sub_goal", [], [], execution=test_execution)
+                == []
+            )
 
     def test_visible_groups_preserve_null_keys_and_off_page_totals(
         self, test_execution, analytics_call_executions, django_assert_num_queries
@@ -1465,7 +1475,9 @@ class TestRunResultsV3Views:
             )
         )
         with django_assert_num_queries(2):
-            groups = group_run_calls(queryset, "goal", [{"id": str(first.pk)}], [])
+            groups = group_run_calls(
+                queryset, "goal", [{"id": str(first.pk)}], [], execution=test_execution
+            )
         assert sorted(group["total"] for group in groups) == [1, 3]
         assert all(group["key"] == "None" for group in groups)
 

@@ -63,6 +63,7 @@ from simulate.services.run_results_v3_expressions import (
     PercentileCont,
     _json_text,
     _safe_json_float,
+    project_annotation,
 )
 from simulate.services.run_results_v3_scoring import (
     EvalScoringSpec,
@@ -376,27 +377,13 @@ def _eval_score(eval_id: str, spec: EvalScoringSpec | None = None):
 
 def _configured_eval_verdict(eval_id: str, config: SimulateEvalConfig):
     spec = resolve_eval_scoring_spec(config)
+    if spec.threshold is None:
+        return (
+            Cast(Value(None), FloatField()),
+            Q(pk__in=[]),
+            Q(pk__in=[]),
+        )
     raw_score = _eval_score(eval_id, spec)
-    if spec.output_type != "pass_fail":
-        score = Value(1.0) - raw_score if spec.reverse_output else raw_score
-        # Raw scores already exclude missing and unmeasured evaluations.
-        passed = Q(
-            Case(
-                When(
-                    GreaterThanOrEqual(score, Value(spec.threshold)), then=Value(True)
-                ),
-                default=Value(False),
-                output_field=BooleanField(),
-            )
-        )
-        failed = Q(
-            Case(
-                When(LessThan(score, Value(spec.threshold)), then=Value(True)),
-                default=Value(False),
-                output_field=BooleanField(),
-            )
-        )
-        return score, passed, failed
     final_pass = Q(
         Exact(
             Lower(Trim(_json_text("eval_outputs", eval_id, "output"))),
@@ -419,6 +406,15 @@ def _configured_eval_verdict(eval_id: str, config: SimulateEvalConfig):
             Value(True, output_field=JSONField()),
         )
     )
+    if spec.output_type != "pass_fail":
+        stored_verdict = Q(
+            In(
+                Lower(Trim(_json_text("eval_outputs", eval_id, "output_type"))),
+                ["pass/fail", "pass_fail"],
+            )
+        )
+        final_pass &= stored_verdict
+        final_fail &= stored_verdict
     measured = _eval_measured_q(eval_id)
     score = Case(
         When(~measured, then=Value(None, output_field=FloatField())),
@@ -427,11 +423,21 @@ def _configured_eval_verdict(eval_id: str, config: SimulateEvalConfig):
         default=Value(1.0) - raw_score if spec.reverse_output else raw_score,
         output_field=FloatField(),
     )
+    raw_pass = (
+        GreaterThan(raw_score, Value(0.0))
+        if spec.output_type == "pass_fail"
+        else GreaterThanOrEqual(raw_score, Value(spec.threshold))
+    )
+    raw_fail = (
+        LessThanOrEqual(raw_score, Value(0.0))
+        if spec.output_type == "pass_fail"
+        else LessThan(raw_score, Value(spec.threshold))
+    )
     passed = measured & Q(
         Case(
             When(final_pass, then=Value(True)),
             When(final_fail, then=Value(False)),
-            default=GreaterThanOrEqual(score, Value(spec.threshold)),
+            default=raw_fail if spec.reverse_output else raw_pass,
             output_field=BooleanField(),
         )
     )
@@ -439,11 +445,52 @@ def _configured_eval_verdict(eval_id: str, config: SimulateEvalConfig):
         Case(
             When(final_fail, then=Value(True)),
             When(final_pass, then=Value(False)),
-            default=LessThan(score, Value(spec.threshold)),
+            default=raw_pass if spec.reverse_output else raw_fail,
             output_field=BooleanField(),
         )
     )
     return score, passed, failed
+
+
+class _NativeHarnessVerdict(Func):
+    """Judge template-less harness checks using the call-row verdict rules."""
+
+    output_field = BooleanField()
+
+    def __init__(self, configured_ids: list[str], verdict: str):
+        super().__init__(
+            F("eval_outputs"), Value(configured_ids, output_field=JSONField())
+        )
+        self.verdict = verdict
+
+    def as_sql(self, compiler, connection, **extra_context):
+        source_sql, source_params = compiler.compile(self.source_expressions[0])
+        ids_sql, ids_params = compiler.compile(self.source_expressions[1])
+        status_sql = "lower(btrim(COALESCE(check_result.value->>'status', '')))"
+        if self.verdict == "error":
+            condition = f"{status_sql} IN ('error', 'failed')"
+            verdict_params = []
+        else:
+            tokens = (
+                ["pass", "passed", "true", "success", "successful"]
+                if self.verdict == "passed"
+                else ["fail", "failed", "false", "failure", "unsuccessful"]
+            )
+            condition = (
+                f"{status_sql} NOT IN ('pending', 'skipped', 'error', 'failed') "
+                "AND jsonb_typeof(check_result.value->'output') IN ('string', 'boolean') "
+                "AND lower(btrim(check_result.value->>'output')) = ANY(%s)"
+            )
+            verdict_params = [tokens]
+        sql = (
+            "EXISTS (SELECT 1 FROM jsonb_each("
+            f"CASE WHEN jsonb_typeof({source_sql}) = 'object' "
+            f"THEN {source_sql} ELSE '{{}}'::jsonb END) AS check_result(key, value) "
+            "WHERE jsonb_typeof(check_result.value) = 'object' "
+            "AND check_result.value->>'source' = 'harness' "
+            f"AND NOT ({ids_sql} ? check_result.key) AND {condition})"
+        )
+        return sql, [*source_params, *source_params, *ids_params, *verdict_params]
 
 
 def run_calls_queryset(
@@ -463,6 +510,11 @@ def run_calls_queryset(
         failed_eval |= failed_q
         passed_eval |= passed_q
         errored_eval |= _eval_errored_q(eval_id)
+
+    configured_ids = [str(config.id) for config in live_configs]
+    failed_eval |= Q(_NativeHarnessVerdict(configured_ids, "failed"))
+    passed_eval |= Q(_NativeHarnessVerdict(configured_ids, "passed"))
+    errored_eval |= Q(_NativeHarnessVerdict(configured_ids, "error"))
 
     # The common hosted-harness fields live in JSONB today. These annotations
     # keep filtering, grouping, ordering and aggregation inside PostgreSQL while
@@ -635,42 +687,37 @@ def run_calls_queryset(
             Cast("row_id", TextField()),
             output_field=CharField(),
         ),
-        # One CSAT per call on the 0-10 scale. The scorer's own value comes first.
-        # overall_score is accepted only above 1: the voice CSAT step falls back to the
-        # provider's 0/1 success flag in that field, and 1.0 cannot be told apart.
-        result_csat=Coalesce(
-            Case(
-                When(
-                    Q(
-                        GreaterThanOrEqual(
-                            _safe_json_float("conversation_metrics_data", "csat_score"),
-                            Value(0.0),
-                        )
+        result_csat=Case(
+            When(
+                Q(
+                    GreaterThanOrEqual(
+                        _safe_json_float("conversation_metrics_data", "csat_score"),
+                        Value(0.0),
                     )
-                    & Q(
-                        LessThanOrEqual(
-                            _safe_json_float("conversation_metrics_data", "csat_score"),
-                            Value(10.0),
-                        )
-                    ),
-                    then=_safe_json_float("conversation_metrics_data", "csat_score"),
+                )
+                & Q(
+                    LessThanOrEqual(
+                        _safe_json_float("conversation_metrics_data", "csat_score"),
+                        Value(10.0),
+                    )
                 ),
-                default=None,
-                output_field=FloatField(),
+                then=_safe_json_float("conversation_metrics_data", "csat_score"),
             ),
-            Case(
-                When(
-                    overall_score__gt=1,
-                    overall_score__lte=10,
-                    then=F("overall_score"),
-                ),
-                default=None,
-                output_field=FloatField(),
-            ),
+            default=None,
             output_field=FloatField(),
         ),
     )
-    return queryset.select_related("scenario", "test_execution__agent_definition")
+    return project_annotation(queryset, "result_outcome").select_related(
+        "scenario", "test_execution__agent_definition"
+    )
+
+
+def run_call_rows_queryset(queryset: QuerySet) -> QuerySet:
+    """Keep SQL verdicts for filtering; call-row serialization judges each row."""
+    return queryset.alias(
+        result_outcome=F("result_outcome"),
+        result_eval_outcome=F("result_eval_outcome"),
+    )
 
 
 def apply_run_call_query(queryset: QuerySet, query: dict[str, Any]) -> QuerySet:
@@ -854,15 +901,32 @@ def group_run_calls(
     group_by: str | None,
     page_rows: list[dict[str, Any]],
     columns: list[dict[str, str]],
+    *,
+    execution: TestExecution,
 ) -> list[dict[str, Any]]:
     if group_by not in GROUP_FIELDS or not page_rows:
         return []
     field = GROUP_FIELDS[group_by]
     expressions = _aggregate_expressions(include_percentiles=False)
+    scoring_configs = (
+        {
+            str(config.id): config
+            for config in SimulateEvalConfig.objects.filter(
+                run_test=execution.run_test, deleted=False
+            ).select_related("eval_template")
+        }
+        if columns
+        else {}
+    )
 
     for index, column in enumerate(columns):
         eval_id = str(column["id"])
-        score = _eval_score(eval_id)
+        config = scoring_configs.get(eval_id)
+        score = (
+            _configured_eval_verdict(eval_id, config)[0]
+            if config is not None
+            else _eval_score(eval_id)
+        )
         expressions[f"eval_{index}_average"] = Avg(score)
         expressions[f"eval_{index}_scored"] = Count(score)
     page_ids = [str(row["id"]) for row in page_rows]
@@ -990,9 +1054,7 @@ def build_run_comparison(
         labels: dict[str, str] = {}
         for scenario_key, scenario_label, outcome in (
             calls.order_by()
-            .values_list(
-                "result_scenario_key", "result_scenario", "result_outcome"
-            )
+            .values_list("result_scenario_key", "result_scenario", "result_outcome")
             .iterator(chunk_size=2000)
         ):
             key = str(scenario_key)
