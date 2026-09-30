@@ -8,6 +8,15 @@
 
 import { subTasksFor } from "src/api/simulate-environments/_fixtures/contract";
 
+// Table row height, as the toolbar's picker names it: how many lines a text
+// cell shows and how many sub-goals are listed. 0 lines and Infinity show all.
+export const ROW_HEIGHTS = {
+  Short: { lines: 3, subTasks: 3 },
+  Medium: { lines: 5, subTasks: 5 },
+  Large: { lines: 8, subTasks: 8 },
+  "Extra Large": { lines: 0, subTasks: Infinity },
+};
+
 export const SCENARIOS_COPY = {
   heading: "Scenarios",
   subtitle:

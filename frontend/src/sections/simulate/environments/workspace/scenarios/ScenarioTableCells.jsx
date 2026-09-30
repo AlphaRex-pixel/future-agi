@@ -7,13 +7,6 @@ import { normaliseSubTasks } from "./scenarioEditor.constants";
 // Attach a tooltip to a truncated line so hovering reveals the full value. Kept
 // thin — the tooltip lives at the row level, not per-Typography, so the same
 // wrapper gates both single-line noWrap labels and multi-line clamped bodies.
-export const ROW_HEIGHTS = {
-  Short: { lines: 3, subTasks: 3 },
-  Medium: { lines: 5, subTasks: 5 },
-  Large: { lines: 8, subTasks: 8 },
-  "Extra Large": { lines: 0, subTasks: Infinity },
-};
-
 export function TruncTooltip({ title, children }) {
   if (!title) return children;
   return (
@@ -32,8 +25,9 @@ export function TruncTooltip({ title, children }) {
 }
 TruncTooltip.propTypes = { title: PropTypes.node, children: PropTypes.node };
 
-// Multi-line text cell — clamped to 3 lines so the row stays a predictable
-// height, full content one hover away. Empty values render as an em-dash.
+// Multi-line text cell — clamped to `lines` (from the row height; 0 shows it
+// all) so the row stays a predictable height, full content one hover away.
+// Empty values render as an em-dash.
 export function ClampCell({ text, lines = 3 }) {
   const value = text || "-";
   return (
@@ -59,8 +53,8 @@ export function ClampCell({ text, lines = 3 }) {
 }
 ClampCell.propTypes = { text: PropTypes.string, lines: PropTypes.number };
 
-// Sub-tasks column body: up to 3 inline, anything past that summarised as
-// "+ N more". Hovering the row reveals the full numbered list.
+// Sub-tasks column body: up to `limit` inline (from the row height), anything
+// past that summarised as "+ N more". Hovering the row reveals the full list.
 export function SubTasksCell({ subTasks, limit = 3 }) {
   const list = normaliseSubTasks(subTasks);
   if (!list.length) {

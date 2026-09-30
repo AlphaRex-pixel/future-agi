@@ -10,8 +10,8 @@ import Iconify from "src/components/iconify";
 import DraggableColResizer from "src/components/draggable-col-resizer";
 import { getStorage, setStorage } from "src/hooks/use-local-storage";
 import { BUILD_TONES } from "../../buildEnvironment/buildTones";
-import { ClampCell, ROW_HEIGHTS, SubTasksCell, TruncTooltip } from "./ScenarioTableCells";
-import { SCENARIOS_COPY } from "./scenarios.constants";
+import { ClampCell, SubTasksCell, TruncTooltip } from "./ScenarioTableCells";
+import { ROW_HEIGHTS, SCENARIOS_COPY } from "./scenarios.constants";
 import { GROUP_SHAPE, SCENARIO_SHAPE } from "./scenarios.shapes";
 
 // A seeded-from-template env is read-only until forked; every mutating control

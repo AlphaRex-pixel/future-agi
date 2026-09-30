@@ -62,10 +62,13 @@ export function buildSummaryRow(run, scores) {
   };
 }
 
+// Distinct scenarios the runs covered. Runs that carry no ids (older or mock
+// runs) can't add to the union, so they are skipped; only when no run has ids
+// does the environment total stand in.
 export function countCoveredScenarios(rows, fallback) {
-  const list = rows || [];
-  if (!list.length || list.some((r) => !r?.scenarioIds?.length)) return fallback;
-  return new Set(list.flatMap((r) => r.scenarioIds)).size;
+  const keyed = (rows || []).filter((r) => r?.scenarioIds?.length);
+  if (!keyed.length) return fallback;
+  return new Set(keyed.flatMap((r) => r.scenarioIds)).size;
 }
 
 // The environment's eval set for the summary, derived from the union of the

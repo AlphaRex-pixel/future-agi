@@ -7,8 +7,7 @@ import SvgColor from "src/components/svg-color/svg-color";
 import ColumnResizer from "src/components/ColumnResizer/ColumnResizer";
 import { SegmentedTabs } from "src/components/tabs/tabs";
 import { FilterPanel } from "src/components/filter-panel";
-import { SCENARIOS_COPY } from "./scenarios.constants";
-import { ROW_HEIGHTS } from "./ScenarioTableCells";
+import { ROW_HEIGHTS, SCENARIOS_COPY } from "./scenarios.constants";
 
 // Per-axis icon, keyed by the server grouping `value`. Falls back to a neutral
 // icon for any axis the backend adds later.
