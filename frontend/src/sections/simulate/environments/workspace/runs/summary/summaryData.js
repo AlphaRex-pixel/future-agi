@@ -49,6 +49,7 @@ export function buildSummaryRow(run, scores) {
     at: run?.finishedAt || run?.startedAt || null,
     tasks: total,
     scenarioCount: run?.scenarioCount ?? null,
+    scenarioIds: run?.scenarioIds ?? [],
     trials: run?.trials ?? 1,
     passRate: total ? Math.round((passed / total) * 100) : 0,
     durationS: run?.durationS ?? null,
@@ -59,6 +60,12 @@ export function buildSummaryRow(run, scores) {
     saidNotDone: null,
     meanReturn: null,
   };
+}
+
+export function countCoveredScenarios(rows, fallback) {
+  const list = rows || [];
+  if (!list.length || list.some((r) => !r?.scenarioIds?.length)) return fallback;
+  return new Set(list.flatMap((r) => r.scenarioIds)).size;
 }
 
 // The environment's eval set for the summary, derived from the union of the
