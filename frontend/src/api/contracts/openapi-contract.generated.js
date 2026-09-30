@@ -2586,6 +2586,9 @@ export const OPENAPI_CONTRACT = Object.freeze({
           500: {
             $ref: "#/definitions/AccountsErrorResponse",
           },
+          503: {
+            $ref: "#/definitions/AccountsErrorResponse",
+          },
           default: {
             $ref: "#/definitions/ManagementAPIErrorResponse",
           },
@@ -82657,9 +82660,11 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "name",
         "owner",
         "key_hash",
+        "key_prefix",
         "models",
         "providers",
         "metadata",
+        "expires_at",
       ],
       type: "object",
       properties: {
@@ -82682,6 +82687,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "string",
           minLength: 1,
         },
+        key_prefix: {
+          title: "Key prefix",
+          type: "string",
+        },
         models: {
           type: "array",
           items: {
@@ -82703,6 +82712,12 @@ export const OPENAPI_CONTRACT = Object.freeze({
             type: "string",
             "x-nullable": true,
           },
+        },
+        expires_at: {
+          title: "Expires at",
+          type: "string",
+          format: "date-time",
+          "x-nullable": true,
         },
       },
     },
@@ -100262,7 +100277,14 @@ export const OPENAPI_CONTRACT = Object.freeze({
       },
     },
     SetupChecksResult: {
-      required: ["status", "mode", "checks"],
+      required: [
+        "status",
+        "mode",
+        "setup",
+        "collector_http_url",
+        "account_exists",
+        "checks",
+      ],
       type: "object",
       properties: {
         status: {
@@ -100274,6 +100296,20 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Mode",
           type: "string",
           enum: ["live", "experiment"],
+        },
+        setup: {
+          title: "Setup",
+          type: "string",
+          enum: ["standalone", "distributed", "helm"],
+        },
+        collector_http_url: {
+          title: "Collector http url",
+          type: "string",
+          minLength: 1,
+        },
+        account_exists: {
+          title: "Account exists",
+          type: "boolean",
         },
         checks: {
           type: "array",

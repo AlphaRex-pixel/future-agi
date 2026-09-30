@@ -2427,9 +2427,11 @@ export interface APIKeyBulkItemApi {
   owner: string;
   /** @minLength 1 */
   key_hash: string;
+  key_prefix: string;
   models: string[];
   providers: string[];
   metadata: APIKeyBulkItemApiMetadata;
+  expires_at: string | null;
 }
 
 export interface APIKeyBulkResponseApi {
@@ -4072,6 +4074,15 @@ export const SetupChecksResultApiMode = {
   experiment: "experiment",
 } as const;
 
+export type SetupChecksResultApiSetup =
+  (typeof SetupChecksResultApiSetup)[keyof typeof SetupChecksResultApiSetup];
+
+export const SetupChecksResultApiSetup = {
+  standalone: "standalone",
+  distributed: "distributed",
+  helm: "helm",
+} as const;
+
 export type SetupCheckApiStatus =
   (typeof SetupCheckApiStatus)[keyof typeof SetupCheckApiStatus];
 
@@ -4097,6 +4108,10 @@ export interface SetupCheckApi {
 export interface SetupChecksResultApi {
   status: SetupChecksResultApiStatus;
   mode: SetupChecksResultApiMode;
+  setup: SetupChecksResultApiSetup;
+  /** @minLength 1 */
+  collector_http_url: string;
+  account_exists: boolean;
   checks: SetupCheckApi[];
 }
 
