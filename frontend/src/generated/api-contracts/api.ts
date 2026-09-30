@@ -7078,9 +7078,14 @@ export type accountsTokenCreateResponse500 = {
   status: 500;
 };
 
+export type accountsTokenCreateResponse503 = {
+  data: AccountsErrorResponseApi;
+  status: 503;
+};
+
 export type accountsTokenCreateResponseDefault = {
   data: ManagementAPIErrorResponseApi;
-  status: Exclude<HTTPStatusCodes, 200 | 400 | 401 | 403 | 404 | 500>;
+  status: Exclude<HTTPStatusCodes, 200 | 400 | 401 | 403 | 404 | 500 | 503>;
 };
 
 export type accountsTokenCreateResponseSuccess =
@@ -7093,6 +7098,7 @@ export type accountsTokenCreateResponseError = (
   | accountsTokenCreateResponse403
   | accountsTokenCreateResponse404
   | accountsTokenCreateResponse500
+  | accountsTokenCreateResponse503
   | accountsTokenCreateResponseDefault
 ) & {
   headers: Headers;
@@ -19147,10 +19153,13 @@ export const getApiSetupChecksListUrl = () => {
 };
 
 /**
- * Returns ``{"status": "ok"|"issues", "mode": ..., "checks": [...]}``. No auth —
-it runs before any account exists. Self-hosted only: on cloud and EE the
-route answers 404, so neither the internal service topology nor the outbound
-probes it triggers are reachable by an anonymous caller.
+ * Returns ``{"status": "ok"|"issues", "mode": ..., "setup":
+"standalone"|"distributed"|"helm", "collector_http_url": ...,
+"account_exists": true|false, "checks": [...]}``. No auth — it runs
+before anyone can sign in. Self-hosted only:
+on cloud and EE the route answers 404, so neither the internal service
+topology nor the outbound probes it triggers are reachable by an
+anonymous caller.
  * @summary Public infrastructure probe for the OSS first-run setup screen.
  */
 export const apiSetupChecksList = async (
