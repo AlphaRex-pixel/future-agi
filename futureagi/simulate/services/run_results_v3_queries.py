@@ -282,6 +282,32 @@ def _expanded_eval_score(
         ),
         output_field=FloatField(),
     )
+    if spec is None:
+        object_score = _json_value(field, eval_id, "output", "score")
+        selected_score = Case(
+            When(
+                Exact(
+                    Func(output, function="jsonb_typeof", output_field=TextField()),
+                    Value("object"),
+                ),
+                then=Case(
+                    When(
+                        Exact(
+                            Func(
+                                object_score,
+                                function="jsonb_typeof",
+                                output_field=TextField(),
+                            ),
+                            Value("number"),
+                        ),
+                        then=numeric_score,
+                    ),
+                    output_field=FloatField(),
+                ),
+            ),
+            default=selected_score,
+            output_field=FloatField(),
+        )
     return Case(
         When(
             ~_eval_measured_q(eval_id, field),
@@ -468,7 +494,7 @@ def run_calls_queryset(
         job__simulation_runs__test_execution_id=OuterRef("test_execution_id")
     )
     authored = (
-        HostedHarnessScenario.no_workspace_objects.filter(
+        HostedHarnessScenario.all_objects.filter(
             Q(call_execution_id=OuterRef("pk"))
             | Q(own_run | own_environment, scenario_key=OuterRef("result_scenario_key"))
         )

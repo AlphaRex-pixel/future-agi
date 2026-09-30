@@ -220,7 +220,8 @@ def eval_rows(
                 else None
             )
         else:
-            numeric = _number(value) if measured else None
+            source = value.get("score") if isinstance(value, dict) else value
+            numeric = _number(source) if measured else None
             verdict = _truth_value(data)
             score = numeric
             if verdict is not None:
