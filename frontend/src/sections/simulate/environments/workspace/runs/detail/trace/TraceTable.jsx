@@ -76,6 +76,11 @@ const clampSx = {
   wordBreak: "break-word",
 };
 
+// A persona is worth showing when any field is filled, not only the name: the
+// API sends name: null when the persona has no name key.
+const hasPersonaDetails = (p) =>
+  !!(p && (p.name || p.voice || p.age || p.traits?.length));
+
 export default function TraceTable({
   groups,
   rows = null,
@@ -234,7 +239,7 @@ export default function TraceTable({
 
         {show("persona") && (
           <TableCell sx={bodyCellSx} onClick={() => onOpen(t)}>
-            {t.personaDetails?.name ? (
+            {hasPersonaDetails(t.personaDetails) ? (
               <Stack spacing={0.5} sx={{ minWidth: 210 }}>
                 <Field
                   icon="solar:user-id-linear"

@@ -28,6 +28,7 @@ import AttributesTable from "./AttributesTable";
 import MessagesView from "./MessagesView";
 import CallDetailsBar from "./CallDetailsBar";
 import ScenarioView from "./ScenarioView";
+import { isEmptyPersona } from "./persona.utils";
 
 const TABS = {
   ANALYTICS: "analytics",
@@ -94,10 +95,13 @@ const VoiceRightPanel = ({
   const callLogs = getSpanAttributes(observationSpan)?.callLogs;
   const hasLogs = !!vapiId || !!callLogs || !!data?.id;
 
+  // A call can have a persona with no dataset row behind it (scenario_columns
+  // empty); the Scenario tab is where that persona shows, so keep it.
   const hasScenarioData =
     isSimulate &&
-    !!data?.scenario_columns &&
-    Object.keys(data.scenario_columns).length > 0;
+    ((!!data?.scenario_columns &&
+      Object.keys(data.scenario_columns).length > 0) ||
+      !isEmptyPersona(data?.persona_details));
 
   const tabs = useMemo(() => {
     // Icons match the trace drawer's SpanDetailPane TAB_CONFIG where they
