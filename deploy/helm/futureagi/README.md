@@ -1520,7 +1520,7 @@ the [configuration reference](https://docs.futureagi.com/docs/self-hosting/confi
 | `gatewayApi.otlpGrpc.enabled` | `false` | A GRPCRoute for OTLP/gRPC (the TraceService) to fi-collector's gRPC port. The listener must accept HTTP/2 (HTTPS). |
 | `gatewayApi.otlpGrpc.host` | `""` | Hostname for OTLP/gRPC; it must differ from the HTTP route hosts. |
 | `gatewayApi.llmGateway.enabled` | `false` | An HTTPRoute to the LLM gateway (agentcc-gateway), for applications outside the cluster; every call needs a virtual key. It also opens the gateway in the NetworkPolicies. |
-| `gatewayApi.llmGateway.host` | `""` | Hostname of the LLM gateway. |
+| `gatewayApi.llmGateway.host` | `""` | Hostname of the LLM gateway. It must differ from the app and API hosts: each route sends `/` to its own service. |
 | `gatewayApi.llmGateway.timeout` | `"310s"` | Route timeout (Gateway API duration) of LLM calls; keep it above the gateway's `config.server.write_timeout`. Empty: the Gateway's default. |
 | `gatewayApi.timeouts.request` | `"300s"` | Route timeout of API requests (Gateway API duration, e.g. `300s`). Empty: the Gateway's default, often 15 s, which cuts long requests. |
 | `gatewayApi.timeouts.websocket` | `"24h"` | Route timeout of the WebSocket paths (`/ws/`). `0s` disables it where the Gateway supports that; some also need a backend or client traffic policy for idle connections (README). |

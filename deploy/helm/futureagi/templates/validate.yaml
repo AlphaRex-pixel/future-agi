@@ -84,11 +84,16 @@ Renders nothing when the values are consistent.
 {{- else if eq $gwApp $gwApi -}}
 {{- $errors = append $errors "gatewayApi.api.host must differ from gatewayApi.app.host: the API serves many top-level paths" -}}
 {{- end -}}
-{{- if and $v.gatewayApi.otlpGrpc.enabled (or (not $v.gatewayApi.otlpGrpc.host) (has $v.gatewayApi.otlpGrpc.host (list $gwApp $gwApi (include "futureagi.gatewayApi.host" (dict "root" . "route" "otlp"))))) -}}
+{{- $httpHosts := list $gwApp $gwApi (include "futureagi.gatewayApi.host" (dict "root" . "route" "otlp")) -}}
+{{- if $v.gatewayApi.llmGateway.enabled }}{{ $httpHosts = append $httpHosts $v.gatewayApi.llmGateway.host }}{{ end -}}
+{{- if and $v.gatewayApi.otlpGrpc.enabled (or (not $v.gatewayApi.otlpGrpc.host) (has $v.gatewayApi.otlpGrpc.host $httpHosts)) -}}
 {{- $errors = append $errors "gatewayApi.otlpGrpc.host is required and must differ from the HTTP route hosts: a GRPCRoute cannot share a hostname with an HTTPRoute on one listener" -}}
 {{- end -}}
 {{- if and $v.gatewayApi.llmGateway.enabled (not $v.gatewayApi.llmGateway.host) -}}
 {{- $errors = append $errors "gatewayApi.llmGateway.host is required with gatewayApi.llmGateway.enabled" -}}
+{{- end -}}
+{{- if and $v.gatewayApi.llmGateway.enabled $v.gatewayApi.llmGateway.host (has $v.gatewayApi.llmGateway.host (list $gwApp $gwApi)) -}}
+{{- $errors = append $errors "gatewayApi.llmGateway.host must differ from the app and API hosts: each of those routes sends / to its own service, so on a shared hostname one of them would be unreachable" -}}
 {{- end -}}
 {{- end -}}
 {{- if not (or $v.worker.allQueues.enabled $v.worker.queues) -}}

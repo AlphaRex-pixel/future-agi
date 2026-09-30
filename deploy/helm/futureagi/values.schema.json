@@ -3163,7 +3163,7 @@
             },
             "host": {
               "type": "string",
-              "description": "Hostname of the LLM gateway."
+              "description": "Hostname of the LLM gateway. It must differ from the app and API hosts: each route sends `/` to its own service."
             },
             "timeout": {
               "type": "string",

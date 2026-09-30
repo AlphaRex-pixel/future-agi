@@ -113,6 +113,9 @@ refused=(
   "an ExternalSecret the chart would not read|externalSecrets.secrets.app needs secrets.existingSecret|--set externalSecrets.enabled=true --set externalSecrets.secretStoreRef.name=vault --set externalSecrets.secrets.app.dataFrom[0].extract.key=a"
   "an unknown OpenShift mode|re:adaptSecurityContext.*must be one of|--set global.compatibility.openshift.adaptSecurityContext=on"
   "an unknown ExternalSecret group|re:[Pp]roperty ?[Nn]ame.*vault|--set externalSecrets.secrets.vault.dataFrom[0].extract.key=a"
+  "an LLM gateway host shared with the API|gatewayApi.llmGateway.host must differ from the app and API hosts|--set gatewayApi.enabled=true --set gatewayApi.parentRefs[0].name=gw --set gatewayApi.app.host=app.example.com --set gatewayApi.api.host=api.example.com --set gatewayApi.llmGateway.enabled=true --set gatewayApi.llmGateway.host=api.example.com"
+  "an LLM gateway host shared with the app|gatewayApi.llmGateway.host must differ from the app and API hosts|--set gatewayApi.enabled=true --set gatewayApi.parentRefs[0].name=gw --set gatewayApi.app.host=app.example.com --set gatewayApi.api.host=api.example.com --set gatewayApi.llmGateway.enabled=true --set gatewayApi.llmGateway.host=app.example.com"
+  "an OTLP/gRPC host shared with the LLM gateway|gatewayApi.otlpGrpc.host is required and must differ from the HTTP route hosts|--set gatewayApi.enabled=true --set gatewayApi.parentRefs[0].name=gw --set gatewayApi.app.host=app.example.com --set gatewayApi.api.host=api.example.com --set gatewayApi.llmGateway.enabled=true --set gatewayApi.llmGateway.host=llm.example.com --set gatewayApi.otlpGrpc.enabled=true --set gatewayApi.otlpGrpc.host=llm.example.com"
 )
 for case in "${refused[@]}"; do
   IFS='|' read -r name expected args <<<"$case"

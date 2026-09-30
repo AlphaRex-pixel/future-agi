@@ -1153,7 +1153,7 @@ gatewayApi:
   llmGateway:
     # -- An HTTPRoute to the LLM gateway (agentcc-gateway), for applications outside the cluster; every call needs a virtual key. It also opens the gateway in the NetworkPolicies.
     enabled: false
-    # -- Hostname of the LLM gateway.
+    # -- Hostname of the LLM gateway. It must differ from the app and API hosts: each route sends `/` to its own service.
     host: ""
     # -- Route timeout (Gateway API duration) of LLM calls; keep it above the gateway's `config.server.write_timeout`. Empty: the Gateway's default.
     timeout: 310s
