@@ -98,7 +98,12 @@ RULES: list[tuple[str, dict]] = [
     ("worker.allQueues.excludedQueues", {"items": {"type": "string"}}),
     (
         "agentccGateway.redis.enabled",
-        {"anyOf": [{"type": "boolean"}, {"type": "string", "enum": ["auto", "true", "false"]}]},
+        {
+            "anyOf": [
+                {"type": "boolean"},
+                {"type": "string", "enum": ["auto", "true", "false"]},
+            ]
+        },
     ),
     ("agentccGateway.redis.db", {"type": "integer", "minimum": 0}),
     (
@@ -170,7 +175,10 @@ RULES: list[tuple[str, dict]] = [
     ("*.preStopSleepSeconds", {"minimum": 0}),
     # Enterprise and hardened operations; validate.yaml enforces the same.
     ("edition", {"enum": ["oss", "ee"]}),
-    ("global.compatibility.openshift.adaptSecurityContext", {"enum": ["auto", "force", "disabled"]}),
+    (
+        "global.compatibility.openshift.adaptSecurityContext",
+        {"enum": ["auto", "force", "disabled"]},
+    ),
     (
         "license.heartbeat",
         {
