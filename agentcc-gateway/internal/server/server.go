@@ -88,7 +88,11 @@ func New(cfg *config.Config, configPath string, registry *providers.Registry, en
 		authKeyStore = nil
 	}
 
-	orgProviderCache := providers.NewOrgProviderCache(cfg.Providers)
+	orgProviderCache := providers.NewOrgProviderCache(cfg.Providers, cfg.OrgProviders.AllowPrivateURLs)
+	if cfg.OrgProviders.AllowPrivateURLs {
+		slog.Warn("org provider base URLs may point at private/LAN addresses; do not enable this on a gateway shared by untrusted orgs",
+			"env", config.EnvAllowPrivateProviderURLs)
+	}
 
 	s := &Server{
 		cfg:              cfg,
@@ -548,6 +552,7 @@ func New(cfg *config.Config, configPath string, registry *providers.Registry, en
 		s.keyHandlers = NewKeyHandlers(keyStore, cfg.Admin.Token)
 		router.Handle("GET", "/-/keys", s.keyHandlers.ListKeys)
 		router.Handle("POST", "/-/keys", s.keyHandlers.CreateKey)
+		router.Handle("POST", "/-/keys/sync", s.keyHandlers.ImportKeys)
 		router.Handle("GET", "/-/keys/{key_id}", s.keyHandlers.GetKey)
 		router.Handle("DELETE", "/-/keys/{key_id}", s.keyHandlers.RevokeKey)
 		router.Handle("PUT", "/-/keys/{key_id}", s.keyHandlers.UpdateKey)

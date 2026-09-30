@@ -207,13 +207,13 @@ class TestScenarioNumbersSurviveADeletion:
 def test_a_row_key_finds_an_older_suite_that_has_only_names():
     from simulate.services.harness_provider import scenarios_meant
 
-    suite = [{"name": "rachel_surge_comfort_booking"}, {"name": "dana_book_uberx"}]
+    suite = [{"name": "rachel_surge_comfort_booking"}, {"name": "dana_book_cab"}]
     assert scenarios_meant("rachel-surge-comfort-booking", suite) == [
         "rachel_surge_comfort_booking"
     ]
     assert scenarios_meant(
-        ["dana-book-uberx", "Rachel_Surge_Comfort_Booking"], suite
-    ) == ["dana_book_uberx", "rachel_surge_comfort_booking"]
+        ["dana-book-cab", "Rachel_Surge_Comfort_Booking"], suite
+    ) == ["dana_book_cab", "rachel_surge_comfort_booking"]
     assert scenarios_meant("unknown-scenario", suite) == []
 
 

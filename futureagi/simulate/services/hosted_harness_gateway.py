@@ -69,6 +69,7 @@ from simulate.services.hosted_sandbox import (
     SandboxNotFoundError,
     SandboxProviderConfigurationError,
     SandboxProviderError,
+    SandboxProviderUnavailableError,
     get_sandbox_provider,
 )
 from tfc.settings.settings import UPLOAD_BUCKET_NAME
@@ -346,11 +347,11 @@ def _platform_simulator_material() -> tuple[dict[str, str], bytes | None]:
         "HARNESS_BACKGROUND_NOISE_VOLUME",
         # Off has to travel: decided here, enforced inside the sandbox.
         "ALK_VOICEMAIL_SCENARIOS",
-        # Temporary Uber Guest Booking POC authoring policy. These values are read only from
+        # Temporary Cab Guest Booking POC authoring policy. These values are read only from
         # deployment configuration and travel on the platform simulator-secret channel; they
         # never come from the customer's RL-environment values.
-        "ALK_UBER_GUEST_POC_TARGET_PHONE_NUMBER",
-        "ALK_UBER_GUEST_POC_PIN",
+        "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER",
+        "ALK_CAB_GUEST_POC_PIN",
         "ALK_HARNESS_WORKERS_AT_ONCE",
         "ALK_VALIDATION_INSTANCES",
     ):
@@ -760,6 +761,17 @@ class HostedSourceAcquirer:
             )
         if ".." in ref or not self._REF.fullmatch(ref):
             raise HostedHarnessError("github_ref_invalid", "invalid GitHub ref")
+        if shutil.which("git") is None:
+            # The default backend image ships without git (with perl it is
+            # ~81 MB unpacked). futureagi/Dockerfile.oss --build-arg
+            # WITH_GIT=true puts it back for GitHub sources.
+            raise HostedHarnessError(
+                "git_unavailable",
+                "git is not installed in this backend image; rebuild it with "
+                "--build-arg WITH_GIT=true to use GitHub sources",
+                status_code=501,
+                retryable=False,
+            )
         credential = nullcontext("")
         if source.get("visibility") == "private":
             installation_id = str(source.get("installation_id") or "")
@@ -1537,6 +1549,15 @@ class HostedHarnessGateway:
     def __init__(self) -> None:
         try:
             self.client = get_sandbox_provider()
+        except SandboxProviderUnavailableError as exc:
+            # The provider SDK is the optional `sandbox` extra. Retrying cannot
+            # install it, so this is neither a 503 nor retryable.
+            raise HostedHarnessError(
+                "sandbox_sdk_missing",
+                str(exc),
+                status_code=501,
+                retryable=False,
+            ) from exc
         except SandboxProviderConfigurationError as exc:
             raise HostedHarnessError(
                 "sandbox_provider_not_configured",
