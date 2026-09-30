@@ -64,52 +64,6 @@ import (
 	"github.com/futureagi/agentcc-gateway/internal/tenant"
 )
 
-// syncWithRetry retries control plane sync (org configs + API keys) with
-// fixed 2s interval until both succeed. Called as a background goroutine
-// so the gateway serves immediately while sync completes.
-func syncWithRetry(cfg *config.Config, tenantStore *tenant.Store, keyStore *auth.KeyStore) {
-	const retryInterval = 2 * time.Second
-	const maxAttempts = 60 // 2 minutes max
-
-	tenantSynced := false
-	keySynced := keyStore == nil
-
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		slog.Info("retrying control plane sync",
-			"attempt", attempt, "need_tenants", !tenantSynced, "need_keys", !keySynced)
-
-		if !tenantSynced {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			if err := tenant.SyncFromControlPlane(ctx, cfg.ControlPlane.URL, cfg.ControlPlane.AdminToken, tenantStore); err == nil {
-				tenantSynced = true
-			}
-			cancel()
-		}
-		if !keySynced {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			if err := auth.SyncKeysFromControlPlane(ctx, cfg.ControlPlane.URL, cfg.ControlPlane.AdminToken, keyStore); err == nil {
-				keySynced = true
-			}
-			cancel()
-		}
-
-		if tenantSynced && keySynced {
-			keyCount := 0
-			if keyStore != nil {
-				keyCount = keyStore.Count()
-			}
-			slog.Info("background sync succeeded",
-				"attempt", attempt, "orgs", tenantStore.Count(), "keys", keyCount)
-			return
-		}
-
-		time.Sleep(retryInterval)
-	}
-
-	slog.Error("control plane sync failed after all retries — gateway running with empty config",
-		"max_attempts", maxAttempts)
-}
-
 func main() {
 	configPath := flag.String("config", "", "Path to config file (YAML/JSON)")
 	flag.Parse()
@@ -197,16 +151,11 @@ func main() {
 		slog.Info("auth enabled", "config_keys", keyStore.Count())
 	}
 
-	// Start control plane sync in background — never blocks startup.
-	// The gateway serves immediately with config.yaml keys, then picks up
-	// Django-managed keys and org configs as soon as the backend is reachable.
+	// Control plane sync runs in the background (started below, next to the
+	// periodic sync) and never blocks startup. The gateway serves immediately
+	// with config.yaml keys, then picks up Django-managed keys and org configs
+	// as soon as the backend is reachable.
 	if cfg.ControlPlane.URL != "" {
-		// Initial sync: retry every 2s until both succeed (non-blocking).
-		if cfg.ControlPlane.SyncOnStartup {
-			go syncWithRetry(cfg, tenantStore, keyStore)
-		}
-		// Periodic sync is handled by StartPeriodicSync below (line ~583).
-		// Do NOT add a second periodic ticker here — it doubles the load.
 		slog.Info("control plane sync enabled",
 			"interval", cfg.ControlPlane.SyncInterval.String(),
 			"startup_sync", cfg.ControlPlane.SyncOnStartup,
@@ -656,9 +605,12 @@ func main() {
 		slog.Info("key revocation pub/sub enabled")
 	}
 
-	// Start periodic config sync if configured.
-	if cfg.ControlPlane.SyncInterval > 0 && cfg.ControlPlane.URL != "" {
-		go tenant.StartPeriodicSync(syncCtxBg, cfg.ControlPlane.SyncInterval, cfg.ControlPlane.URL, cfg.ControlPlane.AdminToken, tenantStore, keyStore)
+	// Control plane sync: the startup sync retries until the backend answers
+	// (it can take minutes on a first boot), next to the periodic re-sync if
+	// an interval is set. Do NOT add another ticker.
+	if cfg.ControlPlane.URL != "" {
+		go tenant.RunControlPlaneSync(syncCtxBg, cfg.ControlPlane.SyncOnStartup, cfg.ControlPlane.SyncInterval,
+			cfg.ControlPlane.URL, cfg.ControlPlane.AdminToken, tenantStore, keyStore)
 	}
 
 	// Handle shutdown signals.
@@ -672,7 +624,7 @@ func main() {
 		signal.Stop(sigCh) // a second signal stops the process at once
 		slog.Info("received signal", "signal", sig)
 
-		// Stop periodic sync.
+		// Stop control plane sync.
 		syncCancelBg()
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
