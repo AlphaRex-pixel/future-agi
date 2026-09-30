@@ -35,6 +35,7 @@ from simulate.services.hosted_harness_gateway import (
     _connector_egress_domains,
     _execution_ttl_seconds,
     _known_simulator_egress_inputs,
+    _add_scoped_guest_pin_policy,
     _normalize_egress_domains,
     _platform_simulator_material,
     _provider_egress_domains,
@@ -72,8 +73,26 @@ def _isolate_platform_simulator_environment(settings, monkeypatch):
         "ALK_HARNESS_MODEL",
         "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER",
         "ALK_CAB_GUEST_POC_PIN",
+        "ALK_CAB_GUEST_POC_ALLOWED_ORGANIZATION_ID",
     ):
         monkeypatch.delenv(name, raising=False)
+
+
+def test_private_pin_policy_is_org_scoped_and_fails_closed(monkeypatch) -> None:
+    monkeypatch.setenv("ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER", "+15551234567")
+    monkeypatch.setenv("ALK_CAB_GUEST_POC_PIN", "7682")
+    values = {}
+    _add_scoped_guest_pin_policy(values, "org-approved")
+    assert values == {}
+
+    monkeypatch.setenv("ALK_CAB_GUEST_POC_ALLOWED_ORGANIZATION_ID", "org-approved")
+    _add_scoped_guest_pin_policy(values, "org-other")
+    assert values == {}
+    _add_scoped_guest_pin_policy(values, "org-approved")
+    assert values == {
+        "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER": "+15551234567",
+        "ALK_CAB_GUEST_POC_PIN": "7682",
+    }
 
 
 def test_guest_failure_cause_preserves_legacy_runnable_entrypoint_blocker() -> None:
@@ -124,8 +143,8 @@ def test_platform_simulator_material_uses_deployment_credentials_only(
     assert values["LIVEKIT_API_SECRET"] == "platform-livekit-secret"
     assert values["SIP_OUTBOUND_TRUNK_ID"] == "ST_platform-outbound"
     assert values["SIP_OUTBOUND_FROM_NUMBER"] == "+14155550123"
-    assert values["ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER"] == "+15551234567"
-    assert values["ALK_CAB_GUEST_POC_PIN"] == "7682"
+    assert "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER" not in values
+    assert "ALK_CAB_GUEST_POC_PIN" not in values
     assert values["ALK_HARNESS"] == "claude"
     assert values["ALK_HARNESS_MODEL"] == "vertex_ai/gemini-3.7-flash"
     assert values["ALK_CLAUDE_GATEWAY_URL"] == "https://gateway.futureagi.test"

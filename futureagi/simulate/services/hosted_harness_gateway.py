@@ -347,10 +347,6 @@ def _platform_simulator_material() -> tuple[dict[str, str], bytes | None]:
         "HARNESS_BACKGROUND_NOISE_VOLUME",
         # Off has to travel: decided here, enforced inside the sandbox.
         "ALK_VOICEMAIL_SCENARIOS",
-        # Temporary private guest-booking scenario policy. These values come only from
-        # deployment configuration, never from customer RL-environment values.
-        "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER",
-        "ALK_CAB_GUEST_POC_PIN",
         "ALK_HARNESS_WORKERS_AT_ONCE",
         "ALK_VALIDATION_INSTANCES",
     ):
@@ -373,6 +369,18 @@ def _platform_simulator_material() -> tuple[dict[str, str], bytes | None]:
     if credential_bytes is not None:
         values["GOOGLE_APPLICATION_CREDENTIALS"] = _SIMULATOR_VERTEX_CREDENTIALS_PATH
     return values, credential_bytes
+
+
+def _add_scoped_guest_pin_policy(values: dict[str, str], organization_id: object) -> None:
+    """Release the private POC authoring policy only to the deployment-approved org."""
+    allowed = str(os.environ.get("ALK_CAB_GUEST_POC_ALLOWED_ORGANIZATION_ID") or "").strip()
+    if not allowed or str(organization_id) != allowed:
+        return
+    target = str(os.environ.get("ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER") or "").strip()
+    pin = str(os.environ.get("ALK_CAB_GUEST_POC_PIN") or "").strip()
+    if target and pin:
+        values["ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER"] = target
+        values["ALK_CAB_GUEST_POC_PIN"] = pin
 
 
 def _scenario_delta(instruction: str) -> int | None:
@@ -1602,6 +1610,7 @@ class HostedHarnessGateway:
         # Authoring reaches only the model provider and the source host - never the target
         # (LiveKit/Deepgram) media secrets, which belong to the execution sandbox alone.
         simulator_env, simulator_vertex_credentials = _platform_simulator_material()
+        _add_scoped_guest_pin_policy(simulator_env, getattr(job, "organization_id", None))
         project_id = str(simulator_env.get("GOOGLE_CLOUD_PROJECT") or "")
 
         # Authoring reaches the source host, the authoring model provider (Vertex/Claude), and
@@ -1880,6 +1889,7 @@ class HostedHarnessGateway:
         # frozen authoring inputs; it does not select or execute a host-side bundle.
         secrets_map = PlatformSecretResolver().resolve(job)
         simulator_env, simulator_vertex_credentials = _platform_simulator_material()
+        _add_scoped_guest_pin_policy(simulator_env, getattr(job, "organization_id", None))
         authoring_target_secrets, _authoring_connector = (
             _provider_import_authoring_material(job, payload)
             if authoring_archive is None
@@ -2260,6 +2270,7 @@ class HostedHarnessGateway:
     ) -> HostedHarnessConversationLease:
         """Start the conversation process beside the job's existing harness process."""
         simulator_env, simulator_vertex_credentials = _platform_simulator_material()
+        _add_scoped_guest_pin_policy(simulator_env, getattr(job, "organization_id", None))
         capability = issue_conversation_capability(
             conversation,
             endpoint_base_url=endpoint_base_url,
@@ -2325,6 +2336,8 @@ class HostedHarnessGateway:
                 "ALK_CLAUDE_GATEWAY_URL",
                 "ALK_CLAUDE_GATEWAY_API_KEY",
                 "CLAUDE_CODE_USE_VERTEX",
+                "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER",
+                "ALK_CAB_GUEST_POC_PIN",
                 "CLOUD_ML_REGION",
                 "GOOGLE_APPLICATION_CREDENTIALS",
                 "GOOGLE_CLOUD_LOCATION",
@@ -2561,6 +2574,7 @@ class HostedHarnessGateway:
             workspace_archive = _empty_workspace_archive()
         source_archive, _commit_sha = HostedSourceAcquirer().acquire(job)
         simulator_env, simulator_vertex_credentials = _platform_simulator_material()
+        _add_scoped_guest_pin_policy(simulator_env, getattr(job, "organization_id", None))
         platform_host = _hostname_from_url(endpoint_base_url)
         allowed_domains = _resolved_egress_domains(
             job.payload,
@@ -2650,6 +2664,8 @@ class HostedHarnessGateway:
                     "ALK_CLAUDE_GATEWAY_URL",
                     "ALK_CLAUDE_GATEWAY_API_KEY",
                     "CLAUDE_CODE_USE_VERTEX",
+                    "ALK_CAB_GUEST_POC_TARGET_PHONE_NUMBER",
+                    "ALK_CAB_GUEST_POC_PIN",
                     "CLOUD_ML_REGION",
                     "GOOGLE_APPLICATION_CREDENTIALS",
                     "GOOGLE_CLOUD_LOCATION",
