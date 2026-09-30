@@ -73,7 +73,7 @@ const VoiceDetailDrawerV2 = ({
   hiddenActionIds = [],
   hidePathTabs = false,
   hideAnnotationTab = false,
-  hideFixWithFalcon = false,
+  showFixWithFalcon = true,
 }) => {
   const queryClient = useQueryClient();
   const { observeId } = useParams();
@@ -511,7 +511,7 @@ const VoiceDetailDrawerV2 = ({
                 onAction={handleVoiceAction}
                 hiddenActionIds={hiddenActionIds}
                 hideAnnotationTab={hideAnnotationTab}
-                hideFixWithFalcon={hideFixWithFalcon}
+                showFixWithFalcon={showFixWithFalcon}
               />
             </Box>
           </>
@@ -635,7 +635,7 @@ VoiceDetailDrawerV2.propTypes = {
   hiddenActionIds: PropTypes.arrayOf(PropTypes.string),
   hidePathTabs: PropTypes.bool,
   hideAnnotationTab: PropTypes.bool,
-  hideFixWithFalcon: PropTypes.bool,
+  showFixWithFalcon: PropTypes.bool,
 };
 
 export default VoiceDetailDrawerV2;

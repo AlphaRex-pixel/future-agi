@@ -21,11 +21,11 @@ vi.mock("src/api/simulate-environments/runDetail", async (importOriginal) => {
 // test proves the routing without mounting the heavy component (imagine store,
 // saved views, share dialog).
 vi.mock("src/components/VoiceDetailDrawerV2", () => ({
-  default: ({ data, onPrev, onNext, hasPrev, hasNext, hidePathTabs, hideFixWithFalcon }) => (
+  default: ({ data, onPrev, onNext, hasPrev, hasNext, hidePathTabs, showFixWithFalcon }) => (
     <div
       data-testid="voice-drawer"
       data-hide-path-tabs={String(!!hidePathTabs)}
-      data-hide-fix-with-falcon={String(!!hideFixWithFalcon)}
+      data-show-fix-with-falcon={String(showFixWithFalcon)}
     >
       voice:{data?.id}:{data?.transcript?.map((turn) => turn.content).join("|")}
       <button type="button" onClick={onPrev} disabled={!hasPrev}>
@@ -505,8 +505,8 @@ describe("CallDrawer — voice branch", () => {
     );
     // Fix with Falcon isn't wired into the environment flow yet.
     expect(screen.getByTestId("voice-drawer")).toHaveAttribute(
-      "data-hide-fix-with-falcon",
-      "true",
+      "data-show-fix-with-falcon",
+      "false",
     );
     expect(screen.getByTestId("voice-drawer")).toHaveTextContent(
       "Function call · lookup_order · 309ms",

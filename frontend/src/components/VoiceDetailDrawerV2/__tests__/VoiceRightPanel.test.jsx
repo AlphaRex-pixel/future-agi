@@ -175,14 +175,16 @@ describe("VoiceRightPanel", () => {
       },
     };
 
-    it("shows by default", async () => {
+    it("shows by default, on the summary bar and on the expanded failing eval", async () => {
       renderWithQueryClient(<VoiceRightPanel data={failingEval} />);
       await userEvent.click(screen.getByRole("tab", { name: "Evals" }));
-      expect(screen.getAllByText("Fix with Falcon").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Fix with Falcon")).toHaveLength(1);
+      await userEvent.click(screen.getByText("Concise replies"));
+      expect(screen.getAllByText("Fix with Falcon")).toHaveLength(2);
     });
 
     it("hides when the host has no Falcon flow wired", async () => {
-      renderWithQueryClient(<VoiceRightPanel data={failingEval} hideFixWithFalcon />);
+      renderWithQueryClient(<VoiceRightPanel data={failingEval} showFixWithFalcon={false} />);
       await userEvent.click(screen.getByRole("tab", { name: "Evals" }));
       await userEvent.click(screen.getByText("Concise replies"));
       expect(screen.queryByText("Fix with Falcon")).not.toBeInTheDocument();

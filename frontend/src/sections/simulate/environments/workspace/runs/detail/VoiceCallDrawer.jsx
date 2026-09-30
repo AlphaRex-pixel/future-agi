@@ -116,7 +116,7 @@ export default function VoiceCallDrawer({
         // Checklist and Graph have no data behind them on an environment run yet.
         hidePathTabs
         // Fix with Falcon isn't wired into the environment flow yet.
-        hideFixWithFalcon
+        showFixWithFalcon={false}
         // The product header defaults both arrows to enabled, so always pass
         // real values.
         onPrev={onPrev}
