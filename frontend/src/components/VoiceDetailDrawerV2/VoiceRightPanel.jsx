@@ -52,6 +52,7 @@ const VoiceRightPanel = ({
   onAction,
   hiddenActionIds = [],
   hideAnnotationTab,
+  hideFixWithFalcon = false,
 }) => {
   const [currentTab, setCurrentTab] = useState(TABS.ANALYTICS);
   const isSimulate = data?.module === "simulate";
@@ -420,6 +421,8 @@ const VoiceRightPanel = ({
               evals={normalizedEvals}
               emptyMessage="No evaluations for this call"
               showSpanColumn={false}
+              // A host with no Falcon flow wired (environment runs) hides it.
+              showFixWithFalcon={!hideFixWithFalcon}
               onFixWithFalcon={({ level, ev, failingEvals, allEvals }) => {
                 const projectId = data?.project_id;
                 const callId = data?.id;
@@ -532,6 +535,7 @@ VoiceRightPanel.propTypes = {
   onAction: PropTypes.func,
   hiddenActionIds: PropTypes.arrayOf(PropTypes.string),
   hideAnnotationTab: PropTypes.bool,
+  hideFixWithFalcon: PropTypes.bool,
 };
 
 export default VoiceRightPanel;

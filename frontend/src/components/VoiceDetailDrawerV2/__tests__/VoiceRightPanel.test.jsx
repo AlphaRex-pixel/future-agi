@@ -156,4 +156,36 @@ describe("VoiceRightPanel", () => {
     );
     getContext.mockRestore();
   });
+
+  describe("Fix with Falcon on the Evals tab", () => {
+    const failingEval = {
+      id: "call-2",
+      module: "simulate",
+      status: "completed",
+      provider: "livekit",
+      transcript: [],
+      eval_metrics: {
+        "eval-1": {
+          id: "eval-1",
+          name: "Concise replies",
+          value: "Failed",
+          type: "Pass/Fail",
+          reason: "Four sentences where three were allowed.",
+        },
+      },
+    };
+
+    it("shows by default", async () => {
+      renderWithQueryClient(<VoiceRightPanel data={failingEval} />);
+      await userEvent.click(screen.getByRole("tab", { name: "Evals" }));
+      expect(screen.getAllByText("Fix with Falcon").length).toBeGreaterThan(0);
+    });
+
+    it("hides when the host has no Falcon flow wired", async () => {
+      renderWithQueryClient(<VoiceRightPanel data={failingEval} hideFixWithFalcon />);
+      await userEvent.click(screen.getByRole("tab", { name: "Evals" }));
+      await userEvent.click(screen.getByText("Concise replies"));
+      expect(screen.queryByText("Fix with Falcon")).not.toBeInTheDocument();
+    });
+  });
 });

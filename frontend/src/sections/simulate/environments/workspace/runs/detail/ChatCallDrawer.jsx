@@ -177,8 +177,10 @@ export default function ChatCallDrawer({
             sx={{ px: 1, borderBottom: "1px solid", borderColor: "divider", minHeight: 40 }}
           >
             <Tab value="transcript" label="Transcript" sx={{ minHeight: 40 }} />
+            {/* Checklist and Graph have no data behind them yet; hidden until
+                their backend feed lands.
             <Tab value="checklist" label="Checklist" sx={{ minHeight: 40 }} />
-            <Tab value="graph" label="Graph" sx={{ minHeight: 40 }} />
+            <Tab value="graph" label="Graph" sx={{ minHeight: 40 }} /> */}
           </CustomTabs>
 
           <Box {...ownsArrowKeys} sx={{ flex: 1, minHeight: 0, overflow: "auto", outline: "none" }}>
@@ -190,8 +192,8 @@ export default function ChatCallDrawer({
               ) : (
                 <ChatTranscriptPane turns={turns} />
               ))}
-            {pane === "checklist" && <DeferredPane label="Sub-goal checklist" />}
-            {pane === "graph" && <DeferredPane label="Conversation graph" />}
+            {/* {pane === "checklist" && <DeferredPane label="Sub-goal checklist" />}
+            {pane === "graph" && <DeferredPane label="Conversation graph" />} */}
           </Box>
         </Stack>
 
