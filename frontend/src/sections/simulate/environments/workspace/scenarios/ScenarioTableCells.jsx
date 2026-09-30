@@ -7,6 +7,13 @@ import { normaliseSubTasks } from "./scenarioEditor.constants";
 // Attach a tooltip to a truncated line so hovering reveals the full value. Kept
 // thin — the tooltip lives at the row level, not per-Typography, so the same
 // wrapper gates both single-line noWrap labels and multi-line clamped bodies.
+export const ROW_HEIGHTS = {
+  Short: { lines: 3, subTasks: 3 },
+  Medium: { lines: 5, subTasks: 5 },
+  Large: { lines: 8, subTasks: 8 },
+  "Extra Large": { lines: 0, subTasks: Infinity },
+};
+
 export function TruncTooltip({ title, children }) {
   if (!title) return children;
   return (
@@ -27,7 +34,7 @@ TruncTooltip.propTypes = { title: PropTypes.node, children: PropTypes.node };
 
 // Multi-line text cell — clamped to 3 lines so the row stays a predictable
 // height, full content one hover away. Empty values render as an em-dash.
-export function ClampCell({ text }) {
+export function ClampCell({ text, lines = 3 }) {
   const value = text || "-";
   return (
     <TruncTooltip title={text}>
@@ -36,11 +43,13 @@ export function ClampCell({ text }) {
           typography: "s2",
           color: "text.secondary",
           lineHeight: 1.45,
-          display: "-webkit-box",
-          WebkitLineClamp: 3,
-          WebkitBoxOrient: "vertical",
-          overflow: "hidden",
           wordBreak: "break-word",
+          ...(lines > 0 && {
+            display: "-webkit-box",
+            WebkitLineClamp: lines,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }),
         }}
       >
         {value}
@@ -48,11 +57,11 @@ export function ClampCell({ text }) {
     </TruncTooltip>
   );
 }
-ClampCell.propTypes = { text: PropTypes.string };
+ClampCell.propTypes = { text: PropTypes.string, lines: PropTypes.number };
 
 // Sub-tasks column body: up to 3 inline, anything past that summarised as
 // "+ N more". Hovering the row reveals the full numbered list.
-export function SubTasksCell({ subTasks }) {
+export function SubTasksCell({ subTasks, limit = 3 }) {
   const list = normaliseSubTasks(subTasks);
   if (!list.length) {
     return <Typography sx={{ typography: "s3", color: "text.subtitle" }}>-</Typography>;
@@ -61,7 +70,7 @@ export function SubTasksCell({ subTasks }) {
   return (
     <TruncTooltip title={fullList}>
       <Stack spacing={0.375}>
-        {list.slice(0, 3).map((st, i) => (
+        {list.slice(0, limit).map((st, i) => (
           <Stack key={st.id} direction="row" spacing={0.75} alignItems="flex-start">
             <Typography
               sx={{
@@ -79,13 +88,13 @@ export function SubTasksCell({ subTasks }) {
             </Typography>
           </Stack>
         ))}
-        {list.length > 3 && (
+        {list.length > limit && (
           <Typography sx={{ typography: "s3", color: "text.subtitle", pl: 1.75 }}>
-            + {list.length - 3} more
+            + {list.length - limit} more
           </Typography>
         )}
       </Stack>
     </TruncTooltip>
   );
 }
-SubTasksCell.propTypes = { subTasks: PropTypes.arrayOf(SUB_TASK_SHAPE) };
+SubTasksCell.propTypes = { subTasks: PropTypes.arrayOf(SUB_TASK_SHAPE), limit: PropTypes.number };

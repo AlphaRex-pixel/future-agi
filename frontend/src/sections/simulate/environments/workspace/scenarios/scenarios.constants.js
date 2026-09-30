@@ -20,6 +20,7 @@ export const SCENARIOS_COPY = {
   filterLabel: "Filter",
   filterTitle: "Filter by use case",
   clearLabel: "Clear",
+  rowHeight: "Row height",
   groupByLabel: "Group by",
   hideGroup: "Hide this group",
   showAll: "Show all",
