@@ -7,6 +7,7 @@ import {
   Tooltip as Help,
   Typography,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import {
   Bar,
   BarChart,
@@ -131,13 +132,22 @@ export function NoMeasurement({ text = "No measurements recorded" }) {
   );
 }
 NoMeasurement.propTypes = { text: PropTypes.string };
-const tooltipStyle = {
-  backgroundColor: "#202025",
-  borderColor: "#41414b",
-  borderRadius: 8,
-  fontSize: 11,
-  color: "#fff",
-};
+// Props for every chart tooltip here, from the theme so the box reads in light
+// and dark. Recharts colours each row itself (black when the series has none,
+// as on the donut), so the rows and the heading get their colour explicitly;
+// the z-index lifts the box above the donut's centre label.
+export const chartTooltipProps = (theme) => ({
+  contentStyle: {
+    backgroundColor: theme.palette.background.paper,
+    borderColor: theme.palette.divider,
+    borderRadius: 8,
+    fontSize: 11,
+    boxShadow: theme.customShadows?.z8 ?? theme.shadows[8],
+  },
+  itemStyle: { color: theme.palette.text.primary },
+  labelStyle: { color: theme.palette.text.secondary },
+  wrapperStyle: { zIndex: 1 },
+});
 const tick = { fontSize: 10, fill: "#92929e" };
 const pieLabel = (label) =>
   ({
@@ -153,6 +163,7 @@ const pieLabel = (label) =>
     negative: "Negative",
   })[label.toLowerCase()] || label;
 export function Donut({ data, onOpen }) {
+  const theme = useTheme();
   if (!data?.total) return <NoMeasurement />;
   const emptyHeadline = Boolean(data.headline) && data.headline.share == null;
   return (
@@ -189,7 +200,7 @@ export function Donut({ data, onOpen }) {
               ))}
             </Pie>
             <Tooltip
-              contentStyle={tooltipStyle}
+              {...chartTooltipProps(theme)}
               formatter={(value, label) => [number(value, 0), pieLabel(label)]}
             />
           </PieChart>
@@ -283,6 +294,7 @@ export function Bars({
   angled = false,
   axisLabel,
 }) {
+  const theme = useTheme();
   if (
     !rows.length ||
     !rows.some((row) => series.some(({ key }) => row[key] != null))
@@ -348,7 +360,7 @@ export function Bars({
               }
             />
             <Tooltip
-              contentStyle={tooltipStyle}
+              {...chartTooltipProps(theme)}
               labelFormatter={(label, payload) =>
                 onOpen ? payload?.[0]?.payload?.label || label : label
               }
@@ -454,6 +466,7 @@ export function TrendLine({
   percentile = false,
   bucketed = false,
 }) {
+  const theme = useTheme();
   if (!rows.some((row) => row[valueKey] != null)) return <NoMeasurement />;
   return (
     <Box sx={{ height: 250, px: 1.5, pb: 2 }}>
@@ -484,7 +497,7 @@ export function TrendLine({
             tickLine={false}
           />
           <Tooltip
-            contentStyle={tooltipStyle}
+            {...chartTooltipProps(theme)}
             formatter={(value) => [format(value, "ms"), "Task duration"]}
             labelFormatter={(label) =>
               percentile
