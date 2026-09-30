@@ -173,6 +173,15 @@ KeyValueRow.propTypes = {
   value: PropTypes.any,
 };
 
+// A persona with nothing to show: missing, blank, an empty object, or an object
+// whose fields are all empty (`persona_details` sends nulls and [] when unset).
+const isEmptyPersona = (value) => {
+  if (value == null || value === "") return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object") return Object.values(value).every(isEmptyPersona);
+  return false;
+};
+
 const ScenarioView = ({ data }) => {
   const [query, setQuery] = useState("");
 
@@ -203,6 +212,14 @@ const ScenarioView = ({ data }) => {
     return { personaEntry: persona, otherEntries: others };
   }, [columns]);
 
+  // Environment (harness) calls carry an empty dataset persona column and send
+  // the persona as `persona_details`, so fall back to that when the column has
+  // nothing to show.
+  const personaValue = !isEmptyPersona(personaEntry?.col?.value)
+    ? personaEntry.col.value
+    : data?.persona_details;
+  const hasPersona = !isEmptyPersona(personaValue);
+
   const scenarioText = data?.scenario;
 
   // Filter sections based on the search query. Matches against the scenario
@@ -214,17 +231,16 @@ const ScenarioView = ({ data }) => {
   const matchedScenario = !q || matches(scenarioText);
 
   const matchedPersona = useMemo(() => {
-    if (!personaEntry) return false;
+    if (!hasPersona) return false;
     if (!q) return true;
-    const label = personaEntry.col?.column_name || "persona";
-    const value = personaEntry.col?.value;
+    const label = personaEntry?.col?.column_name || "persona";
     const valueString =
-      typeof value === "object" && value != null
-        ? JSON.stringify(value)
-        : String(value ?? "");
+      typeof personaValue === "object" && personaValue != null
+        ? JSON.stringify(personaValue)
+        : String(personaValue ?? "");
     return matches(label) || matches(valueString);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [personaEntry, q]);
+  }, [personaEntry, personaValue, hasPersona, q]);
 
   const filteredOthers = useMemo(() => {
     if (!q) return otherEntries;
@@ -242,7 +258,7 @@ const ScenarioView = ({ data }) => {
   const nothingMatched =
     q && !matchedScenario && !matchedPersona && filteredOthers.length === 0;
 
-  if (!scenarioText && columns.length === 0) {
+  if (!scenarioText && columns.length === 0 && !hasPersona) {
     return (
       <Box
         sx={{
@@ -360,7 +376,7 @@ const ScenarioView = ({ data }) => {
 
       {/* Persona section — uses the existing PersonaComponent for its
           structured rendering (icon + label). */}
-      {personaEntry && matchedPersona && (
+      {hasPersona && matchedPersona && (
         <Stack
           gap={0.75}
           sx={{
@@ -378,7 +394,7 @@ const ScenarioView = ({ data }) => {
             />
             <SectionLabel>Persona</SectionLabel>
           </Stack>
-          <PersonaComponent formattedValue={personaEntry.col?.value} />
+          <PersonaComponent formattedValue={personaValue} />
         </Stack>
       )}
 
