@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.43.2](https://github.com/future-agi/future-agi/compare/v1.43.1...v1.43.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* **images:** install libgomp1 in the serving runtime stage ([1bc9801](https://github.com/future-agi/future-agi/commit/1bc9801b4530f25d3f8bcda759bd60761b16a046))
+* **images:** install libgomp1 in the serving runtime stage ([65d1e5b](https://github.com/future-agi/future-agi/commit/65d1e5b47c449952e25583391bab98c9022c4ca6))
+
 ## [1.43.1](https://github.com/future-agi/future-agi/compare/v1.43.0...v1.43.1) (2026-09-30)
 
 
