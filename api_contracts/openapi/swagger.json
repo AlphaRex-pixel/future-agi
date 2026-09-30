@@ -4944,6 +4944,12 @@
                             "$ref": "#/definitions/AccountsErrorResponse"
                         }
                     },
+                    "503": {
+                        "description": "",
+                        "schema": {
+                            "$ref": "#/definitions/AccountsErrorResponse"
+                        }
+                    },
                     "default": {
                         "description": "Default error response",
                         "schema": {
@@ -15560,7 +15566,7 @@
             "get": {
                 "operationId": "api_setup-checks_list",
                 "summary": "Public infrastructure probe for the OSS first-run setup screen.",
-                "description": "Returns ``{\"status\": \"ok\"|\"issues\", \"mode\": ..., \"checks\": [...]}``. No auth —\nit runs before any account exists. Self-hosted only: on cloud and EE the\nroute answers 404, so neither the internal service topology nor the outbound\nprobes it triggers are reachable by an anonymous caller.",
+                "description": "Returns ``{\"status\": \"ok\"|\"issues\", \"mode\": ..., \"setup\":\n\"standalone\"|\"distributed\"|\"helm\", \"collector_http_url\": ...,\n\"account_exists\": true|false, \"checks\": [...]}``. No auth — it runs\nbefore anyone can sign in. Self-hosted only:\non cloud and EE the route answers 404, so neither the internal service\ntopology nor the outbound probes it triggers are reachable by an\nanonymous caller.",
                 "parameters": [],
                 "responses": {
                     "200": {
@@ -86501,9 +86507,11 @@
                 "name",
                 "owner",
                 "key_hash",
+                "key_prefix",
                 "models",
                 "providers",
-                "metadata"
+                "metadata",
+                "expires_at"
             ],
             "type": "object",
             "properties": {
@@ -86526,6 +86534,10 @@
                     "type": "string",
                     "minLength": 1
                 },
+                "key_prefix": {
+                    "title": "Key prefix",
+                    "type": "string"
+                },
                 "models": {
                     "type": "array",
                     "items": {
@@ -86547,6 +86559,12 @@
                         "type": "string",
                         "x-nullable": true
                     }
+                },
+                "expires_at": {
+                    "title": "Expires at",
+                    "type": "string",
+                    "format": "date-time",
+                    "x-nullable": true
                 }
             }
         },
@@ -90432,6 +90450,9 @@
             "required": [
                 "status",
                 "mode",
+                "setup",
+                "collector_http_url",
+                "account_exists",
                 "checks"
             ],
             "type": "object",
@@ -90451,6 +90472,24 @@
                         "live",
                         "experiment"
                     ]
+                },
+                "setup": {
+                    "title": "Setup",
+                    "type": "string",
+                    "enum": [
+                        "standalone",
+                        "distributed",
+                        "helm"
+                    ]
+                },
+                "collector_http_url": {
+                    "title": "Collector http url",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "account_exists": {
+                    "title": "Account exists",
+                    "type": "boolean"
                 },
                 "checks": {
                     "type": "array",
@@ -134205,6 +134244,10 @@
                 "duration_ms": {
                     "title": "Duration ms",
                     "type": "number"
+                },
+                "start_time_ms": {
+                    "title": "Start time ms",
+                    "type": "integer"
                 }
             }
         },
@@ -137263,6 +137306,15 @@
                         "name": {
                             "type": "string"
                         },
+                        "metric_statistic": {
+                            "type": "string",
+                            "enum": [
+                                "count",
+                                "sum",
+                                "mean",
+                                "percentage"
+                            ]
+                        },
                         "data": {
                             "type": "array",
                             "items": {
@@ -137338,6 +137390,15 @@
                                 },
                                 "name": {
                                     "type": "string"
+                                },
+                                "metric_statistic": {
+                                    "type": "string",
+                                    "enum": [
+                                        "count",
+                                        "sum",
+                                        "mean",
+                                        "percentage"
+                                    ]
                                 },
                                 "data": {
                                     "type": "array",
@@ -137496,6 +137557,18 @@
                                         "additionalProperties": true
                                     }
                                 },
+                                "system_metric_statistics": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                        "type": "string",
+                                        "enum": [
+                                            "count",
+                                            "sum",
+                                            "mean",
+                                            "percentage"
+                                        ]
+                                    }
+                                },
                                 "query_complete": {
                                     "type": "boolean"
                                 },
@@ -137551,6 +137624,15 @@
                                     },
                                     "name": {
                                         "type": "string"
+                                    },
+                                    "metric_statistic": {
+                                        "type": "string",
+                                        "enum": [
+                                            "count",
+                                            "sum",
+                                            "mean",
+                                            "percentage"
+                                        ]
                                     },
                                     "data": {
                                         "type": "array",
@@ -145054,6 +145136,7 @@
                 },
                 "property": {
                     "title": "Property",
+                    "description": "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the mean (avg) span latency.",
                     "type": "string",
                     "default": "average"
                 },
@@ -145148,6 +145231,17 @@
                 "name": {
                     "title": "Name",
                     "type": "string"
+                },
+                "metric_statistic": {
+                    "title": "Metric statistic",
+                    "description": "Statistic of the published system-metric series per bucket. Latency is always the mean (avg) of span latency, filtered or not. Absent for eval and annotation series.",
+                    "type": "string",
+                    "enum": [
+                        "count",
+                        "sum",
+                        "mean",
+                        "percentage"
+                    ]
                 },
                 "data": {
                     "description": "Graph points. A sampled series is published only with complete declared stratum coverage; degraded reads never publish points.",
@@ -146177,6 +146271,20 @@
                     "type": "object",
                     "x-json-value": true,
                     "description": "Any valid JSON value."
+                },
+                "system_metric_statistics": {
+                    "title": "System metric statistics",
+                    "description": "Statistic of each ``system_metrics`` series per bucket, e.g. {\"latency\": \"mean\", \"tokens\": \"sum\", \"cost\": \"mean\", \"traffic\": \"count\"}. Latency is always the mean (avg) span latency.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string",
+                        "enum": [
+                            "count",
+                            "sum",
+                            "mean",
+                            "percentage"
+                        ]
+                    }
                 },
                 "evaluations": {
                     "title": "Evaluations",
@@ -148698,6 +148806,7 @@
                 },
                 "property": {
                     "title": "Property",
+                    "description": "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the mean (avg) span latency.",
                     "type": "string",
                     "default": "average"
                 },
@@ -148768,6 +148877,17 @@
                 "name": {
                     "title": "Name",
                     "type": "string"
+                },
+                "metric_statistic": {
+                    "title": "Metric statistic",
+                    "description": "Statistic of the published system-metric series per bucket. Latency is always the mean (avg) of span latency, filtered or not. Absent for eval and annotation series.",
+                    "type": "string",
+                    "enum": [
+                        "count",
+                        "sum",
+                        "mean",
+                        "percentage"
+                    ]
                 },
                 "data": {
                     "description": "Graph points. A sampled series is published only with complete declared stratum coverage; degraded reads never publish points.",
@@ -149965,6 +150085,7 @@
                 },
                 "property": {
                     "title": "Property",
+                    "description": "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the mean (avg) span latency.",
                     "type": "string",
                     "default": "average"
                 },

@@ -2586,6 +2586,9 @@ export const OPENAPI_CONTRACT = Object.freeze({
           500: {
             $ref: "#/definitions/AccountsErrorResponse",
           },
+          503: {
+            $ref: "#/definitions/AccountsErrorResponse",
+          },
           default: {
             $ref: "#/definitions/ManagementAPIErrorResponse",
           },
@@ -60535,6 +60538,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
             name: {
               type: "string",
             },
+            metric_statistic: {
+              type: "string",
+              enum: ["count", "sum", "mean", "percentage"],
+            },
             data: {
               type: "array",
               items: {
@@ -60603,6 +60610,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
                 },
                 name: {
                   type: "string",
+                },
+                metric_statistic: {
+                  type: "string",
+                  enum: ["count", "sum", "mean", "percentage"],
                 },
                 data: {
                   type: "array",
@@ -60741,6 +60752,13 @@ export const OPENAPI_CONTRACT = Object.freeze({
                     additionalProperties: true,
                   },
                 },
+                system_metric_statistics: {
+                  type: "object",
+                  additionalProperties: {
+                    type: "string",
+                    enum: ["count", "sum", "mean", "percentage"],
+                  },
+                },
                 query_complete: {
                   type: "boolean",
                 },
@@ -60791,6 +60809,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
                   },
                   name: {
                     type: "string",
+                  },
+                  metric_statistic: {
+                    type: "string",
+                    enum: ["count", "sum", "mean", "percentage"],
                   },
                   data: {
                     type: "array",
@@ -67273,6 +67295,8 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         property: {
           title: "Property",
+          description:
+            "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the mean (avg) span latency.",
           type: "string",
           default: "average",
         },
@@ -77981,6 +78005,8 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         property: {
           title: "Property",
+          description:
+            "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the mean (avg) span latency.",
           type: "string",
           default: "average",
         },
@@ -78439,6 +78465,8 @@ export const OPENAPI_CONTRACT = Object.freeze({
         },
         property: {
           title: "Property",
+          description:
+            "Accepted for older clients and ignored for SYSTEM_METRIC graphs: each system metric has one statistic, named by the response's metric_statistic. Latency is always the mean (avg) span latency.",
           type: "string",
           default: "average",
         },
@@ -82657,9 +82685,11 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "name",
         "owner",
         "key_hash",
+        "key_prefix",
         "models",
         "providers",
         "metadata",
+        "expires_at",
       ],
       type: "object",
       properties: {
@@ -82682,6 +82712,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "string",
           minLength: 1,
         },
+        key_prefix: {
+          title: "Key prefix",
+          type: "string",
+        },
         models: {
           type: "array",
           items: {
@@ -82703,6 +82737,12 @@ export const OPENAPI_CONTRACT = Object.freeze({
             type: "string",
             "x-nullable": true,
           },
+        },
+        expires_at: {
+          title: "Expires at",
+          type: "string",
+          format: "date-time",
+          "x-nullable": true,
         },
       },
     },
@@ -85079,6 +85119,10 @@ export const OPENAPI_CONTRACT = Object.freeze({
         duration_ms: {
           title: "Duration ms",
           type: "number",
+        },
+        start_time_ms: {
+          title: "Start time ms",
+          type: "integer",
         },
       },
     },
@@ -94681,6 +94725,13 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Name",
           type: "string",
         },
+        metric_statistic: {
+          title: "Metric statistic",
+          description:
+            "Statistic of the published system-metric series per bucket. Latency is always the mean (avg) of span latency, filtered or not. Absent for eval and annotation series.",
+          type: "string",
+          enum: ["count", "sum", "mean", "percentage"],
+        },
         data: {
           description:
             "Graph points. A sampled series is published only with complete declared stratum coverage; degraded reads never publish points.",
@@ -94831,6 +94882,13 @@ export const OPENAPI_CONTRACT = Object.freeze({
         name: {
           title: "Name",
           type: "string",
+        },
+        metric_statistic: {
+          title: "Metric statistic",
+          description:
+            "Statistic of the published system-metric series per bucket. Latency is always the mean (avg) of span latency, filtered or not. Absent for eval and annotation series.",
+          type: "string",
+          enum: ["count", "sum", "mean", "percentage"],
         },
         data: {
           description:
@@ -96260,6 +96318,16 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "object",
           "x-json-value": true,
           description: "Any valid JSON value.",
+        },
+        system_metric_statistics: {
+          title: "System metric statistics",
+          description:
+            'Statistic of each ``system_metrics`` series per bucket, e.g. {"latency": "mean", "tokens": "sum", "cost": "mean", "traffic": "count"}. Latency is always the mean (avg) span latency.',
+          type: "object",
+          additionalProperties: {
+            type: "string",
+            enum: ["count", "sum", "mean", "percentage"],
+          },
         },
         evaluations: {
           title: "Evaluations",
@@ -100262,7 +100330,14 @@ export const OPENAPI_CONTRACT = Object.freeze({
       },
     },
     SetupChecksResult: {
-      required: ["status", "mode", "checks"],
+      required: [
+        "status",
+        "mode",
+        "setup",
+        "collector_http_url",
+        "account_exists",
+        "checks",
+      ],
       type: "object",
       properties: {
         status: {
@@ -100274,6 +100349,20 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Mode",
           type: "string",
           enum: ["live", "experiment"],
+        },
+        setup: {
+          title: "Setup",
+          type: "string",
+          enum: ["standalone", "distributed", "helm"],
+        },
+        collector_http_url: {
+          title: "Collector http url",
+          type: "string",
+          minLength: 1,
+        },
+        account_exists: {
+          title: "Account exists",
+          type: "boolean",
         },
         checks: {
           type: "array",
