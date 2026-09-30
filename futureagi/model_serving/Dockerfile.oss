@@ -75,12 +75,16 @@ ARG TORCH_BACKEND
 LABEL ai.futureagi.torch-backend="${TORCH_BACKEND}"
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
-# soundfile 0.12.1 ships libsndfile only in its x86_64 wheel (PyPI has no
-# aarch64 wheel), so on arm64 librosa needs the system library.
-RUN if [ "$(dpkg --print-architecture)" != "amd64" ]; then \
-        apt-get update && apt-get install -y --no-install-recommends libsndfile1 \
-        && rm -rf /var/lib/apt/lists/*; \
-    fi
+# libgomp1: torchaudio's arm64 wheel links the system OpenMP runtime (the
+# amd64 torch wheel bundles its own); the old single-stage image had it via
+# build-essential. soundfile 0.12.1 ships libsndfile only in its x86_64
+# wheel (PyPI has no aarch64 wheel), so on arm64 librosa needs the system
+# library.
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && if [ "$(dpkg --print-architecture)" != "amd64" ]; then \
+        apt-get install -y --no-install-recommends libsndfile1; \
+    fi \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/embedding
 COPY --from=build /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=build /usr/local/bin /usr/local/bin
