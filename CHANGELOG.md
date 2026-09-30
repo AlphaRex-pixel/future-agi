@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.43.1](https://github.com/future-agi/future-agi/compare/v1.43.0...v1.43.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **images:** keep .pyi stubs in the serving image ([59db1e9](https://github.com/future-agi/future-agi/commit/59db1e940308e806f93bce4efc5353d7229a0a83))
+* **images:** keep .pyi stubs in the serving image ([7a14f32](https://github.com/future-agi/future-agi/commit/7a14f32266324552f7281b5465951e2abb03ea8f))
+
 ## [1.43.0](https://github.com/future-agi/future-agi/compare/v1.42.0...v1.43.0) (2026-09-30)
 
 
