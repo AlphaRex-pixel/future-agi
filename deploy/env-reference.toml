@@ -703,6 +703,12 @@ the default backend ([Backend variants](/docs/self-hosting/images#backend-varian
     text = "Most scenarios one sandbox runs at once, 1 to 8: any other value fails every hosted run. The sandbox's CPU and memory can lower it further."
 
     [[part.section.row]]
+    keys = ["HARNESS_MAX_EXECUTIONS_PER_RUN"]
+    default = "`200`"
+    setups = ["S", "D", "H"]
+    text = "Most scenarios × trials one simulation Run may submit; a larger Run is refused with `run_too_large`."
+
+    [[part.section.row]]
     keys = ["HARNESS_RESOURCE_PROFILES"]
     default = "`[]`: every run uses the provider's fixed sandbox size"
     setups = ["S", "D", "H"]

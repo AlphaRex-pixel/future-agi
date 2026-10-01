@@ -1096,6 +1096,8 @@ HARNESS_PARALLELISM_ENABLED = os.getenv("HARNESS_PARALLELISM_ENABLED", "").lower
     "yes",
 )
 HARNESS_MAX_WORLD_SLOTS = int(os.getenv("HARNESS_MAX_WORLD_SLOTS", "8"))
+# Most scenarios × trials one simulation Run may submit.
+HARNESS_MAX_EXECUTIONS_PER_RUN = int(os.getenv("HARNESS_MAX_EXECUTIONS_PER_RUN", "200"))
 # Each profile is an operator-certified size/connector/snapshot combination.
 HARNESS_RESOURCE_PROFILES = json.loads(os.getenv("HARNESS_RESOURCE_PROFILES", "[]"))
 # Comma-separated allowlist of provider runtime identifiers certified for W>1.
