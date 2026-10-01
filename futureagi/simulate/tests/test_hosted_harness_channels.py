@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from django.test import override_settings
 from django.utils import timezone as django_timezone
 from rest_framework.test import APIClient
 
@@ -610,6 +611,39 @@ def _headers(capability):
         "HTTP_AUTHORIZATION": f"Bearer {capability.token}",
         "HTTP_X_HARNESS_FENCE": capability.fence,
     }
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "requested_budget,effective_budget",
+    [
+        (1_073_741_824, 10_737_418_240),
+        (21_474_836_480, 21_474_836_480),
+    ],
+)
+def test_hosted_job_budget_floor_preserves_request_identity(
+    organization, requested_budget, effective_budget
+):
+    payload = _payload()
+    payload["artifacts"]["max_artifact_bytes"] = requested_budget
+    request_digest = canonical_digest(payload)
+    with override_settings(HARNESS_MAX_ARTIFACT_BYTES=10_737_418_240):
+        job, created = create_hosted_job(
+            organization, payload, idempotency_key="configured-artifact-budget"
+        )
+    with override_settings(HARNESS_MAX_ARTIFACT_BYTES=32_212_254_720):
+        retried, retry_created = create_hosted_job(
+            organization, payload, idempotency_key="configured-artifact-budget"
+        )
+
+    job.refresh_from_db()
+    assert created is True
+    assert retry_created is False
+    assert retried.id == job.id
+    assert job.max_artifact_bytes == effective_budget
+    assert job.payload["artifacts"]["max_artifact_bytes"] == effective_budget
+    assert job.request_digest == request_digest
+    assert payload["artifacts"]["max_artifact_bytes"] == requested_budget
 
 
 @pytest.mark.django_db
@@ -1618,7 +1652,8 @@ def test_artifact_upload_is_content_addressed_and_manifest_is_acked(organization
 
 
 @pytest.mark.django_db
-def test_artifact_budget_is_rechecked_after_concurrent_upload(organization):
+def test_artifact_budget_is_rechecked_after_concurrent_upload(organization, settings):
+    settings.HARNESS_MAX_ARTIFACT_BYTES = 10
     payload = _payload(
         artifacts={
             "level": "full",
