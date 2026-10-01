@@ -81,8 +81,6 @@ export default function RunTraceTable({
     defaultTraceColumns(),
   );
   const [filterAnchor, setFilterAnchor] = useState(null);
-  // The closed groups, or null while every group is closed (the start). Held
-  // here so the toggle next to Filter can drive the table.
   // Which groups are open lives here, not in the table: a filter's loading
   // and empty states unmount the table, and its own state would go with it,
   // folding every group back up. Labels differ per axis, so each axis keeps
