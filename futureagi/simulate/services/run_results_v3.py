@@ -166,12 +166,14 @@ def _harness_scenarios(
     if not call_ids:
         return {}
     scenarios: dict[str, HostedHarnessScenario] = {}
-    executions = HostedHarnessExecution.objects.filter(
+    # all_objects, as the sub-goal filter and facet joins do: a pruned
+    # scenario still describes the calls it ran.
+    executions = HostedHarnessExecution.all_objects.filter(
         call_execution_id__in=call_ids
     ).select_related("source_scenario")
     for execution in executions:
         scenarios[str(execution.call_execution_id)] = execution.source_scenario
-    for scenario in HostedHarnessScenario.objects.filter(
+    for scenario in HostedHarnessScenario.all_objects.filter(
         call_execution_id__in=call_ids
     ):
         scenarios.setdefault(str(scenario.call_execution_id), scenario)

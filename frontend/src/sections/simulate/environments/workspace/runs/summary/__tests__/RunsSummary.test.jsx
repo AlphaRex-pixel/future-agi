@@ -200,8 +200,10 @@ describe("RunsSummary", () => {
     expect(screen.queryByRole("button", { name: "Stop simulation" })).toBeNull();
   });
 
-  it("marks the newest run on the graph's axis", () => {
+  it("marks the newest run on the graph's axis", async () => {
     renderSummary();
+    fireEvent.mouseDown(screen.getByText("Latest 1 run"));
+    fireEvent.click(await screen.findByRole("option", { name: "Latest 2 runs" }));
     expect(lastChart().options.xaxis.categories).toEqual(["Run 1", "Run 2 · latest"]);
   });
 
@@ -258,12 +260,13 @@ describe("RunsSummary", () => {
     expect(screen.getByText(/Rows per page/)).toBeInTheDocument();
   });
 
-  it("reads the graph's runs from their own first page, not the table's page", () => {
+  it("draws the graph from the head of the table's first page, not a query of its own", () => {
     renderSummary();
-    expect(useEnvironmentRuns).toHaveBeenCalledWith(env, envState, {
-      page: 0,
-      pageSize: 1,
-    });
+    const pagings = useEnvironmentRuns.mock.calls.map((call) => call[2]);
+    expect(pagings).toContainEqual({ page: 0, pageSize: 10 });
+    expect(pagings.every((p) => p.pageSize === 10)).toBe(true);
+    // Default "Latest 1 run": only the newest run reaches the graph.
+    expect(lastChart().options.xaxis.categories).toHaveLength(1);
   });
 
   it("pins the runs table's header, since the table scrolls under a fixed graph", () => {

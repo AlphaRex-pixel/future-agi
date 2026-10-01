@@ -24,10 +24,17 @@ export function useRunsSummary(env, envState, paging, graphRuns = RUNS_PAGE_SIZE
     coveredScenarioCount,
     isLoading: runsLoading,
   } = useEnvironmentRuns(env, envState, paging);
-  const { runs: graphRunList = [] } = useEnvironmentRuns(env, envState, {
+  // The graph's runs are the newest few: the head of the table's first page.
+  // Same page and size as the table's, so on page 1 it is the same query and
+  // poller rather than a second one.
+  const { runs: firstPage = [] } = useEnvironmentRuns(env, envState, {
     page: 0,
-    pageSize: graphRuns,
+    pageSize: paging?.pageSize ?? RUNS_PAGE_SIZE,
   });
+  const graphRunList = useMemo(
+    () => firstPage.slice(0, graphRuns),
+    [firstPage, graphRuns],
+  );
   const scoredRuns = [
     ...graphRunList,
     ...runs.filter((r) => !graphRunList.some((g) => g.id === r.id)),

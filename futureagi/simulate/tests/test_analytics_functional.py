@@ -1562,6 +1562,38 @@ class TestRunResultsV3Views:
             {"value": "pin_verified", "count": 1},
         ]
 
+    @pytest.mark.parametrize("layout", ["trial", "registration"])
+    def test_a_pruned_scenarios_sub_goals_show_where_they_are_counted(
+        self,
+        layout,
+        auth_client,
+        organization,
+        workspace,
+        test_execution,
+        analytics_call_executions,
+    ):
+        call = analytics_call_executions[0]
+        call.call_metadata = {"harness_scenario_key": "pin-reset"}
+        call.save(update_fields=["call_metadata"])
+        authored = self._link_call_to_scenario(
+            layout,
+            self._harness_job(organization, workspace),
+            call,
+            sub_goals=["pin_verified"],
+        )
+        authored.deleted = True
+        authored.save(update_fields=["deleted"])
+
+        response = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/calls/"
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        body = response.json()
+        row = next(row for row in body["results"] if row["id"] == str(call.id))
+        assert row["sub_goals"] == ["pin_verified"]
+        assert body["facets"]["sub_goal"] == [{"value": "pin_verified", "count": 1}]
+
     def test_receipt_sub_goals_keep_the_authored_ones_out_of_filters_and_facets(
         self,
         auth_client,
