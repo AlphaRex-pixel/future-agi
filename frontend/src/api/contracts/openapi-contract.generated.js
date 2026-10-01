@@ -84746,6 +84746,13 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "string",
           "x-nullable": true,
         },
+        kind: {
+          title: "Kind",
+          description:
+            "Set on the v3 call detail: a sub-goal check or an evaluation",
+          type: "string",
+          enum: ["evaluation", "sub_goal"],
+        },
         visible: {
           title: "Visible",
           type: "boolean",
@@ -98425,7 +98432,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
       },
     },
     EvaluationColumn: {
-      required: ["id", "name"],
+      required: ["id", "name", "kind"],
       type: "object",
       properties: {
         id: {
@@ -98437,6 +98444,11 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Name",
           type: "string",
           minLength: 1,
+        },
+        kind: {
+          title: "Kind",
+          type: "string",
+          enum: ["evaluation", "sub_goal"],
         },
       },
     },
