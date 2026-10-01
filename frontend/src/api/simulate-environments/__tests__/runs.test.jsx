@@ -217,6 +217,7 @@ describe("useEnvironmentRuns", () => {
     expect(axios.get).toHaveBeenCalledTimes(1);
     expect(axios.get).toHaveBeenCalledWith(
       endpoints.runTests.detailExecutions("rt1"),
+      { params: { page: 1, limit: 10 } },
     );
 
     const [first, second, third] = result.current.runs;

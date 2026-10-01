@@ -43,7 +43,7 @@ const env = { id: "env-1", name: "Refund Support", version: "v3" };
 const envState = { scenarios: Array.from({ length: 20 }, (_, i) => ({ id: `s${i}` })) };
 
 function renderSummary(props = {}, runs = RUNS, isLoading = false) {
-  useEnvironmentRuns.mockReturnValue({ runs, isLoading });
+  useEnvironmentRuns.mockReturnValue({ runs, count: runs.length, isLoading });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
@@ -229,7 +229,7 @@ describe("RunsSummary", () => {
 
     it("keeps the user's pick once they change it", () => {
       renderSummary({}, manyEvals);
-      fireEvent.mouseDown(screen.getByRole("combobox"));
+      fireEvent.mouseDown(screen.getByText("5 of 7 evals"));
       fireEvent.click(screen.getByRole("option", { name: /E7/ }));
       expect(lastChart().series.map((x) => x.name)).toEqual([
         "E1", "E2", "E3", "E4", "E5", "E7",
