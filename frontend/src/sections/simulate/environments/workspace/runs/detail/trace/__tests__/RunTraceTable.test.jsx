@@ -335,7 +335,9 @@ describe("RunTraceTable", () => {
     let loading = false;
     const base = useRunCalls.getMockImplementation();
     useRunCalls.mockImplementation((...args) =>
-      loading ? { ...base(...args), tasks: [], groups: [], isLoading: true } : base(...args),
+      loading
+        ? { ...base(...args), tasks: [], groups: [], isLoading: true }
+        : base(...args),
     );
     const { rerender } = renderTable();
 
@@ -359,7 +361,10 @@ describe("RunTraceTable", () => {
     const base = useRunCalls.getMockImplementation();
     useRunCalls.mockImplementation((...args) => ({
       ...base(...args),
-      facets: { ...FACETS, status: [...FACETS.status, { value: "inconclusive", count: 1 }] },
+      facets: {
+        ...FACETS,
+        status: [...FACETS.status, { value: "inconclusive", count: 1 }],
+      },
     }));
     renderTable();
 
@@ -472,6 +477,94 @@ describe("RunTraceTable", () => {
       expect(persona.refund()).toBeInTheDocument();
       expect(persona.escalate()).toBeInTheDocument();
       expect(persona.timeout()).toBeInTheDocument();
+    });
+
+    const groupBy = async (user, name) => {
+      await user.click(screen.getByRole("button", { name: /Group by/ }));
+      await user.click(screen.getByRole("menuitem", { name }));
+    };
+
+    it("keeps the groups Expand all opened after a Group by round trip", async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await user.click(chip(/Expand all/));
+      await groupBy(user, "Status");
+      await user.click(header("Failed"));
+      await groupBy(user, "Use case");
+
+      expect(persona.refund()).toBeInTheDocument();
+      expect(persona.escalate()).toBeInTheDocument();
+      expect(persona.timeout()).toBeInTheDocument();
+    });
+
+    it("keeps a group opened by hand after touching another Group by", async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await user.click(header("Refund a double charge"));
+      await groupBy(user, "Status");
+      await user.click(header("Failed"));
+      await groupBy(user, "Use case");
+
+      expect(persona.refund()).toBeInTheDocument();
+      expect(persona.escalate()).toBeNull();
+    });
+
+    it("closes groups under every Group by on Collapse all", async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await user.click(header("Refund a double charge"));
+      await groupBy(user, "Status");
+      await user.click(chip(/Expand all/));
+      await user.click(chip(/Collapse all/));
+      await groupBy(user, "Use case");
+
+      expect(persona.refund()).toBeNull();
+    });
+
+    it("keeps groups first seen under Expand all open after one closes on another filter", async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await user.click(chip("Failing"));
+      await user.click(chip(/Expand all/));
+      await user.click(chip(/^All/));
+      await user.click(chip(/^Errored/));
+      await user.click(header("Handle a timeout"));
+      await user.click(chip(/^All/));
+
+      expect(persona.refund()).toBeInTheDocument();
+      expect(persona.escalate()).toBeInTheDocument();
+      expect(persona.timeout()).toBeNull();
+    });
+
+    // The table unmounts while a filter loads; the parent keeps the "already
+    // opened for this call" marker so the remount doesn't reopen its group.
+    it("keeps the open call's group closed after the user closes it and a filter loads", async () => {
+      const user = userEvent.setup();
+      let loading = false;
+      const base = useRunCalls.getMockImplementation();
+      useRunCalls.mockImplementation((...args) =>
+        loading
+          ? { ...base(...args), tasks: [], groups: [], isLoading: true }
+          : base(...args),
+      );
+      const props = {
+        executionId: "ex1",
+        onOpenCall: vi.fn(),
+        activeCallId: "t2",
+      };
+      const { rerender } = render(<RunTraceTable {...props} />);
+      expect(persona.escalate()).toBeInTheDocument();
+
+      await user.click(header("Escalate to a human"));
+      expect(persona.escalate()).toBeNull();
+
+      loading = true;
+      await user.click(chip("Failing"));
+      expect(screen.getByText("Loading calls…")).toBeInTheDocument();
+
+      loading = false;
+      rerender(<RunTraceTable {...props} />);
+      expect(persona.escalate()).toBeNull();
     });
 
     it("starts other filters closed after Collapse all", async () => {

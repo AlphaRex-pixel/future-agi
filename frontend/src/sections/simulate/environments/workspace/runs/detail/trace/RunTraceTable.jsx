@@ -1,5 +1,12 @@
 import PropTypes from "prop-types";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Box,
   Stack,
@@ -75,19 +82,18 @@ export default function RunTraceTable({
 
   // Which groups are open lives here, not in the table: a filter's loading
   // and empty states unmount the table, and its own state would go with it,
-  // folding every group back up. The opened labels are tagged with the axis
-  // they were set under, since labels differ per axis; Expand all carries over.
+  // folding every group back up. Labels differ per axis, so each axis keeps
+  // its own opened set and a change under one never touches another; Expand
+  // all carries over.
   const [groupState, setGroupState] = useState({
-    groupBy,
-    ...CLOSED_GROUP_VIEW,
+    all: false,
+    expandedByAxis: {},
   });
   const groupView = useMemo(
     () => ({
       all: groupState.all,
       expanded:
-        groupState.groupBy === groupBy
-          ? groupState.expanded
-          : CLOSED_GROUP_VIEW.expanded,
+        groupState.expandedByAxis[groupBy] ?? CLOSED_GROUP_VIEW.expanded,
     }),
     [groupState, groupBy],
   );
@@ -96,13 +102,16 @@ export default function RunTraceTable({
       setGroupState((prev) => {
         const current = {
           all: prev.all,
-          expanded:
-            prev.groupBy === groupBy
-              ? prev.expanded
-              : CLOSED_GROUP_VIEW.expanded,
+          expanded: prev.expandedByAxis[groupBy] ?? CLOSED_GROUP_VIEW.expanded,
         };
         const next = typeof update === "function" ? update(current) : update;
-        return { groupBy, ...next };
+        // Collapse all closes every axis, not just the one on screen.
+        if (next === CLOSED_GROUP_VIEW)
+          return { all: false, expandedByAxis: {} };
+        return {
+          all: next.all,
+          expandedByAxis: { ...prev.expandedByAxis, [groupBy]: next.expanded },
+        };
       }),
     [groupBy],
   );
