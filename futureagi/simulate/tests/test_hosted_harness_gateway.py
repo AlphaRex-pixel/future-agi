@@ -1316,7 +1316,10 @@ def test_offline_delivery_replays_durable_guest_spool(monkeypatch):
             archive.addfile(member, io.BytesIO(body))
 
     sandbox = _Sandbox()
-    sandbox.fs.download_file = lambda path, timeout=None: archive_body.getvalue()
+    sandbox.fs.download_file_stream = lambda path, timeout=None: (
+        archive_body.getvalue()[offset : offset + 64]
+        for offset in range(0, len(archive_body.getvalue()), 64)
+    )
     gateway = object.__new__(HostedHarnessGateway)
     gateway.client = SimpleNamespace(get=lambda *args, **kwargs: sandbox)
     attempt = SimpleNamespace(
@@ -1327,13 +1330,16 @@ def test_offline_delivery_replays_durable_guest_spool(monkeypatch):
     replayed = []
     recovered_receipt_options = []
 
+    def artifact_ingest(*args, **kwargs):
+        replayed.append(("artifact", kwargs["stream"].read()))
+
     def receipt_ingest(*args, **kwargs):
         replayed.append(("receipt", args[1]))
         recovered_receipt_options.append(kwargs)
 
     monkeypatch.setattr(
         "simulate.services.hosted_harness_ingestion.ingest_artifact",
-        lambda *args, **kwargs: replayed.append(("artifact", kwargs)),
+        artifact_ingest,
     )
     monkeypatch.setattr(
         "simulate.services.hosted_harness_ingestion.ingest_event_batch",
@@ -1360,7 +1366,46 @@ def test_offline_delivery_replays_durable_guest_spool(monkeypatch):
         "receipt",
         "manifest",
     ]
-    assert replayed[0][1]["stream"].read() == artifact
+    assert replayed[0][1] == artifact
+
+
+@pytest.mark.parametrize("overflow", ["compressed", "expanded"])
+def test_offline_delivery_rejects_oversized_spool_before_replay(monkeypatch, overflow):
+    max_bytes = 16 * 1024 * 1024
+    closed = []
+
+    def chunks(path, timeout=None):
+        try:
+            if overflow == "compressed":
+                chunk = b"x" * (64 * 1024)
+                for _ in range(max_bytes // len(chunk) + 1):
+                    yield chunk
+            else:
+                body = io.BytesIO()
+                with tarfile.open(fileobj=body, mode="w:gz") as archive:
+                    member = tarfile.TarInfo("outbound-spool/artifacts/large.bin")
+                    member.size = max_bytes + 1
+                    archive.addfile(member, io.BytesIO(b"\0" * member.size))
+                yield body.getvalue()
+        finally:
+            closed.append(True)
+
+    sandbox = _Sandbox()
+    sandbox.fs.download_file_stream = chunks
+    gateway = object.__new__(HostedHarnessGateway)
+    gateway.client = SimpleNamespace(get=lambda *args, **kwargs: sandbox)
+    attempt = SimpleNamespace(
+        provider_ref="sandbox-1", job=SimpleNamespace(max_artifact_bytes=0)
+    )
+    monkeypatch.setattr(
+        "simulate.services.hosted_harness_ingestion.ingest_artifact",
+        lambda *args, **kwargs: pytest.fail("oversized spool must not be replayed"),
+    )
+
+    with pytest.raises(HostedHarnessError) as error:
+        gateway._recover_offline_delivery(attempt)
+    assert error.value.code == "offline_delivery_too_large"
+    assert closed == [True]
 
 
 def test_offline_control_processes_scenario_registration(monkeypatch):

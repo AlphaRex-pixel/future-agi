@@ -197,15 +197,25 @@ def test_authoring_cannot_be_ready_without_registered_durable_snapshot(user, wor
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    "saved_budget,effective_budget",
+    [
+        (1_073_741_824, 10_737_418_240),
+        (21_474_836_480, 21_474_836_480),
+    ],
+)
 def test_selected_run_creates_independent_scenario_trials_and_preserves_history(
-    user, workspace
+    user, workspace, saved_budget, effective_budget
 ):
-    environment, _ = create_hosted_job(
-        user.organization,
-        _v1_payload(scenario_count=2),
-        idempotency_key="authored-environment",
-        workspace=workspace,
-    )
+    environment_payload = _v1_payload(scenario_count=2)
+    environment_payload["artifacts"]["max_artifact_bytes"] = saved_budget
+    with override_settings(HARNESS_MAX_ARTIFACT_BYTES=0):
+        environment, _ = create_hosted_job(
+            user.organization,
+            environment_payload,
+            idempotency_key="authored-environment",
+            workspace=workspace,
+        )
     attempt = register_attempt(
         environment.id, endpoint_base_url="https://harness.example.test"
     ).attempt
@@ -247,24 +257,25 @@ def test_selected_run_creates_independent_scenario_trials_and_preserves_history(
     assert environment.test_execution_id is None
     assert environment.run_test.executions.filter(deleted=False).count() == 0
 
-    first, created = create_selected_harness_run(
-        environment,
-        scenario_keys=["scenario-a", "scenario-b"],
-        trials=3,
-        idempotency_key="submission-one",
-    )
-    same, duplicate_created = create_selected_harness_run(
-        environment,
-        scenario_keys=["scenario-a", "scenario-b"],
-        trials=3,
-        idempotency_key="submission-one",
-    )
-    second, second_created = create_selected_harness_run(
-        environment,
-        scenario_keys=["scenario-a"],
-        trials=1,
-        idempotency_key="submission-two",
-    )
+    with override_settings(HARNESS_MAX_ARTIFACT_BYTES=10_737_418_240):
+        first, created = create_selected_harness_run(
+            environment,
+            scenario_keys=["scenario-a", "scenario-b"],
+            trials=3,
+            idempotency_key="submission-one",
+        )
+        same, duplicate_created = create_selected_harness_run(
+            environment,
+            scenario_keys=["scenario-a", "scenario-b"],
+            trials=3,
+            idempotency_key="submission-one",
+        )
+        second, second_created = create_selected_harness_run(
+            environment,
+            scenario_keys=["scenario-a"],
+            trials=1,
+            idempotency_key="submission-two",
+        )
 
     assert created is True
     assert duplicate_created is False
@@ -272,6 +283,11 @@ def test_selected_run_creates_independent_scenario_trials_and_preserves_history(
     assert second_created is True
     assert second.id != first.id
     assert first.environment_id == environment.id
+    assert first.max_artifact_bytes == effective_budget
+    assert first.payload["artifacts"]["max_artifact_bytes"] == effective_budget
+    environment.refresh_from_db()
+    assert environment.max_artifact_bytes == saved_budget
+    assert environment.payload["artifacts"]["max_artifact_bytes"] == saved_budget
     assert first.test_execution.trials == 3
     assert first.test_execution.total_calls == 6
     assert first.payload["runtime"]["max_duration_seconds"] >= 6 * 360

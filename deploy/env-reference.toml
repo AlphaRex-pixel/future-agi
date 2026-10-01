@@ -631,6 +631,12 @@ the default backend ([Backend variants](/docs/self-hosting/images#backend-varian
     text = "Fraction of hosted voice calls selected for optional simulator caller interruptions. Set `0` to disable or a value up to `1` to enable more calls; selected calls may contain multiple interjections."
 
     [[part.section.row]]
+    keys = ["HARNESS_MAX_ARTIFACT_BYTES"]
+    default = "`1073741824` (1 GiB)"
+    setups = ["S", "D", "H"]
+    text = "Minimum cumulative artifact budget, in bytes, for new hosted environment jobs and simulation Runs. Applies to explicit smaller request budgets and Runs of saved environments; larger saved budgets are preserved. Existing jobs are unchanged. `0` is not an unlimited sentinel."
+
+    [[part.section.row]]
     keys = ["ALK_HOSTED_BASE_EGRESS_DOMAINS"]
     default = "empty"
     setups = ["S", "D", "H"]
