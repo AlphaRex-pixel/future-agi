@@ -126,6 +126,37 @@ describe("WorkspacePanels", () => {
     expect(screen.getByRole("tab", { name: /Runs 3/ })).toBeInTheDocument();
   });
 
+  // The executions list comes a page at a time; the environment's own run
+  // count is the whole total and is there before the list loads.
+  it("badges runs from the environment's run count, not the first page of runs", () => {
+    runsApi.useEnvironmentRuns.mockReturnValue({
+      runs: Array.from({ length: 10 }, (_, i) => ({ id: `r${i}` })),
+      isLoading: false,
+    });
+    renderPanels({
+      counts: { scenarios: 5, evals: 2 },
+      overviewCounts: { runs: 23 },
+    });
+    expect(screen.getByRole("tab", { name: /Runs 23/ })).toBeInTheDocument();
+  });
+
+  it("shows the Runs tab from the environment's run count while the runs list loads", () => {
+    runsApi.useEnvironmentRuns.mockReturnValue({ runs: [], isLoading: true });
+    renderPanels({
+      counts: { scenarios: 5, evals: 2 },
+      overviewCounts: { runs: 4 },
+    });
+    expect(screen.getByRole("tab", { name: /Runs 4/ })).toBeInTheDocument();
+  });
+
+  it("hides the Runs tab when the environment's run count is zero", () => {
+    renderPanels({
+      counts: { scenarios: 5, evals: 2 },
+      overviewCounts: { runs: 0 },
+    });
+    expect(screen.queryByRole("tab", { name: /Runs/ })).toBeNull();
+  });
+
   it("shows no numeric badges when counts is omitted (builder still streaming)", () => {
     renderPanels({
       envState: baseEnvState({ runs: [{ id: "r1" }] }),

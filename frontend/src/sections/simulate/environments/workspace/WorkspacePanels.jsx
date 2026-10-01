@@ -55,10 +55,14 @@ export default function WorkspacePanels({
   const navigate = useNavigate();
   const { runs, isLoading: runsLoading } = useEnvironmentRuns(env, envState);
 
+  // The environment's run count is the whole total and comes with the
+  // environment; the runs list comes a page at a time. A run the list already
+  // has that the count hasn't caught up with still counts.
+  const runsTotal = Math.max(overviewCounts?.runs ?? 0, runs.length);
   // Runs appears once the environment has a run. While the list is still
   // loading, a deep link to ?tab=runs keeps the tab so it does not bounce to
   // the Overview and back.
-  const showRuns = runs.length > 0 || (runsLoading && tab === "runs");
+  const showRuns = runsTotal > 0 || (runsLoading && tab === "runs");
   const tabs = showRuns ? WORKSPACE_TABS : WORKSPACE_TABS.filter((t) => t.id !== "runs");
 
   // Default landing is the Overview, which is also the first tab in the rail.
@@ -77,12 +81,11 @@ export default function WorkspacePanels({
     navigate(paths.dashboard.simulate.environments.execution(env.id, runTestId, run.executionId));
   };
 
-  // Runs is badged from the live executions (envState.runs is empty for a
-  // harness env); the rest come from the injected client-state counts. A null
-  // `counts` (builder still streaming) hides every numeric badge.
+  // The rest come from the injected client-state counts. A null `counts`
+  // (builder still streaming) hides every numeric badge.
   const badgeCount = (badge) => {
     if (!counts) return null;
-    if (badge === "runs") return runs.length;
+    if (badge === "runs") return runsTotal;
     return counts[badge] ?? 0;
   };
 

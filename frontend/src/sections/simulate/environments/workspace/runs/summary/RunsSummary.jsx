@@ -77,7 +77,8 @@ export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
             Simulations summary
           </Typography>
           <Typography sx={{ typography: "s1", color: "text.secondary" }}>
-            {runCount} {runCount === 1 ? "run" : "runs"} · {scenarioCount} scenarios
+            {runCount} {runCount === 1 ? "run" : "runs"} · {scenarioCount}{" "}
+            {scenarioCount === 1 ? "scenario" : "scenarios"}
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
