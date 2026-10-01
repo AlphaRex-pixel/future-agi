@@ -803,15 +803,17 @@ class LivekitService(VoiceServiceBlueprint):
         track_specs = [
             ("stereo", f"{s3_prefix}_stereo_recording.mp3", None),
             ("mono", f"{s3_prefix}_recording.mp3", ["-ac", "1"]),
+            # The room recording puts our simulator (the customer) on the left
+            # channel and the tested agent (the assistant) on the right.
             (
                 "assistant",
                 f"{s3_prefix}_assistant_recording.mp3",
-                ["-filter_complex", "pan=mono|c0=c0"],
+                ["-filter_complex", "pan=mono|c0=c1"],
             ),
             (
                 "customer",
                 f"{s3_prefix}_customer_recording.mp3",
-                ["-filter_complex", "pan=mono|c0=c1"],
+                ["-filter_complex", "pan=mono|c0=c0"],
             ),
         ]
 
