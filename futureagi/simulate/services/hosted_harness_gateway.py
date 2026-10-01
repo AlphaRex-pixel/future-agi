@@ -14,6 +14,7 @@ import tarfile
 import tempfile
 import time
 import uuid
+import zlib
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import contextmanager, nullcontext
 from datetime import timedelta
@@ -3311,11 +3312,15 @@ class HostedHarnessGateway:
             return False
         max_bytes = int(attempt.job.max_artifact_bytes * 1.1) + 16 * 1024 * 1024
         # Recordings can make the spool many GiB: keep it on disk, never in worker memory.
-        with tempfile.TemporaryFile() as body:
+        # Inflate while downloading so replay can read members in any order; every backward
+        # seek in a gzip stream would re-inflate it from the first byte.
+        with tempfile.TemporaryFile() as tar:
             chunks = sandbox.fs.download_file_stream(
                 "/tmp/offline-outbound.tar.gz", 180
             )
+            inflater = zlib.decompressobj(wbits=zlib.MAX_WBITS | 16)
             received = 0
+            inflated = 0
             try:
                 for chunk in chunks:
                     received += len(chunk)
@@ -3326,13 +3331,32 @@ class HostedHarnessGateway:
                             status_code=413,
                             retryable=False,
                         )
-                    body.write(chunk)
+                    while chunk:
+                        block = inflater.decompress(chunk, 1024 * 1024)
+                        chunk = inflater.unconsumed_tail
+                        if inflater.unused_data:
+                            # `tar -czf` writes one gzip member; anything after it would
+                            # be dropped from replay and pile up in memory.
+                            raise ValueError(
+                                "offline outbound archive has data after its gzip stream"
+                            )
+                        inflated += len(block)
+                        if inflated > max_bytes:
+                            raise HostedHarnessError(
+                                "offline_delivery_too_large",
+                                "inflated offline outbound archive exceeds the job artifact budget",
+                                status_code=413,
+                                retryable=False,
+                            )
+                        tar.write(block)
             finally:
                 close = getattr(chunks, "close", None)
                 if close is not None:
                     close()
-            body.seek(0)
-            with tarfile.open(fileobj=body, mode="r:gz") as archive:
+            if not inflater.eof:
+                raise EOFError("offline outbound archive is truncated")
+            tar.seek(0)
+            with tarfile.open(fileobj=tar, mode="r:") as archive:
                 return self._replay_offline_spool(attempt, archive, max_bytes)
 
     def _replay_offline_spool(
