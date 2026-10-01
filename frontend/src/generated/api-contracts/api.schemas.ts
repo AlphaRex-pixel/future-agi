@@ -21021,6 +21021,7 @@ export interface RunTestExecutionsResponseApi {
   /** @minLength 1 */
   readonly previous?: string;
   readonly results?: readonly TestExecutionItemResponseApi[];
+  readonly covered_scenario_count?: number;
 }
 
 export interface SimulationPreviewItemApi {
