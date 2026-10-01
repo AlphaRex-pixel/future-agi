@@ -76,6 +76,20 @@ export const TRACE_COLUMNS = [
     group: "System metrics",
   },
   {
+    key: "stopLatency",
+    label: "Stop latency",
+    defaultOn: true,
+    width: 140,
+    group: "System metrics",
+  },
+  {
+    key: "aiInterruptions",
+    label: "AI interruptions",
+    defaultOn: true,
+    width: 150,
+    group: "System metrics",
+  },
+  {
     key: "tokens",
     label: "Tokens",
     defaultOn: true,

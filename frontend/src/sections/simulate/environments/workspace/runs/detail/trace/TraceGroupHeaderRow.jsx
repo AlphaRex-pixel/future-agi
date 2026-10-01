@@ -196,6 +196,8 @@ export default function TraceGroupHeaderRow({
       {show("csat") && numCell(a.csat, "", "csat")}
       {show("turns") && numCell(a.turns, "", "turns")}
       {show("latency") && numCell(a.latency, "ms", "latency")}
+      {show("stopLatency") && numCell(a.stopLatency, "ms")}
+      {show("aiInterruptions") && numCell(a.aiInterruptions)}
       {show("tokens") && numCell(a.tokens, "", undefined, "Total")}
       {showEvals &&
         evals.map((e) => {

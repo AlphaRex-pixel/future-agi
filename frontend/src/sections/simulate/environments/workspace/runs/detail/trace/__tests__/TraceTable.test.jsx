@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render as renderWithProviders } from "src/utils/test-utils";
 
 import TraceTable from "../TraceTable";
 
@@ -31,6 +32,60 @@ const table = (props) => (
   <TraceTable groups={PAGE1} evals={[]} onOpen={vi.fn()} {...props} />
 );
 const activeRow = () => document.querySelector('tr[aria-selected="true"]');
+
+describe("TraceTable interruption metrics", () => {
+  const columns = new Set(["callDetails", "stopLatency", "aiInterruptions"]);
+
+  it.each([
+    [1281, 2, "1,281ms", "2"],
+    [0, 0, "0ms", "0"],
+    [null, null, "-", "-"],
+  ])(
+    "renders call metrics %s and %s",
+    (stopLatencyMs, aiInterruptions, latencyText, countText) => {
+      renderWithProviders(
+        table({
+          rows: [{ ...row("metrics"), stopLatencyMs, aiInterruptions }],
+          columns,
+        }),
+      );
+
+      expect(
+        screen.getAllByRole("columnheader").map((cell) => cell.textContent),
+      ).toEqual(["Run details", "Stop latency", "AI interruptions"]);
+      const cells = within(screen.getAllByRole("row")[1]).getAllByRole("cell");
+      expect(cells[1]).toHaveTextContent(latencyText);
+      expect(cells[2]).toHaveTextContent(countText);
+    },
+  );
+
+  it.each([
+    [640.5, 1.5, "640.5msAvg", "1.5Avg"],
+    [0, 0, "0msAvg", "0Avg"],
+    [null, null, "-", "-"],
+  ])(
+    "renders server group averages %s and %s across unloaded pages",
+    (stopLatency, aiInterruptions, latencyText, countText) => {
+      renderWithProviders(
+        table({
+          groups: [
+            {
+              ...group("Metrics", ["metrics"]),
+              count: 100,
+              agg: { stopLatency, aiInterruptions },
+            },
+          ],
+          columns,
+        }),
+      );
+      const cells = within(
+        screen.getByText("Metrics").closest("tr"),
+      ).getAllByRole("cell");
+      expect(cells[1]).toHaveTextContent(latencyText);
+      expect(cells[2]).toHaveTextContent(countText);
+    },
+  );
+});
 
 // The open call's row must end up on screen — groups start collapsed, and the
 // row only mounts once its group expands, so the scroll has to wait for it.
