@@ -196,20 +196,26 @@ describe("TraceTable — group row while its calls run", () => {
         {...tableProps}
       />,
     );
-  // The group row's last five cells: the last four metric columns and the eval.
-  const groupMetricCells = () =>
-    [...screen.getByText("G").closest("tr").children].slice(-5);
-  const skeletons = () =>
-    groupMetricCells().filter((td) => td.querySelector(".MuiSkeleton-root"));
+  // The group row's cell under a column header, so the checks hold whatever
+  // other columns the table has.
+  const cellUnder = (heading) => {
+    const heads = [...document.querySelectorAll("thead th")].map((th) =>
+      th.textContent.trim(),
+    );
+    return screen.getByText("G").closest("tr").children[heads.indexOf(heading)];
+  };
+  const COLUMNS = ["CSAT", "Turns", "Latency", "Tokens", "Tone"];
+  const loads = (heading) =>
+    cellUnder(heading).querySelector(".MuiSkeleton-root") !== null;
 
   it("shows a skeleton in each empty metric and eval cell while a call is running", () => {
     renderGroup({ rows: [call("g1", "ongoing"), call("g2", "completed")] });
-    expect(skeletons()).toHaveLength(5);
+    COLUMNS.forEach((heading) => expect(loads(heading)).toBe(true));
   });
 
   it("treats a queued call as still coming too", () => {
     renderGroup({ rows: [call("g1", "pending"), call("g2", "completed")] });
-    expect(skeletons()).toHaveLength(5);
+    COLUMNS.forEach((heading) => expect(loads(heading)).toBe(true));
   });
 
   it("keeps an aggregate it already has instead of a skeleton", () => {
@@ -217,14 +223,17 @@ describe("TraceTable — group row while its calls run", () => {
       rows: [call("g1", "ongoing"), call("g2", "completed")],
       agg: { turns: 4 },
     });
-    expect(skeletons()).toHaveLength(4);
-    expect(screen.getByText("4")).toBeInTheDocument();
+    expect(loads("Turns")).toBe(false);
+    expect(cellUnder("Turns")).toHaveTextContent("4");
+    expect(loads("CSAT")).toBe(true);
   });
 
   it("shows a dash once every call in the group has finished", () => {
     renderGroup({ rows: [call("g1", "completed"), call("g2", "failed")] });
-    expect(skeletons()).toHaveLength(0);
-    groupMetricCells().forEach((td) => expect(td).toHaveTextContent("-"));
+    COLUMNS.forEach((heading) => {
+      expect(loads(heading)).toBe(false);
+      expect(cellUnder(heading)).toHaveTextContent("-");
+    });
   });
 
   it("loads only the eval cell while a finished call's eval is still grading", () => {
@@ -237,9 +246,10 @@ describe("TraceTable — group row while its calls run", () => {
         call("g2", "completed"),
       ],
     });
-    const cells = groupMetricCells();
-    expect(cells.at(-1).querySelector(".MuiSkeleton-root")).not.toBeNull();
-    expect(skeletons()).toHaveLength(1);
+    expect(loads("Tone")).toBe(true);
+    ["CSAT", "Turns", "Latency", "Tokens"].forEach((heading) =>
+      expect(loads(heading)).toBe(false),
+    );
   });
 
   it("loads while the run is going and some of the group's calls are on another page", () => {
@@ -247,7 +257,7 @@ describe("TraceTable — group row while its calls run", () => {
       { rows: [call("g1", "completed")], count: 3 },
       { runActive: true },
     );
-    expect(skeletons()).toHaveLength(5);
+    COLUMNS.forEach((heading) => expect(loads(heading)).toBe(true));
   });
 
   it("doesn't load a group split across pages once the run has finished", () => {
@@ -255,7 +265,7 @@ describe("TraceTable — group row while its calls run", () => {
       { rows: [call("g1", "completed")], count: 3 },
       { runActive: false },
     );
-    expect(skeletons()).toHaveLength(0);
+    COLUMNS.forEach((heading) => expect(loads(heading)).toBe(false));
   });
 });
 
