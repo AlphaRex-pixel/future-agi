@@ -30,6 +30,10 @@ import {
   CALL_STATUS_CHIPS,
 } from "./traceTable.constants";
 import StatusChip from "../../StatusChip";
+import {
+  SubTasksCell,
+  TruncTooltip,
+} from "../../../scenarios/ScenarioTableCells";
 import { MetricValue, Score, Field, UnscoredEval } from "./traceCells";
 import TraceGroupHeaderRow from "./TraceGroupHeaderRow";
 
@@ -59,7 +63,12 @@ const lastRowDividersSx = {
 const TEXT_COL_WIDTH = { long: 260, short: 200 };
 // A call still in flight — its eval cells can only be waiting. `analyzing`
 // is a finished conversation whose evals are grading (the chat path).
-const LIVE_CALL_STATUSES = new Set(["pending", "queued", "ongoing", "analyzing"]);
+const LIVE_CALL_STATUSES = new Set([
+  "pending",
+  "queued",
+  "ongoing",
+  "analyzing",
+]);
 const textCellSx = (width) => ({
   ...bodyCellSx,
   width,
@@ -275,7 +284,27 @@ export default function TraceTable({
             sx={textCellSx(TEXT_COL_WIDTH.long)}
             onClick={() => onOpen(t)}
           >
-            <Box sx={clampSx}>{t.scenarioDetails || t.scenario || "-"}</Box>
+            <Box sx={clampSx}>{t.scenario || "-"}</Box>
+          </TableCell>
+        )}
+
+        {show("situation") && (
+          <TableCell
+            sx={textCellSx(TEXT_COL_WIDTH.long)}
+            onClick={() => onOpen(t)}
+          >
+            <TruncTooltip title={t.scenarioDetails}>
+              <Box sx={clampSx}>{t.scenarioDetails || "-"}</Box>
+            </TruncTooltip>
+          </TableCell>
+        )}
+
+        {show("subGoals") && (
+          <TableCell
+            sx={textCellSx(TEXT_COL_WIDTH.long)}
+            onClick={() => onOpen(t)}
+          >
+            <SubTasksCell subTasks={t.subGoals} />
           </TableCell>
         )}
 
@@ -284,7 +313,9 @@ export default function TraceTable({
             sx={textCellSx(TEXT_COL_WIDTH.long)}
             onClick={() => onOpen(t)}
           >
-            <Box sx={clampSx}>{t.idealOutcome || "-"}</Box>
+            <TruncTooltip title={t.idealOutcome}>
+              <Box sx={clampSx}>{t.idealOutcome || "-"}</Box>
+            </TruncTooltip>
           </TableCell>
         )}
 
@@ -309,7 +340,12 @@ export default function TraceTable({
         )}
         {show("latency") && (
           <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
-            <MetricValue metric="latency" value={t.latencyMs} suffix="ms" loading={callLive} />
+            <MetricValue
+              metric="latency"
+              value={t.latencyMs}
+              suffix="ms"
+              loading={callLive}
+            />
           </TableCell>
         )}
         {show("tokens") && (
@@ -398,9 +434,7 @@ export default function TraceTable({
                 </TableCell>
               )}
               {show("status") && (
-                <TableCell sx={{ ...headCellSx, width: 120 }}>
-                  Status
-                </TableCell>
+                <TableCell sx={{ ...headCellSx, width: 120 }}>Status</TableCell>
               )}
               {show("persona") && (
                 <TableCell sx={{ ...headCellSx, width: 200 }}>
@@ -410,6 +444,16 @@ export default function TraceTable({
               {show("scenario") && (
                 <TableCell sx={{ ...headCellSx, width: TEXT_COL_WIDTH.long }}>
                   Scenario
+                </TableCell>
+              )}
+              {show("situation") && (
+                <TableCell sx={{ ...headCellSx, width: TEXT_COL_WIDTH.long }}>
+                  Situation
+                </TableCell>
+              )}
+              {show("subGoals") && (
+                <TableCell sx={{ ...headCellSx, width: TEXT_COL_WIDTH.long }}>
+                  Sub-goals
                 </TableCell>
               )}
               {show("idealOutcome") && (
