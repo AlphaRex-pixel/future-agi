@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections import Counter
 from typing import Any
 
@@ -41,6 +42,8 @@ from simulate.services.run_results_v3_expressions import (
     _json_text,
     _safe_json_float,
 )
+
+ALL_ROWS = sys.maxsize
 
 OUTCOMES = ("passed", "failed", "error", "inconclusive")
 # The Scenarios tab's axes, plus the run's own outcome.
@@ -513,8 +516,9 @@ def _summary_from_values(values: dict[str, Any]) -> dict[str, Any]:
 def summarize_run_calls(
     queryset: QuerySet, include_percentiles: bool = True
 ) -> dict[str, Any]:
+    rows = queryset.order_by()[:ALL_ROWS]
     return _summary_from_values(
-        queryset.aggregate(**_aggregate_expressions(include_percentiles))
+        rows.aggregate(**_aggregate_expressions(include_percentiles))
     )
 
 
