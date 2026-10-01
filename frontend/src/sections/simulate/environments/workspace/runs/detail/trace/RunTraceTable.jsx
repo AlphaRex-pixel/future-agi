@@ -137,6 +137,7 @@ export default function RunTraceTable({
     facets = {},
     totalPages = 1,
     agentType = null,
+    runActive = false,
     isLoading,
     error,
   } = useRunCalls(executionId, listQuery);
@@ -375,6 +376,7 @@ export default function RunTraceTable({
               onOpen={onOpenCall}
               activeCallId={activeCallId}
               scrollRef={tableScrollRef}
+              runActive={runActive}
             />
           )}
         </Box>

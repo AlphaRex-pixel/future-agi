@@ -114,6 +114,9 @@ export const CALL_STATUS_CHIPS = {
 // Columns a chat run has no data for: interruptions only happen on a voice call.
 export const VOICE_ONLY_COLUMNS = new Set(["aiInterruptions", "stopLatency"]);
 
+// An eval result's status while its grade is still on the way.
+export const PENDING_EVAL_STATUS = "pending";
+
 export const defaultTraceColumns = () =>
   new Set(TRACE_COLUMNS.filter((c) => c.defaultOn).map((c) => c.key));
 

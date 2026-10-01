@@ -324,6 +324,7 @@ export function useRunCalls(executionId, opts = {}) {
     summary,
     totalPages,
     agentType: data?.execution?.agent_type ?? null,
+    runActive: ACTIVE_EXECUTION_STATUSES.has(data?.execution?.status),
     isLoading: !!executionId && query.isPending,
     error: query.error,
   };

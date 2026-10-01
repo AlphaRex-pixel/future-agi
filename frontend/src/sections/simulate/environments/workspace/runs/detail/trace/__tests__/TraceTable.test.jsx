@@ -229,6 +229,101 @@ describe("TraceTable — group row grid", () => {
   });
 });
 
+describe("TraceTable — group row while its calls run", () => {
+  const blank = {
+    csat: null,
+    turns: null,
+    latencyMs: null,
+    tokens: null,
+    evalResults: [],
+  };
+  const call = (id, executionStatus) => ({
+    ...row(id),
+    ...blank,
+    executionStatus,
+  });
+  const renderGroup = (groupProps, tableProps = {}) =>
+    render(
+      <TraceTable
+        groups={[{ label: "G", count: 2, agg: {}, ...groupProps }]}
+        evals={[{ id: "e1", name: "Tone" }]}
+        onOpen={vi.fn()}
+        {...tableProps}
+      />,
+    );
+  // The group row's cell under a column header, so the checks hold whatever
+  // other columns the table has.
+  const cellUnder = (heading) => {
+    const heads = [...document.querySelectorAll("thead th")].map((th) =>
+      th.textContent.trim(),
+    );
+    return screen.getByText("G").closest("tr").children[heads.indexOf(heading)];
+  };
+  const COLUMNS = ["CSAT", "Turns", "Latency", "Tokens", "Tone"];
+  const loads = (heading) =>
+    cellUnder(heading).querySelector(".MuiSkeleton-root") !== null;
+
+  it("shows a skeleton in each empty metric and eval cell while a call is running", () => {
+    renderGroup({ rows: [call("g1", "ongoing"), call("g2", "completed")] });
+    COLUMNS.forEach((heading) => expect(loads(heading)).toBe(true));
+  });
+
+  it("treats a queued call as still coming too", () => {
+    renderGroup({ rows: [call("g1", "pending"), call("g2", "completed")] });
+    COLUMNS.forEach((heading) => expect(loads(heading)).toBe(true));
+  });
+
+  it("keeps an aggregate it already has instead of a skeleton", () => {
+    renderGroup({
+      rows: [call("g1", "ongoing"), call("g2", "completed")],
+      agg: { turns: 4 },
+    });
+    expect(loads("Turns")).toBe(false);
+    expect(cellUnder("Turns")).toHaveTextContent("4");
+    expect(loads("CSAT")).toBe(true);
+  });
+
+  it("shows a dash once every call in the group has finished", () => {
+    renderGroup({ rows: [call("g1", "completed"), call("g2", "failed")] });
+    COLUMNS.forEach((heading) => {
+      expect(loads(heading)).toBe(false);
+      expect(cellUnder(heading)).toHaveTextContent("-");
+    });
+  });
+
+  it("loads only the eval cell while a finished call's eval is still grading", () => {
+    renderGroup({
+      rows: [
+        {
+          ...call("g1", "completed"),
+          evalResults: [{ id: "e1", status: "pending", score: null }],
+        },
+        call("g2", "completed"),
+      ],
+    });
+    expect(loads("Tone")).toBe(true);
+    ["CSAT", "Turns", "Latency", "Tokens"].forEach((heading) =>
+      expect(loads(heading)).toBe(false),
+    );
+  });
+
+  it("loads while the run is going and some of the group's calls are on another page", () => {
+    renderGroup(
+      { rows: [call("g1", "completed")], count: 3 },
+      { runActive: true },
+    );
+    COLUMNS.forEach((heading) => expect(loads(heading)).toBe(true));
+  });
+
+  it("doesn't load a group split across pages once the run has finished", () => {
+    renderGroup(
+      { rows: [call("g1", "completed")], count: 3 },
+      { runActive: false },
+    );
+    COLUMNS.forEach((heading) => expect(loads(heading)).toBe(false));
+  });
+});
+
 describe("TraceTable — eval cells without a score", () => {
   const evals = [{ id: "e1", name: "Tone" }];
   const oneCall = (overrides) => [
