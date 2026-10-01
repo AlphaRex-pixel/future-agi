@@ -463,6 +463,7 @@ export function TrendLine({
   rows = [],
   xKey,
   valueKey,
+  valueLabel,
   percentile = false,
   bucketed = false,
 }) {
@@ -491,14 +492,14 @@ export function TrendLine({
           />
           <YAxis
             tick={tick}
-            width={55}
-            tickFormatter={(value) => `${number(value / 1000)}s`}
+            width={64}
+            tickFormatter={(value) => format(value, "ms")}
             axisLine={false}
             tickLine={false}
           />
           <Tooltip
             {...chartTooltipProps(theme)}
-            formatter={(value) => [format(value, "ms"), "Task duration"]}
+            formatter={(value) => [format(value, "ms"), valueLabel]}
             labelFormatter={(label) =>
               percentile
                 ? `Percentile ${label}`
@@ -510,7 +511,7 @@ export function TrendLine({
             dataKey={valueKey}
             stroke={percentile ? COLORS[4] : COLORS[0]}
             strokeWidth={2}
-            dot={false}
+            dot={percentile ? false : { r: 2 }}
             isAnimationActive={false}
             connectNulls={false}
           />
@@ -533,6 +534,7 @@ TrendLine.propTypes = {
   rows: PropTypes.array,
   xKey: PropTypes.string,
   valueKey: PropTypes.string,
+  valueLabel: PropTypes.string.isRequired,
   percentile: PropTypes.bool,
   bucketed: PropTypes.bool,
 };

@@ -6,6 +6,7 @@ import json
 import uuid
 from collections import Counter
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from django.utils import timezone
@@ -18,7 +19,11 @@ from model_hub.models.evals_metric import EvalTemplate
 from simulate.models import AgentDefinition, Scenarios, SimulateEvalConfig
 from simulate.models.agent_optimiser import AgentOptimiser
 from simulate.models.agent_optimiser_run import AgentOptimiserRun
-from simulate.models.hosted_harness import HostedHarnessJob, HostedHarnessScenario
+from simulate.models.hosted_harness import (
+    HostedHarnessExecution,
+    HostedHarnessJob,
+    HostedHarnessScenario,
+)
 from simulate.models.run_test import RunTest
 from simulate.models.simulator_agent import SimulatorAgent
 from simulate.models.test_execution import CallExecution, TestExecution
@@ -164,6 +169,27 @@ def analytics_call_executions(db, test_execution, scenario):
         )
     )
     return calls
+
+
+def _latency_calls(test_execution, scenario, rows):
+    """One completed call per (latency_ms, duration_seconds, offset_seconds)."""
+    base = timezone.now().replace(microsecond=0) - timedelta(hours=1)
+    return [
+        CallExecution.objects.create(
+            test_execution=test_execution,
+            scenario=scenario,
+            phone_number=f"+92{index:08d}",
+            status="completed",
+            avg_agent_latency_ms=latency_ms,
+            duration_seconds=duration_seconds,
+            started_at=(
+                None
+                if offset_seconds is None
+                else base + timedelta(seconds=offset_seconds)
+            ),
+        )
+        for index, (latency_ms, duration_seconds, offset_seconds) in enumerate(rows)
+    ]
 
 
 @pytest.fixture
@@ -1995,7 +2021,7 @@ class TestRunResultsV3Views:
         assert tools["lookup"]["measured"] == 2
         assert tools["unclassified"]["failure_rate"] is None
         assert dashboard["series_mode"] == "calls"
-        assert len(dashboard["latency_percentiles"]) == 101
+        assert len(dashboard["agent_latency_percentiles"]) == 101
         assert all(
             sum(segment["count"] for segment in chart["segments"]) == 4
             for chart in dashboard["breakdowns"]
@@ -2033,6 +2059,169 @@ class TestRunResultsV3Views:
         }
         target = response.json()["dashboard"]["agent_response_time"]["target_ms"]
         assert target == 3000
+
+    def _dashboard(self, auth_client, test_execution):
+        response = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/analytics/"
+        )
+        assert response.status_code == 200
+        return response.json()["dashboard"]
+
+    def test_dashboard_latency_percentiles_use_agent_latency_not_call_length(
+        self, auth_client, test_execution, scenario
+    ):
+        _latency_calls(
+            test_execution,
+            scenario,
+            [(100, 1, 0), (200, 2, 1), (300, 3, 2), (400, 4, 3)],
+        )
+        dashboard = self._dashboard(auth_client, test_execution)
+        curve = dashboard["agent_latency_percentiles"]
+        assert [row["percentile"] for row in curve] == list(range(101))
+        assert curve[0]["value"] == 100
+        assert curve[50]["value"] == 250
+        assert curve[90]["value"] == pytest.approx(370)
+        assert curve[99]["value"] == pytest.approx(397)
+        assert curve[100]["value"] == 400
+        call_length = dashboard["latency_percentiles"]
+        assert [row["percentile"] for row in call_length] == list(range(101))
+        assert call_length[0]["value"] == 1000
+        assert call_length[50]["value"] == 2500
+        assert call_length[100]["value"] == 4000
+
+    def test_dashboard_latency_excludes_unmeasured_calls(
+        self, auth_client, test_execution, scenario
+    ):
+        _latency_calls(
+            test_execution,
+            scenario,
+            [(None, 10, 0), (-5, 10, 1), (0, 10, 2), (300, 10, 3), (500, 10, None)],
+        )
+        dashboard = self._dashboard(auth_client, test_execution)
+        curve = dashboard["agent_latency_percentiles"]
+        assert dashboard["distributions"][0]["measured"] == 3
+        assert curve[0]["value"] == 0
+        assert curve[100]["value"] == 500
+
+    def test_dashboard_latency_is_null_when_no_call_measured(
+        self, auth_client, test_execution, analytics_call_executions
+    ):
+        dashboard = self._dashboard(auth_client, test_execution)
+        curve = dashboard["agent_latency_percentiles"]
+        assert len(curve) == 101
+        assert all(row["value"] is None for row in curve)
+        assert dashboard["distributions"][0] == {
+            "key": "latency_ms",
+            "measured": 0,
+            "average": None,
+            "max": None,
+            "p50": None,
+            "p90": None,
+            "p99": None,
+        }
+
+    def test_dashboard_distribution_latency_row_matches_curve(
+        self, auth_client, test_execution, scenario
+    ):
+        _latency_calls(
+            test_execution,
+            scenario,
+            [(100, 1, 0), (200, 2, 1), (300, 3, 2), (400, 4, 3)],
+        )
+        dashboard = self._dashboard(auth_client, test_execution)
+        assert [row["key"] for row in dashboard["distributions"]] == [
+            "latency_ms",
+            "duration_seconds",
+            "tokens",
+            "cost_cents",
+            "turns",
+            "end_to_end_ms",
+        ]
+        call_length = dashboard["distributions"][-1]
+        assert call_length["measured"] == 4
+        assert call_length["p50"] == 2500
+        assert call_length["max"] == 4000
+        latency = dashboard["distributions"][0]
+        curve = dashboard["agent_latency_percentiles"]
+        assert latency["measured"] == 4
+        assert latency["average"] == 250
+        assert latency["max"] == 400
+        for percentile in (50, 90, 99):
+            assert latency[f"p{percentile}"] == curve[percentile]["value"]
+        duration = dashboard["distributions"][1]
+        assert duration["p50"] == 2.5
+        assert duration["max"] == 4
+
+    def test_dashboard_series_carries_per_call_latency(
+        self, auth_client, test_execution, scenario
+    ):
+        _latency_calls(
+            test_execution,
+            scenario,
+            [(100, 1, 0), (-5, 2, 1), (None, 3, 2), (0, 4, 3), (300, 5, 4)],
+        )
+        dashboard = self._dashboard(auth_client, test_execution)
+        assert dashboard["series_mode"] == "calls"
+        assert [row["latency_ms"] for row in dashboard["series"]] == [
+            100,
+            None,
+            None,
+            0,
+            300,
+        ]
+        assert [row["duration_ms"] for row in dashboard["series"]] == [
+            1000,
+            2000,
+            3000,
+            4000,
+            5000,
+        ]
+
+    def test_dashboard_series_buckets_average_measured_latency(
+        self, auth_client, test_execution, scenario
+    ):
+        first_bucket = [(100, 1, 0), (300, 1, 0), (-5, 1, 0)] + [(None, 1, 0)] * 95
+        _latency_calls(
+            test_execution,
+            scenario,
+            first_bucket + [(None, 1, 50), (0, 1, 99), (600, 1, 99)],
+        )
+        dashboard = self._dashboard(auth_client, test_execution)
+        assert dashboard["series_mode"] == "time_buckets"
+        assert [row["calls"] for row in dashboard["series"]] == [98, 1, 2]
+        assert [row["latency_ms"] for row in dashboard["series"]] == [200, None, 300]
+        assert [row["duration_ms"] for row in dashboard["series"]] == [
+            1000,
+            1000,
+            1000,
+        ]
+
+    def test_dashboard_schema_declares_latency_fields(self):
+        from simulate.serializers.run_dashboard_v3 import (
+            RunDashboardSeriesSerializer,
+            RunDashboardV3Serializer,
+        )
+
+        series_fields = RunDashboardSeriesSerializer().fields
+        dashboard_fields = RunDashboardV3Serializer().fields
+        assert {"latency_ms", "duration_ms"} <= series_fields.keys()
+        assert {"agent_latency_percentiles", "latency_percentiles"} <= (
+            dashboard_fields.keys()
+        )
+
+        swagger_path = (
+            Path(__file__).resolve().parents[3]
+            / "api_contracts"
+            / "openapi"
+            / "swagger.json"
+        )
+        definitions = json.loads(swagger_path.read_text())["definitions"]
+        series_properties = definitions["RunDashboardSeries"]["properties"]
+        dashboard_properties = definitions["RunDashboardV3"]["properties"]
+        assert {"latency_ms", "duration_ms"} <= series_properties.keys()
+        assert {"agent_latency_percentiles", "latency_percentiles"} <= (
+            dashboard_properties.keys()
+        )
 
     def test_dashboard_shows_provider_verdicts_only_when_reported(
         self, auth_client, test_execution, analytics_call_executions
@@ -2137,6 +2326,245 @@ class TestRunResultsV3Views:
                 f"/simulate/v3/test-executions/{hidden_execution.id}/{suffix}"
             )
             assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    @staticmethod
+    def _harness_job(organization, workspace):
+        return HostedHarnessJob.no_workspace_objects.create(
+            organization=organization,
+            workspace=workspace,
+            run_id=uuid.uuid4(),
+            idempotency_key=uuid.uuid4().hex,
+            request_digest=uuid.uuid4().hex,
+            schema_version="1.6",
+            seed=1,
+            artifact_level="standard",
+            max_artifact_bytes=1024,
+            deadline_at=timezone.now() + timedelta(hours=1),
+            scenario_count=1,
+            payload={"metadata": {}, "runtime": {"max_duration_seconds": 600}},
+        )
+
+    def _link_call_to_scenario(self, layout, job, call, **scenario_fields):
+        if layout == "trial":
+            authored = HostedHarnessScenario.no_workspace_objects.create(
+                job=job, scenario_key="pin-reset", **scenario_fields
+            )
+            HostedHarnessExecution.no_workspace_objects.create(
+                job=job,
+                source_scenario=authored,
+                execution_key="pin-reset:1",
+                trial_index=1,
+                call_execution=call,
+            )
+            return authored
+        return HostedHarnessScenario.no_workspace_objects.create(
+            job=job, scenario_key="pin-reset", call_execution=call, **scenario_fields
+        )
+
+    def _call_row(self, auth_client, test_execution, call):
+        response = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/calls/"
+        )
+        assert response.status_code == status.HTTP_200_OK
+        return next(
+            row for row in response.json()["results"] if row["id"] == str(call.id)
+        )
+
+    @pytest.mark.parametrize("layout", ["trial", "registration"])
+    def test_calls_without_receipt_sub_goals_show_the_authored_scenarios_sub_goals(
+        self,
+        layout,
+        auth_client,
+        organization,
+        workspace,
+        test_execution,
+        analytics_call_executions,
+    ):
+        call = analytics_call_executions[0]
+        call.call_metadata = {"harness_scenario_key": "pin-reset"}
+        call.save(update_fields=["call_metadata"])
+        self._link_call_to_scenario(
+            layout,
+            self._harness_job(organization, workspace),
+            call,
+            sub_goals=["pin_verified", {"name": "exact_greeting"}],
+        )
+
+        row = self._call_row(auth_client, test_execution, call)
+
+        assert row["sub_goals"] == ["pin_verified", "exact_greeting"]
+
+    def test_receipt_sub_goals_take_priority_over_the_authored_scenarios(
+        self,
+        auth_client,
+        organization,
+        workspace,
+        test_execution,
+        analytics_call_executions,
+    ):
+        call = analytics_call_executions[0]
+        call.call_metadata = {
+            "hosted_harness_receipt": {
+                "sub_goals": [{"name": "identity_verified", "held": True}]
+            }
+        }
+        call.save(update_fields=["call_metadata"])
+        self._link_call_to_scenario(
+            "trial",
+            self._harness_job(organization, workspace),
+            call,
+            sub_goals=["pin_verified"],
+        )
+
+        row = self._call_row(auth_client, test_execution, call)
+
+        assert row["sub_goals"] == ["identity_verified"]
+
+    @pytest.mark.parametrize("layout", ["trial", "registration"])
+    def test_authored_sub_goals_filter_and_facet_like_the_rows_show_them(
+        self,
+        layout,
+        auth_client,
+        organization,
+        workspace,
+        test_execution,
+        analytics_call_executions,
+    ):
+        call = analytics_call_executions[0]
+        call.call_metadata = {"harness_scenario_key": "pin-reset"}
+        call.save(update_fields=["call_metadata"])
+        self._link_call_to_scenario(
+            layout,
+            self._harness_job(organization, workspace),
+            call,
+            sub_goals=["pin_verified", {"name": "exact_greeting"}],
+        )
+
+        response = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/calls/",
+            {"filters": json.dumps({"sub_goal": ["pin_verified"]})},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        body = response.json()
+        assert [row["id"] for row in body["results"]] == [str(call.id)]
+        assert body["count"] == 1
+        assert body["facets"]["sub_goal"] == [
+            {"value": "exact_greeting", "count": 1},
+            {"value": "pin_verified", "count": 1},
+        ]
+
+    @pytest.mark.parametrize("layout", ["trial", "registration"])
+    def test_a_pruned_scenarios_sub_goals_show_where_they_are_counted(
+        self,
+        layout,
+        auth_client,
+        organization,
+        workspace,
+        test_execution,
+        analytics_call_executions,
+    ):
+        call = analytics_call_executions[0]
+        call.call_metadata = {"harness_scenario_key": "pin-reset"}
+        call.save(update_fields=["call_metadata"])
+        authored = self._link_call_to_scenario(
+            layout,
+            self._harness_job(organization, workspace),
+            call,
+            sub_goals=["pin_verified"],
+        )
+        authored.deleted = True
+        authored.save(update_fields=["deleted"])
+
+        response = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/calls/"
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        body = response.json()
+        row = next(row for row in body["results"] if row["id"] == str(call.id))
+        assert row["sub_goals"] == ["pin_verified"]
+        assert body["facets"]["sub_goal"] == [{"value": "pin_verified", "count": 1}]
+
+    def test_receipt_sub_goals_keep_the_authored_ones_out_of_filters_and_facets(
+        self,
+        auth_client,
+        organization,
+        workspace,
+        test_execution,
+        analytics_call_executions,
+    ):
+        call = analytics_call_executions[0]
+        call.call_metadata = {
+            "hosted_harness_receipt": {
+                "sub_goals": [{"name": "identity_verified", "held": True}]
+            }
+        }
+        call.save(update_fields=["call_metadata"])
+        self._link_call_to_scenario(
+            "trial",
+            self._harness_job(organization, workspace),
+            call,
+            sub_goals=["pin_verified"],
+        )
+
+        response = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/calls/",
+            {"filters": json.dumps({"sub_goal": ["pin_verified"]})},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        body = response.json()
+        assert body["results"] == []
+        assert body["facets"]["sub_goal"] == [
+            {"value": "identity_verified", "count": 1}
+        ]
+
+    @pytest.mark.parametrize("layout", ["trial", "registration"])
+    def test_calls_read_situation_and_outcome_from_the_authored_scenarios_row(
+        self,
+        layout,
+        auth_client,
+        organization,
+        workspace,
+        dataset_for_scenario,
+        test_execution,
+        analytics_call_executions,
+    ):
+        situation = Column.objects.get(dataset=dataset_for_scenario, name="situation")
+        outcome = Column.objects.create(
+            dataset=dataset_for_scenario,
+            name="outcome",
+            data_type="text",
+            source=SourceChoices.OTHERS.value,
+        )
+        scenario_row = Row.objects.create(dataset=dataset_for_scenario, order=1)
+        Cell.objects.create(
+            dataset=dataset_for_scenario,
+            column=situation,
+            row=scenario_row,
+            value="Caller forgot their guest PIN.",
+        )
+        Cell.objects.create(
+            dataset=dataset_for_scenario,
+            column=outcome,
+            row=scenario_row,
+            value="The agent resets the PIN after verifying identity.",
+        )
+        call = analytics_call_executions[0]
+        self._link_call_to_scenario(
+            layout,
+            self._harness_job(organization, workspace),
+            call,
+            dataset_row=scenario_row,
+        )
+
+        row = self._call_row(auth_client, test_execution, call)
+
+        assert row["scenario_details"] == "Caller forgot their guest PIN."
+        assert (
+            row["ideal_outcome"] == "The agent resets the PIN after verifying identity."
+        )
 
 
 # ============================================================================

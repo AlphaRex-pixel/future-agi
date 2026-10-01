@@ -61,9 +61,12 @@ def test_call_rows_csat_requires_explicit_score(metrics, provider_score, expecte
         ended_reason=None,
         error_message=None,
     )
-    with patch(
-        "simulate.services.run_results_v3.SimulateEvalConfig.objects.filter"
-    ) as configs:
+    with (
+        patch(
+            "simulate.services.run_results_v3.SimulateEvalConfig.objects.filter"
+        ) as configs,
+        patch("simulate.services.run_results_v3._harness_scenarios", return_value={}),
+    ):
         configs.return_value.select_related.return_value = []
         rows, _ = build_call_rows(SimpleNamespace(), [call], [], set())
     assert rows[0]["csat"] == expected
@@ -117,7 +120,7 @@ def test_v3_detail_uses_explicit_csat_for_existing_score_fields(csat):
         )
     )
     row["csat"] = csat
-    call = SimpleNamespace(test_execution=SimpleNamespace())
+    call = SimpleNamespace(test_execution=SimpleNamespace(), call_metadata={})
     with (
         patch(
             "simulate.views.run_results_v3.build_call_rows", return_value=([row], [])

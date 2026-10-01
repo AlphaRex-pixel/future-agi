@@ -36,8 +36,22 @@ export const TRACE_COLUMNS = [
   {
     key: "scenario",
     label: "Scenario",
+    defaultOn: true,
+    width: 420,
+    group: "Scenario details",
+  },
+  {
+    key: "situation",
+    label: "Situation",
     defaultOn: false,
     width: 420,
+    group: "Scenario details",
+  },
+  {
+    key: "subGoals",
+    label: "Sub-goals",
+    defaultOn: false,
+    width: 320,
     group: "Scenario details",
   },
   {
@@ -96,6 +110,12 @@ export const TRACE_COLUMNS = [
     width: 96,
     group: "System metrics",
   },
+  {
+    key: "subGoalEvals",
+    label: "Sub-goal Results",
+    defaultOn: false,
+    group: "Sub-goal Results",
+  },
   { key: "evals", label: "Evaluations", defaultOn: true, group: "Evaluations" },
 ];
 
@@ -116,6 +136,10 @@ export const VOICE_ONLY_COLUMNS = new Set(["aiInterruptions", "stopLatency"]);
 
 // An eval result's status while its grade is still on the way.
 export const PENDING_EVAL_STATUS = "pending";
+
+// Every group closed: the table's starting state, and Collapse all. Expand all
+// sets `all`; `expanded` holds the labels opened.
+export const CLOSED_GROUP_VIEW = { all: false, expanded: new Set() };
 
 export const defaultTraceColumns = () =>
   new Set(TRACE_COLUMNS.filter((c) => c.defaultOn).map((c) => c.key));
@@ -171,6 +195,26 @@ export const neutralCheckboxSx = {
 // below it, so they need its height. Both measured in the browser.
 export const HEAD_ROW_PX = 44;
 export const GROUP_ROW_PX = 57;
+// The band naming each column group, pinned above the head row.
+export const GROUP_BAND_PX = 28;
+
+export const bandCellSx = {
+  typography: "s3",
+  fontWeight: "fontWeightBold",
+  color: "text.subtitle",
+  textTransform: "uppercase",
+  letterSpacing: 0.4,
+  whiteSpace: "nowrap",
+  bgcolor: "background.paper",
+  height: GROUP_BAND_PX,
+  position: "sticky",
+  top: 0,
+  zIndex: 3,
+  py: 0,
+  borderBottom: "1px solid",
+  borderColor: "divider",
+  "&:not(:first-of-type)": { borderLeft: "1px solid", borderColor: "divider" },
+};
 
 // Shared cell sx. A hairline left border between columns and a bottom divider per
 // row give the table its grid without a heavy outline.
