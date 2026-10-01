@@ -706,7 +706,7 @@ the default backend ([Backend variants](/docs/self-hosting/images#backend-varian
     keys = ["HARNESS_MAX_EXECUTIONS_PER_RUN"]
     default = "`200`"
     setups = ["S", "D", "H"]
-    text = "Most executions one simulation Run may submit: the selected scenarios times the trials. A larger submission is refused with `run_too_large` before anything is dispatched. Raise it only once the sandbox provider and the simulation runner are sized for that many concurrent calls."
+    text = "Most scenarios × trials one simulation Run may submit; a larger Run is refused with `run_too_large`."
 
     [[part.section.row]]
     keys = ["HARNESS_RESOURCE_PROFILES"]
