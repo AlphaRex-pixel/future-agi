@@ -16,6 +16,7 @@ function liveEvalCell(col, data) {
     data.value && typeof data.value === "object" ? storedEvalCell(col, data) : null;
   return {
     id: col.id,
+    kind: col.kind ?? "evaluation",
     name: data.name || col.name || col.column_name || col.id,
     score: data.score ?? stored?.score ?? to01(data.value?.score) ?? null,
     passed: data.passed ?? stored?.passed ?? null,
@@ -53,6 +54,7 @@ function storedEvalCell(col, data) {
   }
   return {
     id: col.id,
+    kind: col.kind ?? "evaluation",
     name: data.name || col.column_name || col.name || col.id,
     score,
     passed,
