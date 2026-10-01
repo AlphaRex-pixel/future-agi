@@ -908,6 +908,8 @@ def group_run_calls(
         return []
     field = GROUP_FIELDS[group_by]
     expressions = _aggregate_expressions(include_percentiles=False)
+    expressions["stop_latency_average"] = Avg("avg_stop_time_after_interruption_ms")
+    expressions["ai_interruptions_average"] = Avg("ai_interruption_count")
     scoring_configs = (
         {
             str(config.id): config
@@ -992,6 +994,8 @@ def group_run_calls(
                     "csat": values.get("csat_average"),
                     "turns": values.get("turns_average"),
                     "latency_ms": summary["latency"]["average"],
+                    "avg_stop_time_after_interruption": values.get("stop_latency_average"),
+                    "ai_interruptions": values.get("ai_interruptions_average"),
                     "tokens": summary["tokens"]["total_value"],
                     "evaluations": evaluation_aggregates,
                 },
