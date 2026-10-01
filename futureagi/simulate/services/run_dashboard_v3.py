@@ -223,7 +223,10 @@ def _series(queryset: QuerySet, total: int) -> list[dict]:
         rows = (
             queryset.order_by(F("started_at").asc(nulls_last=True), "id")
             .annotate(
-                duration_ms=F("duration_seconds") * 1000.0,
+                latency_ms=Case(
+                    When(result_latency_ms__gte=0, then=F("result_latency_ms")),
+                    output_field=FloatField(),
+                ),
                 llm_cents=F("llm_cost_cents"),
                 tts_cents=F("tts_cost_cents"),
                 stt_cents=F("stt_cost_cents"),
@@ -231,7 +234,7 @@ def _series(queryset: QuerySet, total: int) -> list[dict]:
             )
             .values(
                 "started_at",
-                "duration_ms",
+                "latency_ms",
                 "llm_cents",
                 "tts_cents",
                 "stt_cents",
@@ -263,7 +266,7 @@ def _series(queryset: QuerySet, total: int) -> list[dict]:
         .annotate(
             started_at=Min("started_at"),
             calls=Count("id"),
-            duration_ms=Avg(F("duration_seconds") * 1000.0),
+            latency_ms=Avg("result_latency_ms", filter=Q(result_latency_ms__gte=0)),
             llm_cents=Sum("llm_cost_cents"),
             tts_cents=Sum("tts_cost_cents"),
             stt_cents=Sum("stt_cost_cents"),
@@ -564,8 +567,11 @@ def build_run_dashboard(
         }
     )
     slo_stats = _stats(voice, {key: f"slo_{key}" for key in slos})
-    curve = queryset.aggregate(
-        **{f"p{p}": PercentileCont("duration_seconds", p / 100) for p in range(101)}
+    latency = queryset.filter(result_latency_ms__gte=0).aggregate(
+        measured=Count("id"),
+        average=Avg("result_latency_ms"),
+        max=Max("result_latency_ms"),
+        **{f"p{p}": PercentileCont("result_latency_ms", p / 100) for p in range(101)},
     )
     costs = queryset.aggregate(
         **{
@@ -660,19 +666,15 @@ def build_run_dashboard(
         "series": _series(queryset, total),
         "series_mode": "calls" if total <= CHART_BUCKETS else "time_buckets",
         "series_limit": CHART_BUCKETS,
-        "latency_percentiles": [
-            {
-                "percentile": p,
-                "value": curve[f"p{p}"] * 1000 if curve[f"p{p}"] is not None else None,
-            }
-            for p in range(101)
+        "agent_latency_percentiles": [
+            {"percentile": p, "value": latency[f"p{p}"]} for p in range(101)
         ],
         "distributions": [
             {
-                "key": "end_to_end_ms",
+                "key": "latency_ms",
                 **{
-                    key: value if key == "measured" or value is None else value * 1000
-                    for key, value in duration_stats["duration_seconds"].items()
+                    key: latency[key]
+                    for key in ("measured", "average", "max", "p50", "p90", "p99")
                 },
             },
             *[{"key": key, **stats} for key, stats in duration_stats.items()],

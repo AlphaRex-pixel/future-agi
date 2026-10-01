@@ -98224,7 +98224,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "series",
         "series_limit",
         "series_mode",
-        "latency_percentiles",
+        "agent_latency_percentiles",
         "distributions",
         "csat",
         "agent_response_time",
@@ -98275,7 +98275,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
           type: "string",
           enum: ["calls", "time_buckets"],
         },
-        latency_percentiles: {
+        agent_latency_percentiles: {
           type: "array",
           items: {
             $ref: "#/definitions/RunDashboardPercentile",
@@ -111893,7 +111893,7 @@ export const OPENAPI_CONTRACT = Object.freeze({
         "label",
         "started_at",
         "calls",
-        "duration_ms",
+        "latency_ms",
         "llm_cents",
         "tts_cents",
         "stt_cents",
@@ -111916,8 +111916,8 @@ export const OPENAPI_CONTRACT = Object.freeze({
           title: "Calls",
           type: "integer",
         },
-        duration_ms: {
-          title: "Duration ms",
+        latency_ms: {
+          title: "Latency ms",
           type: "number",
           "x-nullable": true,
         },

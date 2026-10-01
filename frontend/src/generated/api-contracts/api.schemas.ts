@@ -22429,7 +22429,7 @@ export interface RunDashboardSeriesApi {
   label: string;
   started_at: string;
   calls: number;
-  duration_ms: number;
+  latency_ms: number;
   llm_cents: number;
   tts_cents: number;
   stt_cents: number;
@@ -22565,7 +22565,7 @@ export interface RunDashboardV3Api {
   series: RunDashboardSeriesApi[];
   series_limit: number;
   series_mode: RunDashboardV3ApiSeriesMode;
-  latency_percentiles: RunDashboardPercentileApi[];
+  agent_latency_percentiles: RunDashboardPercentileApi[];
   distributions: RunDashboardDistributionApi[];
   csat: RunDashboardCsatApi;
   agent_response_time: RunDashboardResponseTimeApi;
