@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.44.0](https://github.com/future-agi/future-agi/compare/v1.43.3...v1.44.0) (2026-10-01)
+
+
+### Features
+
+* **simulate:** read HARNESS_MAX_EXECUTIONS_PER_RUN from the environment ([76386dc](https://github.com/future-agi/future-agi/commit/76386dc684fdac3f705227213c3739e9a6f420dc))
+* **simulate:** read HARNESS_MAX_EXECUTIONS_PER_RUN from the environment ([9b232e8](https://github.com/future-agi/future-agi/commit/9b232e8039eb31847ec703b80717f4cae3b82ddb))
+
+
+### Bug Fixes
+
+* bound Error Feed ClickHouse trace lookups ([db069a9](https://github.com/future-agi/future-agi/commit/db069a9d249fd675b2e6499bd0e0a48cd6dd1acb))
+* bound Error Feed ClickHouse trace lookups ([21411fd](https://github.com/future-agi/future-agi/commit/21411fd3cc3f0638045dddd6dd62ddcf3749c269))
+* **harness:** apply artifact budget floor to every hosted job; stream offline recovery ([207661e](https://github.com/future-agi/future-agi/commit/207661e9e077e6910610ac45f3d259503d6dbf57))
+* **harness:** configure artifact budget through environment ([866bdc2](https://github.com/future-agi/future-agi/commit/866bdc25461adeb7a00032812dd835ec78a5b472))
+* **harness:** configure hosted artifact budget via environment ([ca5f591](https://github.com/future-agi/future-agi/commit/ca5f5919d77a9cd26134c3ea3bb56835a68f6ade))
+* **harness:** inflate the offline spool while downloading so replay stays linear ([c6a65a4](https://github.com/future-agi/future-agi/commit/c6a65a467ccf8325e55a1b6f661b7ada3c474ed1))
+
 ## [1.43.3](https://github.com/future-agi/future-agi/compare/v1.43.2...v1.43.3) (2026-09-30)
 
 
