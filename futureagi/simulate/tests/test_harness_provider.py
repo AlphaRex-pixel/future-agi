@@ -1846,3 +1846,61 @@ def test_selected_run_returns_structured_usage_limit_response(
     assert retried.status_code == 202, retried.content
     assert start.call_count == 1
     assert environment.simulation_runs.count() == 1
+
+
+@pytest.mark.django_db
+def test_selected_run_size_cap_comes_from_settings(user, workspace):
+    """``HARNESS_MAX_EXECUTIONS_PER_RUN`` bounds selected scenarios × trials."""
+
+    environment, _ = create_hosted_job(
+        user.organization,
+        _v1_payload(scenario_count=2),
+        idempotency_key="capped-environment",
+        workspace=workspace,
+    )
+    attempt = register_attempt(
+        environment.id, endpoint_base_url="https://harness.example.test"
+    ).attempt
+    provision_scenarios(
+        attempt,
+        {
+            "operation": "provision",
+            "name": "Capped Run suite",
+            "modality": "text",
+            "personas": [
+                {"scenario_key": "scenario-a", "name": "A", "persona": {"name": "A"}},
+                {"scenario_key": "scenario-b", "name": "B", "persona": {"name": "B"}},
+            ],
+        },
+    )
+    environment.refresh_from_db()
+    payload = dict(environment.payload)
+    metadata = dict(payload.get("metadata") or {})
+    metadata["authoring_object_key"] = "harness/environments/authored.tar.gz"
+    payload["metadata"] = metadata
+    environment.payload = payload
+    environment.state = environment.State.COMPLETED
+    environment.current_stage = "completed"
+    environment.save(update_fields=["payload", "state", "current_stage", "updated_at"])
+
+    with override_settings(HARNESS_MAX_EXECUTIONS_PER_RUN=3):
+        with pytest.raises(HostedHarnessError) as refused:
+            create_selected_harness_run(
+                environment,
+                scenario_keys=["scenario-a", "scenario-b"],
+                trials=2,
+                idempotency_key="four-executions",
+            )
+    assert refused.value.code == "run_too_large"
+    assert refused.value.status_code == 400
+    assert "3" in refused.value.message
+
+    with override_settings(HARNESS_MAX_EXECUTIONS_PER_RUN=4):
+        run, created = create_selected_harness_run(
+            environment,
+            scenario_keys=["scenario-a", "scenario-b"],
+            trials=2,
+            idempotency_key="four-executions",
+        )
+    assert created is True
+    assert run.test_execution.trials == 2
