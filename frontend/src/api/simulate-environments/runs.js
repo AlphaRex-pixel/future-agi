@@ -119,7 +119,7 @@ export function mapExecutions(payload, offset = 0) {
 }
 
 // A new run changes both the run-test's executions and the environment's run
-// count, which badges the Runs tab.
+// count, which the Runs tab shows until the runs list loads.
 export function refreshAfterRunStart(queryClient, envId, runTestId) {
   queryClient.invalidateQueries({
     queryKey: ["run-test-executions", runTestId],

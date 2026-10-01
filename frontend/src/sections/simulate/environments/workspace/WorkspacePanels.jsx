@@ -59,10 +59,12 @@ export default function WorkspacePanels({
     isLoading: runsLoading,
   } = useEnvironmentRuns(env, envState);
 
-  // The environment's run count is the whole total and comes with the
-  // environment; the runs list comes a page at a time. A run the list already
-  // has that the count hasn't caught up with still counts.
-  const runsTotal = Math.max(overviewCounts?.runs ?? 0, runs.length);
+  // The runs list's total is what the Runs tab lists. The environment's own
+  // count comes with the environment, so it stands in until the list loads;
+  // it can run high once loaded, since a deleted run leaves its job behind.
+  const runsTotal = runsLoading
+    ? overviewCounts?.runs ?? 0
+    : runCount ?? runs.length;
   // Runs appears once the environment has a run. While the list is still
   // loading, a deep link to ?tab=runs keeps the tab so it does not bounce to
   // the Overview and back.
