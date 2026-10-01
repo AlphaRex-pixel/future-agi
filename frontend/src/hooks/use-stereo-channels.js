@@ -91,10 +91,15 @@ export default function useStereoChannels(
   });
   const prevKey = useRef("");
   const blobUrls = useRef([]);
+  // Read when a split starts, not as a dependency: a fallback input changing
+  // mid-download would cancel the split and the guard would never restart it.
+  const assistantIndexRef = useRef(assistantIndex);
+  assistantIndexRef.current = assistantIndex;
 
   useEffect(() => {
     if (!stereoUrl || splitKey === prevKey.current) return;
     prevKey.current = splitKey;
+    const assistantIndexAtStart = assistantIndexRef.current;
 
     // Revoke old blob URLs
     blobUrls.current.forEach((u) => URL.revokeObjectURL(u));
@@ -132,7 +137,9 @@ export default function useStereoChannels(
         const rightData =
           numChannels >= 2 ? decoded.getChannelData(1) : leftData;
         const [aData, cData] =
-          assistantIndex === 0 ? [leftData, rightData] : [rightData, leftData];
+          assistantIndexAtStart === 0
+            ? [leftData, rightData]
+            : [rightData, leftData];
 
         // Extract real peaks now while we have the decoded PCM data.
         // Passing these to WaveSurfer means it renders the waveform instantly
@@ -175,9 +182,7 @@ export default function useStereoChannels(
     return () => {
       cancelled = true;
     };
-    // assistantIndex is read inside; the guard above stops it re-splitting
-    // unless splitKey changed.
-  }, [stereoUrl, splitKey, assistantIndex]);
+  }, [stereoUrl, splitKey]);
 
   // Cleanup blob URLs on unmount
   useEffect(() => {

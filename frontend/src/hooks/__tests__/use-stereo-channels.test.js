@@ -98,6 +98,31 @@ describe("useStereoChannels", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it("still finishes when the fallback rule's inputs change mid-download", async () => {
+    let release;
+    const download = new Promise((resolve) => {
+      release = resolve;
+    });
+    fetch.mockImplementation(() => download);
+    const { result, rerender } = renderHook(
+      ({ isInbound }) =>
+        useStereoChannels(URL_STEREO, isInbound, "phone", null),
+      { initialProps: { isInbound: true } },
+    );
+
+    rerender({ isInbound: false });
+    release({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.assistantUrl).toBeTruthy();
+    // The channel picked when the download started stands, as it always did.
+    expect(assistantLevel(result)).toBeCloseTo(LEFT);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("doesn't re-split when only the fallback rule's inputs change", async () => {
     const { result, rerender } = renderHook(
       ({ isInbound }) =>
