@@ -19,12 +19,12 @@ import { buildSummaryRow, buildEvalSeries, deriveEvals } from "./summaryData";
 // `?mockRuns=1` switch) carries its scores inline, so no fetch is made for it.
 export function useRunsSummary(env, envState, paging, graphRuns = RUNS_PAGE_SIZE) {
   const {
-    runs,
+    runs = [],
     count,
     coveredScenarioCount,
     isLoading: runsLoading,
   } = useEnvironmentRuns(env, envState, paging);
-  const { runs: graphRunList } = useEnvironmentRuns(env, envState, {
+  const { runs: graphRunList = [] } = useEnvironmentRuns(env, envState, {
     page: 0,
     pageSize: graphRuns,
   });
