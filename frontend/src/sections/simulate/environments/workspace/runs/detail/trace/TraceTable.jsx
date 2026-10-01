@@ -319,6 +319,25 @@ export default function TraceTable({
             <MetricValue metric="latency" value={t.latencyMs} suffix="ms" loading={callLive} />
           </TableCell>
         )}
+        {show("stopLatency") && (
+          <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
+            <MetricValue
+              metric="stopLatency"
+              value={t.stopLatencyMs}
+              suffix="ms"
+              loading={callLive}
+            />
+          </TableCell>
+        )}
+        {show("aiInterruptions") && (
+          <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
+            <MetricValue
+              metric="aiInterruptions"
+              value={t.aiInterruptions}
+              loading={callLive}
+            />
+          </TableCell>
+        )}
         {show("tokens") && (
           <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
             <MetricValue metric="tokens" value={t.tokens} loading={callLive} />
@@ -437,6 +456,16 @@ export default function TraceTable({
               )}
               {show("latency") && (
                 <TableCell sx={{ ...headCellSx, width: 96 }}>Latency</TableCell>
+              )}
+              {show("stopLatency") && (
+                <TableCell sx={{ ...headCellSx, width: 140 }}>
+                  Stop latency
+                </TableCell>
+              )}
+              {show("aiInterruptions") && (
+                <TableCell sx={{ ...headCellSx, width: 150 }}>
+                  AI interruptions
+                </TableCell>
               )}
               {show("tokens") && (
                 <TableCell sx={{ ...headCellSx, width: 120 }}>Tokens</TableCell>
