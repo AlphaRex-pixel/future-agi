@@ -264,6 +264,25 @@ describe("TraceTable — group row while its calls run", () => {
   const COLUMNS = ["CSAT", "Turns", "Latency", "Tokens", "Tone"];
   const loads = (heading) =>
     cellUnder(heading).querySelector(".MuiSkeleton-root") !== null;
+  // The sub-goal count comes from the rows on this page, so it only shows
+  // once the whole group is here.
+  const subGoalColumns = new Set(["callDetails", "subGoals"]);
+  const subGoalCalls = [
+    {
+      ...call("g1", "completed"),
+      subGoals: ["pin_verified", "exact_greeting"],
+    },
+  ];
+
+  it("hides the sub-goal count while some of the group's calls are on another page", () => {
+    renderGroup({ rows: subGoalCalls, count: 2 }, { columns: subGoalColumns });
+    expect(cellUnder("Sub-goals")).toHaveTextContent("-");
+  });
+
+  it("counts the group's distinct sub-goals once every call is on the page", () => {
+    renderGroup({ rows: subGoalCalls, count: 1 }, { columns: subGoalColumns });
+    expect(cellUnder("Sub-goals")).toHaveTextContent("2 sub-goals");
+  });
 
   it("shows a skeleton in each empty metric and eval cell while a call is running", () => {
     renderGroup({ rows: [call("g1", "ongoing"), call("g2", "completed")] });

@@ -90,6 +90,9 @@ export default function TraceGroupHeaderRow({
     if (key === "situation")
       return `${group.count} situation${group.count === 1 ? "" : "s"}`;
     if (key === "subGoals") {
+      // Counted from the rows here, so only once every call in the group is
+      // on this page: a page's share would read as the whole group's.
+      if (group.rows.length < group.count) return "-";
       const subGoalCount = new Set(group.rows.flatMap((t) => t.subGoals || []))
         .size;
       return subGoalCount

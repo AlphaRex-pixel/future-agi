@@ -1529,6 +1529,74 @@ class TestRunResultsV3Views:
         assert row["sub_goals"] == ["identity_verified"]
 
     @pytest.mark.parametrize("layout", ["trial", "registration"])
+    def test_authored_sub_goals_filter_and_facet_like_the_rows_show_them(
+        self,
+        layout,
+        auth_client,
+        organization,
+        workspace,
+        test_execution,
+        analytics_call_executions,
+    ):
+        call = analytics_call_executions[0]
+        call.call_metadata = {"harness_scenario_key": "pin-reset"}
+        call.save(update_fields=["call_metadata"])
+        self._link_call_to_scenario(
+            layout,
+            self._harness_job(organization, workspace),
+            call,
+            sub_goals=["pin_verified", {"name": "exact_greeting"}],
+        )
+
+        response = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/calls/",
+            {"filters": json.dumps({"sub_goal": ["pin_verified"]})},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        body = response.json()
+        assert [row["id"] for row in body["results"]] == [str(call.id)]
+        assert body["count"] == 1
+        assert body["facets"]["sub_goal"] == [
+            {"value": "exact_greeting", "count": 1},
+            {"value": "pin_verified", "count": 1},
+        ]
+
+    def test_receipt_sub_goals_keep_the_authored_ones_out_of_filters_and_facets(
+        self,
+        auth_client,
+        organization,
+        workspace,
+        test_execution,
+        analytics_call_executions,
+    ):
+        call = analytics_call_executions[0]
+        call.call_metadata = {
+            "hosted_harness_receipt": {
+                "sub_goals": [{"name": "identity_verified", "held": True}]
+            }
+        }
+        call.save(update_fields=["call_metadata"])
+        self._link_call_to_scenario(
+            "trial",
+            self._harness_job(organization, workspace),
+            call,
+            sub_goals=["pin_verified"],
+        )
+
+        response = auth_client.get(
+            f"/simulate/v3/test-executions/{test_execution.id}/calls/",
+            {"filters": json.dumps({"sub_goal": ["pin_verified"]})},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        body = response.json()
+        assert body["results"] == []
+        assert body["facets"]["sub_goal"] == [
+            {"value": "identity_verified", "count": 1}
+        ]
+
+    @pytest.mark.parametrize("layout", ["trial", "registration"])
     def test_calls_read_situation_and_outcome_from_the_authored_scenarios_row(
         self,
         layout,
@@ -1571,8 +1639,7 @@ class TestRunResultsV3Views:
 
         assert row["scenario_details"] == "Caller forgot their guest PIN."
         assert (
-            row["ideal_outcome"]
-            == "The agent resets the PIN after verifying identity."
+            row["ideal_outcome"] == "The agent resets the PIN after verifying identity."
         )
 
 
