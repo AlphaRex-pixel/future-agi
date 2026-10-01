@@ -227,6 +227,7 @@ def _series(queryset: QuerySet, total: int) -> list[dict]:
                     When(result_latency_ms__gte=0, then=F("result_latency_ms")),
                     output_field=FloatField(),
                 ),
+                duration_ms=F("duration_seconds") * 1000.0,
                 llm_cents=F("llm_cost_cents"),
                 tts_cents=F("tts_cost_cents"),
                 stt_cents=F("stt_cost_cents"),
@@ -235,6 +236,7 @@ def _series(queryset: QuerySet, total: int) -> list[dict]:
             .values(
                 "started_at",
                 "latency_ms",
+                "duration_ms",
                 "llm_cents",
                 "tts_cents",
                 "stt_cents",
@@ -267,6 +269,7 @@ def _series(queryset: QuerySet, total: int) -> list[dict]:
             started_at=Min("started_at"),
             calls=Count("id"),
             latency_ms=Avg("result_latency_ms", filter=Q(result_latency_ms__gte=0)),
+            duration_ms=Avg(F("duration_seconds") * 1000.0),
             llm_cents=Sum("llm_cost_cents"),
             tts_cents=Sum("tts_cost_cents"),
             stt_cents=Sum("stt_cost_cents"),
@@ -573,6 +576,10 @@ def build_run_dashboard(
         max=Max("result_latency_ms"),
         **{f"p{p}": PercentileCont("result_latency_ms", p / 100) for p in range(101)},
     )
+    # Call length under the earlier keys, for frontend builds that still read them.
+    duration_curve = queryset.aggregate(
+        **{f"p{p}": PercentileCont("duration_seconds", p / 100) for p in range(101)}
+    )
     costs = queryset.aggregate(
         **{
             key: Sum(field)
@@ -669,6 +676,17 @@ def build_run_dashboard(
         "agent_latency_percentiles": [
             {"percentile": p, "value": latency[f"p{p}"]} for p in range(101)
         ],
+        "latency_percentiles": [
+            {
+                "percentile": p,
+                "value": (
+                    duration_curve[f"p{p}"] * 1000
+                    if duration_curve[f"p{p}"] is not None
+                    else None
+                ),
+            }
+            for p in range(101)
+        ],
         "distributions": [
             {
                 "key": "latency_ms",
@@ -678,6 +696,13 @@ def build_run_dashboard(
                 },
             },
             *[{"key": key, **stats} for key, stats in duration_stats.items()],
+            {
+                "key": "end_to_end_ms",
+                **{
+                    key: value if key == "measured" or value is None else value * 1000
+                    for key, value in duration_stats["duration_seconds"].items()
+                },
+            },
         ],
         "tools": _tool_stats(queryset),
         "slowest_tasks": _tails(queryset, "duration_seconds"),

@@ -1376,7 +1376,11 @@ class TestRunResultsV3Views:
         assert curve[90]["value"] == pytest.approx(370)
         assert curve[99]["value"] == pytest.approx(397)
         assert curve[100]["value"] == 400
-        assert "latency_percentiles" not in dashboard
+        call_length = dashboard["latency_percentiles"]
+        assert [row["percentile"] for row in call_length] == list(range(101))
+        assert call_length[0]["value"] == 1000
+        assert call_length[50]["value"] == 2500
+        assert call_length[100]["value"] == 4000
 
     def test_dashboard_latency_excludes_unmeasured_calls(
         self, auth_client, test_execution, scenario
@@ -1424,7 +1428,12 @@ class TestRunResultsV3Views:
             "tokens",
             "cost_cents",
             "turns",
+            "end_to_end_ms",
         ]
+        call_length = dashboard["distributions"][-1]
+        assert call_length["measured"] == 4
+        assert call_length["p50"] == 2500
+        assert call_length["max"] == 4000
         latency = dashboard["distributions"][0]
         curve = dashboard["agent_latency_percentiles"]
         assert latency["measured"] == 4
@@ -1453,7 +1462,13 @@ class TestRunResultsV3Views:
             0,
             300,
         ]
-        assert all("duration_ms" not in row for row in dashboard["series"])
+        assert [row["duration_ms"] for row in dashboard["series"]] == [
+            1000,
+            2000,
+            3000,
+            4000,
+            5000,
+        ]
 
     def test_dashboard_series_buckets_average_measured_latency(
         self, auth_client, test_execution, scenario
@@ -1468,6 +1483,11 @@ class TestRunResultsV3Views:
         assert dashboard["series_mode"] == "time_buckets"
         assert [row["calls"] for row in dashboard["series"]] == [98, 1, 2]
         assert [row["latency_ms"] for row in dashboard["series"]] == [200, None, 300]
+        assert [row["duration_ms"] for row in dashboard["series"]] == [
+            1000,
+            1000,
+            1000,
+        ]
 
     def test_dashboard_schema_declares_latency_fields(self):
         from simulate.serializers.run_dashboard_v3 import (
@@ -1477,10 +1497,10 @@ class TestRunResultsV3Views:
 
         series_fields = RunDashboardSeriesSerializer().fields
         dashboard_fields = RunDashboardV3Serializer().fields
-        assert "latency_ms" in series_fields
-        assert "duration_ms" not in series_fields
-        assert "agent_latency_percentiles" in dashboard_fields
-        assert "latency_percentiles" not in dashboard_fields
+        assert {"latency_ms", "duration_ms"} <= series_fields.keys()
+        assert {"agent_latency_percentiles", "latency_percentiles"} <= (
+            dashboard_fields.keys()
+        )
 
         swagger_path = (
             Path(__file__).resolve().parents[3]
@@ -1491,10 +1511,10 @@ class TestRunResultsV3Views:
         definitions = json.loads(swagger_path.read_text())["definitions"]
         series_properties = definitions["RunDashboardSeries"]["properties"]
         dashboard_properties = definitions["RunDashboardV3"]["properties"]
-        assert "latency_ms" in series_properties
-        assert "duration_ms" not in series_properties
-        assert "agent_latency_percentiles" in dashboard_properties
-        assert "latency_percentiles" not in dashboard_properties
+        assert {"latency_ms", "duration_ms"} <= series_properties.keys()
+        assert {"agent_latency_percentiles", "latency_percentiles"} <= (
+            dashboard_properties.keys()
+        )
 
     def test_dashboard_task_success_is_independent_of_provider_verdict(
         self, auth_client, test_execution, analytics_call_executions

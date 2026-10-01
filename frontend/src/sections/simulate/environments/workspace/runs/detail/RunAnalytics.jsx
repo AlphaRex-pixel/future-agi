@@ -172,6 +172,10 @@ function AnalyticsDashboard({ executionId, onOpenCall, onOpenCalls }) {
   const latencyLabel =
     dashboard.metrics.find((metric) => metric.key === "agent_latency")?.label ||
     "Agent latency";
+  // Call length kept in the payload for earlier builds of this page.
+  const distributionRows = dashboard.distributions.filter(
+    (row) => row.key !== "end_to_end_ms",
+  );
   const latencyAt = (percentile) =>
     dashboard.agent_latency_percentiles?.find(
       (row) => row.percentile === percentile,
@@ -385,7 +389,7 @@ function AnalyticsDashboard({ executionId, onOpenCall, onOpenCalls }) {
             pb: 2,
           }}
         >
-          {dashboard.distributions.map((row) => {
+          {distributionRows.map((row) => {
             const [mapped, unit] = DISTRIBUTIONS[row.key] || [
               row.key,
               "number",

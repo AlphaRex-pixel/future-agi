@@ -347,6 +347,11 @@ describe("RunAnalytics", () => {
         { percentile: 90, value: 400 },
         { percentile: 99, value: 900 },
       ],
+      latency_percentiles: [
+        { percentile: 50, value: 189000 },
+        { percentile: 90, value: 308100 },
+        { percentile: 99, value: 338520 },
+      ],
     });
     const region = screen.getByRole("region", { name: "Latency percentiles" });
     expect(
@@ -412,8 +417,8 @@ describe("RunAnalytics", () => {
       ],
       series_mode: "time_buckets",
       series: [
-        seriesRow({ latency_ms: 420 }),
-        seriesRow({ label: "2", latency_ms: 480 }),
+        seriesRow({ latency_ms: 420, duration_ms: 189000 }),
+        seriesRow({ label: "2", latency_ms: 480, duration_ms: 308100 }),
       ],
     });
     region = screen.getByRole("region", { name: "Task latency" });
@@ -487,9 +492,18 @@ describe("RunAnalytics", () => {
     expect(within(region).queryByText("Agent latency")).not.toBeInTheDocument();
   });
 
-  it("does not label a legacy call-length row as latency", () => {
+  it("hides the legacy call-length row", () => {
     withDashboard({
       distributions: [
+        {
+          key: "latency_ms",
+          measured: 3,
+          average: 300,
+          max: 900,
+          p50: 250,
+          p90: 400,
+          p99: 880,
+        },
         {
           key: "end_to_end_ms",
           measured: 4,
@@ -502,11 +516,12 @@ describe("RunAnalytics", () => {
       ],
     });
     const region = screen.getByRole("region", { name: "Distribution summary" });
+    expect(within(region).getByText("Agent latency")).toBeInTheDocument();
     expect(
       within(region).queryByText("End-to-end latency"),
     ).not.toBeInTheDocument();
-    expect(within(region).queryByText("Agent latency")).not.toBeInTheDocument();
-    expect(within(region).getByText("end_to_end_ms")).toBeInTheDocument();
+    expect(within(region).queryByText("end_to_end_ms")).not.toBeInTheDocument();
+    expect(within(region).queryByText(/308,100/)).not.toBeInTheDocument();
   });
 
   it("describes latency charts as agent latency", () => {

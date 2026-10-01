@@ -46742,6 +46742,7 @@ export const SimulateV3TestExecutionAnalyticsResponse = zod.object({
         started_at: zod.string().datetime({ offset: true }),
         calls: zod.number(),
         latency_ms: zod.number(),
+        duration_ms: zod.number(),
         llm_cents: zod.number(),
         tts_cents: zod.number(),
         stt_cents: zod.number(),
@@ -46751,6 +46752,12 @@ export const SimulateV3TestExecutionAnalyticsResponse = zod.object({
     series_limit: zod.number(),
     series_mode: zod.enum(["calls", "time_buckets"]),
     agent_latency_percentiles: zod.array(
+      zod.object({
+        percentile: zod.number(),
+        value: zod.number(),
+      }),
+    ),
+    latency_percentiles: zod.array(
       zod.object({
         percentile: zod.number(),
         value: zod.number(),
