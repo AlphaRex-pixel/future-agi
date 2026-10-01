@@ -212,7 +212,7 @@ describe("RunTraceTable", () => {
     expect(screen.getByText("Tone")).toBeInTheDocument();
 
     // Groups start collapsed — expand to reveal the rows, then the persona cell.
-    await user.click(screen.getByRole("button", { name: /Expand all/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Expand all/ }));
     expect(
       screen.getByText("The Hungry Customer in a Rush"),
     ).toBeInTheDocument();
@@ -226,7 +226,7 @@ describe("RunTraceTable", () => {
     const onOpenCall = vi.fn();
     renderTable({ onOpenCall });
 
-    await user.click(screen.getByRole("button", { name: /Expand all/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Expand all/ }));
     await user.click(screen.getByText("The Hungry Customer in a Rush"));
 
     expect(onOpenCall).toHaveBeenCalledWith(

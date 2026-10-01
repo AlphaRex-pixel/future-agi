@@ -51,9 +51,11 @@ describe("TraceTable interruption metrics", () => {
       );
 
       expect(
-        screen.getAllByRole("columnheader").map((cell) => cell.textContent),
+        within(document.querySelector("thead tr:last-of-type"))
+          .getAllByRole("columnheader")
+          .map((cell) => cell.textContent),
       ).toEqual(["Run details", "Stop latency", "AI interruptions"]);
-      const cells = within(screen.getAllByRole("row")[1]).getAllByRole("cell");
+      const cells = within(screen.getAllByRole("row")[2]).getAllByRole("cell");
       expect(cells[1]).toHaveTextContent(latencyText);
       expect(cells[2]).toHaveTextContent(countText);
     },
@@ -164,7 +166,7 @@ describe("TraceTable — sticky header and group rows", () => {
     ["A", "B"].forEach((label) => {
       const td = screen.getByText(label).closest("td");
       expect(position(td)).toBe("sticky");
-      expect(window.getComputedStyle(td).top).toBe("44px");
+      expect(window.getComputedStyle(td).top).toBe("72px");
     });
   });
 
@@ -194,9 +196,9 @@ describe("TraceTable — call status column", () => {
 
   it("sits between Run details and Persona", () => {
     render(table());
-    const heads = [...document.querySelectorAll("thead th")].map((th) =>
-      th.textContent.trim(),
-    );
+    const heads = [
+      ...document.querySelectorAll("thead tr:last-of-type th"),
+    ].map((th) => th.textContent.trim());
     expect(heads.slice(0, 3)).toEqual(["Run details", "Status", "Persona"]);
   });
 
@@ -254,9 +256,9 @@ describe("TraceTable — group row while its calls run", () => {
   // The group row's cell under a column header, so the checks hold whatever
   // other columns the table has.
   const cellUnder = (heading) => {
-    const heads = [...document.querySelectorAll("thead th")].map((th) =>
-      th.textContent.trim(),
-    );
+    const heads = [
+      ...document.querySelectorAll("thead tr:last-of-type th"),
+    ].map((th) => th.textContent.trim());
     return screen.getByText("G").closest("tr").children[heads.indexOf(heading)];
   };
   const COLUMNS = ["CSAT", "Turns", "Latency", "Tokens", "Tone"];

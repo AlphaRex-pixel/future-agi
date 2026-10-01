@@ -235,6 +235,18 @@ def eval_rows(call: CallExecution, live_eval_ids: set[str]) -> list[dict[str, An
     return rows
 
 
+def receipt_sub_goal_names(metadata: Any) -> set[str]:
+    receipt = (
+        metadata.get("hosted_harness_receipt") if isinstance(metadata, dict) else None
+    )
+    sub_goals = receipt.get("sub_goals") if isinstance(receipt, dict) else None
+    return {
+        str(item["name"])
+        for item in sub_goals or []
+        if isinstance(item, dict) and item.get("name")
+    }
+
+
 def build_evaluation_catalog(
     execution: TestExecution,
 ) -> tuple[list[dict[str, str]], set[str]]:
@@ -242,7 +254,7 @@ def build_evaluation_catalog(
     cache_key = None
     if execution.status == TestExecution.ExecutionStatus.COMPLETED:
         version = execution.completed_at or execution.updated_at
-        cache_key = f"simulate:v3:eval-catalog:{execution.id}:{version.timestamp()}"
+        cache_key = f"simulate:v3:eval-catalog:v2:{execution.id}:{version.timestamp()}"
         cached = cache.get(cache_key)
         if cached is not None:
             return cached[0], set(cached[1])
@@ -252,17 +264,19 @@ def build_evaluation_catalog(
         ).values("id", "name")
     )
     columns = [
-        {"id": str(config["id"]), "name": str(config["name"])} for config in configs
+        {"id": str(config["id"]), "name": str(config["name"]), "kind": "evaluation"}
+        for config in configs
     ]
     live_eval_ids = {column["id"] for column in columns}
     known = set(live_eval_ids)
     # The catalog is execution-wide so columns never vary by page or filter.
     outputs = CallExecution.objects.filter(test_execution=execution).values_list(
-        "eval_outputs", flat=True
+        "eval_outputs", "call_metadata"
     )
-    for eval_outputs in outputs:
+    for eval_outputs, metadata in outputs:
         if not isinstance(eval_outputs, dict):
             continue
+        sub_goal_names = receipt_sub_goal_names(metadata)
         for eval_id, data in eval_outputs.items():
             eval_id = str(eval_id)
             if (
@@ -271,7 +285,14 @@ def build_evaluation_catalog(
                 or data.get("source") != "harness"
             ):
                 continue
-            columns.append({"id": eval_id, "name": str(data.get("name") or eval_id)})
+            name = str(data.get("name") or eval_id)
+            columns.append(
+                {
+                    "id": eval_id,
+                    "name": name,
+                    "kind": "sub_goal" if name in sub_goal_names else "evaluation",
+                }
+            )
             known.add(eval_id)
     if cache_key:
         cache.set(cache_key, (columns, list(live_eval_ids)), timeout=60 * 60)
@@ -304,7 +325,7 @@ def build_call_rows(
         },
     )
     rows = []
-    harness_columns: dict[str, str] = {}
+    harness_columns: dict[str, dict[str, str]] = {}
     for call in calls:
         metadata = call.call_metadata if isinstance(call.call_metadata, dict) else {}
         row_data = metadata.get("row_data")
@@ -376,8 +397,17 @@ def build_call_rows(
         if turn_count is None:
             turn_count = _number(metrics.get("bot_message_count"))
         evaluations = eval_rows(call, live_eval_ids)
+        receipt_sub_goals = receipt_sub_goal_names(metadata)
         for evaluation in evaluations:
-            harness_columns[evaluation["id"]] = evaluation["name"]
+            harness_columns[evaluation["id"]] = {
+                "id": evaluation["id"],
+                "name": evaluation["name"],
+                "kind": (
+                    "sub_goal"
+                    if evaluation["name"] in receipt_sub_goals
+                    else "evaluation"
+                ),
+            }
         rows.append(
             {
                 "id": str(call.id),
@@ -425,8 +455,6 @@ def build_call_rows(
     columns = list(columns)
     known = {column["id"] for column in columns}
     columns.extend(
-        {"id": eval_id, "name": name}
-        for eval_id, name in harness_columns.items()
-        if eval_id not in known
+        column for eval_id, column in harness_columns.items() if eval_id not in known
     )
     return rows, columns

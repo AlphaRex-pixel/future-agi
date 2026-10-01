@@ -175,21 +175,21 @@ export function taskFromCallDetail(detail) {
  * @returns {import("./runDetail").TraceColumn[]}
  */
 export function buildTraceColumns(columnOrder = []) {
-  const staticCols = TRACE_COLUMNS.filter((c) => c.key !== "evals").map(
-    (c) => ({
-      key: c.key,
-      label: c.label,
-      defaultOn: c.defaultOn,
-      width: c.width,
-      group: c.group,
-    }),
-  );
+  const staticCols = TRACE_COLUMNS.filter(
+    (c) => c.key !== "evals" && c.key !== "subGoalEvals",
+  ).map((c) => ({
+    key: c.key,
+    label: c.label,
+    defaultOn: c.defaultOn,
+    width: c.width,
+    group: c.group,
+  }));
   const evalCols = (columnOrder || []).map((c) => ({
     key: c.id,
     label: c.name || c.id,
     defaultOn: true,
     width: 150,
-    group: "Evaluations",
+    group: c.kind === "sub_goal" ? "Sub-goals" : "Evaluations",
   }));
   return [...staticCols, ...evalCols];
 }

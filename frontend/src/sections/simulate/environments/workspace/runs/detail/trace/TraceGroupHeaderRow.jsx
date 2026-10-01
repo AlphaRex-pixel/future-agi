@@ -40,6 +40,7 @@ export default function TraceGroupHeaderRow({
   show,
   showEvals,
   evals,
+  top = HEAD_ROW_PX,
   loading = false,
 }) {
   // Pinned under the head row while its group's calls scroll past; the next
@@ -47,7 +48,7 @@ export default function TraceGroupHeaderRow({
   // the paper instead of replacing it.
   const cellSx = {
     position: "sticky",
-    top: HEAD_ROW_PX,
+    top,
     zIndex: 2,
     bgcolor: "background.paper",
     borderBottom: "1px solid",
@@ -278,5 +279,6 @@ TraceGroupHeaderRow.propTypes = {
   show: PropTypes.func,
   showEvals: PropTypes.bool,
   evals: PropTypes.array,
+  top: PropTypes.number,
   loading: PropTypes.bool,
 };

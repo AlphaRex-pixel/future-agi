@@ -5,7 +5,9 @@ import {
   Stack,
   Button,
   Chip,
+  FormControlLabel,
   Pagination,
+  Switch,
   Typography,
 } from "@mui/material";
 
@@ -20,6 +22,7 @@ import TraceTable from "./TraceTable";
 import { TraceGroupByPicker, TraceColumnsPicker } from "./TracePickers";
 import StatusFilterChips from "./StatusFilterChips";
 import {
+  GROUPINGS,
   VOICE_ONLY_COLUMNS,
   defaultTraceColumns,
 } from "./traceTable.constants";
@@ -70,6 +73,9 @@ export default function RunTraceTable({
     defaultTraceColumns(),
   );
   const [filterAnchor, setFilterAnchor] = useState(null);
+  // The closed groups, or null while every group is closed (the start). Held
+  // here so the toggle next to Filter can drive the table.
+  const [collapsed, setCollapsed] = useState(null);
   const [filters, setFilters] = useState(initialFilters);
 
   const serverFilters = useMemo(() => {
@@ -156,12 +162,18 @@ export default function RunTraceTable({
     [chatRun, visibleColumns],
   );
 
-
   // The eval columns to render come from the data-driven column descriptors.
   const evals = useMemo(
     () =>
       columns
         .filter((c) => c.group === "Evaluations")
+        .map((c) => ({ id: c.key, name: c.label })),
+    [columns],
+  );
+  const subGoalEvals = useMemo(
+    () =>
+      columns
+        .filter((c) => c.group === "Sub-goals")
         .map((c) => ({ id: c.key, name: c.label })),
     [columns],
   );
@@ -248,15 +260,42 @@ export default function RunTraceTable({
     setStatusChip("all");
   };
 
+  const allCollapsed =
+    collapsed === null || groups.every((g) => collapsed.has(g.label));
+
   const title = (
     <Stack direction="row" alignItems="center" spacing={1.25}>
       <TraceGroupByPicker
         value={groupBy}
         onChange={(value) => {
           setGroupBy(value);
+          setCollapsed(null);
           setPage(1);
         }}
       />
+      {groupBy && (
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={!allCollapsed}
+              onChange={(e) =>
+                setCollapsed(
+                  e.target.checked
+                    ? new Set()
+                    : new Set(groups.map((g) => g.label)),
+                )
+              }
+            />
+          }
+          label="Expand all"
+          sx={{
+            ml: 0.5,
+            mr: 0,
+            ".MuiFormControlLabel-label": { typography: "s2" },
+          }}
+        />
+      )}
       <Button
         size="small"
         variant="outlined"
@@ -373,6 +412,14 @@ export default function RunTraceTable({
               groups={groups}
               rows={groupBy ? null : tasks}
               evals={evals}
+              subGoalEvals={subGoalEvals}
+              collapsed={collapsed}
+              onCollapsedChange={setCollapsed}
+              firstColumnLabel={
+                groupBy
+                  ? GROUPINGS.find((g) => g.id === groupBy)?.label
+                  : undefined
+              }
               onOpen={onOpenCall}
               activeCallId={activeCallId}
               scrollRef={tableScrollRef}
