@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import reprlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -64,13 +65,6 @@ def resolve_eval_scoring_spec(config: SimulateEvalConfig) -> EvalScoringSpec:
         or not 0 <= threshold <= 1
     ):
         threshold = None
-    if threshold is None:
-        logger.warning(
-            "Invalid pass_threshold %r for evaluation config %s; "
-            "threshold-dependent scores remain unmeasured",
-            configured_threshold,
-            getattr(config, "id", None),
-        )
     return EvalScoringSpec(
         output_type=output_type,
         threshold=threshold,
@@ -81,6 +75,23 @@ def resolve_eval_scoring_spec(config: SimulateEvalConfig) -> EvalScoringSpec:
         ),
         choice_scores=choice_scores,
     )
+
+
+def warn_invalid_eval_threshold(
+    config: SimulateEvalConfig, spec: EvalScoringSpec
+) -> None:
+    if spec.threshold is None:
+        configured_threshold = _binding_setting(
+            config,
+            "pass_threshold",
+            getattr(config.eval_template, "pass_threshold", None),
+        )
+        logger.warning(
+            "Invalid pass_threshold %s for evaluation config %s; "
+            "threshold-dependent scores remain unmeasured",
+            reprlib.repr(configured_threshold)[:200],
+            getattr(config, "id", None),
+        )
 
 
 def _number(value: Any) -> float | None:

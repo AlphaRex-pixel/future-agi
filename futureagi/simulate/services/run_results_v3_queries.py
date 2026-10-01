@@ -68,6 +68,7 @@ from simulate.services.run_results_v3_expressions import (
 from simulate.services.run_results_v3_scoring import (
     EvalScoringSpec,
     resolve_eval_scoring_spec,
+    warn_invalid_eval_threshold,
 )
 
 OUTCOMES = ("passed", "failed", "error", "inconclusive")
@@ -375,8 +376,11 @@ def _eval_score(eval_id: str, spec: EvalScoringSpec | None = None):
     )
 
 
-def _configured_eval_verdict(eval_id: str, config: SimulateEvalConfig):
-    spec = resolve_eval_scoring_spec(config)
+def _configured_eval_verdict(
+    eval_id: str, config: SimulateEvalConfig, spec: EvalScoringSpec | None = None
+):
+    if spec is None:
+        spec = resolve_eval_scoring_spec(config)
     raw_score = (
         _eval_score(eval_id, spec)
         if spec.threshold is not None
@@ -506,7 +510,9 @@ def run_calls_queryset(
     errored_eval = Q(pk__in=[])
     for config in live_configs:
         eval_id = str(config.id)
-        _, passed_q, failed_q = _configured_eval_verdict(eval_id, config)
+        spec = resolve_eval_scoring_spec(config)
+        warn_invalid_eval_threshold(config, spec)
+        _, passed_q, failed_q = _configured_eval_verdict(eval_id, config, spec)
         failed_eval |= failed_q
         passed_eval |= passed_q
         errored_eval |= _eval_errored_q(eval_id)

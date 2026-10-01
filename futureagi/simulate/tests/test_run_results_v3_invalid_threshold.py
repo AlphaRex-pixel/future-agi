@@ -18,6 +18,7 @@ from simulate.services.run_results_v3_queries import (
 from simulate.services.run_results_v3_scoring import (
     judge_stored_eval,
     resolve_eval_scoring_spec,
+    warn_invalid_eval_threshold,
 )
 
 
@@ -51,6 +52,7 @@ def test_invalid_threshold_is_unmeasured_for_rows_and_sql(threshold, source, cap
 
     with caplog.at_level(logging.WARNING):
         spec = resolve_eval_scoring_spec(config)
+        warn_invalid_eval_threshold(config, spec)
     assert spec.threshold is None
     assert f"Invalid pass_threshold {threshold!r}" in caplog.text
     assert "evaluation config eval-1" in caplog.text
@@ -107,6 +109,57 @@ def test_invalid_threshold_preserves_execution_errors():
     assert (
         judge_stored_eval({"status": "error", "output": None}, spec).outcome == "error"
     )
+
+
+@pytest.mark.parametrize(
+    "threshold", ["x" * 10000, ["x" * 10000] * 100, {"x" * 10000: "y" * 10000}]
+)
+def test_invalid_threshold_warning_has_bounded_value(threshold, caplog):
+    config = _config({"pass_threshold": threshold})
+    with caplog.at_level(logging.WARNING):
+        spec = resolve_eval_scoring_spec(config)
+        warn_invalid_eval_threshold(config, spec)
+    assert spec.threshold is None
+    record = caplog.records[-1]
+    assert len(record.args[0]) <= 200
+    assert "..." in record.args[0]
+    assert len(record.getMessage()) < 350
+    assert "evaluation config eval-1" in record.getMessage()
+
+
+def test_warnings_are_per_loaded_config_not_per_call(caplog):
+    config = _config({"pass_threshold": 70})
+    other = _config({"pass_threshold": 70})
+    other.id = "eval-2"
+    valid = _config({"pass_threshold": 0.7})
+    valid.id = "eval-3"
+    configs = {str(item.id): item for item in (config, other, valid)}
+    call = SimpleNamespace(
+        status=CallExecution.CallStatus.COMPLETED,
+        call_metadata={},
+        eval_outputs={key: {"status": "completed", "output": 0.8} for key in configs},
+    )
+    with (
+        caplog.at_level(logging.WARNING),
+        patch(
+            "simulate.services.run_results_v3_queries.SimulateEvalConfig.objects.filter"
+        ) as filtered,
+    ):
+        filtered.return_value.select_related.return_value = list(configs.values())
+        run_calls_queryset(SimpleNamespace(run_test=None), [uuid4()])
+        assert len(caplog.records) == 2
+        assert "evaluation config eval-1" in caplog.records[0].getMessage()
+        assert "evaluation config eval-2" in caplog.records[1].getMessage()
+        for _ in range(100):
+            assert call_outcome(call, configs) == "passed"
+            eval_rows(call, configs)
+        assert len(caplog.records) == 2
+        run_calls_queryset(SimpleNamespace(run_test=None), [uuid4()])
+        assert len(caplog.records) == 4
+        valid.config = {"pass_threshold": 0.9}
+        assert call_outcome(call, configs) == "failed"
+        assert eval_rows(call, configs)[2]["passed"] is False
+        assert len(caplog.records) == 4
 
 
 def test_malformed_binding_does_not_discard_valid_evaluations():
