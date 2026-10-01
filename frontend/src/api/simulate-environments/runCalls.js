@@ -191,7 +191,7 @@ export function buildTraceColumns(columnOrder = []) {
     label: c.name || c.id,
     defaultOn: true,
     width: 150,
-    group: c.kind === "sub_goal" ? "Sub-goals" : "Evaluations",
+    group: c.kind === "sub_goal" ? "Sub-goal Results" : "Evaluations",
   }));
   return [...staticCols, ...evalCols];
 }

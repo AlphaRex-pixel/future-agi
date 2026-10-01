@@ -220,6 +220,26 @@ describe("TraceTable — call status column", () => {
   });
 });
 
+describe("TraceTable — column group band", () => {
+  it("heads sub-goal checks with Sub-goal Results, ahead of the evaluations", () => {
+    render(
+      table({
+        columns: new Set(["callDetails", "subGoalEvals", "evals"]),
+        subGoalEvals: [{ id: "sg-1", name: "pin_verified" }],
+        evals: [{ id: "e1", name: "Tone" }],
+      }),
+    );
+    const band = [...document.querySelectorAll("thead tr:first-of-type th")].map(
+      (th) => th.textContent.trim(),
+    );
+    expect(band).toEqual(["Run details", "Sub-goal Results", "Evaluations"]);
+    const heads = [...document.querySelectorAll("thead tr:last-of-type th")].map(
+      (th) => th.textContent.trim(),
+    );
+    expect(heads.slice(-2)).toEqual(["pin_verified", "Tone"]);
+  });
+});
+
 describe("TraceTable — group row grid", () => {
   it("keeps the column dividers on the group row", () => {
     render(table());

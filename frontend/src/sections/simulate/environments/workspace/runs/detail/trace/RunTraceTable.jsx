@@ -1,5 +1,12 @@
 import PropTypes from "prop-types";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Box,
   Stack,
@@ -22,6 +29,7 @@ import TraceTable from "./TraceTable";
 import { TraceGroupByPicker, TraceColumnsPicker } from "./TracePickers";
 import StatusFilterChips from "./StatusFilterChips";
 import {
+  CLOSED_GROUP_VIEW,
   GROUPINGS,
   VOICE_ONLY_COLUMNS,
   defaultTraceColumns,
@@ -75,7 +83,42 @@ export default function RunTraceTable({
   const [filterAnchor, setFilterAnchor] = useState(null);
   // The closed groups, or null while every group is closed (the start). Held
   // here so the toggle next to Filter can drive the table.
-  const [collapsed, setCollapsed] = useState(null);
+  // Which groups are open lives here, not in the table: a filter's loading
+  // and empty states unmount the table, and its own state would go with it,
+  // folding every group back up. Labels differ per axis, so each axis keeps
+  // its own opened set and a change under one never touches another; Expand
+  // all carries over.
+  const [groupState, setGroupState] = useState({
+    all: false,
+    expandedByAxis: {},
+  });
+  const groupView = useMemo(
+    () => ({
+      all: groupState.all,
+      expanded:
+        groupState.expandedByAxis[groupBy] ?? CLOSED_GROUP_VIEW.expanded,
+    }),
+    [groupState, groupBy],
+  );
+  const setGroupView = useCallback(
+    (update) =>
+      setGroupState((prev) => {
+        const current = {
+          all: prev.all,
+          expanded: prev.expandedByAxis[groupBy] ?? CLOSED_GROUP_VIEW.expanded,
+        };
+        const next = typeof update === "function" ? update(current) : update;
+        // Collapse all closes every axis, not just the one on screen.
+        if (next === CLOSED_GROUP_VIEW)
+          return { all: false, expandedByAxis: {} };
+        return {
+          all: next.all,
+          expandedByAxis: { ...prev.expandedByAxis, [groupBy]: next.expanded },
+        };
+      }),
+    [groupBy],
+  );
+  const expandedForRef = useRef(null);
   const [filters, setFilters] = useState(initialFilters);
 
   const serverFilters = useMemo(() => {
@@ -173,7 +216,7 @@ export default function RunTraceTable({
   const subGoalEvals = useMemo(
     () =>
       columns
-        .filter((c) => c.group === "Sub-goals")
+        .filter((c) => c.group === "Sub-goal Results")
         .map((c) => ({ id: c.key, name: c.label })),
     [columns],
   );
@@ -260,8 +303,11 @@ export default function RunTraceTable({
     setStatusChip("all");
   };
 
-  const allCollapsed =
-    collapsed === null || groups.every((g) => collapsed.has(g.label));
+  // Like a "select all" box: on only while every group on screen is open,
+  // however they were opened.
+  const allOpen =
+    groups.length > 0 &&
+    groups.every((g) => groupView.all || groupView.expanded.has(g.label));
 
   const title = (
     <Stack direction="row" alignItems="center" spacing={1.25}>
@@ -269,7 +315,8 @@ export default function RunTraceTable({
         value={groupBy}
         onChange={(value) => {
           setGroupBy(value);
-          setCollapsed(null);
+          // The open call's group has to open again under the new axis.
+          expandedForRef.current = null;
           setPage(1);
         }}
       />
@@ -278,12 +325,18 @@ export default function RunTraceTable({
           control={
             <Switch
               size="small"
-              checked={!allCollapsed}
-              onChange={(e) =>
-                setCollapsed(
-                  e.target.checked
-                    ? new Set()
-                    : new Set(groups.map((g) => g.label)),
+              checked={allOpen}
+              onChange={() =>
+                setGroupView((prev) =>
+                  allOpen
+                    ? CLOSED_GROUP_VIEW
+                    : {
+                        all: true,
+                        expanded: new Set([
+                          ...prev.expanded,
+                          ...groups.map((g) => g.label),
+                        ]),
+                      },
                 )
               }
             />
@@ -413,8 +466,9 @@ export default function RunTraceTable({
               rows={groupBy ? null : tasks}
               evals={evals}
               subGoalEvals={subGoalEvals}
-              collapsed={collapsed}
-              onCollapsedChange={setCollapsed}
+              groupView={groupView}
+              onGroupViewChange={setGroupView}
+              expandedForRef={expandedForRef}
               firstColumnLabel={
                 groupBy
                   ? GROUPINGS.find((g) => g.id === groupBy)?.label

@@ -248,6 +248,24 @@ describe("RunsSummary", () => {
     });
   });
 
+  it("shows the pager only once there is more than one page of runs", () => {
+    renderSummary({}, RUNS, false, { count: 10 });
+    expect(screen.queryByText(/Rows per page/)).toBeNull();
+  });
+
+  it("pages the runs table once the run-test holds more than ten runs", () => {
+    renderSummary({}, RUNS, false, { count: 11 });
+    expect(screen.getByText(/Rows per page/)).toBeInTheDocument();
+  });
+
+  it("reads the graph's runs from their own first page, not the table's page", () => {
+    renderSummary();
+    expect(useEnvironmentRuns).toHaveBeenCalledWith(env, envState, {
+      page: 0,
+      pageSize: 1,
+    });
+  });
+
   it("pins the runs table's header, since the table scrolls under a fixed graph", () => {
     renderSummary();
     const heads = document.querySelectorAll("thead th");
