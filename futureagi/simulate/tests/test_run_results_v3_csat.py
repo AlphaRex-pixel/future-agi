@@ -45,6 +45,8 @@ def test_call_rows_csat_requires_explicit_score(metrics, provider_score, expecte
         conversation_metrics_data=metrics,
         overall_score=provider_score,
         avg_agent_latency_ms=None,
+        avg_stop_time_after_interruption_ms=None,
+        ai_interruption_count=None,
         eval_outputs={},
         status="completed",
         simulation_call_type="voice",
