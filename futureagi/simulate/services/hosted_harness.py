@@ -349,6 +349,10 @@ def create_selected_harness_run(
 
         child_payload = json.loads(json.dumps(environment.payload))
         child_payload["scenario_count"] = len(manifest)
+        artifacts = child_payload["artifacts"]
+        artifacts["max_artifact_bytes"] = max(
+            artifacts["max_artifact_bytes"], settings.HARNESS_MAX_ARTIFACT_BYTES
+        )
         runtime = child_payload["runtime"]
         runtime["max_duration_seconds"] = max(
             runtime["max_duration_seconds"], len(manifest) * 360
