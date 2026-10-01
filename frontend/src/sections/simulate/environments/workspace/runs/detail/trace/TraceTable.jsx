@@ -10,6 +10,7 @@ import {
   TableHead,
   TableRow,
   Button,
+  tableBodyClasses,
   tableCellClasses,
   tableHeadClasses,
   tableRowClasses,
@@ -29,13 +30,13 @@ import {
   CALL_STATUS_CHIPS,
 } from "./traceTable.constants";
 import StatusChip from "../../StatusChip";
-import { MetricValue, Score, Field } from "./traceCells";
+import { MetricValue, Score, Field, UnscoredEval } from "./traceCells";
 import TraceGroupHeaderRow from "./TraceGroupHeaderRow";
 
 // The theme hides every border on a table's last row, which here is the head
 // row and the final call row. The column dividers are cell left borders, so put
-// those back, and the head's bottom line; the body's last bottom line stays
-// hidden so it doesn't double up with the container edge. Separate borders,
+// those back, the head's bottom line, and the body's last bottom line, which
+// closes the table when its rows don't fill the scroll box. Separate borders,
 // because collapsed ones stay behind when the head and group rows stick.
 const lastRowDividersSx = {
   minWidth: 1000,
@@ -44,9 +45,8 @@ const lastRowDividersSx = {
   borderSpacing: 0,
   [`& .${tableRowClasses.root}:last-of-type .${tableCellClasses.root}:not(:first-of-type)`]:
     { borderLeftColor: "divider" },
-  [`& .${tableHeadClasses.root} .${tableCellClasses.root}`]: {
-    borderBottomColor: "divider",
-  },
+  [`& .${tableHeadClasses.root} .${tableCellClasses.root}, & .${tableBodyClasses.root} .${tableRowClasses.root}:last-of-type .${tableCellClasses.root}`]:
+    { borderBottomColor: "divider" },
 };
 
 /**
@@ -57,6 +57,9 @@ const lastRowDividersSx = {
 // The free-text columns stay narrow so a collapsed table (one count per group)
 // doesn't stretch; long text is cut at four lines — the drawer has the rest.
 const TEXT_COL_WIDTH = { long: 260, short: 200 };
+// A call still in flight — its eval cells can only be waiting. `analyzing`
+// is a finished conversation whose evals are grading (the chat path).
+const LIVE_CALL_STATUSES = new Set(["pending", "queued", "ongoing", "analyzing"]);
 const textCellSx = (width) => ({
   ...bodyCellSx,
   width,
@@ -73,6 +76,11 @@ const clampSx = {
   wordBreak: "break-word",
 };
 
+// A persona is worth showing when any field is filled, not only the name: the
+// API sends name: null when the persona has no name key.
+const hasPersonaDetails = (p) =>
+  !!(p && (p.name || p.voice || p.age || p.traits?.length));
+
 export default function TraceTable({
   groups,
   rows = null,
@@ -84,6 +92,7 @@ export default function TraceTable({
   collapsed: collapsedProp,
   onCollapsedChange,
   expandedForRef: expandedForRefProp,
+  runActive = false,
 }) {
   // A parent that unmounts this table (a filter's loading or empty state)
   // passes the open/closed groups in, so they survive the remount. Without
@@ -99,6 +108,12 @@ export default function TraceTable({
   const visible = columns || defaultTraceColumns();
   const show = (key) => visible.has(key);
   const showEvals = show("evals");
+  // The server's group figures can't tell a call still running from one with no
+  // value. So a group counts as still coming while one of its calls here is
+  // live, or, while the run goes on, while some of its calls are on other pages.
+  const groupLive = (g) =>
+    g.rows.some((t) => LIVE_CALL_STATUSES.has(t.executionStatus)) ||
+    (runActive && g.rows.length < g.count);
 
   const collapsedSet = collapsed ?? new Set(groups.map((g) => g.label));
   const toggleCollapsed = (label) =>
@@ -138,6 +153,7 @@ export default function TraceTable({
 
   const renderRow = (t) => {
     const outcome = runOutcome(t.status);
+    const callLive = LIVE_CALL_STATUSES.has(t.executionStatus);
     const active = t.id === activeCallId;
     return (
       <TableRow
@@ -239,7 +255,7 @@ export default function TraceTable({
 
         {show("persona") && (
           <TableCell sx={bodyCellSx} onClick={() => onOpen(t)}>
-            {t.personaDetails?.name ? (
+            {hasPersonaDetails(t.personaDetails) ? (
               <Stack spacing={0.5} sx={{ minWidth: 210 }}>
                 <Field
                   icon="solar:user-id-linear"
@@ -299,22 +315,41 @@ export default function TraceTable({
 
         {show("csat") && (
           <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
-            <MetricValue metric="csat" value={t.csat} />
+            <MetricValue metric="csat" value={t.csat} loading={callLive} />
           </TableCell>
         )}
         {show("turns") && (
           <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
-            <MetricValue metric="turns" value={t.turns} />
+            <MetricValue metric="turns" value={t.turns} loading={callLive} />
           </TableCell>
         )}
         {show("latency") && (
           <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
-            <MetricValue metric="latency" value={t.latencyMs} suffix="ms" />
+            <MetricValue metric="latency" value={t.latencyMs} suffix="ms" loading={callLive} />
+          </TableCell>
+        )}
+        {show("stopLatency") && (
+          <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
+            <MetricValue
+              metric="stopLatency"
+              value={t.stopLatencyMs}
+              suffix="ms"
+              loading={callLive}
+            />
+          </TableCell>
+        )}
+        {show("aiInterruptions") && (
+          <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
+            <MetricValue
+              metric="aiInterruptions"
+              value={t.aiInterruptions}
+              loading={callLive}
+            />
           </TableCell>
         )}
         {show("tokens") && (
           <TableCell sx={numCellSx} onClick={() => onOpen(t)}>
-            <MetricValue metric="tokens" value={t.tokens} />
+            <MetricValue metric="tokens" value={t.tokens} loading={callLive} />
           </TableCell>
         )}
 
@@ -327,12 +362,14 @@ export default function TraceTable({
                 sx={{ ...bodyCellSx, p: 0, position: "relative" }}
                 onClick={() => onOpen(t)}
               >
-                {r ? (
+                {r?.score != null || r?.label ? (
                   <Score result={r} />
                 ) : (
-                  <Box sx={{ p: 2, typography: "s2", color: "text.disabled" }}>
-                    -
-                  </Box>
+                  <UnscoredEval
+                    result={r}
+                    callLive={callLive}
+                    callStatus={t.executionStatus}
+                  />
                 )}
               </TableCell>
             );
@@ -429,6 +466,16 @@ export default function TraceTable({
               {show("latency") && (
                 <TableCell sx={{ ...headCellSx, width: 96 }}>Latency</TableCell>
               )}
+              {show("stopLatency") && (
+                <TableCell sx={{ ...headCellSx, width: 140 }}>
+                  Stop latency
+                </TableCell>
+              )}
+              {show("aiInterruptions") && (
+                <TableCell sx={{ ...headCellSx, width: 150 }}>
+                  AI interruptions
+                </TableCell>
+              )}
               {show("tokens") && (
                 <TableCell sx={{ ...headCellSx, width: 120 }}>Tokens</TableCell>
               )}
@@ -456,6 +503,7 @@ export default function TraceTable({
                   <React.Fragment key={g.label}>
                     <TraceGroupHeaderRow
                       group={g}
+                      loading={groupLive(g)}
                       collapsed={collapsedSet.has(g.label)}
                       onToggle={() => toggleCollapsed(g.label)}
                       show={show}
@@ -484,4 +532,5 @@ TraceTable.propTypes = {
   collapsed: PropTypes.instanceOf(Set),
   onCollapsedChange: PropTypes.func,
   expandedForRef: PropTypes.shape({ current: PropTypes.any }),
+  runActive: PropTypes.bool,
 };

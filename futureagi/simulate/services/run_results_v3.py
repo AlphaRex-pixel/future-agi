@@ -183,7 +183,9 @@ def eval_rows(call: CallExecution, live_eval_ids: set[str]) -> list[dict[str, An
             "skipped",
             "error",
         }
-        numeric = _number(value) if measured else None
+        # choice-scored evals store {"score": ...}; other evals store the number directly.
+        source = value.get("score") if isinstance(value, dict) else value
+        numeric = _number(source) if measured else None
         verdict = _truth_value(data)
         score = numeric
         if verdict is not None:
@@ -345,6 +347,10 @@ def build_call_rows(
                 "completed_at": call.completed_at,
                 "duration_seconds": call.duration_seconds,
                 "latency_ms": latency,
+                "avg_stop_time_after_interruption": (
+                    call.avg_stop_time_after_interruption_ms
+                ),
+                "ai_interruption_count": call.ai_interruption_count,
                 "turn_count": int(turn_count) if turn_count is not None else None,
                 "tokens": int(tokens) if tokens is not None else None,
                 "cost_cents": call.cost_cents,

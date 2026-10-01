@@ -10,6 +10,7 @@ import { useRunsSummary } from "./useRunsSummary";
 import SummaryGraph from "./SummaryGraph";
 import SummaryLegend from "./SummaryLegend";
 import SummaryTable from "./SummaryTable";
+import { countCoveredScenarios } from "./summaryData";
 
 // The Runs tab: every run of the environment as one summary — the eval-score
 // trend graph over the runs table. Choosing a winner is a later phase,
@@ -21,8 +22,13 @@ const MIN_SUMMARY_PX = 760;
 const DEFAULT_SHOWN_EVALS = 5;
 
 export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
-  const { rows, rowsChrono, evals, series, isLoading } = useRunsSummary(env, envState);
-  const scenarioCount = envState.scenarios?.length ?? 0;
+  const { rows, rowsChrono, evals, series, count, coveredScenarioCount, isLoading } =
+    useRunsSummary(env, envState);
+  // The server counts over every run of the environment; the page-local
+  // fallbacks only serve mock runs and environments with no run-test.
+  const runCount = count ?? rows.length;
+  const scenarioCount =
+    coveredScenarioCount ?? countCoveredScenarios(rows, envState.scenarios?.length ?? 0);
 
   // Which eval lines to draw. Until the user picks, the first five; the last
   // one cannot be unticked (an empty chart reads as a bug, not a choice).
@@ -71,7 +77,7 @@ export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
             Simulations summary
           </Typography>
           <Typography sx={{ typography: "s1", color: "text.secondary" }}>
-            {rows.length} {rows.length === 1 ? "run" : "runs"} · {scenarioCount} scenarios
+            {runCount} {runCount === 1 ? "run" : "runs"} · {scenarioCount} scenarios
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
