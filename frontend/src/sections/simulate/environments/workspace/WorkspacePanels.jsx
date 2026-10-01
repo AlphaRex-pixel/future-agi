@@ -53,7 +53,11 @@ export default function WorkspacePanels({
   canRun = false,
 }) {
   const navigate = useNavigate();
-  const { runs, isLoading: runsLoading } = useEnvironmentRuns(env, envState);
+  const {
+    runs = [],
+    count: runCount,
+    isLoading: runsLoading,
+  } = useEnvironmentRuns(env, envState);
 
   // The environment's run count is the whole total and comes with the
   // environment; the runs list comes a page at a time. A run the list already
