@@ -44356,6 +44356,7 @@ export const SimulateRunTestsExecutionsListResponse = zod.object({
       }),
     )
     .optional(),
+  covered_scenario_count: zod.number().optional(),
 });
 
 export const SimulateRunTestsPreviewExecutionsListParams = zod.object({
@@ -47483,6 +47484,13 @@ export const SimulateV3TestExecutionCallsResponse = zod.object({
       completed_at: zod.string().datetime({ offset: true }),
       duration_seconds: zod.number(),
       latency_ms: zod.number(),
+      avg_stop_time_after_interruption: zod
+        .number()
+        .nullable()
+        .describe(
+          "Average stop time after caller interruption in milliseconds.",
+        ),
+      ai_interruption_count: zod.number().nullable(),
       turn_count: zod.number(),
       tokens: zod.number(),
       cost_cents: zod.number(),
@@ -47570,6 +47578,18 @@ export const SimulateV3TestExecutionCallsResponse = zod.object({
         csat: zod.number(),
         turns: zod.number(),
         latency_ms: zod.number(),
+        avg_stop_time_after_interruption: zod
+          .number()
+          .nullable()
+          .describe(
+            "Mean call stop latency in milliseconds, excluding unmeasured calls.",
+          ),
+        ai_interruptions: zod
+          .number()
+          .nullable()
+          .describe(
+            "Mean AI interruption count per call, excluding unmeasured calls.",
+          ),
         tokens: zod.number(),
         evaluations: zod.object({}).passthrough(),
       }),

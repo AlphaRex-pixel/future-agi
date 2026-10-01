@@ -131286,6 +131286,11 @@
                         "$ref": "#/definitions/TestExecutionItemResponse"
                     },
                     "readOnly": true
+                },
+                "covered_scenario_count": {
+                    "title": "Covered scenario count",
+                    "type": "integer",
+                    "readOnly": true
                 }
             }
         },
@@ -136361,6 +136366,8 @@
                 "completed_at",
                 "duration_seconds",
                 "latency_ms",
+                "avg_stop_time_after_interruption",
+                "ai_interruption_count",
                 "turn_count",
                 "tokens",
                 "cost_cents",
@@ -136486,6 +136493,17 @@
                     "type": "number",
                     "x-nullable": true
                 },
+                "avg_stop_time_after_interruption": {
+                    "title": "Avg stop time after interruption",
+                    "description": "Average stop time after caller interruption in milliseconds.",
+                    "type": "integer",
+                    "x-nullable": true
+                },
+                "ai_interruption_count": {
+                    "title": "Ai interruption count",
+                    "type": "integer",
+                    "x-nullable": true
+                },
                 "turn_count": {
                     "title": "Turn count",
                     "type": "integer",
@@ -136534,6 +136552,8 @@
                 "csat",
                 "turns",
                 "latency_ms",
+                "avg_stop_time_after_interruption",
+                "ai_interruptions",
                 "tokens",
                 "evaluations"
             ],
@@ -136551,6 +136571,18 @@
                 },
                 "latency_ms": {
                     "title": "Latency ms",
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "avg_stop_time_after_interruption": {
+                    "title": "Avg stop time after interruption",
+                    "description": "Mean call stop latency in milliseconds, excluding unmeasured calls.",
+                    "type": "number",
+                    "x-nullable": true
+                },
+                "ai_interruptions": {
+                    "title": "Ai interruptions",
+                    "description": "Mean AI interruption count per call, excluding unmeasured calls.",
                     "type": "number",
                     "x-nullable": true
                 },

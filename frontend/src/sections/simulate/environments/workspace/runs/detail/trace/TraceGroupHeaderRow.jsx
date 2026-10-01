@@ -5,7 +5,12 @@ import { Box, Stack, Typography, TableCell, TableRow } from "@mui/material";
 import Iconify from "src/components/iconify";
 import { interpolateColorBasedOnScore } from "src/utils/utils";
 import { BUILD_TONES } from "../../../../buildEnvironment/buildTones";
-import { HEAD_ROW_PX, isBad } from "./traceTable.constants";
+import {
+  HEAD_ROW_PX,
+  PENDING_EVAL_STATUS,
+  isBad,
+} from "./traceTable.constants";
+import { CellSkeleton } from "./traceCells";
 
 const DESC_KEYS = [
   "callDetails",
@@ -35,6 +40,7 @@ export default function TraceGroupHeaderRow({
   show,
   showEvals,
   evals,
+  loading = false,
 }) {
   // Pinned under the head row while its group's calls scroll past; the next
   // group's row slides over it. Opaque for that, so the hover tint layers over
@@ -102,7 +108,9 @@ export default function TraceGroupHeaderRow({
       : false;
     return (
       <TableCell sx={numCellSx}>
-        {value == null ? (
+        {value == null && loading ? (
+          <CellSkeleton />
+        ) : value == null ? (
           <Typography sx={{ typography: "s3", color: "text.disabled" }}>
             -
           </Typography>
@@ -200,16 +208,28 @@ export default function TraceGroupHeaderRow({
       {show("csat") && numCell(a.csat, "", "csat")}
       {show("turns") && numCell(a.turns, "", "turns")}
       {show("latency") && numCell(a.latency, "ms", "latency")}
+      {show("stopLatency") && numCell(a.stopLatency, "ms")}
+      {show("aiInterruptions") && numCell(a.aiInterruptions)}
       {show("tokens") && numCell(a.tokens, "", undefined, "Total")}
       {showEvals &&
         evals.map((e) => {
           const ea = a.evals?.[e.id];
           if (!ea || !ea.scored) {
+            // A finished call can still be waiting on this eval's grade.
+            const grading = group.rows.some((t) =>
+              t.evalResults?.some(
+                (r) => r.id === e.id && r.status === PENDING_EVAL_STATUS,
+              ),
+            );
             return (
               <TableCell key={`eval-${e.id}`} sx={numCellSx}>
-                <Typography sx={{ typography: "s3", color: "text.disabled" }}>
-                  -
-                </Typography>
+                {loading || grading ? (
+                  <CellSkeleton />
+                ) : (
+                  <Typography sx={{ typography: "s3", color: "text.disabled" }}>
+                    -
+                  </Typography>
+                )}
               </TableCell>
             );
           }
@@ -258,4 +278,5 @@ TraceGroupHeaderRow.propTypes = {
   show: PropTypes.func,
   showEvals: PropTypes.bool,
   evals: PropTypes.array,
+  loading: PropTypes.bool,
 };

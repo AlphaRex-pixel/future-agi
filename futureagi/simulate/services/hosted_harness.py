@@ -185,6 +185,11 @@ def create_hosted_job(
         if seed is None:
             seed = secrets.randbits(63)
         normalized = _json_value(payload)
+        # Deployment policy must not change the submitted request's idempotency digest.
+        artifacts = normalized["artifacts"]
+        artifacts["max_artifact_bytes"] = max(
+            artifacts.get("max_artifact_bytes", 0), settings.HARNESS_MAX_ARTIFACT_BYTES
+        )
         normalized.update(
             {
                 "schema_version": _JOB_SCHEMA_VERSION,

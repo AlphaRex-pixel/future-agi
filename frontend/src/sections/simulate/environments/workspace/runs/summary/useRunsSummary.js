@@ -21,6 +21,7 @@ export function useRunsSummary(env, envState, paging, graphRuns = RUNS_PAGE_SIZE
   const {
     runs,
     count,
+    coveredScenarioCount,
     isLoading: runsLoading,
   } = useEnvironmentRuns(env, envState, paging);
   const { runs: graphRunList } = useEnvironmentRuns(env, envState, {
@@ -63,9 +64,17 @@ export function useRunsSummary(env, envState, paging, graphRuns = RUNS_PAGE_SIZE
       ...rows.filter((row) => !graphRows.some((g) => g.id === row.id)),
     ]);
     const series = buildEvalSeries(rowsChrono, evals);
-    return { rows, rowsChrono, evals, series, count, isLoading: runsLoading };
+    return {
+      rows,
+      rowsChrono,
+      evals,
+      series,
+      count,
+      coveredScenarioCount,
+      isLoading: runsLoading,
+    };
     // scoreKey stands in for scoresById (fresh object each render); runs is stable
     // across renders while the query data is unchanged.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runs, graphRunList, scoreKey, runsLoading, count]);
+  }, [runs, graphRunList, scoreKey, runsLoading, count, coveredScenarioCount]);
 }

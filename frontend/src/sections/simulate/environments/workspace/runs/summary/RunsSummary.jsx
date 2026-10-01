@@ -29,13 +29,20 @@ export default function RunsSummary({ env, envState, onOpenRun, onGo }) {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(RUNS_PAGE_SIZE);
   const [graphRuns, setGraphRuns] = useState(DEFAULT_GRAPH_RUNS);
-  const { rows, rowsChrono, evals, series, count, isLoading } = useRunsSummary(
-    env,
-    envState,
-    { page, pageSize },
-    graphRuns,
-  );
-  const scenarioCount = countCoveredScenarios(rows, envState.scenarios?.length ?? 0);
+  const {
+    rows,
+    rowsChrono,
+    evals,
+    series,
+    count,
+    coveredScenarioCount,
+    isLoading,
+  } = useRunsSummary(env, envState, { page, pageSize }, graphRuns);
+  // The server counts over every run of the environment; the page-local
+  // fallback only serves mock runs and environments with no run-test.
+  const scenarioCount =
+    coveredScenarioCount ??
+    countCoveredScenarios(rows, envState.scenarios?.length ?? 0);
 
   // Which eval lines to draw. Until the user picks, the first five; the last
   // one cannot be unticked (an empty chart reads as a bug, not a choice).

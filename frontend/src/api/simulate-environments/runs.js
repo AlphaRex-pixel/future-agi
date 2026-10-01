@@ -134,6 +134,7 @@ export function useEnvironmentRuns(
         (payload) => ({
           runs: mapExecutions(payload, page * pageSize),
           count: payload?.count ?? 0,
+          coveredScenarioCount: payload?.covered_scenario_count ?? null,
         }),
       ),
     enabled: !!runTestId && !mockRuns,
@@ -146,17 +147,28 @@ export function useEnvironmentRuns(
 
   const pageOf = (list) => list.slice(page * pageSize, (page + 1) * pageSize);
   if (mockRuns) {
-    return { runs: pageOf(MOCK_RUNS), count: MOCK_RUNS.length, isLoading: false };
+    return {
+      runs: pageOf(MOCK_RUNS),
+      count: MOCK_RUNS.length,
+      coveredScenarioCount: null,
+      isLoading: false,
+    };
   }
   if (runTestId) {
     return {
       runs: query.data?.runs ?? [],
       count: query.data?.count ?? 0,
+      coveredScenarioCount: query.data?.coveredScenarioCount ?? null,
       isLoading: query.isLoading,
     };
   }
   const localRuns = envState?.runs ?? [];
-  return { runs: pageOf(localRuns), count: localRuns.length, isLoading: false };
+  return {
+    runs: pageOf(localRuns),
+    count: localRuns.length,
+    coveredScenarioCount: null,
+    isLoading: false,
+  };
 }
 
 // Where "Run simulation" / "Start simulation" navigates. A built environment
