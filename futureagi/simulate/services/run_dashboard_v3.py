@@ -60,13 +60,16 @@ END_REASONS = [
     ("Agent ended", r"^(?:target|assistant)[-_]end(?:ed)?[-_]call$"),
     ("Agent disconnected", r"^target[-_]disconnected$"),
     ("Session closed", r"^(?:session[-_]closed|close[-_]on[-_]disconnect)$"),
-    ("Disconnected", r"^participant[-_]disconnected$"),
+    ("Disconnected", r"^(?:participant|room|provider)[-_]disconnected$"),
     (
         "Caller hung up",
         r"customer|user|caller|persona|client|human-ended|hangup-by-user",
     ),
     ("Agent ended", r"assistant|agent|end-call"),
-    ("Completed", r"complete|done|script-completed|outcome_satisfied"),
+    (
+        "Completed",
+        r"complete|done|script-completed|outcome_satisfied|^closing[-_]loop$",
+    ),
 ]
 
 
@@ -426,7 +429,7 @@ def build_run_dashboard(
             "id",
             filter=Q(
                 call_metadata__hosted_harness_receipt__call__script_completed=False,
-                dashboard_disconnection="Caller hung up",
+                dashboard_disconnection__in=["Caller hung up", "Simulator ended"],
                 result_outcome="failed",
             ),
         ),

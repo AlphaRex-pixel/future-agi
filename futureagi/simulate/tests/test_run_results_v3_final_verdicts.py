@@ -14,7 +14,7 @@ from simulate.services.run_results_v3_scoring import (
 )
 
 
-def _config(output_type, reverse):
+def _config(output_type, reverse, threshold=0.8):
     return SimpleNamespace(
         eval_template=SimpleNamespace(
             output_type_normalized=output_type,
@@ -22,7 +22,7 @@ def _config(output_type, reverse):
             choice_scores={"Passed": 0, "Failed": 1},
             pass_threshold=0.8,
         ),
-        config={"reverse_output": reverse},
+        config={"reverse_output": reverse, "pass_threshold": threshold},
     )
 
 
@@ -35,6 +35,7 @@ FINAL_OUTPUTS = [
 
 
 @pytest.mark.parametrize("output_type", ["pass_fail", "percentage", "deterministic"])
+@pytest.mark.parametrize("threshold", [0.8, 70, "bad"])
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("stored_type", ["Pass/Fail", " pass_fail "])
 @pytest.mark.parametrize("output,outcome,score", FINAL_OUTPUTS)
@@ -42,9 +43,9 @@ FINAL_OUTPUTS = [
     "status", ["completed", "pending", "skipped", "error", "failed"]
 )
 def test_receipt_final_verdict_ignores_template_scoring(
-    output_type, reverse, stored_type, output, outcome, score, status
+    output_type, threshold, reverse, stored_type, output, outcome, score, status
 ):
-    config = _config(output_type, reverse)
+    config = _config(output_type, reverse, threshold)
     stored = {
         "source": "harness",
         "output_type": stored_type,
@@ -81,15 +82,16 @@ def test_choice_label_is_not_a_final_verdict_without_marker(source, stored_type)
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("output_type", ["pass_fail", "percentage", "deterministic"])
+@pytest.mark.parametrize("threshold", [0.8, 70, "bad"])
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("output,outcome,score", FINAL_OUTPUTS)
 @pytest.mark.parametrize(
     "status", ["completed", "pending", "skipped", "error", "failed"]
 )
 def test_final_receipt_verdict_sql_matches_python(
-    output_type, reverse, output, outcome, score, status
+    output_type, threshold, reverse, output, outcome, score, status
 ):
-    config = _config(output_type, reverse)
+    config = _config(output_type, reverse, threshold)
     stored = {
         "source": "harness",
         "output_type": "Pass/Fail",

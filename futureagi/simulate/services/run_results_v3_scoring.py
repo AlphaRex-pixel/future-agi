@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import Any
 
 from evaluations.engine.instance import resolve_pass_threshold
 from simulate.models import SimulateEvalConfig
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,13 @@ def resolve_eval_scoring_spec(config: SimulateEvalConfig) -> EvalScoringSpec:
         or not 0 <= threshold <= 1
     ):
         threshold = None
+    if threshold is None:
+        logger.warning(
+            "Invalid pass_threshold %r for evaluation config %s; "
+            "threshold-dependent scores remain unmeasured",
+            configured_threshold,
+            getattr(config, "id", None),
+        )
     return EvalScoringSpec(
         output_type=output_type,
         threshold=threshold,
@@ -136,9 +146,6 @@ def judge_stored_eval(eval_data: Any, spec: EvalScoringSpec) -> EvalJudgement:
         return EvalJudgement("error", None)
     if status in {"pending", "skipped"}:
         return EvalJudgement(None, None)
-    if spec.threshold is None:
-        return EvalJudgement(None, None)
-
     value = eval_data.get("output")
     stored_output_type = str(eval_data.get("output_type") or "").strip().lower()
     if spec.output_type == "pass_fail" or stored_output_type in {
@@ -152,6 +159,9 @@ def judge_stored_eval(eval_data: Any, spec: EvalScoringSpec) -> EvalJudgement:
             final = value.strip().lower()
             if final in {"passed", "failed"}:
                 return EvalJudgement(final, 1.0 if final == "passed" else 0.0)
+
+    if spec.threshold is None:
+        return EvalJudgement(None, None)
 
     score = _raw_score(value, spec)
     if score is None:

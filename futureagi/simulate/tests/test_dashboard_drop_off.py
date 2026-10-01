@@ -1,4 +1,6 @@
-"""Caller drop-off uses the same recorded cause as the endings chart."""
+"""Caller drop-off requires an unfinished, failed caller-side ending."""
+
+import pytest
 
 from simulate.models.test_execution import CallExecution
 
@@ -28,8 +30,12 @@ def test_drop_off_shares_endings_category_and_requires_completion_evidence(
         "human-ended",
         "hangup-by-user",
     ]
-    excluded_reasons = [
+    simulator_reasons = [
         "simulator_end_call",
+        "SIMULATOR_END_CALL",
+        "simulator-ended-call",
+    ]
+    excluded_reasons = [
         "target_disconnected",
         "participant_disconnected",
         "session_closed",
@@ -37,8 +43,9 @@ def test_drop_off_shares_endings_category_and_requires_completion_evidence(
         "customer-error",
         "user-declined",
         "some-new-provider-reason",
+        "voicemail",
     ]
-    for reason in caller_reasons + excluded_reasons:
+    for reason in caller_reasons + simulator_reasons + excluded_reasons:
         CallExecution.objects.create(
             test_execution=test_execution,
             scenario=scenario,
@@ -87,9 +94,10 @@ def test_drop_off_shares_endings_category_and_requires_completion_evidence(
         f"/simulate/v3/test-executions/{test_execution.id}/analytics/"
     )
     metric = _metric(response)
-    measured = len(caller_reasons) + len(excluded_reasons) + 2
+    counted = len(caller_reasons) + len(simulator_reasons)
+    measured = counted + len(excluded_reasons) + 2
     assert metric["measured"] == measured
-    assert metric["value"] == round(len(caller_reasons) * 100 / measured, 2)
+    assert metric["value"] == round(counted * 100 / measured, 2)
     endings = next(
         chart
         for chart in response.json()["dashboard"]["breakdowns"]
@@ -101,20 +109,27 @@ def test_drop_off_shares_endings_category_and_requires_completion_evidence(
         if segment["label"] == "Caller hung up"
     )
     assert caller_segment["count"] == len(caller_reasons) + len(extra_cases)
+    simulator_segment = next(
+        segment
+        for segment in endings["segments"]
+        if segment["label"] == "Simulator ended"
+    )
+    assert simulator_segment["count"] == len(simulator_reasons)
 
 
+@pytest.mark.parametrize("reason", ["customer-ended-call", "simulator_end_call"])
 def test_drop_off_is_unmeasured_without_explicit_script_completion(
-    auth_client, test_execution, scenario
+    auth_client, test_execution, scenario, reason
 ):
     CallExecution.objects.create(
         test_execution=test_execution,
         scenario=scenario,
         phone_number="+1230001111",
         status="completed",
-        ended_reason="customer-ended-call",
+        ended_reason=reason,
         call_metadata={
             "harness_outcome_status": "failed",
-            "hosted_harness_receipt": {"call": {"stop_reason": "customer-ended-call"}},
+            "hosted_harness_receipt": {"call": {"stop_reason": reason}},
         },
     )
     metric = _metric(

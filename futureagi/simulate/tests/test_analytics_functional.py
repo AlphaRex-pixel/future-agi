@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import uuid
+from collections import Counter
 from datetime import timedelta
 
 import pytest
@@ -1638,6 +1639,9 @@ class TestRunResultsV3Views:
             "target_disconnected": "Agent disconnected",
             "session_closed": "Session closed",
             "participant_disconnected": "Disconnected",
+            "room_disconnected": "Disconnected",
+            "provider_disconnected": "Disconnected",
+            "closing_loop": "Completed",
             "some-new-provider-reason": "Unrecognised",
         }
         for index, reason in enumerate(cases):
@@ -1652,7 +1656,7 @@ class TestRunResultsV3Views:
                     "hosted_harness_receipt": {
                         "call": {
                             "stop_reason": reason,
-                            "script_completed": False,
+                            "script_completed": reason == "simulator_end_call",
                         }
                     },
                 },
@@ -1666,9 +1670,10 @@ class TestRunResultsV3Views:
         chart = next(
             item for item in dashboard["breakdowns"] if item["key"] == "disconnection"
         )
-        assert {item["label"]: item["count"] for item in chart["segments"]} == {
-            label: 1 for label in cases.values()
-        }
+        assert {item["label"]: item["count"] for item in chart["segments"]} == dict(
+            Counter(cases.values())
+        )
+        assert response.json()["summary"]["outcomes"]["failed"] == len(cases)
         drop_off = next(
             item for item in dashboard["metrics"] if item["key"] == "drop_off"
         )
@@ -1681,7 +1686,7 @@ class TestRunResultsV3Views:
     @pytest.mark.parametrize(
         ("stop_reason", "expected_drop_off"),
         [
-            ("simulator_end_call", 0),
+            ("simulator_end_call", 33.33),
             ("customer-ended-call", 33.33),
         ],
     )

@@ -1,5 +1,7 @@
 """Malformed scoring configuration must not break dashboard reads."""
 
+import json
+import logging
 from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
@@ -32,12 +34,13 @@ def _config(runtime=None, template_threshold=0.5):
     )
 
 
+@pytest.mark.django_db
 @pytest.mark.parametrize(
     "threshold",
-    ["bad", "", [], {}, True, False, float("nan"), float("inf"), -0.1, 1.1],
+    ["bad", "", [], {}, True, False, float("nan"), float("inf"), -0.1, 1.1, 70],
 )
 @pytest.mark.parametrize("source", ["nested", "runtime", "template"])
-def test_invalid_threshold_is_unmeasured_for_rows_and_sql(threshold, source):
+def test_invalid_threshold_is_unmeasured_for_rows_and_sql(threshold, source, caplog):
     config = _config()
     if source == "nested":
         config.config = {"run_config": {"pass_threshold": threshold}}
@@ -46,21 +49,35 @@ def test_invalid_threshold_is_unmeasured_for_rows_and_sql(threshold, source):
     else:
         config.eval_template.pass_threshold = threshold
 
-    spec = resolve_eval_scoring_spec(config)
+    with caplog.at_level(logging.WARNING):
+        spec = resolve_eval_scoring_spec(config)
     assert spec.threshold is None
-    for output in [0.9, "Passed", "Failed", {"failure": False}]:
-        judgement = judge_stored_eval({"status": "completed", "output": output}, spec)
-        assert judgement.outcome is None
-        assert judgement.score is None
+    assert f"Invalid pass_threshold {threshold!r}" in caplog.text
+    assert "evaluation config eval-1" in caplog.text
 
-    score, passed, failed = _configured_eval_verdict("eval-1", config)
+    expressions = _configured_eval_verdict("eval-1", config)
     query = CallExecution.objects.all().query
     compiler = query.get_compiler(connection=connection)
-    sql, params = compiler.compile(score.resolve_expression(query))
-    assert sql == "(NULL)::double precision"
-    assert not params
-    assert passed.children == [("pk__in", [])]
-    assert failed.children == [("pk__in", [])]
+    compiled = [
+        compiler.compile(expr.resolve_expression(query)) for expr in expressions
+    ]
+    columns = ", ".join(sql for sql, _ in compiled)
+    params = [param for _, values in compiled for param in values]
+    table = connection.ops.quote_name(CallExecution._meta.db_table)
+    for output in [0.9, "Passed", "Failed", {"failure": False}]:
+        stored = {"status": "completed", "output": output}
+        judgement = judge_stored_eval(stored, spec)
+        assert judgement.outcome is None
+        assert judgement.score is None
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT {columns} FROM (SELECT %s::jsonb AS eval_outputs, 1 AS id) {table}",
+                [*params, json.dumps({"eval-1": stored})],
+            )
+            actual_score, passed, failed = cursor.fetchone()
+        assert actual_score is None
+        assert not passed
+        assert not failed
 
 
 @pytest.mark.parametrize(

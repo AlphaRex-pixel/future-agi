@@ -377,13 +377,11 @@ def _eval_score(eval_id: str, spec: EvalScoringSpec | None = None):
 
 def _configured_eval_verdict(eval_id: str, config: SimulateEvalConfig):
     spec = resolve_eval_scoring_spec(config)
-    if spec.threshold is None:
-        return (
-            Cast(Value(None), FloatField()),
-            Q(pk__in=[]),
-            Q(pk__in=[]),
-        )
-    raw_score = _eval_score(eval_id, spec)
+    raw_score = (
+        _eval_score(eval_id, spec)
+        if spec.threshold is not None
+        else Value(None, output_field=FloatField())
+    )
     final_pass = Q(
         Exact(
             Lower(Trim(_json_text("eval_outputs", eval_id, "output"))),
@@ -423,6 +421,8 @@ def _configured_eval_verdict(eval_id: str, config: SimulateEvalConfig):
         default=Value(1.0) - raw_score if spec.reverse_output else raw_score,
         output_field=FloatField(),
     )
+    if spec.threshold is None:
+        return score, measured & final_pass, measured & final_fail
     raw_pass = (
         GreaterThan(raw_score, Value(0.0))
         if spec.output_type == "pass_fail"
