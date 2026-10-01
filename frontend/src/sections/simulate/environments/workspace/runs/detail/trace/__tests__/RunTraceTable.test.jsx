@@ -378,6 +378,113 @@ describe("RunTraceTable", () => {
     expect(screen.getByText("Caller")).toBeInTheDocument();
   });
 
+  it("keeps the open call's row visible after changing group-by", async () => {
+    const user = userEvent.setup();
+    renderTable({ activeCallId: "t2" });
+    expect(screen.getAllByRole("row", { selected: true })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: /Group by/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Status" }));
+    expect(screen.getAllByRole("row", { selected: true })).toHaveLength(1);
+  });
+
+  // A row's persona name only shows while its group is open: Refund holds
+  // "The Hungry Customer in a Rush", Escalate "Angry caller", Timeout "Caller".
+  describe("which groups stay open", () => {
+    const persona = {
+      refund: () => screen.queryByText("The Hungry Customer in a Rush"),
+      escalate: () => screen.queryByText("Angry caller"),
+      timeout: () => screen.queryByText("Caller"),
+    };
+    const header = (label) => screen.getAllByText(label)[0];
+    const chip = (name) => screen.getByRole("button", { name });
+
+    it("leaves other groups closed after opening the only group a filter showed", async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await user.click(chip("Failing"));
+      await user.click(header("Escalate to a human"));
+      await user.click(chip(/^All/));
+
+      expect(persona.escalate()).toBeInTheDocument();
+      expect(persona.refund()).toBeNull();
+      expect(persona.timeout()).toBeNull();
+    });
+
+    it("opens groups from another filter after Expand all", async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await user.click(chip("Failing"));
+      await user.click(chip(/Expand all/));
+      await user.click(chip(/^All/));
+
+      expect(persona.refund()).toBeInTheDocument();
+      expect(persona.escalate()).toBeInTheDocument();
+      expect(persona.timeout()).toBeInTheDocument();
+    });
+
+    it("keeps the rest open when one group is closed after Expand all", async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await user.click(chip(/Expand all/));
+      await user.click(header("Refund a double charge"));
+
+      expect(persona.refund()).toBeNull();
+      expect(persona.escalate()).toBeInTheDocument();
+      expect(persona.timeout()).toBeInTheDocument();
+      expect(chip(/Expand all/)).toBeInTheDocument();
+    });
+
+    it("keeps groups seen under Expand all open after one is closed elsewhere", async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await user.click(chip("Failing"));
+      await user.click(chip(/Expand all/));
+      await user.click(chip(/^All/));
+      await user.click(header("Refund a double charge"));
+
+      expect(persona.refund()).toBeNull();
+      expect(persona.escalate()).toBeInTheDocument();
+      expect(persona.timeout()).toBeInTheDocument();
+    });
+
+    it("reads Collapse all once every group is opened by hand, and closes them", async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await user.click(header("Refund a double charge"));
+      expect(chip(/Expand all/)).toBeInTheDocument();
+      await user.click(header("Escalate to a human"));
+      await user.click(header("Handle a timeout"));
+      expect(chip(/Collapse all/)).toBeInTheDocument();
+
+      await user.click(chip(/Collapse all/));
+      expect(persona.refund()).toBeNull();
+      expect(persona.escalate()).toBeNull();
+      expect(persona.timeout()).toBeNull();
+    });
+
+    it("keeps Expand all through a group-by change", async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await user.click(chip(/Expand all/));
+      await user.click(screen.getByRole("button", { name: /Group by/ }));
+      await user.click(screen.getByRole("menuitem", { name: "Status" }));
+
+      expect(persona.refund()).toBeInTheDocument();
+      expect(persona.escalate()).toBeInTheDocument();
+      expect(persona.timeout()).toBeInTheDocument();
+    });
+
+    it("starts other filters closed after Collapse all", async () => {
+      const user = userEvent.setup();
+      renderTable();
+      await user.click(chip(/Expand all/));
+      await user.click(chip(/Collapse all/));
+      await user.click(chip("Failing"));
+
+      expect(persona.escalate()).toBeNull();
+    });
+  });
+
   it("scopes to handed-over calls until the affected-calls chip is dismissed", async () => {
     const user = userEvent.setup();
     const { container } = renderTable({

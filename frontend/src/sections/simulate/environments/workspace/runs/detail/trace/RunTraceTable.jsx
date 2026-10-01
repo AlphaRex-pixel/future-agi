@@ -20,6 +20,7 @@ import TraceTable from "./TraceTable";
 import { TraceGroupByPicker, TraceColumnsPicker } from "./TracePickers";
 import StatusFilterChips from "./StatusFilterChips";
 import {
+  CLOSED_GROUP_VIEW,
   VOICE_ONLY_COLUMNS,
   defaultTraceColumns,
 } from "./traceTable.constants";
@@ -74,18 +75,34 @@ export default function RunTraceTable({
 
   // Which groups are open lives here, not in the table: a filter's loading
   // and empty states unmount the table, and its own state would go with it,
-  // folding every group back up. Tagged with the axis it was set under, so a
-  // new group-by starts from the default (group labels differ per axis).
-  const [groupState, setGroupState] = useState({ groupBy, collapsed: null });
-  const collapsed = groupState.groupBy === groupBy ? groupState.collapsed : null;
-  const setCollapsed = useCallback(
+  // folding every group back up. The opened labels are tagged with the axis
+  // they were set under, since labels differ per axis; Expand all carries over.
+  const [groupState, setGroupState] = useState({
+    groupBy,
+    ...CLOSED_GROUP_VIEW,
+  });
+  const groupView = useMemo(
+    () => ({
+      all: groupState.all,
+      expanded:
+        groupState.groupBy === groupBy
+          ? groupState.expanded
+          : CLOSED_GROUP_VIEW.expanded,
+    }),
+    [groupState, groupBy],
+  );
+  const setGroupView = useCallback(
     (update) =>
       setGroupState((prev) => {
-        const current = prev.groupBy === groupBy ? prev.collapsed : null;
-        return {
-          groupBy,
-          collapsed: typeof update === "function" ? update(current) : update,
+        const current = {
+          all: prev.all,
+          expanded:
+            prev.groupBy === groupBy
+              ? prev.expanded
+              : CLOSED_GROUP_VIEW.expanded,
         };
+        const next = typeof update === "function" ? update(current) : update;
+        return { groupBy, ...next };
       }),
     [groupBy],
   );
@@ -273,6 +290,8 @@ export default function RunTraceTable({
         value={groupBy}
         onChange={(value) => {
           setGroupBy(value);
+          // The open call's group has to open again under the new axis.
+          expandedForRef.current = null;
           setPage(1);
         }}
       />
@@ -395,8 +414,8 @@ export default function RunTraceTable({
               onOpen={onOpenCall}
               activeCallId={activeCallId}
               scrollRef={tableScrollRef}
-              collapsed={collapsed}
-              onCollapsedChange={setCollapsed}
+              groupView={groupView}
+              onGroupViewChange={setGroupView}
               expandedForRef={expandedForRef}
               runActive={runActive}
             />
