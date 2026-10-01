@@ -323,6 +323,7 @@ export function useRunCalls(executionId, opts = {}) {
     facets,
     summary,
     totalPages,
+    agentType: data?.execution?.agent_type ?? null,
     isLoading: !!executionId && query.isPending,
     error: query.error,
   };

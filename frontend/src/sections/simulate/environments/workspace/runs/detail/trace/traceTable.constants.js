@@ -111,6 +111,9 @@ export const CALL_STATUS_CHIPS = {
   cancelled: { chip: "cancelled", label: "Cancelled" },
 };
 
+// Columns a chat run has no data for: interruptions only happen on a voice call.
+export const VOICE_ONLY_COLUMNS = new Set(["aiInterruptions", "stopLatency"]);
+
 export const defaultTraceColumns = () =>
   new Set(TRACE_COLUMNS.filter((c) => c.defaultOn).map((c) => c.key));
 

@@ -383,6 +383,19 @@ describe("useRunCalls", () => {
     unmount();
   });
 
+  it("carries the run's agent type from the execution", async () => {
+    axios.get.mockResolvedValue({
+      data: {
+        ...payload(),
+        execution: { status: "completed", agent_type: "text" },
+      },
+    });
+    const { result } = renderHook(() => useRunCalls("ex-chat"), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.agentType).toBe("text"));
+  });
+
   it("polls active execution results and stops polling when the Run is terminal", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
