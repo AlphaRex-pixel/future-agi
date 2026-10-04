@@ -180,10 +180,16 @@ def test_configured_verdict_query_compiles_without_database():
     config = _config("deterministic")
     config.id = "eval-1"
     config.eval_template.choice_scores = {"good": 1.0, "bad": 0.0}
-    with patch(
-        "simulate.services.run_results_v3_queries.SimulateEvalConfig.objects.filter"
-    ) as filtered:
+    with (
+        patch(
+            "simulate.services.run_results_v3_queries.SimulateEvalConfig.objects.filter"
+        ) as filtered,
+        patch(
+            "simulate.services.run_results_v3_queries.HostedHarnessJob.all_objects.filter"
+        ) as jobs,
+    ):
         filtered.return_value.select_related.return_value = [config]
+        jobs.return_value.values_list.return_value = []
         queryset = run_calls_queryset(SimpleNamespace(run_test=None), [uuid.uuid4()])
 
     sql = str(queryset.query)
